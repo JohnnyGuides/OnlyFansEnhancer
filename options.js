@@ -2,6 +2,27 @@
 
 const AVATAR_CACHE_SIZE = 96;
 const $ = (selector) => document.querySelector(selector);
+const TOOLKIT_STORAGE_KEY = "creatorToolkitV1";
+const TOOLKIT_DEFAULTS = Object.freeze({
+  c4sUpload: true,
+  phUploader: true,
+  fanslyPrefill: true,
+  manyvidsAutofill: true,
+  sheerTags: true,
+  onlyfansAutoSelect: false,
+  onlyfansAutoFollow: true,
+  redditBannerCensor: true
+});
+const TOOLKIT_CONTROLS = Object.freeze({
+  c4sUpload: "#toolC4sUpload",
+  phUploader: "#toolPhUploader",
+  fanslyPrefill: "#toolFanslyPrefill",
+  manyvidsAutofill: "#toolManyvidsAutofill",
+  sheerTags: "#toolSheerTags",
+  onlyfansAutoSelect: "#toolOnlyfansAutoSelect",
+  onlyfansAutoFollow: "#toolOnlyfansAutoFollow",
+  redditBannerCensor: "#toolRedditBannerCensor"
+});
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -60,11 +81,20 @@ function validateGelbooruCredentials() {
 }
 
 async function load() {
-  const [{ settings }, { stats }, { history }] = await Promise.all([
+  const [{ settings }, { stats }, { history }, storedToolkit] = await Promise.all([
     sendMessage({ type: "GET_SETTINGS" }),
     sendMessage({ type: "GET_STATS" }),
-    sendMessage({ type: "GET_GELBOORU_HISTORY" })
+    sendMessage({ type: "GET_GELBOORU_HISTORY" }),
+    chrome.storage.local.get(TOOLKIT_STORAGE_KEY)
   ]);
+  const toolkit = {
+    ...TOOLKIT_DEFAULTS,
+    ...(storedToolkit[TOOLKIT_STORAGE_KEY] || {})
+  };
+
+  for (const [key, selector] of Object.entries(TOOLKIT_CONTROLS)) {
+    $(selector).checked = toolkit[key] !== false;
+  }
 
   $("#enabled").checked = settings.enabled;
   $("#ownHandles").value = settings.ownHandles.join(", ");
@@ -403,10 +433,20 @@ async function save() {
     realbooruEndpoint: $("#realbooruEndpoint").value.trim()
   };
 
-  await sendMessage({ type: "SET_SETTINGS", patch });
+  const toolkit = Object.fromEntries(
+    Object.entries(TOOLKIT_CONTROLS).map(([key, selector]) => [
+      key,
+      $(selector).checked
+    ])
+  );
+
+  await Promise.all([
+    sendMessage({ type: "SET_SETTINGS", patch }),
+    chrome.storage.local.set({ [TOOLKIT_STORAGE_KEY]: toolkit })
+  ]);
   $("#gelbooruUserId").value = credentials.userId;
   $("#gelbooruApiKey").value = credentials.apiKey;
-  showStatus("Saved. Reload any open OnlyFans tabs to apply immediately.");
+  showStatus("Saved. Reload matching creator-site tabs to apply the changes.");
 }
 
 async function resetMappings() {

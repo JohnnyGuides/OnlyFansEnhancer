@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Fan Identity Mask",
-  "version": "0.6.1",
-  "description": "Locally replaces fan names and avatars with persistent aliases on supported OnlyFans views.",
+  "name": "Creator Workflow Toolkit",
+  "version": "0.7.0",
+  "description": "Local identity masking and workflow helpers for adult creators across supported publishing and community sites.",
   "permissions": [
     "storage",
     "declarativeNetRequestWithHostAccess"
@@ -14,7 +14,13 @@
     "http://127.0.0.1/*"
   ],
   "host_permissions": [
-    "https://onlyfans.com/*"
+    "https://onlyfans.com/*",
+    "*://workspace.clips4sale.com/*",
+    "https://pornhub.mainhub.com/*",
+    "https://fansly.com/*",
+    "https://www.manyvids.com/*",
+    "https://my.sheer.com/*",
+    "https://www.reddit.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -29,7 +35,7 @@
     ]
   },
   "action": {
-    "default_title": "Fan Identity Mask",
+    "default_title": "Creator Workflow Toolkit",
     "default_popup": "popup.html"
   },
   "options_page": "options.html",
@@ -44,6 +50,78 @@
       ],
       "css": [
         "content.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://workspace.clips4sale.com/upload*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/c4s-categories.js",
+        "creator-tools/c4s-upload.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://pornhub.mainhub.com/upload/uploader*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/ph-uploader.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://fansly.com/*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/fansly-prefill.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.manyvids.com/Edit-vid/*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/manyvids-autofill.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://my.sheer.com/content/update/*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/sheer-tags.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://onlyfans.com/my/collections/user-lists/*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/onlyfans-auto-select.js",
+        "creator-tools/onlyfans-auto-follow.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.reddit.com/r/*"
+      ],
+      "js": [
+        "creator-tools/common.js",
+        "creator-tools/reddit-banner-censor.js"
       ],
       "run_at": "document_start"
     }

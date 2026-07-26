@@ -3,17 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Fan Identity Mask settings</title>
+    <title>Creator Workflow Toolkit settings</title>
     <link rel="stylesheet" href="options.css">
   </head>
   <body>
     <main>
       <header>
-        <p class="eyebrow">Local privacy layer</p>
-        <h1>Fan Identity Mask</h1>
+        <p class="eyebrow">JohnnyGuides creator utilities</p>
+        <h1>Creator Workflow Toolkit</h1>
         <p class="lede">
-          Replace fan identities on your screen without changing anything on
-          OnlyFans or sending fan information to another service.
+          Keep the local fan-identity mask and your creator-site workflow
+          helpers together in one personal Chrome extension.
         </p>
       </header>
 
@@ -24,6 +24,78 @@
             <small>Affected OnlyFans tabs reload when this changes.</small>
           </span>
           <input id="enabled" type="checkbox">
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Workflow helpers</h2>
+        <p class="hint">
+          These are your migrated Tampermonkey tools. Changes take effect after
+          reloading their matching site.
+        </p>
+
+        <label class="tool-row">
+          <span>
+            <strong>Clips4Sale upload assistant</strong>
+            <small>Audience, type, price, description, keywords, bundled random categories, and performer assignment.</small>
+          </span>
+          <input id="toolC4sUpload" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Pornhub uploader presets</strong>
+            <small>Adds manual audience preset buttons for orientation, tags, and categories.</small>
+          </span>
+          <input id="toolPhUploader" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Fansly post prefill</strong>
+            <small>Prefills an empty composer with the GameSync hashtag pack and your posting toggles.</small>
+          </span>
+          <input id="toolFanslyPrefill" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>ManyVids edit autofill</strong>
+            <small>Sets co-performer, price, launch time, bundle choice, and ten tags.</small>
+          </span>
+          <input id="toolManyvidsAutofill" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Sheer tag replacement</strong>
+            <small>Replaces the current tag selection with your exact configured tag pack.</small>
+          </span>
+          <input id="toolSheerTags" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>OnlyFans expired-list auto-select</strong>
+            <small>Adds select-visible, auto-select-all, stop, and separate Add controls. Disabled by default, matching the backup.</small>
+          </span>
+          <input id="toolOnlyfansAutoSelect" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>OnlyFans expired-list follow helper</strong>
+            <small>Follows visible or lazy-loaded rows and closes the blocking subscription popup.</small>
+          </span>
+          <input id="toolOnlyfansAutoFollow" type="checkbox">
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Reddit banner censor</strong>
+            <small>Covers subreddit banners with a neutral striped “Banner censored” panel.</small>
+          </span>
+          <input id="toolRedditBannerCensor" type="checkbox">
         </label>
       </section>
 
