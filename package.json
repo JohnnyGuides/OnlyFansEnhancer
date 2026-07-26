@@ -1,13 +1,14 @@
 {
-  "name": "fan-identity-mask",
-  "version": "0.6.1",
+  "name": "creator-workflow-toolkit",
+  "version": "0.7.0",
   "private": true,
-  "description": "Development checks for the Fan Identity Mask Chrome extension.",
+  "description": "Development checks for the personal Creator Workflow Toolkit and store-safe Fan Identity Mask edition.",
   "scripts": {
     "test": "npm run test:personal && npm run test:store",
-    "test:personal": "node --test tests/background.test.cjs tests/extension-load.test.cjs",
+    "test:personal": "node --test tests/background.test.cjs tests/creator-tools.test.cjs tests/extension-load.test.cjs",
     "test:store": "node --test tests/store-edition.test.cjs",
     "test:snapshots": "node tests/saved-pages.test.cjs",
+    "build:personal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-personal-package.ps1",
     "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1"
   },
   "devDependencies": {

@@ -134,6 +134,37 @@ select:focus {
   accent-color: #00aff0;
 }
 
+.tool-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid #29354a;
+}
+
+.tool-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.tool-row span {
+  display: grid;
+  gap: 5px;
+}
+
+.tool-row small {
+  color: #94a3b7;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.tool-row input {
+  width: 22px;
+  height: 22px;
+  accent-color: #00aff0;
+}
+
 .subsection {
   margin-top: 18px;
   padding-top: 4px;

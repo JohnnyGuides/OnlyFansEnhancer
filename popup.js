@@ -73,7 +73,7 @@ $("#enabled").addEventListener("change", async (event) => {
     type: "SET_SETTINGS",
     patch: { enabled: event.target.checked }
   });
-  $("#note").textContent = "Enabled setting saved—reload OnlyFans.";
+  $("#note").textContent = "Identity-mask setting saved—reload OnlyFans.";
 });
 
 $("#sourceMix").addEventListener("input", (event) => {

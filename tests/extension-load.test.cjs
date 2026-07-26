@@ -49,6 +49,22 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     await page.waitForFunction(
       () => document.querySelector("#realbooruEndpoint")?.value
     );
+    await page.locator("#toolC4sUpload").waitFor();
+    assert.equal(await page.locator("#toolC4sUpload").isChecked(), true);
+    assert.equal(await page.locator("#toolOnlyfansAutoSelect").isChecked(), false);
+    assert.equal(await page.locator("#toolOnlyfansAutoFollow").isChecked(), true);
+    await page.locator("#toolOnlyfansAutoSelect").check();
+    await page.locator("#save").click();
+    await page.locator("#status").filter({ hasText: "Saved." }).waitFor();
+
+    const toolkitSettings = await workers[0].evaluate(async () => {
+      const result = await chrome.storage.local.get("creatorToolkitV1");
+      return result.creatorToolkitV1;
+    });
+    assert.equal(toolkitSettings.c4sUpload, true);
+    assert.equal(toolkitSettings.onlyfansAutoSelect, true);
+    assert.equal(toolkitSettings.onlyfansAutoFollow, true);
+
     const modes = await page
       .locator("#avatarMode option")
       .evaluateAll((options) => options.map((option) => option.value));

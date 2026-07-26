@@ -1,10 +1,14 @@
-# Fan Identity Mask
+# Creator Workflow Toolkit
 
-Fan Identity Mask is a local Manifest V3 Chrome extension that changes how fan
-identities appear in your browser. It does not edit accounts, send messages, or
-change data on OnlyFans.
+Creator Workflow Toolkit is the personal Manifest V3 extension for the
+JohnnyGuides creator workflow. It combines the original Fan Identity Mask with
+the creator-site helpers previously kept as separate Tampermonkey scripts.
 
-## What it masks
+The personal edition is intentionally broader than the separately packaged
+Chrome Web Store edition. The store edition remains the narrow, display-only
+**Fan Identity Mask** product under `store/`.
+
+## Fan Identity Mask
 
 - Names and avatars on comments beneath posts
 - Names, handles, and avatars in the DM conversation list
@@ -25,17 +29,48 @@ synchronous pending marker runs before the asynchronous identity lookup, which
 prevents the real identity from briefly flashing or being concatenated with its
 replacement. All masked avatars are forced into the same circular frame.
 
+## Creator workflow helpers
+
+Each helper has its own toggle in the extension settings:
+
+- **Clips4Sale upload assistant** selects a random main category and five
+  related categories from the bundled 1,116-item category file, assigns
+  Johnny Guides as performer, and opens an audience/video-type dialog. The
+  chosen type controls price and optional description prefixes; the audience
+  controls the keyword pack.
+- **Pornhub uploader presets** adds manual buttons for Straight, Gay, Lesbian,
+  Bisexual Male, and Transgender orientation/tag/category packs.
+- **Fansly post prefill** fills an empty composer with the GameSync hashtag pack
+  and applies the configured FYP, Walls, and reply toggles. It does not click
+  Post.
+- **ManyVids edit autofill** sets co-performer to No, price to 19.99, launch
+  time to 03:00 PM, excludes the video from the membership bundle, and adds ten
+  tags. It does not save the form.
+- **Sheer tag replacement** replaces the tag selection with the configured
+  exact-match tag pack. It does not save the form.
+- **OnlyFans expired-list auto-select** provides select-visible,
+  auto-select-all, stop, and separate Add controls. It remains disabled by
+  default, matching the Tampermonkey backup.
+- **OnlyFans expired-list follow helper** provides follow-visible and
+  auto-follow-all controls, automatically dismissing the blocking subscription
+  popup while it runs.
+- **Reddit banner censor** covers subreddit banners with a local neutral panel.
+
+The third-party **Bypass All Shortlinks Debloated** userscript is deliberately
+not included.
+
 ## Install locally
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
-4. Select this `fan-identity-mask-local` folder.
+4. Select this repository folder.
 5. Open the extension’s **Details**, then **Extension options**.
 6. Confirm your own handle is listed and choose an avatar source.
 7. Reload OnlyFans.
 
-The extension is intentionally limited to `https://onlyfans.com/*`.
+The personal edition requests access only to the supported creator-site routes
+listed in `manifest.json`.
 
 ## Avatar modes
 
@@ -150,10 +185,11 @@ Download only images you are permitted to use, then import the local files.
 
 ## Chrome Web Store
 
-Do not submit this personal build unchanged. The Gelbooru and local-companion
-integrations materially increase review, adult-content, native-companion,
-third-party terms, and intellectual-property risk. See `STORE_READINESS.md` for
-a safer publication plan.
+Do not submit this personal build unchanged. In addition to its remote-avatar
+integrations, it now contains multi-site form and account-action helpers. That
+is unsuitable for the store edition's privacy-only single purpose and
+materially increases review, adult-content, automation, third-party terms, and
+intellectual-property risk. See `STORE_READINESS.md`.
 
 The separate `store/` edition removes all remote-image integrations and keeps
 only neutral generated avatars plus optional images imported and processed
