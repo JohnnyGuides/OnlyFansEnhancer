@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "OFEnhancer",
+  "name": "Fan Identity Mask",
   "version": "0.7.0",
   "description": "Locally replaces fan names and avatars with persistent aliases on supported OnlyFans creator views.",
   "permissions": [
@@ -19,7 +19,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "OFEnhancer",
+    "default_title": "Fan Identity Mask",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

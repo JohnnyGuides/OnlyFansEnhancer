@@ -2,7 +2,7 @@
 
 Last updated: July 23, 2026
 
-OFEnhancer processes webpage content only to replace fan names and
+Fan Identity Mask processes webpage content only to replace fan names and
 profile pictures in the user’s local browser display.
 
 ## Data processed and stored locally
@@ -19,7 +19,7 @@ The extension may read and locally store:
 - Extension settings, including handles that should never be masked
 - A numeric Gelbooru API user ID and API key if the user enables that optional mode
 
-This information is stored in Chrome local extension storage. OFEnhancer
+This information is stored in Chrome local extension storage. Fan Identity Mask
 does not operate a developer server, analytics service, advertising service, or
 telemetry endpoint, and the developer does not receive this information.
 

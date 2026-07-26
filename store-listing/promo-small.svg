@@ -20,8 +20,9 @@
     <path d="M86 40c-15 0-27 8-34 20 8 9 13 16 13 26 0 6-2 12-5 18 20-8 31-23 31-42 0-8-2-16-5-22Z" fill="#7fe8ff"/>
     <path d="M42 61c4-4 9-4 13 0-4 5-9 5-13 0Zm31 0c4-4 9-4 13 0-4 5-9 5-13 0Z" fill="#09163b"/>
   </g>
-  <text x="224" y="122" fill="#ffffff" font-family="Inter,Segoe UI,sans-serif" font-size="31" font-weight="800">OFEnhancer</text>
-  <text x="224" y="165" fill="#a8bdd8" font-family="Inter,Segoe UI,sans-serif" font-size="14">Local aliases. Private by design.</text>
-  <rect x="224" y="190" width="126" height="29" rx="14.5" fill="#203558" stroke="#3b5d8b"/>
-  <text x="240" y="210" fill="#7de8ff" font-family="Inter,Segoe UI,sans-serif" font-size="12" font-weight="700">STAYS ON DEVICE</text>
+  <text x="224" y="105" fill="#ffffff" font-family="Inter,Segoe UI,sans-serif" font-size="29" font-weight="800">Fan Identity</text>
+  <text x="224" y="138" fill="#ffffff" font-family="Inter,Segoe UI,sans-serif" font-size="29" font-weight="800">Mask</text>
+  <text x="224" y="176" fill="#a8bdd8" font-family="Inter,Segoe UI,sans-serif" font-size="14">Local aliases. Private by design.</text>
+  <rect x="224" y="200" width="126" height="29" rx="14.5" fill="#203558" stroke="#3b5d8b"/>
+  <text x="240" y="220" fill="#7de8ff" font-family="Inter,Segoe UI,sans-serif" font-size="12" font-weight="700">STAYS ON DEVICE</text>
 </svg>
