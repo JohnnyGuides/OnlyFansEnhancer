@@ -155,6 +155,23 @@ integrations materially increase review, adult-content, native-companion,
 third-party terms, and intellectual-property risk. See `STORE_READINESS.md` for
 a safer publication plan.
 
+The separate `store/` edition removes all remote-image integrations and keeps
+only neutral generated avatars plus optional images imported and processed
+locally by the user. It starts disabled, requires affirmative consent in the
+settings page, and requests only `storage` plus the narrow
+`https://onlyfans.com/*` host scope.
+
+Run the store validation and build:
+
+```powershell
+npm run test:store
+npm run build:store
+```
+
+The upload-ready ZIP is written to `dist/` with `manifest.json` at the archive
+root. Store copy, permission justifications, reviewer instructions, and listing
+artwork are in `store-listing/`. The public privacy-policy source is in `docs/`.
+
 ## Development checks
 
 Install the test dependency and run the self-contained test suite:
