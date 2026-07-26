@@ -1,0 +1,46 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://gelbooru.com/"
+        }
+      ]
+    },
+    "condition": {
+      "regexFilter": "^https://[^/]+\\.gelbooru\\.com/(?:thumbnails|samples|images)/",
+      "resourceTypes": [
+        "xmlhttprequest",
+        "image",
+        "other"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        {
+          "header": "Referer",
+          "operation": "set",
+          "value": "https://realbooru.com/"
+        }
+      ]
+    },
+    "condition": {
+      "regexFilter": "^https://realbooru\\.com/+(?:thumbnails|images)/",
+      "resourceTypes": [
+        "xmlhttprequest",
+        "image",
+        "other"
+      ]
+    }
+  }
+]

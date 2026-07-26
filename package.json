@@ -1,0 +1,13 @@
+{
+  "name": "fan-identity-mask",
+  "version": "0.6.1",
+  "private": true,
+  "description": "Development checks for the Fan Identity Mask Chrome extension.",
+  "scripts": {
+    "test": "node --test tests/background.test.cjs tests/extension-load.test.cjs",
+    "test:snapshots": "node tests/saved-pages.test.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.0"
+  }
+}

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Fan Identity Mask</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <div class="top">
+        <div class="mark">F</div>
+        <div>
+          <h1>Identity Mask</h1>
+          <p id="count">Loading…</p>
+        </div>
+      </div>
+
+      <label class="toggle">
+        <span>Enabled</span>
+        <span class="switch">
+          <input id="enabled" type="checkbox">
+          <span class="switch-track"></span>
+        </span>
+      </label>
+
+      <section class="mix-card">
+        <div class="mix-head">
+          <span>Gelbooru</span>
+          <strong id="mixValue">50 / 50</strong>
+          <span>Realbooru</span>
+        </div>
+        <input
+          id="sourceMix"
+          type="range"
+          min="0"
+          max="100"
+          step="10"
+          value="50"
+          aria-label="Realbooru probability"
+        >
+        <div class="mix-percent">
+          <span id="gelbooruChance">50% anime</span>
+          <span id="realbooruChance">50% real</span>
+        </div>
+        <p id="mixSummary">
+          Each new picture independently chooses a source.
+        </p>
+      </section>
+
+      <div class="reset-actions">
+        <button id="resetNames" type="button">Reset names</button>
+        <button id="resetPictures" type="button">Reset pictures</button>
+      </div>
+
+      <p id="note" class="note">Changes apply to open OnlyFans tabs.</p>
+      <button id="options" type="button">Open settings</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

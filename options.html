@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Fan Identity Mask settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Local privacy layer</p>
+        <h1>Fan Identity Mask</h1>
+        <p class="lede">
+          Replace fan identities on your screen without changing anything on
+          OnlyFans or sending fan information to another service.
+        </p>
+      </header>
+
+      <section class="card">
+        <label class="toggle-row">
+          <span>
+            <strong>Enable identity masking</strong>
+            <small>Affected OnlyFans tabs reload when this changes.</small>
+          </span>
+          <input id="enabled" type="checkbox">
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Your account</h2>
+        <label for="ownHandles">Handles that must never be masked</label>
+        <input id="ownHandles" type="text" autocomplete="off" placeholder="johnny_guides">
+        <p class="hint">Separate multiple handles with commas. The @ is optional.</p>
+      </section>
+
+      <section class="card">
+        <h2>Avatar source</h2>
+        <label for="avatarMode">Profile-picture style</label>
+        <select id="avatarMode">
+          <option value="generated">Neutral generated avatars</option>
+          <option value="gelbooru">Unique anime selfies via Gelbooru API</option>
+          <option value="realbooru">Unique real selfies via local Realbooru scraper</option>
+          <option value="mixed">Mixed anime + real selfies</option>
+          <option value="custom">My imported selfie pack (real or anime)</option>
+        </select>
+
+        <div id="gelbooruFields" class="subsection" hidden>
+          <div class="notice">
+            Personal-build feature. It searches across randomized result pages
+            for <code>selfie 1girl</code>, then locally requires
+            <code>solo</code>. Explicit results are enabled by default.
+          </div>
+
+          <label for="gelbooruRatingMode">Content rating</label>
+          <select id="gelbooruRatingMode">
+            <option value="any">Any rating (spicy/explicit included)</option>
+            <option value="general">General-rated only</option>
+          </select>
+
+          <label for="gelbooruUserId">Numeric Gelbooru user ID (not your username)</label>
+          <input
+            id="gelbooruUserId"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]+"
+            autocomplete="off"
+            placeholder="2022304"
+          >
+          <p class="hint">
+            Find it beside your API key or at the end of your profile URL:
+            <code>...s=profile&amp;id=2022304</code>.
+          </p>
+
+          <label for="gelbooruApiKey">Gelbooru API key</label>
+          <input id="gelbooruApiKey" type="password" autocomplete="off">
+          <p class="hint">
+            You can also paste Gelbooru’s entire
+            <code>&amp;api_key=…&amp;user_id=…</code> line here; it will be
+            split automatically.
+          </p>
+
+          <div class="inline-actions">
+            <button id="testGelbooru" type="button">Test Gelbooru connection</button>
+          </div>
+          <p id="gelbooruDebug" class="hint" aria-live="polite">
+            No connection test has been run yet.
+          </p>
+
+          <p class="hint">
+            Credentials remain in Chrome local extension storage, which is not
+            encrypted. The extension sends no OnlyFans usernames or messages to
+            Gelbooru.
+          </p>
+        </div>
+
+        <div id="realbooruFields" class="subsection" hidden>
+          <div class="notice">
+            Uses your local <code>realbooru_scraper</code> companion on
+            <code>127.0.0.1</code>. It randomizes across Realbooru pages and
+            receives no OnlyFans data.
+          </div>
+
+          <label for="realbooruEndpoint">Local scraper endpoint</label>
+          <input
+            id="realbooruEndpoint"
+            type="url"
+            autocomplete="off"
+            value="http://127.0.0.1:47831"
+          >
+          <p class="hint">
+            Start it with
+            <code>dart run bin/realbooru_scraper.dart</code> from your scraper
+            folder before loading new avatars.
+          </p>
+          <div class="inline-actions">
+            <button id="testRealbooru" type="button">Test Realbooru scraper</button>
+          </div>
+          <p id="realbooruDebug" class="hint" aria-live="polite">
+            No local scraper test has been run yet.
+          </p>
+        </div>
+
+        <div id="customFields" class="subsection" hidden>
+          <div class="notice">
+            Import multiple images at once. Chrome’s native face detector is
+            used when available; otherwise a local detail-weighted smart crop
+            favors the upper-center portion of the image. Images are reduced to
+            96×96 WebP avatars before local storage.
+          </div>
+
+          <label for="customImages">Selfie images</label>
+          <input id="customImages" type="file" accept="image/*" multiple>
+          <div class="inline-actions">
+            <button id="importImages" type="button">Import selected images</button>
+            <button id="clearImages" class="danger" type="button">Clear image pack</button>
+          </div>
+          <p id="importProgress" class="hint"></p>
+        </div>
+      </section>
+
+      <section class="card stats-card">
+        <div>
+          <strong id="mappedAccounts">0</strong>
+          <span>mapped accounts</span>
+        </div>
+        <div>
+          <strong id="usedAnimeSelfies">0</strong>
+          <span>remote pictures used—never reused</span>
+        </div>
+        <div>
+          <strong id="importedAvatars">0</strong>
+          <span>imported cropped avatars</span>
+        </div>
+      </section>
+
+      <details class="card history-card">
+        <summary>Previously used remote pictures</summary>
+        <p class="hint">
+          These post IDs remain blocked from reuse, including after resetting
+          identity mappings.
+        </p>
+        <ol id="gelbooruHistory"></ol>
+      </details>
+
+      <p id="avatarError" class="error" hidden></p>
+      <p id="status" class="status" role="status"></p>
+
+      <div class="actions">
+        <button id="save" class="primary" type="button">Save settings</button>
+        <button id="reset" class="danger" type="button">Reset all mappings</button>
+      </div>
+
+      <section class="footnote">
+        <h2>What stays local</h2>
+        <p>
+          Stable account keys, generated aliases, and avatar assignments are
+          stored only in Chrome’s local extension storage. Reloading the page
+          reveals the original site again when the extension is disabled.
+        </p>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

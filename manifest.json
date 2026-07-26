@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Fan Identity Mask",
+  "version": "0.6.1",
+  "description": "Locally replaces fan names and avatars with persistent aliases on supported OnlyFans views.",
+  "permissions": [
+    "storage",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "optional_host_permissions": [
+    "https://gelbooru.com/*",
+    "https://*.gelbooru.com/*",
+    "https://realbooru.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "host_permissions": [
+    "https://onlyfans.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "gelbooru_image_referrer",
+        "enabled": true,
+        "path": "gelbooru-rules.json"
+      }
+    ]
+  },
+  "action": {
+    "default_title": "Fan Identity Mask",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://onlyfans.com/*"
+      ],
+      "js": [
+        "core.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

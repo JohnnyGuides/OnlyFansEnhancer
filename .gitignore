@@ -1,0 +1,12 @@
+node_modules/
+playwright-report/
+test-results/
+_metadata/
+*.zip
+.env
+.env.*
+!.env.example
+
+# Saved OnlyFans pages can contain private account information.
+*.html.snapshot
+tests/fixtures/private/
