@@ -1,6 +1,6 @@
-# Fan Identity Mask
+# OFEnhancer
 
-Fan Identity Mask is a local Manifest V3 Chrome extension that changes how fan
+OFEnhancer is a local Manifest V3 Chrome extension that changes how fan
 identities appear in your browser. It does not edit accounts, send messages, or
 change data on OnlyFans.
 
@@ -30,7 +30,7 @@ replacement. All masked avatars are forced into the same circular frame.
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
-4. Select this `fan-identity-mask-local` folder.
+4. Select the `OnlyFansEnhancer` project folder.
 5. Open the extension’s **Details**, then **Extension options**.
 6. Confirm your own handle is listed and choose an avatar source.
 7. Reload OnlyFans.

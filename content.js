@@ -93,7 +93,7 @@
         core.maskContext(context, cachedIdentity(context));
       }
     } catch (error) {
-      console.warn("[Fan Identity Mask]", error);
+      console.warn("[OFEnhancer]", error);
     } finally {
       scanning = false;
       if (rescanRequested) {
@@ -171,7 +171,7 @@
       }
     } catch (error) {
       finishFailedRotation(keys, error.message);
-      console.warn("[Fan Identity Mask] Could not change avatar.", error);
+      console.warn("[OFEnhancer] Could not change avatar.", error);
     }
   }
 
@@ -180,7 +180,7 @@
     try {
       await loadSettings();
     } catch (error) {
-      console.warn("[Fan Identity Mask] Could not load settings.", error);
+      console.warn("[OFEnhancer] Could not load settings.", error);
     }
 
     if (!settings.enabled) {

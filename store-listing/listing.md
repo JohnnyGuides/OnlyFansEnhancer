@@ -2,7 +2,7 @@
 
 ## Product name
 
-Fan Identity Mask
+OFEnhancer
 
 ## Summary
 
@@ -11,7 +11,7 @@ OnlyFans creator views.
 
 ## Detailed description
 
-Fan Identity Mask gives creators a consistent, private display layer for fan
+OFEnhancer gives creators a consistent, private display layer for fan
 identities.
 
 When enabled, the extension replaces visible fan names, handles, and profile
@@ -28,7 +28,7 @@ Key features:
 - A protected list of creator handles that must never be masked
 - No analytics, advertising, telemetry, or developer server
 
-Fan Identity Mask changes only the local browser display. It does not change
+OFEnhancer changes only the local browser display. It does not change
 OnlyFans data, read or store message bodies, send messages, scrape pages for
 export, download media, or automate account actions.
 

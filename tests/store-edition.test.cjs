@@ -59,6 +59,7 @@ test("store package is remote-free and minimally scoped", () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(extensionRoot, "manifest.json"), "utf8")
   );
+  assert.equal(manifest.name, "OFEnhancer");
   assert.equal(manifest.version, "0.7.0");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.host_permissions, ["https://onlyfans.com/*"]);

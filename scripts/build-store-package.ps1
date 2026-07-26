@@ -5,7 +5,7 @@ $storeRoot = Join-Path $repositoryRoot "store"
 $manifestPath = Join-Path $storeRoot "manifest.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $distRoot = Join-Path $repositoryRoot "dist"
-$zipPath = Join-Path $distRoot "fan-identity-mask-store-v$($manifest.version).zip"
+$zipPath = Join-Path $distRoot "ofenhancer-store-v$($manifest.version).zip"
 
 if (-not (Test-Path -LiteralPath (Join-Path $storeRoot "icons\icon128.png"))) {
   throw "The mandatory 128x128 extension icon is missing."

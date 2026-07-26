@@ -1,8 +1,8 @@
-# Fan Identity Mask privacy policy
+# OFEnhancer privacy policy
 
 Last updated: July 26, 2026
 
-Fan Identity Mask has one purpose: to pseudonymize fan identities in supported
+OFEnhancer has one purpose: to pseudonymize fan identities in supported
 OnlyFans creator views inside the user's local browser display.
 
 ## Data processed locally
@@ -37,7 +37,7 @@ The extension does not sell, share, rent, or use user data for advertising,
 creditworthiness, profiling, or any purpose unrelated to its single purpose.
 No human can access the locally processed data through the extension.
 
-Fan Identity Mask's use of information complies with the Chrome Web Store User
+OFEnhancer's use of information complies with the Chrome Web Store User
 Data Policy, including the Limited Use requirements.
 
 ## Retention and deletion
