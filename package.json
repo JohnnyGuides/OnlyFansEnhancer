@@ -1,11 +1,14 @@
 {
-  "name": "fan-identity-mask",
+  "name": "ofenhancer",
   "version": "0.6.1",
   "private": true,
-  "description": "Development checks for the Fan Identity Mask Chrome extension.",
+  "description": "Development checks for the OFEnhancer Chrome extension.",
   "scripts": {
-    "test": "node --test tests/background.test.cjs tests/extension-load.test.cjs",
-    "test:snapshots": "node tests/saved-pages.test.cjs"
+    "test": "npm run test:personal && npm run test:store",
+    "test:personal": "node --test tests/background.test.cjs tests/extension-load.test.cjs",
+    "test:store": "node --test tests/store-edition.test.cjs",
+    "test:snapshots": "node tests/saved-pages.test.cjs",
+    "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1"
   },
   "devDependencies": {
     "playwright": "1.62.0"

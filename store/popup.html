@@ -9,7 +9,7 @@
   <body>
     <main>
       <div class="top">
-        <div class="mark">F</div>
+        <img class="mark" src="icons/icon48.png" alt="">
         <div>
           <h1>Identity Mask</h1>
           <p id="count">Loading…</p>
@@ -25,26 +25,9 @@
       </label>
 
       <section class="mix-card">
-        <div class="mix-head">
-          <span>Gelbooru</span>
-          <strong id="mixValue">50 / 50</strong>
-          <span>Realbooru</span>
-        </div>
-        <input
-          id="sourceMix"
-          type="range"
-          min="0"
-          max="100"
-          step="10"
-          value="50"
-          aria-label="Realbooru probability"
-        >
-        <div class="mix-percent">
-          <span id="gelbooruChance">50% anime</span>
-          <span id="realbooruChance">50% real</span>
-        </div>
-        <p id="mixSummary">
-          Each new picture independently chooses a source.
+        <strong id="mode">Local generated avatars</strong>
+        <p id="setupMessage">
+          Masking and identity mappings stay in Chrome local storage.
         </p>
       </section>
 
@@ -54,7 +37,7 @@
       </div>
 
       <p id="note" class="note">Changes apply to open OnlyFans tabs.</p>
-      <button id="options" type="button">Open settings</button>
+      <button id="options" type="button">Open settings &amp; privacy</button>
     </main>
     <script src="popup.js"></script>
   </body>

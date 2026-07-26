@@ -5,7 +5,8 @@
   if (!core) return;
 
   let settings = {
-    enabled: true,
+    enabled: false,
+    consentAccepted: false,
     ownHandles: ["johnny_guides"]
   };
   let scheduled = false;

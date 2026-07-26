@@ -1,6 +1,6 @@
-# Fan Identity Mask
+# OFEnhancer
 
-Fan Identity Mask is a local Manifest V3 Chrome extension that changes how fan
+OFEnhancer is a local Manifest V3 Chrome extension that changes how fan
 identities appear in your browser. It does not edit accounts, send messages, or
 change data on OnlyFans.
 
@@ -30,7 +30,7 @@ replacement. All masked avatars are forced into the same circular frame.
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
-4. Select this `fan-identity-mask-local` folder.
+4. Select the `OnlyFansEnhancer` project folder.
 5. Open the extension’s **Details**, then **Extension options**.
 6. Confirm your own handle is listed and choose an avatar source.
 7. Reload OnlyFans.
@@ -154,6 +154,23 @@ Do not submit this personal build unchanged. The Gelbooru and local-companion
 integrations materially increase review, adult-content, native-companion,
 third-party terms, and intellectual-property risk. See `STORE_READINESS.md` for
 a safer publication plan.
+
+The separate `store/` edition removes all remote-image integrations and keeps
+only neutral generated avatars plus optional images imported and processed
+locally by the user. It starts disabled, requires affirmative consent in the
+settings page, and requests only `storage` plus the narrow
+`https://onlyfans.com/*` host scope.
+
+Run the store validation and build:
+
+```powershell
+npm run test:store
+npm run build:store
+```
+
+The upload-ready ZIP is written to `dist/` with `manifest.json` at the archive
+root. Store copy, permission justifications, reviewer instructions, and listing
+artwork are in `store-listing/`. The public privacy-policy source is in `docs/`.
 
 ## Development checks
 

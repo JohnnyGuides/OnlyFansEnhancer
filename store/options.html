@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>OFEnhancer settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Local privacy layer</p>
+        <h1>OFEnhancer</h1>
+        <p class="lede">
+          Replace fan identities on your screen without changing accounts,
+          sending messages, or transmitting fan information to the developer.
+        </p>
+      </header>
+
+      <section class="card" id="consentCard">
+        <h2>Before masking starts</h2>
+        <div class="notice">
+          To create consistent aliases, the extension reads names, handles,
+          profile images, and stable account or chat identifiers already visible
+          in loaded OnlyFans pages. It stores identifiers, aliases, avatar
+          assignments, and your settings only in Chrome local extension storage.
+          No fan information is transmitted to the developer or another service.
+        </div>
+        <label class="toggle-row">
+          <span>
+            <strong>I understand and consent to this local processing</strong>
+            <small>
+              You can withdraw consent by disabling masking or uninstalling the
+              extension.
+            </small>
+          </span>
+          <input id="consentAccepted" type="checkbox">
+        </label>
+        <p class="hint">
+          Read the complete <a href="privacy.html" target="_blank">privacy policy</a>.
+        </p>
+      </section>
+
+      <section class="card">
+        <label class="toggle-row">
+          <span>
+            <strong>Enable identity masking</strong>
+            <small>Consent is required. Affected tabs reload when this changes.</small>
+          </span>
+          <input id="enabled" type="checkbox">
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Your account</h2>
+        <label for="ownHandles">Handles that must never be masked</label>
+        <input id="ownHandles" type="text" autocomplete="off" placeholder="johnny_guides">
+        <p class="hint">Separate multiple handles with commas. The @ is optional.</p>
+      </section>
+
+      <section class="card">
+        <h2>Avatar source</h2>
+        <label for="avatarMode">Profile-picture style</label>
+        <select id="avatarMode">
+          <option value="generated">Neutral generated avatars</option>
+          <option value="custom">My locally imported image pack</option>
+        </select>
+
+        <div id="customFields" class="subsection" hidden>
+          <div class="notice">
+            Selected images are processed locally, reduced to 96×96 WebP
+            avatars, and stored in Chrome local extension storage. They are not
+            uploaded anywhere. Import only images you are permitted to use.
+          </div>
+          <label for="customImages">Avatar images</label>
+          <input id="customImages" type="file" accept="image/*" multiple>
+          <div class="inline-actions">
+            <button id="importImages" type="button">Import selected images</button>
+            <button id="clearImages" class="danger" type="button">Clear image pack</button>
+          </div>
+          <p id="importProgress" class="hint"></p>
+        </div>
+      </section>
+
+      <section class="card stats-card">
+        <div>
+          <strong id="mappedAccounts">0</strong>
+          <span>mapped accounts</span>
+        </div>
+        <div>
+          <strong id="importedAvatars">0</strong>
+          <span>imported local avatars</span>
+        </div>
+        <div>
+          <strong id="usedImportedAvatars">0</strong>
+          <span>assigned imported avatars</span>
+        </div>
+      </section>
+
+      <p id="status" class="status" role="status"></p>
+
+      <div class="actions">
+        <button id="save" class="primary" type="button">Save settings</button>
+        <button id="reset" class="danger" type="button">Reset all mappings</button>
+      </div>
+
+      <section class="footnote">
+        <h2>Single purpose</h2>
+        <p>
+          This extension only pseudonymizes fan identities in the local browser
+          display. It does not read message bodies, send messages, scrape pages,
+          download media, automate account actions, or operate a developer
+          server.
+        </p>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
