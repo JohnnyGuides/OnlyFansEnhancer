@@ -19,8 +19,9 @@
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/\.(?:mp4|m4v|mov|webm|avi|mkv)$/i, "")
-      .replace(/\((?:full|limited|teaser)\)/gi, " ")
       .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\b(?:full|limited|teaser|final|vr)\b/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
   }
 
