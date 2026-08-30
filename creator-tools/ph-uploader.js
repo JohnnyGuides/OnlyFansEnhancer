@@ -240,6 +240,26 @@
     };
   }
 
+  function resolvePreset(profile, seasonArc, explicitName) {
+    const presets = profile?.presets || {};
+    const explicit = String(explicitName || "").trim();
+    if (explicit) {
+      return Object.hasOwn(presets, explicit)
+        ? { name: explicit, preset: presets[explicit], source: "explicit" }
+        : null;
+    }
+    const expectedSeries = toolkit.normalizeText(seasonArc);
+    if (!expectedSeries) return null;
+    const matches = Object.entries(profile?.seriesPresets || {}).filter(
+      ([series]) => toolkit.normalizeText(series) === expectedSeries,
+    );
+    if (matches.length !== 1) return null;
+    const name = String(matches[0][1] || "").trim();
+    return Object.hasOwn(presets, name)
+      ? { name, preset: presets[name], source: "series" }
+      : null;
+  }
+
   async function applyPreset(plan, signal, budget) {
     if (formSignature() !== plan.signature) {
       throw new toolkit.ToolkitError(
@@ -406,6 +426,9 @@
     selectExactToken,
     selectOrientation,
     inspectPreset,
+    resolvePreset,
+    applyPreset,
+    failedResult,
   });
 
   toolkit.mountTool({

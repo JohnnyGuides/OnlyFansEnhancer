@@ -448,11 +448,35 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
         wrongClicked:
           document.querySelector("#wrong-ph")?.dataset.clicked === "1",
         selected: document.querySelector(".chip")?.textContent,
+        resolved: CreatorToolkitAdapters.phUploader.resolvePreset(
+          {
+            presets: {
+              Straight: {
+                orientation: "Straight",
+                tags: [],
+                categories: [],
+              },
+            },
+            seriesPresets: { "Resident Evil": "Straight" },
+          },
+          "resident  evil",
+          "",
+        ),
+        unresolved: CreatorToolkitAdapters.phUploader.resolvePreset(
+          { presets: { Straight: {} }, seriesPresets: {} },
+          "Unknown",
+          "",
+        ),
+        applyExport: typeof CreatorToolkitAdapters.phUploader.applyPreset,
       };
     });
     assert.equal(phResult.result.status, "changed");
     assert.equal(phResult.wrongClicked, false);
     assert.equal(phResult.selected, "Wanted");
+    assert.equal(phResult.resolved.name, "Straight");
+    assert.equal(phResult.resolved.source, "series");
+    assert.equal(phResult.unresolved, null);
+    assert.equal(phResult.applyExport, "function");
     await ph.context.close();
 
     const mv = await preparePage(browser, {
