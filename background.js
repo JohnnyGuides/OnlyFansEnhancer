@@ -2391,21 +2391,30 @@ function validateCreatorUploadRequest(message) {
     releaseDate: creatorUploadClean(message.catalogue?.releaseDate, 10),
     title: creatorUploadClean(message.catalogue?.title, 500),
     description: creatorUploadClean(message.catalogue?.description, 10_000),
+    seasonArc: creatorUploadClean(message.catalogue?.seasonArc, 500),
+    episode: creatorUploadClean(message.catalogue?.episode, 100),
+    pornhubLink: creatorUploadClean(message.catalogue?.pornhubLink, 500),
     onlyfansLink: creatorUploadClean(message.catalogue?.onlyfansLink, 500),
     fanslyLink: creatorUploadClean(message.catalogue?.fanslyLink, 500),
     manyvidsLink: creatorUploadClean(message.catalogue?.manyvidsLink, 500),
     fingerprint: creatorUploadClean(message.catalogue?.fingerprint, 64),
     status: creatorUploadClean(message.catalogue?.status, 20),
   };
+  const catalogueRelease = new Date(`${catalogue.releaseDate}T15:00:00.000Z`);
   if (
     !Number.isInteger(catalogue.row) ||
     catalogue.row < 2 ||
     catalogue.row > 5000 ||
     !catalogue.id ||
     !catalogue.title ||
-    catalogue.releaseDate !== draft.releaseDate ||
-    !/^[a-f0-9]{8,64}$/i.test(catalogue.fingerprint) ||
-    !new Set(["matched", "new"]).has(catalogue.status)
+    !new Set(["matched", "new"]).has(catalogue.status) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(catalogue.releaseDate) ||
+    Number.isNaN(catalogueRelease.getTime()) ||
+    catalogueRelease.toISOString().slice(0, 10) !== catalogue.releaseDate ||
+    catalogueRelease.getUTCDay() !== 5 ||
+    (catalogue.status === "new" &&
+      catalogue.releaseDate !== draft.releaseDate) ||
+    !/^[a-f0-9]{8,64}$/i.test(catalogue.fingerprint)
   ) {
     throw new Error("Invalid catalogue upload preview.");
   }

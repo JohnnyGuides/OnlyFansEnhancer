@@ -1581,6 +1581,17 @@ test("upload console performs no platform mutation before the single Yes confirm
       ["PREPARE_CREATOR_UPLOAD", "START_CREATOR_UPLOAD"],
     );
     assert.equal(mutationMessages[0].catalogue.row, 135);
+    assert.equal(mutationMessages[0].catalogue.releaseDate, "2026-08-28");
+    assert.notEqual(
+      mutationMessages[0].catalogue.releaseDate,
+      mutationMessages[0].draft.releaseDate,
+    );
+    assert.equal(mutationMessages[0].catalogue.seasonArc, "Episodes");
+    assert.equal(mutationMessages[0].catalogue.episode, "42");
+    assert.equal(
+      mutationMessages[0].catalogue.pornhubLink,
+      "https://pornhub.com/view_video.php?viewkey=42",
+    );
     assert.deepEqual(mutationMessages[0].targets, ["onlyfans"]);
     assert.deepEqual(mutationMessages[1].targets, ["onlyfans"]);
     assert.equal(

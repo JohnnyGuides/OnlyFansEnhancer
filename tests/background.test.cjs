@@ -529,6 +529,9 @@ function send(message) {
           releaseDate: "2026-08-28",
           title: "Episode 42",
           description: "Description",
+          seasonArc: "GameSync Season 4",
+          episode: "42",
+          pornhubLink: "https://www.pornhub.com/view_video.php?viewkey=episode42",
           onlyfansLink: "",
           fanslyLink: "",
           manyvidsLink: "",
@@ -547,6 +550,62 @@ function send(message) {
   assert.equal(validatedUpload.draft.manyvids.tags.length, 10);
   assert.equal(validatedUpload.catalogue.fanslyLink, "");
   assert.equal(validatedUpload.catalogue.manyvidsLink, "");
+  assert.equal(validatedUpload.catalogue.seasonArc, "GameSync Season 4");
+  assert.equal(validatedUpload.catalogue.episode, "42");
+  assert.equal(
+    validatedUpload.catalogue.pornhubLink,
+    "https://www.pornhub.com/view_video.php?viewkey=episode42",
+  );
+  context.historicalUploadRequest = {
+    ...validatedUpload,
+    draft: {
+      ...validatedUpload.draft,
+      releaseDate: "2026-09-11",
+      scheduledIso: "2026-09-11T15:00:00.000Z",
+    },
+    catalogue: {
+      ...validatedUpload.catalogue,
+      releaseDate: "2026-05-08",
+      status: "matched",
+    },
+  };
+  const historicalUpload = vm.runInContext(
+    "validateCreatorUploadRequest(historicalUploadRequest)",
+    context,
+  );
+  assert.equal(historicalUpload.catalogue.releaseDate, "2026-05-08");
+  context.newRowDateMismatch = {
+    ...context.historicalUploadRequest,
+    catalogue: {
+      ...validatedUpload.catalogue,
+      releaseDate: "2026-05-08",
+      status: "new",
+    },
+  };
+  assert.throws(
+    () =>
+      vm.runInContext(
+        "validateCreatorUploadRequest(newRowDateMismatch)",
+        context,
+      ),
+    /Invalid catalogue upload preview/,
+  );
+  context.invalidHistoricalDate = {
+    ...context.historicalUploadRequest,
+    catalogue: {
+      ...validatedUpload.catalogue,
+      releaseDate: "2026-99-99",
+      status: "matched",
+    },
+  };
+  assert.throws(
+    () =>
+      vm.runInContext(
+        "validateCreatorUploadRequest(invalidHistoricalDate)",
+        context,
+      ),
+    /Invalid catalogue upload preview/,
+  );
   context.uploadOnlyRequest = { ...validatedUpload, catalogue: null };
   const uploadOnly = vm.runInContext(
     "validateCreatorUploadRequest(uploadOnlyRequest)",
