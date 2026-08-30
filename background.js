@@ -2,6 +2,7 @@ importScripts(
   "creator-tools/registry.js",
   "creator-tools/catalogue-contract.js",
   "creator-tools/catalogue-client.js",
+  "creator-tools/upload-session-store.js",
 );
 
 ("use strict");
@@ -22,6 +23,7 @@ const REALBOORU_MAX_HTML_LENGTH = 2_000_000;
 const CREATOR_REGISTRY = globalThis.CreatorToolkitRegistry;
 const CREATOR_CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
 const CREATOR_CATALOGUE_CONTRACT = globalThis.CreatorCatalogueContract;
+const CREATOR_UPLOAD_SESSION_STORE = globalThis.CreatorUploadSessionStore;
 const GELBOORU_FORBIDDEN_TAG_PARTS = /(^|_)(trans)(_|$)/i;
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -2254,7 +2256,8 @@ async function waitForManyVidsRoute(tabId, stage, timeoutMs = 45 * 60_000) {
     const inspect = async () => {
       try {
         const tab = await chrome.tabs.get(tabId);
-        const result = tab?.status === "complete" && manyVidsRoute(tab.url, stage);
+        const result =
+          tab?.status === "complete" && manyVidsRoute(tab.url, stage);
         if (result) finish(null, result);
       } catch (error) {
         finish(error);
@@ -2266,9 +2269,7 @@ async function waitForManyVidsRoute(tabId, stage, timeoutMs = 45 * 60_000) {
     chrome.tabs.onUpdated.addListener(onUpdated);
     const timeout = setTimeout(
       () =>
-        finish(
-          new Error(`Timed out waiting for the ManyVids ${stage} page.`),
-        ),
+        finish(new Error(`Timed out waiting for the ManyVids ${stage} page.`)),
       timeoutMs,
     );
     inspect();
@@ -2307,6 +2308,69 @@ const creatorUploadSessions = new Map();
 const creatorUploadConsolePorts = new Set();
 const creatorUploadFileRequests = new Map();
 let creatorUploadRequestCounter = 0;
+
+function creatorUploadSessionRecord(session) {
+  return {
+    id: session.id,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    draft: session.draft,
+    catalogue: session.catalogue,
+    platforms: Object.fromEntries(
+      [...session.platforms].map(([platform, target]) => [
+        platform,
+        {
+          platform,
+          tabId: target.tabId,
+          stage: target.stage,
+          status: target.status,
+          createdAt: target.createdAt,
+          updatedAt: target.updatedAt,
+          manyvidsId: target.manyvidsId,
+          commitArmed: target.commitArmed,
+          submitAttempted: target.submitAttempted,
+          postUrl: target.postUrl,
+          error: target.error,
+        },
+      ]),
+    ),
+  };
+}
+
+async function checkpointCreatorUploadSession(session) {
+  session.updatedAt = Date.now();
+  for (const target of session.platforms.values()) {
+    if (!target.createdAt) target.createdAt = session.createdAt;
+    target.updatedAt = session.updatedAt;
+  }
+  return CREATOR_UPLOAD_SESSION_STORE.save(creatorUploadSessionRecord(session));
+}
+
+async function getCreatorUploadSession(sessionId) {
+  const id = creatorUploadClean(sessionId, 64);
+  if (!CREATOR_UPLOAD_SESSION_PATTERN.test(id)) return null;
+  const active = creatorUploadSessions.get(id);
+  if (active) return active;
+  const stored = await CREATOR_UPLOAD_SESSION_STORE.load(id);
+  if (!stored) return null;
+  const session = {
+    id,
+    createdAt: stored.createdAt || Date.now(),
+    updatedAt: stored.updatedAt || Date.now(),
+    draft: stored.draft || {},
+    catalogue: stored.catalogue ?? null,
+    platforms: new Map(Object.entries(stored.platforms || {})),
+    commitChain: Promise.resolve(),
+    cleanupTimer: null,
+    restored: true,
+  };
+  creatorUploadSessions.set(id, session);
+  session.cleanupTimer = setTimeout(
+    () => creatorUploadSessions.delete(id),
+    2 * 60 * 60_000,
+  );
+  return session;
+}
 
 function creatorUploadClean(value, maximum) {
   return String(value || "")
@@ -2634,14 +2698,14 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       ? { full: { selector: "#file_upload_input", token: tokens.full } }
       : platform === "fansly"
         ? {
-          full: {
-            selector: "app-post-creation input[type='file']",
-            token: tokens.full,
-          },
-          teaser: {
-            selector: "app-post-creation input[type='file']",
-            token: tokens.teaser,
-          },
+            full: {
+              selector: "app-post-creation input[type='file']",
+              token: tokens.full,
+            },
+            teaser: {
+              selector: "app-post-creation input[type='file']",
+              token: tokens.teaser,
+            },
           }
         : {
             full: {
@@ -2675,9 +2739,12 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
     platform,
     tabId: tab.id,
     tokens,
+    stage: "prepared",
     status: "prepared",
+    createdAt: Date.now(),
   };
   session.platforms.set(platform, target);
+  await checkpointCreatorUploadSession(session);
   return target;
 }
 
@@ -2727,11 +2794,13 @@ async function prepareCreatorManyVidsEdit(session, target) {
 
 async function prepareCreatorUpload(message) {
   const request = validateCreatorUploadRequest(message);
-  if (creatorUploadSessions.has(request.sessionId)) {
+  if (await getCreatorUploadSession(request.sessionId)) {
     throw new Error("This creator upload session already exists.");
   }
   const session = {
     id: request.sessionId,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     draft: request.draft,
     catalogue: request.catalogue,
     platforms: new Map(),
@@ -2739,6 +2808,7 @@ async function prepareCreatorUpload(message) {
     cleanupTimer: null,
   };
   creatorUploadSessions.set(session.id, session);
+  await checkpointCreatorUploadSession(session);
   session.cleanupTimer = setTimeout(
     () => creatorUploadSessions.delete(session.id),
     2 * 60 * 60_000,
@@ -2755,6 +2825,7 @@ async function prepareCreatorUpload(message) {
     } catch (error) {
       const failed = { platform, status: "failed", error: error.message };
       session.platforms.set(platform, failed);
+      await checkpointCreatorUploadSession(session);
       platforms.push(failed);
     }
   }
@@ -2870,6 +2941,7 @@ async function commitCreatorUploadResult(session, platform, postUrl) {
       });
       if (result.fingerprint)
         session.catalogue.fingerprint = result.fingerprint;
+      await checkpointCreatorUploadSession(session);
       return result;
     });
   return session.commitChain;
@@ -2880,6 +2952,8 @@ async function runCreatorManyVidsPlatform(session, target) {
   try {
     if (!target.manyvidsId) {
       target.status = "uploading-full";
+      target.stage = "upload";
+      await checkpointCreatorUploadSession(session);
       creatorUploadPost(session.id, {
         type: "platform-progress",
         platform,
@@ -2909,9 +2983,12 @@ async function runCreatorManyVidsPlatform(session, target) {
         2 * 60_000,
       );
       target.manyvidsId = editRoute.manyvidsId;
+      await checkpointCreatorUploadSession(session);
     }
 
     target.status = "configuring";
+    target.stage = "edit";
+    await checkpointCreatorUploadSession(session);
     creatorUploadPost(session.id, {
       type: "platform-progress",
       platform,
@@ -2941,7 +3018,9 @@ async function runCreatorManyVidsPlatform(session, target) {
       throw new Error("ManyVids did not confirm its final Save click.");
     }
     target.submitted = true;
+    target.submitAttempted = true;
     target.status = "save-clicked";
+    await checkpointCreatorUploadSession(session);
     creatorUploadPost(session.id, {
       type: "platform-progress",
       platform,
@@ -2954,6 +3033,7 @@ async function runCreatorManyVidsPlatform(session, target) {
     );
     if (!postUrl) throw new Error("ManyVids returned an invalid video ID.");
     target.postUrl = postUrl;
+    await checkpointCreatorUploadSession(session);
     const commit = await commitCreatorUploadResult(session, platform, postUrl);
     const result = {
       platform,
@@ -2967,6 +3047,7 @@ async function runCreatorManyVidsPlatform(session, target) {
         : {}),
     };
     Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
     creatorUploadPost(session.id, {
       type: "platform-result",
       platform,
@@ -2989,6 +3070,7 @@ async function runCreatorManyVidsPlatform(session, target) {
       error: error.message,
     };
     Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
     try {
       creatorUploadPost(session.id, {
         type: "platform-result",
@@ -3017,6 +3099,8 @@ async function runCreatorUploadPlatform(session, platform) {
     return runCreatorManyVidsPlatform(session, target);
   }
   target.status = "uploading-full";
+  target.stage = "upload";
+  await checkpointCreatorUploadSession(session);
   creatorUploadPost(session.id, {
     type: "platform-progress",
     platform,
@@ -3057,7 +3141,9 @@ async function runCreatorUploadPlatform(session, platform) {
       throw new Error("The platform adapter did not confirm final submission.");
     }
     target.submitted = true;
+    target.submitAttempted = true;
     target.status = "submitted";
+    await checkpointCreatorUploadSession(session);
     creatorUploadPost(session.id, {
       type: "platform-progress",
       platform,
@@ -3078,6 +3164,7 @@ async function runCreatorUploadPlatform(session, platform) {
     }
     target.status = "link-captured";
     target.postUrl = postUrl;
+    await checkpointCreatorUploadSession(session);
     creatorUploadPost(session.id, {
       type: "platform-progress",
       platform,
@@ -3096,6 +3183,7 @@ async function runCreatorUploadPlatform(session, platform) {
         : {}),
     };
     Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
     creatorUploadPost(session.id, {
       type: "platform-result",
       platform,
@@ -3120,6 +3208,7 @@ async function runCreatorUploadPlatform(session, platform) {
       error: error.message,
     };
     Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
     try {
       creatorUploadPost(session.id, {
         type: "platform-result",
@@ -3134,7 +3223,7 @@ async function runCreatorUploadPlatform(session, platform) {
 }
 
 async function startCreatorUpload(sessionId, targets) {
-  const session = creatorUploadSessions.get(creatorUploadClean(sessionId, 64));
+  const session = await getCreatorUploadSession(sessionId);
   if (!session) throw new Error("Unknown creator upload session.");
   const requested = Array.isArray(targets) ? [...new Set(targets)] : [];
   if (
@@ -3149,12 +3238,13 @@ async function startCreatorUpload(sessionId, targets) {
 }
 
 async function retryCreatorUploadPlatform(sessionId, platform) {
-  const session = creatorUploadSessions.get(creatorUploadClean(sessionId, 64));
+  const session = await getCreatorUploadSession(sessionId);
   const target = session?.platforms.get(platform);
   if (!session || !target || !Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform)) {
     throw new Error("Unknown creator upload retry target.");
   }
-  if (["catalogue-updated", "uploaded-no-sheet"].includes(target.status)) return [target];
+  if (["catalogue-updated", "uploaded-no-sheet"].includes(target.status))
+    return [target];
   if (target.postUrl) {
     try {
       const commit = await commitCreatorUploadResult(
@@ -3175,6 +3265,7 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
           : {}),
       };
       Object.assign(target, result);
+      await checkpointCreatorUploadSession(session);
       try {
         creatorUploadPost(session.id, {
           type: "platform-result",
@@ -3194,6 +3285,7 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
         error: error.message,
       };
       Object.assign(target, result);
+      await checkpointCreatorUploadSession(session);
       return [result];
     }
   }
@@ -3211,6 +3303,8 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
       throw new Error("ManyVids retry opened a different video.");
     }
     target.status = "prepared";
+    target.stage = "edit";
+    await checkpointCreatorUploadSession(session);
     return [await runCreatorUploadPlatform(session, platform)];
   }
   const prepared = await prepareCreatorUploadPlatform(
@@ -3358,9 +3452,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ),
         };
       case "DELIVER_CREATOR_UPLOAD_FILE": {
-        const session = creatorUploadSessions.get(
-          creatorUploadClean(message.sessionId, 64),
-        );
+        const session = await getCreatorUploadSession(message.sessionId);
         const target = session?.platforms.get(message.platform);
         if (
           !session ||
@@ -3374,9 +3466,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { delivered: true };
       }
       case "CREATOR_UPLOAD_PLATFORM_PROGRESS": {
-        const session = creatorUploadSessions.get(
-          creatorUploadClean(message.sessionId, 64),
-        );
+        const session = await getCreatorUploadSession(message.sessionId);
         const target = session?.platforms.get(message.platform);
         if (!session || !target || sender.tab?.id !== target.tabId) {
           throw new Error("Unauthorized creator upload progress update.");
@@ -3397,6 +3487,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (status === "submitted") target.submitted = true;
         target.status = status;
+        await checkpointCreatorUploadSession(session);
         creatorUploadPost(session.id, {
           type: "platform-progress",
           platform: message.platform,

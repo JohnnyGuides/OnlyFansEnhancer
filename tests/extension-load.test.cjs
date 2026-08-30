@@ -212,6 +212,8 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
         settings: result.creatorToolkitV2,
         registrations: registrations.map((entry) => entry.id).sort(),
         parsedRealbooruId: parser?.result?.posts?.[0]?.id || "",
+        hasUploadSessionStore:
+          typeof CreatorUploadSessionStore?.save === "function",
       };
     });
     assert.equal(toolkitState.settings.schemaVersion, 2);
@@ -223,6 +225,7 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
       "creator-toolkit-onlyfans-lists",
     ]);
     assert.equal(toolkitState.parsedRealbooruId, "321");
+    assert.equal(toolkitState.hasUploadSessionStore, true);
     assert.equal(
       JSON.parse(await page.locator("#workflowProfiles").inputValue()).sheerTags
         .mode,

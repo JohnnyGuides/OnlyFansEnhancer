@@ -9,6 +9,7 @@ const backgroundPath = path.resolve(__dirname, "..", "background.js");
 const manifestPath = path.resolve(__dirname, "..", "manifest.json");
 const gelbooruRulesPath = path.resolve(__dirname, "..", "gelbooru-rules.json");
 const storage = {};
+const sessionStorage = {};
 let messageListener;
 let installListener;
 let startupListener;
@@ -244,6 +245,31 @@ const chrome = {
             },
             "local",
           );
+        }
+      },
+    },
+    session: {
+      async get(keys) {
+        const selected = {};
+        const wanted =
+          keys == null
+            ? Object.keys(sessionStorage)
+            : Array.isArray(keys)
+              ? keys
+              : [keys];
+        for (const key of wanted) {
+          if (Object.hasOwn(sessionStorage, key)) {
+            selected[key] = structuredClone(sessionStorage[key]);
+          }
+        }
+        return selected;
+      },
+      async set(values) {
+        Object.assign(sessionStorage, structuredClone(values));
+      },
+      async remove(keys) {
+        for (const key of Array.isArray(keys) ? keys : [keys]) {
+          delete sessionStorage[key];
         }
       },
     },
@@ -507,6 +533,38 @@ function send(message) {
     "https://realbooru.com/",
   );
   assert.match(gelbooruRules[0].condition.regexFilter, /gelbooru/);
+
+  const restoredUploadSession = JSON.parse(
+    await vm.runInContext(
+      `(async () => {
+        const id = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef";
+        await CreatorUploadSessionStore.save({
+          id,
+          draft: { title: "Restored episode" },
+          platforms: {
+            onlyfans: {
+              platform: "onlyfans",
+              tabId: 41,
+              status: "submitted",
+              submitAttempted: true
+            }
+          }
+        });
+        creatorUploadSessions.delete(id);
+        const restored = await getCreatorUploadSession(id);
+        clearTimeout(restored.cleanupTimer);
+        creatorUploadSessions.delete(id);
+        await CreatorUploadSessionStore.remove(id);
+        return JSON.stringify({
+          title: restored.draft.title,
+          platform: restored.platforms.get("onlyfans")
+        });
+      })()`,
+      context,
+    ),
+  );
+  assert.equal(restoredUploadSession.title, "Restored episode");
+  assert.equal(restoredUploadSession.platform.submitAttempted, true);
 
   const validatedUpload = JSON.parse(
     vm.runInContext(

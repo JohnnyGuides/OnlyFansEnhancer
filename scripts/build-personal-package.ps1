@@ -88,6 +88,7 @@ $requiredArchiveEntries = @(
   "creator-tools/upload-file-bridge.js",
   "creator-tools/upload-platform-adapters.js",
   "creator-tools/upload-response-observer.js",
+  "creator-tools/upload-session-store.js",
   "creator-tools/c4s-upload.js",
   "creator-tools/ph-uploader.js",
   "creator-tools/fansly-prefill.js",
