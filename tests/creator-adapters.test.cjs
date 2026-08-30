@@ -469,6 +469,7 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
           <input id="free_vid_0" type="radio"><label for="free_vid_0">Unknown price mode</label>
           <input id="launchCustom" type="radio"><label for="launchCustom">Unknown launch mode</label>
           <input id="membership3" type="radio"><label for="membership3">Unknown membership mode</label>
+          <input id="premium2" type="radio"><label for="premium2">Include this Vid to Premium</label>
         </form>
         <script>
           const mvInput = document.querySelector("#input-new-custom-tag-filter");
@@ -509,17 +510,26 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
         "#free_vid_0",
         "",
       );
+      const profile = CreatorToolkitRegistry.DEFAULT_PROFILES.manyvidsAutofill;
+      const plan = CreatorToolkitAdapters.manyvidsAutofill.inspectForm(
+        form,
+        profile,
+      );
       return {
         result,
         selected: CreatorToolkitAdapters.manyvidsAutofill
           .selectedTags(form)
           .has("exacttag"),
         unsafeMode: mode.safe,
+        premiumSafe: plan.premium.safe,
+        applyExport: typeof CreatorToolkitAdapters.manyvidsAutofill.applyPlan,
       };
     });
     assert.equal(mvResult.result.status, "changed");
     assert.equal(mvResult.selected, true);
     assert.equal(mvResult.unsafeMode, false);
+    assert.equal(mvResult.premiumSafe, true);
+    assert.equal(mvResult.applyExport, "function");
     await mv.context.close();
   } finally {
     await browser.close();

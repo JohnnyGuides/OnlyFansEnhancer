@@ -208,6 +208,7 @@
       "#free_vid_0",
       "#launchCustom",
       "#membership3",
+      "#premium2",
     ];
     return JSON.stringify({
       fields: fields.map((selector) => {
@@ -246,6 +247,11 @@
       profile.membershipSelector,
       profile.membershipExpectedLabel,
     );
+    const premium = inspectModeControl(
+      form,
+      profile.premiumSelector,
+      profile.premiumExpectedLabel,
+    );
 
     return {
       form,
@@ -253,6 +259,7 @@
       priceMode,
       launchMode,
       membership,
+      premium,
       tagsToAdd,
       signature: formSignature(form),
       items: [
@@ -267,6 +274,9 @@
         `Launch time: ${launchTime?.selectedOptions?.[0]?.textContent?.trim() || "unset"} → exact “${profile.launchTimeLabel}”`,
         `Membership ${profile.membershipSelector}: ${membership.detail}${
           membership.safe ? " (will select if needed)" : " (will not click)"
+        }`,
+        `Premium ${profile.premiumSelector}: ${premium.detail}${
+          premium.safe ? " (will select if needed)" : " (will not click)"
         }`,
         `Append ${tagsToAdd.length} missing exact tag(s): ${tagsToAdd.join(", ") || "none"}`,
         "Existing tags are preserved; capacity is capped at ten.",
@@ -461,6 +471,13 @@
     ) {
       return failedResult(outcomes);
     }
+    if (
+      !(await step("Premium mode", () =>
+        selectRadioIfSafe(plan.premium, signal, budget),
+      ))
+    ) {
+      return failedResult(outcomes);
+    }
     for (const tag of plan.tagsToAdd) {
       if (
         !(await step(`Tag ${tag}`, () =>
@@ -523,6 +540,7 @@
         plan.priceMode,
         plan.launchMode,
         plan.membership,
+        plan.premium,
       ].filter((mode) => !mode.safe).length;
       panel.setStatus(
         unsafeModes
@@ -560,6 +578,8 @@
     inspectModeControl,
     inspectForm,
     addExactTag,
+    applyPlan,
+    failedResult,
   });
 
   toolkit.mountTool({
