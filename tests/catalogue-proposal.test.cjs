@@ -157,6 +157,19 @@ test("standalone full limited final and VR filename noise does not weaken a matc
   assert.equal(ranked[0].score, 90);
 });
 
+test("teaser remains meaningful catalogue wording instead of filename noise", () => {
+  const proposal = loadProposal();
+  const ranked = plain(
+    proposal.rankRows(
+      { filename: "Claire.mp4", title: "Claire", description: "" },
+      [row({ row: 55, id: "claire-teaser", title: "Claire Teaser" })],
+    ),
+  );
+
+  assert.notEqual(ranked[0].similarity, 1);
+  assert.equal(ranked[0].similarity < 0.75, true);
+});
+
 test("explicit numeric selection bypasses similarity without bypassing queue evidence", () => {
   const proposal = loadProposal();
   const selected = row({
@@ -269,6 +282,45 @@ test("verified scheduling respects future catalogue dates and occupied Fridays",
     "ManyVids already has an upload on 2026-09-11",
     "ManyVids already has an upload on 2026-09-18",
   ]);
+});
+
+test("multiple executable targets use one Friday verified free across every queue", () => {
+  const proposal = loadProposal();
+  const candidate = row({
+    title: "Shared Friday",
+    id: "shared-friday",
+    pornhubLink: "https://www.pornhub.com/view_video.php?viewkey=shared",
+    onlyfansLink: "",
+    fanslyLink: "",
+  });
+  const result = plain(
+    proposal.build({
+      draft: { filename: "Shared Friday.mp4", title: "Shared Friday" },
+      snapshot: {
+        status: "snapshot",
+        rows: [candidate],
+        emptyRow: emptyRow(136),
+      },
+      now: new Date("2026-08-30T10:00:00Z"),
+      executablePlatforms: ["onlyfans", "fansly", "manyvids"],
+      queueByPlatform: {
+        onlyfans: {
+          verified: true,
+          scheduled: [],
+          occupiedFridays: ["2026-09-11"],
+        },
+        fansly: {
+          verified: true,
+          scheduled: [],
+          occupiedFridays: ["2026-09-04"],
+        },
+      },
+    }),
+  );
+
+  assert.equal(result.status, "ready");
+  assert.equal(result.schedules.onlyfans.releaseDate, "2026-09-18");
+  assert.equal(result.schedules.fansly.releaseDate, "2026-09-18");
 });
 
 test("missing queue evidence stays unverified", () => {

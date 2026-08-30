@@ -154,6 +154,38 @@ test("draft normalization maps the ManyVids full, teaser, and optional thumbnail
   assert.match(missingTeaser.errors.join(" "), /ManyVids teaser/);
 });
 
+test("proposal preflight identity includes Add New metadata, not only the empty row fingerprint", () => {
+  const context = loadScripts("upload-console.js");
+  const proposal = {
+    status: "ready",
+    candidate: {
+      row: 136,
+      id: "new-video",
+      releaseDate: "2026-09-04",
+      title: "New Video",
+      description: "Description",
+      seasonArc: "",
+      episode: "",
+      fingerprint: "1234abcd",
+    },
+    targets: { executable: ["onlyfans"] },
+    schedules: {
+      onlyfans: {
+        verified: true,
+        releaseDate: "2026-09-04",
+      },
+    },
+  };
+
+  assert.notEqual(
+    context.CreatorUploadConsole.proposalSignature(proposal),
+    context.CreatorUploadConsole.proposalSignature({
+      ...proposal,
+      candidate: { ...proposal.candidate, id: "new-video-2" },
+    }),
+  );
+});
+
 test("catalogue helpers score the same Friday and protect existing platform links", () => {
   const context = loadScripts("creator-tools/catalogue-contract.js");
   const contract = context.CreatorCatalogueContract;
@@ -1454,7 +1486,7 @@ test("upload console performs no platform mutation before the single Yes confirm
                 episode: "42",
                 pornhubLink: "https://pornhub.com/view_video.php?viewkey=42",
                 onlyfansLink: "",
-                fanslyLink: "https://fansly.com/post/777777777",
+                fanslyLink: "",
                 manyvidsLink: "https://www.manyvids.com/Video/42",
                 fingerprint: "1234abcd",
               },
@@ -1470,6 +1502,11 @@ test("upload console performs no platform mutation before the single Yes confirm
         snapshot() {
           return {
             onlyfans: { verified: true, scheduled: [], occupiedFridays: [] },
+            fansly: {
+              verified: true,
+              scheduled: [],
+              occupiedFridays: ["2026-09-04"],
+            },
           };
         },
       };
@@ -1562,7 +1599,7 @@ test("upload console performs no platform mutation before the single Yes confirm
       "Catalogue description",
     );
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
-    assert.equal(await page.locator("#targetFansly").isChecked(), false);
+    assert.equal(await page.locator("#targetFansly").isChecked(), true);
 
     await page.locator("#confirmUpload").click();
     await page
@@ -1592,12 +1629,10 @@ test("upload console performs no platform mutation before the single Yes confirm
       mutationMessages[0].catalogue.pornhubLink,
       "https://pornhub.com/view_video.php?viewkey=42",
     );
-    assert.deepEqual(mutationMessages[0].targets, ["onlyfans"]);
-    assert.deepEqual(mutationMessages[1].targets, ["onlyfans"]);
-    assert.equal(
-      mutationMessages[0].catalogue.fanslyLink,
-      "https://fansly.com/post/777777777",
-    );
+    assert.deepEqual(mutationMessages[0].targets, ["onlyfans", "fansly"]);
+    assert.deepEqual(mutationMessages[1].targets, ["onlyfans", "fansly"]);
+    assert.equal(mutationMessages[0].catalogue.fanslyLink, "");
+    assert.equal(mutationMessages[0].draft.releaseDate, "2026-09-11");
     assert.equal(
       mutationMessages[0].draft.scheduledIso.endsWith("T15:00:00.000Z"),
       true,
@@ -1716,6 +1751,14 @@ test("strong catalogue proposal shows one Yes card and No opens the searchable p
     await page.locator("#rejectMatch").click();
     await page.locator("#cataloguePicker").waitFor();
     await page.locator("#catalogueSearch").fill("battlefield");
+    assert.equal(
+      await page.locator("#catalogueRow optgroup").getAttribute("label"),
+      "Likely matches",
+    );
+    assert.match(
+      await page.locator('#catalogueRow option[value="row:121"]').textContent(),
+      /PH missing.*OF missing.*Fansly yes.*MV yes/i,
+    );
     await page.locator("#catalogueRow").selectOption("row:121");
     assert.match(
       await page.locator("#selectedCatalogueReason").textContent(),
@@ -1774,6 +1817,14 @@ test("ambiguous catalogue wording opens the picker without offering Yes", async 
           };
         },
       };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot() {
+          return {
+            onlyfans: { verified: true, scheduled: [], occupiedFridays: [] },
+            manyvids: { verified: true, scheduled: [], occupiedFridays: [] },
+          };
+        },
+      };
       globalThis.chrome = {
         runtime: {
           lastError: null,
@@ -1804,6 +1855,18 @@ test("ambiguous catalogue wording opens the picker without offering Yes", async 
     assert.equal(await page.locator("#confirmation").isHidden(), true);
     assert.equal(await page.locator("#catalogueRow option").count(), 4);
     assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+
+    await page.locator("#catalogueRow").selectOption("row:20");
+    await page.locator("#targetManyvids").uncheck();
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator("#catalogueRow").inputValue(), "row:20");
+    assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
+    assert.equal(await page.locator("#targetManyvids").isChecked(), false);
+
+    await page.locator("#uploadTitle").fill("claire-b");
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator("#catalogueRow").inputValue(), "row:20");
+    assert.match(await page.locator("#matchBadge").textContent(), /Row 20/);
   } finally {
     await browser.close();
   }
@@ -1870,7 +1933,7 @@ test("unverified platform queue keeps Yes disabled and offers explicit upload wi
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
-    await page.getByText(/queue is not verified/i).waitFor();
+    await page.getByText(/OnlyFans queue is not verified/i).waitFor();
 
     assert.equal(await page.locator("#confirmUpload").isDisabled(), true);
     await page.locator("#continueWithoutSheet").click();

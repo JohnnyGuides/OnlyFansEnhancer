@@ -215,6 +215,46 @@
     };
   }
 
+  function synchronizeExecutableSchedules(
+    schedules,
+    executablePlatforms,
+    queueByPlatform,
+  ) {
+    if (
+      executablePlatforms.length < 2 ||
+      executablePlatforms.some((platform) => !schedules[platform]?.verified)
+    ) {
+      return;
+    }
+    let common = executablePlatforms
+      .map((platform) => new Date(schedules[platform].scheduledIso))
+      .sort((left, right) => right.getTime() - left.getTime())[0];
+    const occupied = new Set(
+      executablePlatforms.flatMap(
+        (platform) => queueByPlatform[platform]?.occupiedFridays || [],
+      ),
+    );
+    while (occupied.has(dateValue(common))) {
+      common.setUTCDate(common.getUTCDate() + 7);
+    }
+    const releaseDate = dateValue(common);
+    for (const platform of executablePlatforms) {
+      const schedule = schedules[platform];
+      schedules[platform] = {
+        ...schedule,
+        releaseDate,
+        scheduledIso: common.toISOString(),
+        evidence:
+          schedule.releaseDate === releaseDate
+            ? schedule.evidence
+            : [
+                ...schedule.evidence,
+                `Selected platforms share the first verified free Friday: ${releaseDate}`,
+              ],
+      };
+    }
+  }
+
   function buildNewCandidate(draft, snapshot) {
     const empty = snapshot?.emptyRow;
     if (!empty || !Number.isInteger(Number(empty.row))) {
@@ -309,6 +349,11 @@
           queueEvidence: queueByPlatform[platform],
         }),
       ]),
+    );
+    synchronizeExecutableSchedules(
+      schedules,
+      targets.executable,
+      queueByPlatform,
     );
     const rankedCandidate = ranked.find(
       (item) => Number(item.row) === Number(candidate.row),

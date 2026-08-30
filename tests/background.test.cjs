@@ -590,6 +590,19 @@ function send(message) {
     context,
   );
   assert.equal(historicalUpload.catalogue.releaseDate, "2026-05-08");
+  context.historicalWeekdayRequest = {
+    ...context.historicalUploadRequest,
+    catalogue: {
+      ...validatedUpload.catalogue,
+      releaseDate: "2026-05-07",
+      status: "matched",
+    },
+  };
+  const historicalWeekday = vm.runInContext(
+    "validateCreatorUploadRequest(historicalWeekdayRequest)",
+    context,
+  );
+  assert.equal(historicalWeekday.catalogue.releaseDate, "2026-05-07");
   context.newRowDateMismatch = {
     ...context.historicalUploadRequest,
     catalogue: {

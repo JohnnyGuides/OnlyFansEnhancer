@@ -189,6 +189,33 @@
       .trim();
   }
 
+  function proposalSignature(proposal) {
+    const executable = proposal?.targets?.executable || [];
+    const candidate = proposal?.candidate || {};
+    return JSON.stringify({
+      candidate: {
+        row: candidate.row,
+        id: candidate.id || "",
+        releaseDate: candidate.releaseDate || "",
+        title: candidate.title || "",
+        description: candidate.description || "",
+        seasonArc: candidate.seasonArc || "",
+        episode: candidate.episode || "",
+        pornhubLink: candidate.pornhubLink || "",
+        onlyfansLink: candidate.onlyfansLink || "",
+        fanslyLink: candidate.fanslyLink || "",
+        manyvidsLink: candidate.manyvidsLink || "",
+        fingerprint: candidate.fingerprint || "",
+      },
+      executable,
+      schedules: executable.map((platform) => ({
+        platform,
+        releaseDate: proposal?.schedules?.[platform]?.releaseDate || "",
+        verified: proposal?.schedules?.[platform]?.verified === true,
+      })),
+    });
+  }
+
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, (response) => {
@@ -247,6 +274,7 @@
     let currentSnapshot = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
+    let manualTargets = null;
     let uploadWithoutSheet = false;
     let activeSession = null;
     const platformStates = new Map();
@@ -398,16 +426,23 @@
       prompt.value = "";
       prompt.textContent = "Choose a catalogue episode";
       catalogueRow.append(prompt);
+      const group = document.createElement("optgroup");
+      group.label = showAllCatalogue.checked
+        ? "All catalogue entries"
+        : "Likely matches";
+      catalogueRow.append(group);
       for (const candidate of visible) {
-        const targets = engine.inferTargets(candidate, [
-          "onlyfans",
-          "fansly",
-          "manyvids",
-        ]);
         const option = document.createElement("option");
         option.value = `row:${candidate.row}`;
-        option.textContent = `${candidate.title || candidate.id} · ${candidate.releaseDate || "no date"} · ${targets.recommended.join(", ") || "fully linked"}`;
-        catalogueRow.append(option);
+        option.textContent = [
+          candidate.title || candidate.id,
+          candidate.releaseDate || "no date",
+          `PH ${candidate.pornhubLink ? "yes" : "missing"}`,
+          `OF ${candidate.onlyfansLink ? "yes" : "missing"}`,
+          `Fansly ${candidate.fanslyLink ? "yes" : "missing"}`,
+          `MV ${candidate.manyvidsLink ? "yes" : "missing"}`,
+        ].join(" · ");
+        group.append(option);
       }
       const addNew = document.createElement("option");
       addNew.value = "new";
@@ -426,7 +461,9 @@
         snapshot: currentSnapshot,
         selectedRow,
         now: new Date(),
-        executablePlatforms: ["onlyfans", "fansly", "manyvids"],
+        executablePlatforms: manualTargets
+          ? [...manualTargets]
+          : ["onlyfans", "fansly", "manyvids"],
         queueByPlatform: currentQueueEvidence(),
       });
     }
@@ -465,8 +502,17 @@
       if (proposal.status !== "ready") {
         confirmUpload.disabled = true;
         if (proposal.status === "needs-queue-evidence") {
-          matchQuestion.textContent =
-            "The episode and targets are ready, but the live platform queue is not verified yet.";
+          const unverified = proposal.targets.executable
+            .filter((platform) => !proposal.schedules[platform]?.verified)
+            .map(
+              (platform) =>
+                ({
+                  onlyfans: "OnlyFans",
+                  fansly: "Fansly",
+                  manyvids: "ManyVids",
+                })[platform],
+            );
+          matchQuestion.textContent = `${unverified.join(" and ")} queue${unverified.length === 1 ? " is" : "s are"} not verified yet.`;
         } else if (proposal.status === "not-executable") {
           matchQuestion.textContent =
             "The missing platform is recommended but not executable yet.";
@@ -631,7 +677,7 @@
         }
         currentSnapshot = await loadCatalogueSnapshot();
         if (revision !== matchRevision) return;
-        selectedCatalogueRow = forceNew ? "new" : null;
+        if (forceNew) selectedCatalogueRow = "new";
         const proposal = buildProposal(selectedCatalogueRow);
         if (proposal.status === "needs-selection") {
           currentProposal = proposal;
@@ -886,20 +932,6 @@
       }
     }
 
-    function proposalSignature(proposal) {
-      const executable = proposal?.targets?.executable || [];
-      return JSON.stringify({
-        row: proposal?.candidate?.row,
-        fingerprint: proposal?.candidate?.fingerprint || "",
-        executable,
-        schedules: executable.map((platform) => ({
-          platform,
-          releaseDate: proposal?.schedules?.[platform]?.releaseDate || "",
-          verified: proposal?.schedules?.[platform]?.verified === true,
-        })),
-      });
-    }
-
     async function recheckProposalBeforeUpload() {
       if (!currentProposal || currentMatch?.status === "upload-only") return;
       const previousSignature = proposalSignature(currentProposal);
@@ -1041,6 +1073,8 @@
 
     fullInput.addEventListener("change", () => {
       fullFile = fullInput.files?.[0] || null;
+      selectedCatalogueRow = null;
+      manualTargets = null;
       get("#fullFileSummary").textContent = fileSummary(
         fullFile,
         "Required. It starts transferring after Yes and remains only in this open tab.",
@@ -1070,7 +1104,12 @@
       control.addEventListener("input", scheduleMatch);
     }
     for (const control of [onlyfans, fansly, manyvids]) {
-      control.addEventListener("change", scheduleMatch);
+      control.addEventListener("change", () => {
+        if (selectedCatalogueRow !== null) {
+          manualTargets = new Set(selectedTargets());
+        }
+        scheduleMatch();
+      });
     }
     confirmUpload.addEventListener("click", () => startUpload());
     catalogueSearch.addEventListener("input", () => renderPicker());
@@ -1079,6 +1118,7 @@
       const value = catalogueRow.value;
       if (!value) return;
       selectedCatalogueRow = value === "new" ? "new" : Number(value.slice(4));
+      manualTargets = null;
       const proposal = buildProposal(selectedCatalogueRow);
       applyProposal(
         proposal,
@@ -1121,6 +1161,10 @@
     });
     rejectMatch.addEventListener("click", () => {
       if (currentProposal) {
+        selectedCatalogueRow =
+          currentMatch?.status === "new"
+            ? "new"
+            : currentMatch?.candidate?.row || selectedCatalogueRow;
         confirmation.hidden = true;
         renderPicker();
         matchStatus.textContent =
@@ -1148,6 +1192,7 @@
     nextFridayUtc,
     nextFridayLocalValue,
     normalizeDraft,
+    proposalSignature,
     scheduledIsoForReleaseDate,
     titleFromFilename,
     validateDraft,
