@@ -64,6 +64,18 @@
           Optional. If empty, ManyVids keeps its site-generated thumbnail.
         </p>
 
+        <label for="uploadPornhubVideo">Pornhub video (optional)</label>
+        <input
+          id="uploadPornhubVideo"
+          type="file"
+          accept="video/*,.mkv,.avi"
+          aria-describedby="pornhubFileSummary draftErrors"
+        />
+        <p id="pornhubFileSummary" class="hint">
+          Optional limited edition. If empty, Pornhub uses the full-video
+          selection in the plan.
+        </p>
+
         <div class="field-grid">
           <div>
             <label for="uploadTitle">Title</label>
@@ -94,6 +106,16 @@
           spellcheck="true"
           placeholder="Enter the description, or fill it from a connected catalogue"
         ></textarea>
+
+        <label for="contentPreset">Content preset</label>
+        <select id="contentPreset" aria-describedby="draftErrors">
+          <option value="">Choose when Pornhub is selected</option>
+          <option value="Straight">Straight</option>
+          <option value="Gay">Gay</option>
+          <option value="Lesbian">Lesbian</option>
+          <option value="Bisexual Male">Bisexual Male</option>
+          <option value="Transgender">Transgender</option>
+        </select>
       </section>
 
       <section class="card" aria-labelledby="targetsHeading">
@@ -132,6 +154,16 @@
               ><strong>Fansly</strong
               ><small
                 >Teaser as Free Preview · full locked with defaulT</small
+              ></span
+            >
+          </label>
+          <label class="target-option">
+            <input id="targetPornhub" type="checkbox" value="pornhub" />
+            <span
+              ><strong>Pornhub</strong
+              ><small
+                >Preset metadata · trace-gated · file and final Submit
+                manual</small
               ></span
             >
           </label>
@@ -212,6 +244,10 @@
         >
       </aside>
     </main>
+    <script src="creator-tools/registry.js"></script>
+    <script src="creator-tools/common.js"></script>
+    <script src="creator-tools/fansly-prefill.js"></script>
+    <script src="creator-tools/ph-uploader.js"></script>
     <script src="creator-tools/catalogue-contract.js"></script>
     <script src="creator-tools/catalogue-proposal.js"></script>
     <script src="creator-tools/catalogue-client.js"></script>

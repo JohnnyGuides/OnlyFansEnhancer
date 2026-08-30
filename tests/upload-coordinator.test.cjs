@@ -78,6 +78,44 @@ test("upload console validates one local video and allow-listed targets", () => 
     }),
   );
   assert.deepEqual(manyvids, { valid: true, errors: [] });
+
+  const fullFile = { name: "episode (full).mp4", type: "video/mp4", size: 100 };
+  const limitedFile = {
+    name: "episode (limited).mp4",
+    type: "video/mp4",
+    size: 80,
+  };
+  const pornhub = plain(
+    hooks.normalizeDraft({
+      fullFile,
+      pornhubFile: limitedFile,
+      title: "Episode 42",
+      description: "Description",
+      scheduledIso: "2026-08-28T15:00:00.000Z",
+      targets: ["pornhub"],
+      contentPreset: "Straight",
+    }),
+  );
+  assert.equal(pornhub.valid, true);
+  assert.deepEqual(pornhub.media.pornhub, {
+    file: "episode (limited).mp4",
+    source: "pornhub",
+  });
+  assert.equal(pornhub.contentPreset, "Straight");
+
+  const pornhubFallback = plain(
+    hooks.normalizeDraft({
+      fullFile,
+      title: "Episode 42",
+      scheduledIso: "2026-08-28T15:00:00.000Z",
+      targets: ["pornhub"],
+      contentPreset: "Straight",
+    }),
+  );
+  assert.deepEqual(pornhubFallback.media.pornhub, {
+    file: "episode (full).mp4",
+    source: "full",
+  });
 });
 
 test("upload console rejects missing, empty, non-video, invalid-date, and unknown-target drafts", () => {
@@ -97,7 +135,7 @@ test("upload console rejects missing, empty, non-video, invalid-date, and unknow
       "Choose a non-empty video file.",
       "Enter a title.",
       "Choose a valid publication date and time.",
-      "Choose OnlyFans, Fansly, ManyVids, or a combination.",
+      "Choose OnlyFans, Fansly, ManyVids, Pornhub, or a combination.",
     ],
   });
 

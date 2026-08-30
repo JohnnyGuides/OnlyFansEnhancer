@@ -35,6 +35,54 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+async function addUploadConsoleScripts(page, options = {}) {
+  await page.evaluate(async () => {
+    const previous = globalThis.chrome.storage?.local;
+    const seeded = previous?.get
+      ? await previous.get([
+          "creatorUploadSheetBridgeV1",
+          "creatorToolkitV1",
+          "creatorToolkitV2",
+        ])
+      : {};
+    const values = { ...(seeded || {}) };
+    globalThis.chrome.storage = {
+      local: {
+        get(keys, callback) {
+          const result = {};
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            if (Object.hasOwn(values, key)) {
+              result[key] = structuredClone(values[key]);
+            }
+          }
+          if (callback) queueMicrotask(() => callback(result));
+          return Promise.resolve(result);
+        },
+        set(next, callback) {
+          Object.assign(values, structuredClone(next));
+          queueMicrotask(() => callback?.());
+        },
+      },
+      onChanged: { addListener() {}, removeListener() {} },
+    };
+  });
+  const scripts = [
+    "creator-tools/registry.js",
+    "creator-tools/common.js",
+    "creator-tools/fansly-prefill.js",
+    "creator-tools/ph-uploader.js",
+    "creator-tools/catalogue-contract.js",
+    "creator-tools/catalogue-proposal.js",
+  ];
+  if (options.catalogueClient) {
+    scripts.push("creator-tools/catalogue-client.js");
+  }
+  scripts.push("upload-console.js");
+  for (const relativePath of scripts) {
+    await page.addScriptTag({ path: path.join(repositoryRoot, relativePath) });
+  }
+}
+
 test("Friday scheduling keeps 15:00 UTC across Zurich daylight saving time", () => {
   const context = loadScripts("upload-console.js");
   const summer = plain(
@@ -105,6 +153,7 @@ test("draft normalization maps full and teaser files without requiring a teaser"
     scheduledIso: "2026-08-28T15:00:00.000Z",
     releaseDate: "2026-08-28",
     targets: ["onlyfans", "fansly"],
+    contentPreset: "",
     media: {
       onlyfans: { full: "episode full.mp4" },
       fansly: { full: "episode full.mp4", teaser: null },
@@ -1566,15 +1615,7 @@ test("upload console performs no platform mutation before the single Yes confirm
         },
       };
     });
-    for (const relativePath of [
-      "creator-tools/catalogue-contract.js",
-      "creator-tools/catalogue-proposal.js",
-      "upload-console.js",
-    ]) {
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, relativePath),
-      });
-    }
+    await addUploadConsoleScripts(page);
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "Episode 42 (full).mp4",
       mimeType: "video/mp4",
@@ -1631,6 +1672,15 @@ test("upload console performs no platform mutation before the single Yes confirm
     );
     assert.deepEqual(mutationMessages[0].targets, ["onlyfans", "fansly"]);
     assert.deepEqual(mutationMessages[1].targets, ["onlyfans", "fansly"]);
+    assert.equal(
+      mutationMessages[0].draft.fanslyCaption,
+      `Catalogue description\n\n${mutationMessages[0].draft.profiles.fanslyPrefill.message}`,
+    );
+    assert.equal(
+      mutationMessages[0].draft.profiles.manyvidsAutofill.price,
+      "19.99",
+    );
+    assert.equal(typeof mutationMessages[0].draft.profileSignature, "string");
     assert.equal(mutationMessages[0].catalogue.fanslyLink, "");
     assert.equal(mutationMessages[0].draft.releaseDate, "2026-09-11");
     assert.equal(
@@ -1721,15 +1771,7 @@ test("strong catalogue proposal shows one Yes card and No opens the searchable p
         },
       };
     });
-    for (const relativePath of [
-      "creator-tools/catalogue-contract.js",
-      "creator-tools/catalogue-proposal.js",
-      "upload-console.js",
-    ]) {
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, relativePath),
-      });
-    }
+    await addUploadConsoleScripts(page);
 
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "BATTLEFIELD 6 Angry Sex (full).mp4",
@@ -1743,7 +1785,7 @@ test("strong catalogue proposal shows one Yes card and No opens the searchable p
     assert.equal(await page.locator("#targetManyvids").isChecked(), false);
     assert.match(
       await page.locator("#pornhubRecommendation").textContent(),
-      /recommended.*not yet executable/i,
+      /recommended.*choose an exact content preset/i,
     );
     assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
     assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
@@ -1835,15 +1877,7 @@ test("ambiguous catalogue wording opens the picker without offering Yes", async 
         },
       };
     });
-    for (const relativePath of [
-      "creator-tools/catalogue-contract.js",
-      "creator-tools/catalogue-proposal.js",
-      "upload-console.js",
-    ]) {
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, relativePath),
-      });
-    }
+    await addUploadConsoleScripts(page);
 
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "Claire VR (full).mp4",
@@ -1919,15 +1953,7 @@ test("unverified platform queue keeps Yes disabled and offers explicit upload wi
         },
       };
     });
-    for (const relativePath of [
-      "creator-tools/catalogue-contract.js",
-      "creator-tools/catalogue-proposal.js",
-      "upload-console.js",
-    ]) {
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, relativePath),
-      });
-    }
+    await addUploadConsoleScripts(page);
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "Nervous Jo (full).mp4",
       mimeType: "video/mp4",
@@ -2011,15 +2037,7 @@ test("Yes rechecks the proposed catalogue row and stops before platform mutation
         },
       };
     });
-    for (const relativePath of [
-      "creator-tools/catalogue-contract.js",
-      "creator-tools/catalogue-proposal.js",
-      "upload-console.js",
-    ]) {
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, relativePath),
-      });
-    }
+    await addUploadConsoleScripts(page);
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "BATTLEFIELD 6 Angry Sex (full).mp4",
       mimeType: "video/mp4",
@@ -2115,16 +2133,7 @@ for (const scenario of [
           },
         };
       }, scenario.config);
-      for (const relativePath of [
-        "creator-tools/catalogue-contract.js",
-        "creator-tools/catalogue-proposal.js",
-        "creator-tools/catalogue-client.js",
-        "upload-console.js",
-      ]) {
-        await page.addScriptTag({
-          path: path.join(repositoryRoot, relativePath),
-        });
-      }
+      await addUploadConsoleScripts(page, { catalogueClient: true });
       await page.locator("#uploadFullVideo").setInputFiles({
         name: "Episode 42 (full).mp4",
         mimeType: "video/mp4",

@@ -3,7 +3,7 @@
 (() => {
   const VIDEO_EXTENSIONS = /\.(?:mp4|m4v|mov|webm|avi|mkv)$/i;
   const IMAGE_EXTENSIONS = /\.(?:jpe?g|png)$/i;
-  const TARGETS = new Set(["onlyfans", "fansly", "manyvids"]);
+  const TARGETS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
 
   function localDateTimeValue(date, timeZone) {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -78,10 +78,12 @@
     fullFile,
     teaserFile = null,
     thumbnailFile = null,
+    pornhubFile = null,
     title,
     description,
     scheduledIso,
     targets,
+    contentPreset = "",
   } = {}) {
     const errors = [];
     if (!isVideoFile(fullFile)) errors.push("Choose a non-empty full video.");
@@ -90,6 +92,9 @@
     }
     if (thumbnailFile && !isImageFile(thumbnailFile)) {
       errors.push("Choose a PNG or JPEG ManyVids thumbnail or leave it blank.");
+    }
+    if (pornhubFile && !isVideoFile(pornhubFile)) {
+      errors.push("Choose a non-empty Pornhub video or leave it blank.");
     }
     const cleanTitle = String(title || "").trim();
     if (!cleanTitle) errors.push("Enter a catalogue title.");
@@ -106,10 +111,16 @@
       ? [...new Set(targets)].filter((target) => TARGETS.has(target))
       : [];
     if (!selectedTargets.length || selectedTargets.length !== targets?.length) {
-      errors.push("Choose OnlyFans, Fansly, ManyVids, or a combination.");
+      errors.push(
+        "Choose OnlyFans, Fansly, ManyVids, Pornhub, or a combination.",
+      );
     }
     if (selectedTargets.includes("manyvids") && !isVideoFile(teaserFile)) {
       errors.push("Choose a non-empty ManyVids teaser video.");
+    }
+    const cleanPreset = String(contentPreset || "").trim();
+    if (selectedTargets.includes("pornhub") && !cleanPreset) {
+      errors.push("Choose an exact Pornhub content preset.");
     }
     return {
       valid: errors.length === 0,
@@ -123,6 +134,7 @@
         ? ""
         : scheduled.toISOString().slice(0, 10),
       targets: selectedTargets,
+      contentPreset: cleanPreset,
       media: {
         ...(selectedTargets.includes("onlyfans")
           ? { onlyfans: { full: fullFile?.name || "" } }
@@ -141,6 +153,14 @@
                 full: fullFile?.name || "",
                 teaser: teaserFile?.name || "",
                 thumbnail: thumbnailFile?.name || null,
+              },
+            }
+          : {}),
+        ...(selectedTargets.includes("pornhub")
+          ? {
+              pornhub: {
+                file: pornhubFile?.name || fullFile?.name || "",
+                source: pornhubFile ? "pornhub" : "full",
               },
             }
           : {}),
@@ -237,6 +257,8 @@
     const fullInput = get("#uploadFullVideo");
     const teaserInput = get("#uploadTeaser");
     const thumbnailInput = get("#uploadManyvidsThumbnail");
+    const pornhubInput = get("#uploadPornhubVideo");
+    const contentPreset = get("#contentPreset");
     const title = get("#uploadTitle");
     const description = get("#uploadDescription");
     const releaseDate = get("#releaseDate");
@@ -244,6 +266,7 @@
     const onlyfans = get("#targetOnlyfans");
     const fansly = get("#targetFansly");
     const manyvids = get("#targetManyvids");
+    const pornhub = get("#targetPornhub");
     const errors = get("#draftErrors");
     const matchStatus = get("#matchStatus");
     const continueWithoutSheet = get("#continueWithoutSheet");
@@ -267,6 +290,7 @@
     let fullFile = null;
     let teaserFile = null;
     let thumbnailFile = null;
+    let pornhubFile = null;
     let matchTimer = null;
     let matchRevision = 0;
     let currentMatch = null;
@@ -277,6 +301,8 @@
     let manualTargets = null;
     let uploadWithoutSheet = false;
     let activeSession = null;
+    let workflowProfiles = null;
+    let profilesLoaded = false;
     const platformStates = new Map();
 
     releaseDate.value = initialSchedule.releaseDate;
@@ -286,6 +312,7 @@
         onlyfans.checked ? "onlyfans" : "",
         fansly.checked ? "fansly" : "",
         manyvids.checked ? "manyvids" : "",
+        pornhub.checked ? "pornhub" : "",
       ].filter(Boolean);
     }
 
@@ -300,14 +327,54 @@
     }
 
     function draft() {
-      return normalizeDraft({
+      const value = normalizeDraft({
         fullFile,
         teaserFile,
         thumbnailFile,
+        pornhubFile,
         title: title.value,
         description: description.value,
         scheduledIso: scheduledIsoForReleaseDate(releaseDate.value),
         targets: selectedTargets(),
+        contentPreset: contentPreset.value,
+      });
+      if (!profilesLoaded || !workflowProfiles) {
+        value.errors.push("Workflow profiles are still loading.");
+        value.valid = false;
+        return value;
+      }
+      const profiles = {
+        fanslyPrefill: structuredClone(workflowProfiles.fanslyPrefill),
+        manyvidsAutofill: structuredClone(workflowProfiles.manyvidsAutofill),
+        phUploader: structuredClone(workflowProfiles.phUploader),
+      };
+      if (
+        value.targets.includes("pornhub") &&
+        !Object.hasOwn(profiles.phUploader.presets, value.contentPreset)
+      ) {
+        value.errors.push(
+          "The selected Pornhub content preset is unavailable.",
+        );
+        value.valid = false;
+      }
+      value.fanslyCaption =
+        globalThis.CreatorToolkitAdapters?.fanslyPrefill?.composeMasterCaption(
+          value.description,
+          profiles.fanslyPrefill.message,
+        ) ?? value.description;
+      value.profiles = profiles;
+      value.profileSignature = JSON.stringify(profiles);
+      return value;
+    }
+
+    async function refreshProfiles() {
+      const settings = await globalThis.CreatorToolkit.loadSettings();
+      workflowProfiles = settings.profiles;
+      profilesLoaded = true;
+      return JSON.stringify({
+        fanslyPrefill: workflowProfiles.fanslyPrefill,
+        manyvidsAutofill: workflowProfiles.manyvidsAutofill,
+        phUploader: workflowProfiles.phUploader,
       });
     }
 
@@ -382,6 +449,7 @@
       onlyfans.checked = inferred.has("onlyfans");
       fansly.checked = inferred.has("fansly");
       manyvids.checked = inferred.has("manyvids");
+      pornhub.checked = inferred.has("pornhub");
     }
 
     function proposalReason(proposal) {
@@ -463,7 +531,12 @@
         now: new Date(),
         executablePlatforms: manualTargets
           ? [...manualTargets]
-          : ["onlyfans", "fansly", "manyvids"],
+          : [
+              "onlyfans",
+              "fansly",
+              "manyvids",
+              ...(contentPreset.value ? ["pornhub"] : []),
+            ],
         queueByPlatform: currentQueueEvidence(),
       });
     }
@@ -480,7 +553,24 @@
       }
       if (candidate.title) title.value = candidate.title;
       if (candidate.description) description.value = candidate.description;
-      setInferredTargets(proposal.targets.executable);
+      if (!contentPreset.value && candidate.seasonArc && workflowProfiles) {
+        const resolved =
+          globalThis.CreatorToolkitAdapters?.phUploader?.resolvePreset(
+            workflowProfiles.phUploader,
+            candidate.seasonArc,
+            "",
+          );
+        if (resolved) contentPreset.value = resolved.name;
+      }
+      const inferredTargets = [...proposal.targets.executable];
+      if (
+        !candidate.pornhubLink &&
+        contentPreset.value &&
+        !inferredTargets.includes("pornhub")
+      ) {
+        inferredTargets.push("pornhub");
+      }
+      setInferredTargets(inferredTargets);
       const executableDates = [
         ...new Set(
           proposal.targets.executable
@@ -493,7 +583,9 @@
       pornhubRecommendation.textContent = proposal.targets.recommended.includes(
         "pornhub",
       )
-        ? "Pornhub is recommended from the empty catalogue link, but is not yet executable."
+        ? contentPreset.value
+          ? "Pornhub metadata preparation was added from an exact content preset. File assignment and final Submit remain manual."
+          : "Pornhub is recommended from the empty catalogue link. Choose an exact content preset to add its trace-gated metadata step."
         : "";
       selectedCatalogueReason.textContent = proposalReason(proposal);
       currentMatch = { status: catalogueStatus, candidate };
@@ -510,6 +602,7 @@
                   onlyfans: "OnlyFans",
                   fansly: "Fansly",
                   manyvids: "ManyVids",
+                  pornhub: "Pornhub",
                 })[platform],
             );
           matchQuestion.textContent = `${unverified.join(" and ")} queue${unverified.length === 1 ? " is" : "s are"} not verified yet.`;
@@ -574,6 +667,7 @@
             "Fansly access",
             "Full locked with preset defaulT · teaser attached as Free Preview",
           );
+          summaryRow("Fansly caption", draft().fanslyCaption || "Empty");
         }
       }
       if (selectedTargets().includes("onlyfans")) {
@@ -594,6 +688,15 @@
             : `Full + ${teaserFile?.name || "teaser required"} preview · $19.99 · ${thumbnailFile?.name || "site-generated thumbnail"}`,
         );
       }
+      if (selectedTargets().includes("pornhub")) {
+        const existing = catalogueLink(candidate, "pornhub");
+        summaryRow(
+          "Pornhub",
+          existing
+            ? `Already linked · ${existing}`
+            : `${pornhubFile?.name || fullFile.name} · ${contentPreset.value || "preset required"} · metadata only; file and final Submit remain manual`,
+        );
+      }
       summaryRow("Description", description.value.trim() || "Empty");
       summaryRow(
         "Sheet cells",
@@ -611,6 +714,9 @@
                 : "",
               selectedTargets().includes("manyvids")
                 ? `L${candidate.row} if empty`
+                : "",
+              selectedTargets().includes("pornhub")
+                ? `H${candidate.row} only after a future verified link capture`
                 : "",
             ]
               .filter(Boolean)
@@ -752,7 +858,9 @@
             ? "OnlyFans"
             : platform === "fansly"
               ? "Fansly"
-              : "ManyVids";
+              : platform === "manyvids"
+                ? "ManyVids"
+                : "Pornhub";
         const badge = document.createElement("span");
         badge.className = "result-status";
         badge.dataset.state = state.status || "";
@@ -933,6 +1041,14 @@
     }
 
     async function recheckProposalBeforeUpload() {
+      const priorProfiles = draft().profileSignature;
+      const currentProfiles = await refreshProfiles();
+      if (priorProfiles !== currentProfiles) {
+        scheduleMatch();
+        throw new Error(
+          "Workflow profiles changed. Review the updated plan and click Yes again.",
+        );
+      }
       if (!currentProposal || currentMatch?.status === "upload-only") return;
       const previousSignature = proposalSignature(currentProposal);
       currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
@@ -978,6 +1094,9 @@
           ...(targets.includes("manyvids")
             ? ["https://www.manyvids.com/*"]
             : []),
+          ...(targets.includes("pornhub")
+            ? ["https://pornhub.mainhub.com/*"]
+            : []),
         ];
         if (optionalOrigins.length) {
           const granted = await chrome.permissions.request({
@@ -1017,6 +1136,11 @@
             timeZone,
             fanslyPreset: "defaulT",
             manyvidsThumbnail: Boolean(thumbnailFile),
+            pornhubFilename: pornhubFile?.name || fullFile.name,
+            contentPreset: value.contentPreset,
+            fanslyCaption: value.fanslyCaption,
+            profiles: value.profiles,
+            profileSignature: value.profileSignature,
           },
           catalogue:
             currentMatch.status === "upload-only"
@@ -1100,10 +1224,18 @@
       );
       if (!activeSession) scheduleMatch();
     });
-    for (const control of [title, description, releaseDate]) {
+    pornhubInput.addEventListener("change", () => {
+      pornhubFile = pornhubInput.files?.[0] || null;
+      get("#pornhubFileSummary").textContent = fileSummary(
+        pornhubFile,
+        "Optional limited edition. If empty, Pornhub uses the full-video selection in the plan.",
+      );
+      if (!activeSession) scheduleMatch();
+    });
+    for (const control of [title, description, releaseDate, contentPreset]) {
       control.addEventListener("input", scheduleMatch);
     }
-    for (const control of [onlyfans, fansly, manyvids]) {
+    for (const control of [onlyfans, fansly, manyvids, pornhub]) {
       control.addEventListener("change", () => {
         if (selectedCatalogueRow !== null) {
           manualTargets = new Set(selectedTargets());
@@ -1185,6 +1317,11 @@
     });
 
     refreshReleaseSummary();
+    refreshProfiles()
+      .then(() => scheduleMatch())
+      .catch((error) => {
+        matchStatus.textContent = error.message;
+      });
     validate();
   }
 
