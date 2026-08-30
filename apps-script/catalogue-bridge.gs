@@ -6,11 +6,17 @@ var CREATOR_UPLOAD_SHEET_NAME = "2026 Video Catalogue";
 var CREATOR_UPLOAD_SECRET_PROPERTY = "CREATOR_UPLOAD_SECRET";
 var CREATOR_UPLOAD_MATCH_THRESHOLD = 75;
 var CREATOR_UPLOAD_LINK_FIELDS = {
+  pornhub: "pornhubLink",
   onlyfans: "onlyfansLink",
   fansly: "fanslyLink",
   manyvids: "manyvidsLink",
 };
-var CREATOR_UPLOAD_LINK_COLUMNS = { onlyfans: 10, fansly: 11, manyvids: 12 };
+var CREATOR_UPLOAD_LINK_COLUMNS = {
+  pornhub: 8,
+  onlyfans: 10,
+  fansly: 11,
+  manyvids: 12,
+};
 
 function creatorUploadClean(value) {
   return String(value == null ? "" : value).trim();
@@ -114,6 +120,21 @@ function creatorUploadFingerprint(row) {
 function creatorUploadCanonicalUrl(platform, value) {
   var raw = creatorUploadClean(value);
   var match;
+  if (platform === "pornhub") {
+    try {
+      var url = new URL(raw);
+      var viewkeys = url.searchParams.getAll("viewkey");
+      var viewkey = viewkeys[0] || "";
+      return url.origin === "https://www.pornhub.com" &&
+        url.pathname === "/view_video.php" &&
+        viewkeys.length === 1 &&
+        /^[A-Za-z0-9_-]{1,100}$/.test(viewkey)
+        ? "https://www.pornhub.com/view_video.php?viewkey=" + viewkey
+        : null;
+    } catch (error) {
+      return null;
+    }
+  }
   if (platform === "fansly") {
     match = raw.match(/^(?:https:\/\/fansly\.com\/post\/)?(\d+)\/?$/);
     return match ? "https://fansly.com/post/" + match[1] : null;

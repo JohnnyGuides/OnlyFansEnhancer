@@ -23,6 +23,19 @@ function loadProposal() {
   return context.CreatorCatalogueProposal;
 }
 
+function loadContract() {
+  const context = vm.createContext({ URL });
+  vm.runInContext(
+    fs.readFileSync(
+      path.join(repositoryRoot, "creator-tools/catalogue-contract.js"),
+      "utf8",
+    ),
+    context,
+    { filename: "creator-tools/catalogue-contract.js" },
+  );
+  return context.CreatorCatalogueContract;
+}
+
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -61,6 +74,28 @@ function emptyRow(rowNumber) {
     fingerprint: "1234abcd",
   };
 }
+
+test("Pornhub catalogue URLs accept only one canonical viewkey", () => {
+  const contract = loadContract();
+  assert.equal(
+    contract.canonicalPostUrl(
+      "pornhub",
+      "https://www.pornhub.com/view_video.php?viewkey=phabc123&utm_source=x#y",
+    ),
+    "https://www.pornhub.com/view_video.php?viewkey=phabc123",
+  );
+  assert.equal(
+    contract.canonicalPostUrl("pornhub", "https://evil.example/?viewkey=x"),
+    null,
+  );
+  assert.equal(
+    contract.canonicalPostUrl(
+      "pornhub",
+      "https://www.pornhub.com/view_video.php?viewkey=one&viewkey=two",
+    ),
+    null,
+  );
+});
 
 test("strong wording infers missing Pornhub and schedules after its predecessor", () => {
   const proposal = loadProposal();

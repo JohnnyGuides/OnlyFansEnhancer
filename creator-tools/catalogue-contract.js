@@ -4,6 +4,7 @@
   if (globalThis.CreatorCatalogueContract) return;
 
   const PLATFORM_FIELDS = Object.freeze({
+    pornhub: "pornhubLink",
     onlyfans: "onlyfansLink",
     fansly: "fanslyLink",
     manyvids: "manyvidsLink",
@@ -91,6 +92,16 @@
     }
     try {
       const url = new URL(raw);
+      if (platform === "pornhub") {
+        const viewkeys = url.searchParams.getAll("viewkey");
+        const viewkey = viewkeys[0] || "";
+        return url.origin === "https://www.pornhub.com" &&
+          url.pathname === "/view_video.php" &&
+          viewkeys.length === 1 &&
+          /^[A-Za-z0-9_-]{1,100}$/.test(viewkey)
+          ? `https://www.pornhub.com/view_video.php?viewkey=${viewkey}`
+          : null;
+      }
       if (platform === "fansly") {
         const match = url.pathname.match(/^\/post\/(\d+)\/?$/);
         return url.origin === "https://fansly.com" && match

@@ -1413,6 +1413,49 @@ test("catalogue bridge commit is fingerprinted, idempotent, and never overwrites
     manyvids.row.manyvidsLink,
     "https://www.manyvids.com/Video/7783271",
   );
+
+  const pornhubRequest = {
+    ...request,
+    fingerprint: bridge.fingerprint(row),
+    platform: "pornhub",
+    postUrl:
+      "https://www.pornhub.com/view_video.php?viewkey=phabc123&utm_source=x#y",
+  };
+  const pornhub = plain(bridge.planCommit(row, pornhubRequest));
+  assert.equal(pornhub.status, "updated");
+  assert.equal(
+    pornhub.row.pornhubLink,
+    "https://www.pornhub.com/view_video.php?viewkey=phabc123",
+  );
+  assert.equal(
+    plain(
+      bridge.planCommit(pornhub.row, {
+        ...pornhubRequest,
+        fingerprint: pornhub.fingerprint,
+      }),
+    ).status,
+    "idempotent",
+  );
+  assert.equal(
+    plain(
+      bridge.planCommit(
+        {
+          ...row,
+          pornhubLink:
+            "https://www.pornhub.com/view_video.php?viewkey=existing",
+        },
+        {
+          ...pornhubRequest,
+          fingerprint: bridge.fingerprint({
+            ...row,
+            pornhubLink:
+              "https://www.pornhub.com/view_video.php?viewkey=existing",
+          }),
+        },
+      ),
+    ).status,
+    "conflict",
+  );
 });
 
 test("catalogue client sends bounded metadata only in a no-referrer POST body", async () => {
