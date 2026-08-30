@@ -1440,21 +1440,36 @@ test("upload console performs no platform mutation before the single Yes confirm
             secret: "configured",
           };
         },
-        async matchCatalogue(payload) {
-          globalThis.lastMatchPayload = structuredClone(payload);
+        async getCatalogueSnapshot() {
           return {
-            status: "matched",
-            candidate: {
-              row: 135,
-              id: "episode-42",
-              releaseDate: payload.releaseDate,
-              title: "Episode 42 from catalogue",
-              description: "Catalogue description",
-              onlyfansLink: "",
-              fanslyLink: "https://fansly.com/post/777777777",
-              fingerprint: "1234abcd",
-              score: 101,
+            status: "snapshot",
+            rows: [
+              {
+                row: 135,
+                id: "episode-42",
+                releaseDate: "2026-08-28",
+                title: "Episode 42 from catalogue",
+                description: "Catalogue description",
+                seasonArc: "Episodes",
+                episode: "42",
+                pornhubLink: "https://pornhub.com/view_video.php?viewkey=42",
+                onlyfansLink: "",
+                fanslyLink: "https://fansly.com/post/777777777",
+                manyvidsLink: "https://www.manyvids.com/Video/42",
+                fingerprint: "1234abcd",
+              },
+            ],
+            emptyRow: {
+              row: 136,
+              fingerprint: "8765dcba",
             },
+          };
+        },
+      };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot() {
+          return {
+            onlyfans: { verified: true, scheduled: [], occupiedFridays: [] },
           };
         },
       };
@@ -1514,16 +1529,22 @@ test("upload console performs no platform mutation before the single Yes confirm
         },
       };
     });
-    await page.addScriptTag({
-      path: path.join(repositoryRoot, "upload-console.js"),
-    });
+    for (const relativePath of [
+      "creator-tools/catalogue-contract.js",
+      "creator-tools/catalogue-proposal.js",
+      "upload-console.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "Episode 42 (full).mp4",
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
     await page.locator("#uploadTitle").fill("Episode 42");
-    await page.getByText(/Is this your video from the sheet/i).waitFor();
+    await page.getByText(/Likely episode/i).waitFor();
 
     assert.deepEqual(
       await page.evaluate(() =>
@@ -1541,7 +1562,7 @@ test("upload console performs no platform mutation before the single Yes confirm
       "Catalogue description",
     );
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
-    assert.equal(await page.locator("#targetFansly").isChecked(), true);
+    assert.equal(await page.locator("#targetFansly").isChecked(), false);
 
     await page.locator("#confirmUpload").click();
     await page
@@ -1575,6 +1596,296 @@ test("upload console performs no platform mutation before the single Yes confirm
       "Episode 42 (full).mp4",
     );
     assert.equal(mutationMessages[0].draft.manyvidsThumbnail, false);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("strong catalogue proposal shows one Yes card and No opens the searchable picker", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    const html = fs
+      .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+      .replace(/<script[^>]+><\/script>/gi, "");
+    await page.setContent(html);
+    await page.evaluate(() => {
+      globalThis.consoleMessages = [];
+      globalThis.CreatorCatalogueClient = {
+        async loadConfig() {
+          return {
+            endpoint: "https://script.google.com/fixture",
+            secret: "configured",
+          };
+        },
+        async getCatalogueSnapshot() {
+          return {
+            status: "snapshot",
+            rows: [
+              {
+                row: 121,
+                id: "battlefield-ep03",
+                releaseDate: "2026-05-08",
+                title: "BATTLEFIELD 6 Angry Sex",
+                description: "Catalogue description",
+                seasonArc: "Battlefield",
+                episode: "3",
+                pornhubLink: "",
+                onlyfansLink: "",
+                fanslyLink: "https://fansly.com/post/2",
+                manyvidsLink: "https://www.manyvids.com/Video/3",
+                fingerprint: "1234abcd",
+              },
+            ],
+            emptyRow: {
+              row: 136,
+              id: "",
+              releaseDate: "",
+              title: "",
+              description: "",
+              seasonArc: "",
+              episode: "",
+              pornhubLink: "",
+              onlyfansLink: "",
+              fanslyLink: "",
+              manyvidsLink: "",
+              fingerprint: "8765dcba",
+            },
+          };
+        },
+      };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot() {
+          return {
+            onlyfans: {
+              verified: true,
+              scheduled: [],
+              occupiedFridays: [],
+            },
+          };
+        },
+      };
+      globalThis.chrome = {
+        runtime: {
+          lastError: null,
+          sendMessage(message, callback) {
+            globalThis.consoleMessages.push(structuredClone(message));
+            callback({ ok: true });
+          },
+        },
+      };
+    });
+    for (const relativePath of [
+      "creator-tools/catalogue-contract.js",
+      "creator-tools/catalogue-proposal.js",
+      "upload-console.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
+
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "BATTLEFIELD 6 Angry Sex (full).mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("full-video"),
+    });
+    await page.getByText(/Likely episode/i).waitFor();
+
+    assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
+    assert.equal(await page.locator("#targetFansly").isChecked(), false);
+    assert.equal(await page.locator("#targetManyvids").isChecked(), false);
+    assert.match(
+      await page.locator("#pornhubRecommendation").textContent(),
+      /recommended.*not yet executable/i,
+    );
+    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+
+    await page.locator("#rejectMatch").click();
+    await page.locator("#cataloguePicker").waitFor();
+    await page.locator("#catalogueSearch").fill("battlefield");
+    await page.locator("#catalogueRow").selectOption("row:121");
+    assert.match(
+      await page.locator("#selectedCatalogueReason").textContent(),
+      /Episode 3/i,
+    );
+    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("ambiguous catalogue wording opens the picker without offering Yes", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    const html = fs
+      .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+      .replace(/<script[^>]+><\/script>/gi, "");
+    await page.setContent(html);
+    await page.evaluate(() => {
+      globalThis.consoleMessages = [];
+      globalThis.CreatorCatalogueClient = {
+        async loadConfig() {
+          return { endpoint: "https://script.google.com/fixture", secret: "x" };
+        },
+        async getCatalogueSnapshot() {
+          const common = {
+            releaseDate: "2026-05-08",
+            title: "Claire VR",
+            description: "",
+            seasonArc: "Claire",
+            pornhubLink: "",
+            onlyfansLink: "",
+            fanslyLink: "https://fansly.com/post/existing",
+            manyvidsLink: "",
+          };
+          return {
+            status: "snapshot",
+            rows: [
+              {
+                ...common,
+                row: 20,
+                id: "claire-a",
+                episode: "1",
+                fingerprint: "a",
+              },
+              {
+                ...common,
+                row: 21,
+                id: "claire-b",
+                episode: "2",
+                fingerprint: "b",
+              },
+            ],
+            emptyRow: { row: 30, fingerprint: "empty" },
+          };
+        },
+      };
+      globalThis.chrome = {
+        runtime: {
+          lastError: null,
+          sendMessage(message, callback) {
+            globalThis.consoleMessages.push(structuredClone(message));
+            callback({ ok: true });
+          },
+        },
+      };
+    });
+    for (const relativePath of [
+      "creator-tools/catalogue-contract.js",
+      "creator-tools/catalogue-proposal.js",
+      "upload-console.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
+
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "Claire VR (full).mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("full-video"),
+    });
+    await page.locator("#cataloguePicker").waitFor();
+
+    assert.equal(await page.locator("#confirmation").isHidden(), true);
+    assert.equal(await page.locator("#catalogueRow option").count(), 4);
+    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Yes rechecks the proposed catalogue row and stops before platform mutation when it changed", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    const html = fs
+      .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+      .replace(/<script[^>]+><\/script>/gi, "");
+    await page.setContent(html);
+    await page.evaluate(() => {
+      globalThis.consoleMessages = [];
+      globalThis.permissionRequests = 0;
+      globalThis.snapshotRequests = 0;
+      globalThis.CreatorCatalogueClient = {
+        async loadConfig() {
+          return { endpoint: "https://script.google.com/fixture", secret: "x" };
+        },
+        async getCatalogueSnapshot() {
+          globalThis.snapshotRequests += 1;
+          return {
+            status: "snapshot",
+            rows: [
+              {
+                row: 121,
+                id: "battlefield-ep03",
+                releaseDate: "2026-05-08",
+                title: "BATTLEFIELD 6 Angry Sex",
+                description: "Catalogue description",
+                seasonArc: "Battlefield",
+                episode: "3",
+                pornhubLink: "https://pornhub.com/view_video.php?viewkey=x",
+                onlyfansLink: "",
+                fanslyLink: "https://fansly.com/post/2",
+                manyvidsLink: "https://www.manyvids.com/Video/3",
+                fingerprint:
+                  globalThis.snapshotRequests === 1
+                    ? "1234abcd"
+                    : "changed-row",
+              },
+            ],
+            emptyRow: { row: 136, fingerprint: "empty" },
+          };
+        },
+      };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot() {
+          return {
+            onlyfans: { verified: true, scheduled: [], occupiedFridays: [] },
+          };
+        },
+      };
+      globalThis.chrome = {
+        permissions: {
+          async request() {
+            globalThis.permissionRequests += 1;
+            return true;
+          },
+        },
+        runtime: {
+          lastError: null,
+          sendMessage(message, callback) {
+            globalThis.consoleMessages.push(structuredClone(message));
+            callback({ ok: true });
+          },
+        },
+      };
+    });
+    for (const relativePath of [
+      "creator-tools/catalogue-contract.js",
+      "creator-tools/catalogue-proposal.js",
+      "upload-console.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "BATTLEFIELD 6 Angry Sex (full).mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("full-video"),
+    });
+    await page.getByText(/Likely episode/i).waitFor();
+
+    await page.locator("#confirmUpload").click();
+    await page.getByText(/changed.*review.*Yes again/i).waitFor();
+
+    assert.equal(await page.evaluate(() => globalThis.snapshotRequests), 2);
+    assert.equal(await page.evaluate(() => globalThis.permissionRequests), 0);
+    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
   } finally {
     await browser.close();
   }
@@ -1657,12 +1968,16 @@ for (const scenario of [
           },
         };
       }, scenario.config);
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, "creator-tools/catalogue-client.js"),
-      });
-      await page.addScriptTag({
-        path: path.join(repositoryRoot, "upload-console.js"),
-      });
+      for (const relativePath of [
+        "creator-tools/catalogue-contract.js",
+        "creator-tools/catalogue-proposal.js",
+        "creator-tools/catalogue-client.js",
+        "upload-console.js",
+      ]) {
+        await page.addScriptTag({
+          path: path.join(repositoryRoot, relativePath),
+        });
+      }
       await page.locator("#uploadFullVideo").setInputFiles({
         name: "Episode 42 (full).mp4",
         mimeType: "video/mp4",

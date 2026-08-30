@@ -220,6 +220,13 @@
     const errors = get("#draftErrors");
     const matchStatus = get("#matchStatus");
     const continueWithoutSheet = get("#continueWithoutSheet");
+    const cataloguePicker = get("#cataloguePicker");
+    const catalogueSearch = get("#catalogueSearch");
+    const catalogueRow = get("#catalogueRow");
+    const showAllCatalogue = get("#showAllCatalogue");
+    const refreshCatalogue = get("#refreshCatalogue");
+    const selectedCatalogueReason = get("#selectedCatalogueReason");
+    const pornhubRecommendation = get("#pornhubRecommendation");
     const confirmation = get("#confirmation");
     const confirmationNotice = get("#confirmationNotice");
     const matchBadge = get("#matchBadge");
@@ -236,6 +243,10 @@
     let matchTimer = null;
     let matchRevision = 0;
     let currentMatch = null;
+    let currentProposal = null;
+    let currentSnapshot = null;
+    let snapshotPromise = null;
+    let selectedCatalogueRow = null;
     let uploadWithoutSheet = false;
     let activeSession = null;
     const platformStates = new Map();
@@ -294,7 +305,11 @@
 
     function invalidateMatch() {
       currentMatch = null;
+      currentProposal = null;
       confirmation.hidden = true;
+      cataloguePicker.hidden = true;
+      pornhubRecommendation.textContent = "";
+      selectedCatalogueReason.textContent = "";
       continueWithoutSheet.hidden = true;
       matchRevision += 1;
     }
@@ -303,6 +318,159 @@
       const value = draft();
       errors.textContent = show ? value.errors.join(" ") : "";
       return value;
+    }
+
+    function proposalDraft() {
+      return {
+        filename: fullFile?.name || "",
+        title: title.value.trim(),
+        description: description.value.trim(),
+        releaseDate: releaseDate.value,
+      };
+    }
+
+    function currentQueueEvidence() {
+      try {
+        return globalThis.CreatorUploadQueueEvidence?.snapshot?.() || {};
+      } catch {
+        return {};
+      }
+    }
+
+    async function loadCatalogueSnapshot({ refresh = false } = {}) {
+      if (refresh) snapshotPromise = null;
+      const client = globalThis.CreatorCatalogueClient;
+      if (!client?.getCatalogueSnapshot) {
+        throw new Error(
+          "Catalogue snapshot client is unavailable. Reload the extension or continue without the sheet.",
+        );
+      }
+      snapshotPromise ||= client.getCatalogueSnapshot();
+      return snapshotPromise;
+    }
+
+    function setInferredTargets(targets) {
+      const inferred = new Set(targets);
+      onlyfans.checked = inferred.has("onlyfans");
+      fansly.checked = inferred.has("fansly");
+      manyvids.checked = inferred.has("manyvids");
+    }
+
+    function proposalReason(proposal) {
+      return [
+        proposal.candidate?.seasonArc,
+        proposal.candidate?.episode
+          ? `Episode ${proposal.candidate.episode}`
+          : "",
+        ...(proposal.reasons || []),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+
+    function renderPicker() {
+      if (!currentSnapshot) return;
+      const engine = globalThis.CreatorCatalogueProposal;
+      const query = engine
+        ? globalThis.CreatorCatalogueContract.normalizedText(
+            catalogueSearch.value,
+          )
+        : "";
+      const ranked = engine.rankRows(proposalDraft(), currentSnapshot.rows);
+      const visible = ranked.filter((candidate) => {
+        const searchable = globalThis.CreatorCatalogueContract.normalizedText(
+          [
+            candidate.title,
+            candidate.id,
+            candidate.seasonArc,
+            candidate.episode,
+          ].join(" "),
+        );
+        if (query && !searchable.includes(query)) return false;
+        return (
+          showAllCatalogue.checked ||
+          engine.inferTargets(candidate, ["onlyfans", "fansly", "manyvids"])
+            .recommended.length > 0
+        );
+      });
+      catalogueRow.replaceChildren();
+      const prompt = document.createElement("option");
+      prompt.value = "";
+      prompt.textContent = "Choose a catalogue episode";
+      catalogueRow.append(prompt);
+      for (const candidate of visible) {
+        const targets = engine.inferTargets(candidate, [
+          "onlyfans",
+          "fansly",
+          "manyvids",
+        ]);
+        const option = document.createElement("option");
+        option.value = `row:${candidate.row}`;
+        option.textContent = `${candidate.title || candidate.id} · ${candidate.releaseDate || "no date"} · ${targets.recommended.join(", ") || "fully linked"}`;
+        catalogueRow.append(option);
+      }
+      const addNew = document.createElement("option");
+      addNew.value = "new";
+      addNew.textContent = "+ Add new catalogue entry";
+      catalogueRow.append(addNew);
+      if (selectedCatalogueRow === "new") catalogueRow.value = "new";
+      else if (Number.isInteger(selectedCatalogueRow)) {
+        catalogueRow.value = `row:${selectedCatalogueRow}`;
+      }
+      cataloguePicker.hidden = false;
+    }
+
+    function buildProposal(selectedRow = null) {
+      return globalThis.CreatorCatalogueProposal.build({
+        draft: proposalDraft(),
+        snapshot: currentSnapshot,
+        selectedRow,
+        now: new Date(),
+        executablePlatforms: ["onlyfans", "fansly", "manyvids"],
+        queueByPlatform: currentQueueEvidence(),
+      });
+    }
+
+    function applyProposal(proposal, catalogueStatus = "matched") {
+      currentProposal = proposal;
+      const candidate = proposal.candidate;
+      if (!candidate) {
+        currentMatch = null;
+        confirmation.hidden = true;
+        renderPicker();
+        return;
+      }
+      if (candidate.title) title.value = candidate.title;
+      if (candidate.description) description.value = candidate.description;
+      setInferredTargets(proposal.targets.executable);
+      const executableDates = [
+        ...new Set(
+          proposal.targets.executable
+            .map((platform) => proposal.schedules[platform]?.releaseDate)
+            .filter(Boolean),
+        ),
+      ];
+      if (executableDates.length === 1) releaseDate.value = executableDates[0];
+      refreshReleaseSummary();
+      pornhubRecommendation.textContent = proposal.targets.recommended.includes(
+        "pornhub",
+      )
+        ? "Pornhub is recommended from the empty catalogue link, but is not yet executable."
+        : "";
+      selectedCatalogueReason.textContent = proposalReason(proposal);
+      currentMatch = { status: catalogueStatus, candidate };
+      matchStatus.textContent = `Catalogue row ${candidate.row} is the strongest deterministic proposal.`;
+      renderMatch(currentMatch);
+      if (proposal.status !== "ready") {
+        confirmUpload.disabled = true;
+        if (proposal.status === "needs-queue-evidence") {
+          matchQuestion.textContent =
+            "The episode and targets are ready, but the live platform queue is not verified yet.";
+        } else if (proposal.status === "not-executable") {
+          matchQuestion.textContent =
+            "The missing platform is recommended but not executable yet.";
+        }
+      }
     }
 
     function summaryRow(label, value) {
@@ -318,16 +486,23 @@
       const uploadOnly = match.status === "upload-only";
       matchBadge.textContent = uploadOnly
         ? "Upload without sheet"
-        : match.status === "matched"
-          ? `Row ${candidate.row} matched`
-          : `New row ${candidate.row}`;
+        : currentProposal
+          ? `Row ${candidate.row} proposed`
+          : match.status === "matched"
+            ? `Row ${candidate.row} matched`
+            : `New row ${candidate.row}`;
       matchQuestion.textContent = uploadOnly
         ? `Upload and schedule “${candidate.title}” on the selected platforms?`
+        : currentProposal
+          ? `Likely episode: “${candidate.title}”. Upload to the missing executable platforms?`
+          : match.status === "matched"
+            ? `Is this your video from the sheet: “${candidate.title}”?`
+            : `No credible existing episode matched. Create row ${candidate.row} for “${candidate.title}”?`;
+      rejectMatch.textContent = currentProposal
+        ? "No"
         : match.status === "matched"
-          ? `Is this your video from the sheet: “${candidate.title}”?`
-          : `No credible existing episode matched. Create row ${candidate.row} for “${candidate.title}”?`;
-      rejectMatch.textContent =
-        match.status === "matched" ? "No, use a new row" : "No, edit details";
+          ? "No, use a new row"
+          : "No, edit details";
       uploadSummary.replaceChildren();
       summaryRow(
         "Catalogue",
@@ -335,7 +510,10 @@
           ? "Not connected · existing sheet links will not be checked"
           : `2026 Video Catalogue row ${candidate.row} · ${candidate.id}`,
       );
-      summaryRow("Release", `${candidate.releaseDate} · 15:00 UTC`);
+      summaryRow(
+        "Release",
+        `${currentProposal ? releaseDate.value : candidate.releaseDate} · 15:00 UTC`,
+      );
       summaryRow("Full video", fullFile.name);
       if (selectedTargets().includes("fansly")) {
         const existing = catalogueLink(candidate, "fansly");
@@ -366,7 +544,7 @@
           "ManyVids",
           existing
             ? `Already linked · ${existing}`
-            : `Full + ${teaserFile.name} preview · $19.99 · ${thumbnailFile?.name || "site-generated thumbnail"}`,
+            : `Full + ${teaserFile?.name || "teaser required"} preview · $19.99 · ${thumbnailFile?.name || "site-generated thumbnail"}`,
         );
       }
       summaryRow("Description", description.value.trim() || "Empty");
@@ -395,8 +573,11 @@
         ? "Yes opens or reuses your selected platform tabs, uploads the files, and schedules real posts using your signed-in sessions. No sheet data will be read or written. Existing posts are not checked against the sheet, so confirm this is not a duplicate upload."
         : "Yes opens or reuses your selected platform tabs, uploads and schedules real posts, and fills only the confirmed catalogue row's empty platform link cells.";
       confirmation.hidden = false;
-      const nothingMissing = pendingTargets(draft(), match).length === 0;
-      confirmUpload.disabled = nothingMissing;
+      const value = draft();
+      const nothingMissing = value.valid
+        ? pendingTargets(value, match).length === 0
+        : false;
+      confirmUpload.disabled = !value.valid || nothingMissing;
       if (nothingMissing) {
         matchQuestion.textContent =
           "Every selected platform already has a catalogue link. Nothing will be uploaded.";
@@ -414,7 +595,9 @@
       clearTimeout(matchTimer);
       const revision = ++matchRevision;
       currentMatch = null;
+      currentProposal = null;
       confirmation.hidden = true;
+      cataloguePicker.hidden = true;
       continueWithoutSheet.hidden = true;
       const value = validate(true);
       if (!value.valid || activeSession) {
@@ -430,13 +613,13 @@
       }
       matchStatus.textContent = forceNew
         ? "Finding the next safe empty catalogue row…"
-        : "Matching filename, title, description, and release Friday…";
+        : "Loading the catalogue and ranking likely episodes…";
       confirmation.hidden = true;
       try {
         const client = globalThis.CreatorCatalogueClient;
-        if (!client?.loadConfig || !client?.matchCatalogue) {
+        if (!client?.loadConfig || !globalThis.CreatorCatalogueProposal) {
           throw new Error(
-            "Catalogue client is unavailable. Reload the extension or continue without the sheet.",
+            "Catalogue proposal tools are unavailable. Reload the extension or continue without the sheet.",
           );
         }
         const config = await client.loadConfig();
@@ -445,25 +628,18 @@
           previewWithoutSheet(value);
           return;
         }
-        const match = await client.matchCatalogue({
-          filename: fullFile.name,
-          title: value.title,
-          description: value.description,
-          releaseDate: value.releaseDate,
-          targets: value.targets,
-          forceNew,
-        });
+        currentSnapshot = await loadCatalogueSnapshot();
         if (revision !== matchRevision) return;
-        if (match.status === "matched") {
-          title.value = match.candidate.title;
-          description.value = match.candidate.description;
+        selectedCatalogueRow = forceNew ? "new" : null;
+        const proposal = buildProposal(selectedCatalogueRow);
+        if (proposal.status === "needs-selection") {
+          currentProposal = proposal;
+          matchStatus.textContent =
+            "More than one catalogue episode is plausible. Choose the exact row.";
+          renderPicker();
+          return;
         }
-        currentMatch = match;
-        matchStatus.textContent =
-          match.status === "matched"
-            ? `Catalogue row ${match.candidate.row} is the best deterministic match.`
-            : `Catalogue row ${match.candidate.row} is empty and ready for this Friday.`;
-        renderMatch(match);
+        applyProposal(proposal, forceNew ? "new" : "matched");
       } catch (error) {
         if (revision !== matchRevision) return;
         currentMatch = null;
@@ -709,18 +885,61 @@
       }
     }
 
-    async function startUpload() {
-      const value = validate(true);
-      if (!value.valid || !currentMatch || activeSession) return;
-      const targets = pendingTargets(value);
-      if (!targets.length) {
-        matchStatus.textContent =
-          "Every selected platform is already linked. Nothing was uploaded.";
-        return;
+    function proposalSignature(proposal) {
+      const executable = proposal?.targets?.executable || [];
+      return JSON.stringify({
+        row: proposal?.candidate?.row,
+        fingerprint: proposal?.candidate?.fingerprint || "",
+        executable,
+        schedules: executable.map((platform) => ({
+          platform,
+          releaseDate: proposal?.schedules?.[platform]?.releaseDate || "",
+          verified: proposal?.schedules?.[platform]?.verified === true,
+        })),
+      });
+    }
+
+    async function recheckProposalBeforeUpload() {
+      if (!currentProposal || currentMatch?.status === "upload-only") return;
+      const previousSignature = proposalSignature(currentProposal);
+      currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+      const selectedRow =
+        currentMatch.status === "new" ? "new" : currentMatch.candidate.row;
+      selectedCatalogueRow = selectedRow;
+      const refreshed = buildProposal(selectedRow);
+      if (
+        refreshed.status !== "ready" ||
+        proposalSignature(refreshed) !== previousSignature
+      ) {
+        applyProposal(refreshed, selectedRow === "new" ? "new" : "matched");
+        throw new Error(
+          "Catalogue or queue changed. Review the updated proposal and click Yes again.",
+        );
       }
+      currentProposal = refreshed;
+      currentMatch = {
+        status: selectedRow === "new" ? "new" : "matched",
+        candidate: refreshed.candidate,
+      };
+    }
+
+    async function startUpload() {
+      let value = validate(true);
+      if (!value.valid || !currentMatch || activeSession) return;
+      let targets = [];
       confirmUpload.disabled = true;
       rejectMatch.disabled = true;
       try {
+        await recheckProposalBeforeUpload();
+        value = validate(true);
+        targets = pendingTargets(value);
+        if (!targets.length) {
+          matchStatus.textContent =
+            "Every selected platform is already linked. Nothing was uploaded.";
+          confirmUpload.disabled = false;
+          rejectMatch.disabled = false;
+          return;
+        }
         const optionalOrigins = [
           ...(targets.includes("fansly") ? ["https://fansly.com/*"] : []),
           ...(targets.includes("manyvids")
@@ -850,6 +1069,43 @@
       control.addEventListener("change", scheduleMatch);
     }
     confirmUpload.addEventListener("click", () => startUpload());
+    catalogueSearch.addEventListener("input", () => renderPicker());
+    showAllCatalogue.addEventListener("change", () => renderPicker());
+    catalogueRow.addEventListener("change", () => {
+      const value = catalogueRow.value;
+      if (!value) return;
+      selectedCatalogueRow = value === "new" ? "new" : Number(value.slice(4));
+      const proposal = buildProposal(selectedCatalogueRow);
+      applyProposal(
+        proposal,
+        selectedCatalogueRow === "new" ? "new" : "matched",
+      );
+      renderPicker();
+    });
+    refreshCatalogue.addEventListener("click", async () => {
+      refreshCatalogue.disabled = true;
+      matchStatus.textContent = "Refreshing the catalogue snapshot…";
+      try {
+        currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        const proposal = buildProposal(selectedCatalogueRow);
+        if (proposal.status === "needs-selection") {
+          currentProposal = proposal;
+          renderPicker();
+          matchStatus.textContent =
+            "Catalogue refreshed. Choose the exact episode.";
+        } else {
+          applyProposal(
+            proposal,
+            selectedCatalogueRow === "new" ? "new" : "matched",
+          );
+          renderPicker();
+        }
+      } catch (error) {
+        matchStatus.textContent = error.message;
+      } finally {
+        refreshCatalogue.disabled = false;
+      }
+    });
     continueWithoutSheet.addEventListener("click", () => {
       if (activeSession) return;
       clearTimeout(matchTimer);
@@ -860,7 +1116,13 @@
       previewWithoutSheet(value);
     });
     rejectMatch.addEventListener("click", () => {
-      if (currentMatch?.status === "matched") {
+      if (currentProposal) {
+        confirmation.hidden = true;
+        renderPicker();
+        matchStatus.textContent =
+          "Choose another catalogue episode or add a new entry.";
+        catalogueSearch.focus();
+      } else if (currentMatch?.status === "matched") {
         matchCatalogue(true);
       } else {
         invalidateMatch();

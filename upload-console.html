@@ -137,6 +137,8 @@
           </label>
         </div>
 
+        <p id="pornhubRecommendation" class="hint" role="status"></p>
+
         <p id="draftErrors" class="error" role="alert"></p>
         <p id="matchStatus" class="status" role="status">
           Choose a full video to preview the upload. No sheet setup is required.
@@ -144,6 +146,23 @@
         <button id="continueWithoutSheet" type="button" hidden>
           Continue without sheet
         </button>
+        <div id="cataloguePicker" class="catalogue-picker" hidden>
+          <label for="catalogueSearch">Search catalogue</label>
+          <input
+            id="catalogueSearch"
+            type="search"
+            autocomplete="off"
+            placeholder="Title, ID, series, or episode"
+          />
+          <label for="catalogueRow">Catalogue episode</label>
+          <select id="catalogueRow"></select>
+          <label class="catalogue-picker-toggle">
+            <input id="showAllCatalogue" type="checkbox" />
+            Show all catalogue entries
+          </label>
+          <button id="refreshCatalogue" type="button">Refresh catalogue</button>
+          <p id="selectedCatalogueReason" class="hint" role="status"></p>
+        </div>
         <p class="hint">
           <a
             href="options.html#catalogueBridgeHeading"
@@ -193,6 +212,8 @@
         >
       </aside>
     </main>
+    <script src="creator-tools/catalogue-contract.js"></script>
+    <script src="creator-tools/catalogue-proposal.js"></script>
     <script src="creator-tools/catalogue-client.js"></script>
     <script src="upload-console.js"></script>
   </body>

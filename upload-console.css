@@ -118,6 +118,8 @@ label {
 input[type="text"],
 input[type="date"],
 input[type="file"],
+input[type="search"],
+select,
 textarea {
   width: 100%;
   border: 1px solid #343b48;
@@ -129,6 +131,8 @@ textarea {
 
 input[type="text"],
 input[type="date"],
+input[type="search"],
+select,
 textarea {
   padding: 12px 14px;
 }
@@ -138,6 +142,7 @@ input[type="file"] {
 }
 
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
   outline: 3px solid rgba(101, 207, 255, 0.4);
@@ -205,6 +210,30 @@ button:disabled {
   min-height: 1.25rem;
   margin: 9px 0 0;
   font-size: 0.9rem;
+}
+
+.catalogue-picker {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #303744;
+  border-radius: 12px;
+  background: #0d1118;
+}
+
+.catalogue-picker[hidden] {
+  display: none;
+}
+
+.catalogue-picker label {
+  margin: 4px 0 0;
+}
+
+.catalogue-picker-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .error {
