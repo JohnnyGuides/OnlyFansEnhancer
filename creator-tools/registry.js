@@ -336,6 +336,7 @@
           ]),
         }),
       }),
+      seriesPresets: Object.freeze({}),
     }),
     fanslyPrefill: Object.freeze({
       message:
@@ -547,14 +548,33 @@
     }
 
     const ph = rawProfiles.phUploader;
-    if (isPlainObject(ph) && isPlainObject(ph.presets)) {
-      for (const [name, preset] of Object.entries(ph.presets)) {
-        if (!isPlainObject(preset) || !name.trim()) continue;
-        profiles.phUploader.presets[name.slice(0, 100)] = {
-          orientation: normalizeString(preset.orientation, name, 100).trim(),
-          tags: normalizeStringList(preset.tags, [], 50),
-          categories: normalizeStringList(preset.categories, [], 30),
-        };
+    if (isPlainObject(ph)) {
+      if (isPlainObject(ph.presets)) {
+        for (const [name, preset] of Object.entries(ph.presets)) {
+          if (!isPlainObject(preset) || !name.trim()) continue;
+          profiles.phUploader.presets[name.slice(0, 100)] = {
+            orientation: normalizeString(preset.orientation, name, 100).trim(),
+            tags: normalizeStringList(preset.tags, [], 50),
+            categories: normalizeStringList(preset.categories, [], 30),
+          };
+        }
+      }
+      if (isPlainObject(ph.seriesPresets)) {
+        profiles.phUploader.seriesPresets = {};
+        for (const [rawSeries, rawPreset] of Object.entries(ph.seriesPresets)) {
+          if (Object.keys(profiles.phUploader.seriesPresets).length >= 100)
+            break;
+          const series = normalizeString(rawSeries, "", 200).trim();
+          const preset = normalizeString(rawPreset, "", 100).trim();
+          if (!series) continue;
+          if (!Object.hasOwn(profiles.phUploader.presets, preset)) {
+            errors.push(
+              `Pornhub series mapping “${series}” names an unknown Pornhub preset.`,
+            );
+            continue;
+          }
+          profiles.phUploader.seriesPresets[series] = preset;
+        }
       }
     }
 

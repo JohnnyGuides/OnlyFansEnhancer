@@ -182,6 +182,44 @@ test("the registry fails closed and separates enabled from autorun", () => {
   assert.equal(Object.hasOwn(malformed.tools, "typoTool"), false);
 });
 
+test("Pornhub series mappings retain only bounded exact preset names", () => {
+  const registry = loadRegistry();
+  const excessive = Object.fromEntries(
+    Array.from({ length: 105 }, (_, index) => [
+      `Series ${String(index).padStart(3, "0")}`,
+      "Straight",
+    ]),
+  );
+  const normalized = registry.normalizeSettings({
+    profiles: {
+      phUploader: {
+        seriesPresets: {
+          " GameSync Season Two ": "Bisexual Male",
+          Unknown: "Not A Preset",
+          ...excessive,
+        },
+      },
+    },
+  });
+
+  assert.equal(
+    normalized.value.profiles.phUploader.seriesPresets["GameSync Season Two"],
+    "Bisexual Male",
+  );
+  assert.equal(
+    Object.hasOwn(
+      normalized.value.profiles.phUploader.seriesPresets,
+      "Unknown",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.keys(normalized.value.profiles.phUploader.seriesPresets).length,
+    100,
+  );
+  assert.match(normalized.errors.join(" "), /unknown Pornhub preset/i);
+});
+
 test("profile validation rejects destructive or malformed policy", () => {
   const registry = loadRegistry();
   const invalid = registry.normalizeSettings({
