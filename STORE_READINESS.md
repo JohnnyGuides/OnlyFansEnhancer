@@ -35,9 +35,15 @@ content, and personal communications context. Chrome treats these as user data
 even when processing and storage stay local, so disclosure and a privacy policy
 are required.
 
+The personal **Creator Workflow Toolkit** also contains multi-site uploader
+presets, tag automation, an OnlyFans selection helper, and an OnlyFans follow
+helper. Those features broaden both host access and purpose, and some activate
+authenticated account controls. They remain intentionally excluded from the
+store-safe **Fan Identity Mask** edition.
+
 ## OnlyFans terms and account risk
 
-This extension is deliberately display-only. It observes markup already loaded
+The store edition is deliberately display-only. It observes markup already loaded
 by a user’s normal browser session and changes only the local presentation. It
 does not automate navigation, extract data to a server, bypass access controls,
 or send messages.

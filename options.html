@@ -1,19 +1,19 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Fan Identity Mask settings</title>
-    <link rel="stylesheet" href="options.css">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Creator Workflow Toolkit settings</title>
+    <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main>
       <header>
-        <p class="eyebrow">Local privacy layer</p>
-        <h1>Fan Identity Mask</h1>
+        <p class="eyebrow">JohnnyGuides creator utilities</p>
+        <h1>Creator Workflow Toolkit</h1>
         <p class="lede">
-          Replace fan identities on your screen without changing anything on
-          OnlyFans or sending fan information to another service.
+          Keep the local fan-identity mask and your creator-site workflow
+          helpers together in one personal Chrome extension.
         </p>
       </header>
 
@@ -23,15 +23,209 @@
             <strong>Enable identity masking</strong>
             <small>Affected OnlyFans tabs reload when this changes.</small>
           </span>
-          <input id="enabled" type="checkbox">
+          <input id="enabled" type="checkbox" />
         </label>
+      </section>
+
+      <section class="card" aria-labelledby="catalogueBridgeHeading">
+        <h2 id="catalogueBridgeHeading">Video catalogue bridge (optional)</h2>
+        <p class="hint">
+          Uploading to OnlyFans and Fansly does not require this setup. Connect
+          the upload console to the private Work spreadsheet through the
+          included Apps Script web app. Only the endpoint and shared secret are
+          stored locally; episode metadata is sent only while matching or
+          committing a confirmed post link.
+        </p>
+        <label for="catalogueBridgeUrl">Deployed Apps Script web-app URL</label>
+        <input
+          id="catalogueBridgeUrl"
+          type="url"
+          inputmode="url"
+          autocomplete="off"
+          placeholder="https://script.google.com/macros/s/.../exec"
+        />
+        <label for="catalogueBridgeSecret">Shared bridge secret</label>
+        <input
+          id="catalogueBridgeSecret"
+          type="password"
+          autocomplete="new-password"
+        />
+        <p class="hint">
+          Put the same random secret in Apps Script property
+          <code>CREATOR_UPLOAD_SECRET</code>. Deploy the script to execute as
+          you with web-app access set to <strong>Anyone</strong>; the long
+          random secret is the endpoint's authorization.
+        </p>
+        <div class="inline-actions">
+          <button id="saveCatalogueBridge" class="primary" type="button">
+            Save catalogue bridge
+          </button>
+        </div>
+        <p id="catalogueBridgeStatus" class="status" role="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Workflow helpers</h2>
+        <p class="hint">
+          State-changing helpers are disabled by default and never mutate a page
+          merely because it opened. Enabling a helper requests only its site
+          permission and adds a manual preview/apply panel. Disabling it
+          immediately aborts active work in open tabs.
+        </p>
+
+        <label class="tool-row">
+          <span>
+            <strong>Upload trace recorder</strong>
+            <small
+              >Shows a local Start/Stop panel and captures bounded, sanitized
+              upload evidence. Recording never starts automatically.</small
+            >
+          </span>
+          <input id="toolUploadTraceRecorder" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Clips4Sale upload assistant</strong>
+            <small
+              >Serial exact-match plan for audience, type, price, description,
+              keywords, approved categories, and performer assignment.</small
+            >
+          </span>
+          <input id="toolC4sUpload" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Pornhub uploader presets</strong>
+            <small
+              >Adds manual audience preset buttons for orientation, tags, and
+              categories.</small
+            >
+          </span>
+          <input id="toolPhUploader" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Fansly post prefill</strong>
+            <small
+              >Previews one visible composer, preserves user text by default,
+              and never focuses or clicks Post.</small
+            >
+          </span>
+          <input id="toolFanslyPrefill" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>ManyVids edit autofill</strong>
+            <small
+              >Shows a complete before/after plan and verifies exact fields and
+              tags. Save remains manual.</small
+            >
+          </span>
+          <input id="toolManyvidsAutofill" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Sheer tag assistant</strong>
+            <small
+              >Native exact tag selection without page jQuery. Appends by
+              default; replacement requires a complete preview.</small
+            >
+          </span>
+          <input id="toolSheerTags" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>OnlyFans expired-list selection assistant</strong>
+            <small
+              >Bounded stable-ID selection with a real Stop barrier. The final
+              OnlyFans Add action is always manual.</small
+            >
+          </span>
+          <input id="toolOnlyfansAutoSelect" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>OnlyFans expired-list follow assistant</strong>
+            <small
+              >Confirmed and hard-capped exact Follow actions. Unknown modals,
+              rate limits, and unverifiable results stop the batch.</small
+            >
+          </span>
+          <input id="toolOnlyfansAutoFollow" type="checkbox" />
+        </label>
+
+        <label class="tool-row">
+          <span>
+            <strong>Reddit banner censor</strong>
+            <small
+              >Covers subreddit banners with a neutral striped “Banner censored”
+              panel.</small
+            >
+          </span>
+          <input id="toolRedditBannerCensor" type="checkbox" />
+        </label>
+
+        <details class="profile-editor">
+          <summary>Advanced workflow profiles</summary>
+          <p class="hint">
+            Creator metadata belongs in this versioned profile document, not
+            executable scripts. Invalid values fail closed. Keep selectors in
+            code; edit only policy such as tags, prices, labels, and limits.
+          </p>
+          <label for="workflowProfiles">Profile JSON</label>
+          <textarea
+            id="workflowProfiles"
+            rows="22"
+            spellcheck="false"
+            autocomplete="off"
+          ></textarea>
+        </details>
+
+        <p id="workflowStatus" class="status" role="status"></p>
+        <div class="inline-actions">
+          <button id="saveWorkflow" class="primary" type="button">
+            Save workflow settings
+          </button>
+          <button id="resetWorkflowProfiles" type="button">
+            Restore safe profile defaults
+          </button>
+        </div>
+
+        <details class="history-card">
+          <summary>Recent local workflow actions</summary>
+          <p class="hint">
+            Stored only in extension-local storage. Each entry records the tool,
+            time, outcome, and concise per-field results—never page content or
+            remote telemetry.
+          </p>
+          <ol id="workflowHistory"></ol>
+          <div class="inline-actions">
+            <button id="clearWorkflowHistory" type="button">
+              Clear workflow history
+            </button>
+          </div>
+        </details>
       </section>
 
       <section class="card">
         <h2>Your account</h2>
         <label for="ownHandles">Handles that must never be masked</label>
-        <input id="ownHandles" type="text" autocomplete="off" placeholder="johnny_guides">
-        <p class="hint">Separate multiple handles with commas. The @ is optional.</p>
+        <input
+          id="ownHandles"
+          type="text"
+          autocomplete="off"
+          placeholder="johnny_guides"
+        />
+        <p class="hint">
+          Separate multiple handles with commas. The @ is optional.
+        </p>
       </section>
 
       <section class="card">
@@ -39,10 +233,16 @@
         <label for="avatarMode">Profile-picture style</label>
         <select id="avatarMode">
           <option value="generated">Neutral generated avatars</option>
-          <option value="gelbooru">Unique anime selfies via Gelbooru API</option>
-          <option value="realbooru">Unique real selfies via local Realbooru scraper</option>
+          <option value="gelbooru">
+            Unique anime selfies via Gelbooru API
+          </option>
+          <option value="realbooru">
+            Unique real selfies via extension-native Realbooru
+          </option>
           <option value="mixed">Mixed anime + real selfies</option>
-          <option value="custom">My imported selfie pack (real or anime)</option>
+          <option value="custom">
+            My imported selfie pack (real or anime)
+          </option>
         </select>
 
         <div id="gelbooruFields" class="subsection" hidden>
@@ -58,7 +258,9 @@
             <option value="general">General-rated only</option>
           </select>
 
-          <label for="gelbooruUserId">Numeric Gelbooru user ID (not your username)</label>
+          <label for="gelbooruUserId"
+            >Numeric Gelbooru user ID (not your username)</label
+          >
           <input
             id="gelbooruUserId"
             type="text"
@@ -66,14 +268,14 @@
             pattern="[0-9]+"
             autocomplete="off"
             placeholder="2022304"
-          >
+          />
           <p class="hint">
             Find it beside your API key or at the end of your profile URL:
             <code>...s=profile&amp;id=2022304</code>.
           </p>
 
           <label for="gelbooruApiKey">Gelbooru API key</label>
-          <input id="gelbooruApiKey" type="password" autocomplete="off">
+          <input id="gelbooruApiKey" type="password" autocomplete="off" />
           <p class="hint">
             You can also paste Gelbooru’s entire
             <code>&amp;api_key=…&amp;user_id=…</code> line here; it will be
@@ -81,7 +283,9 @@
           </p>
 
           <div class="inline-actions">
-            <button id="testGelbooru" type="button">Test Gelbooru connection</button>
+            <button id="testGelbooru" type="button">
+              Test Gelbooru connection
+            </button>
           </div>
           <p id="gelbooruDebug" class="hint" aria-live="polite">
             No connection test has been run yet.
@@ -96,28 +300,23 @@
 
         <div id="realbooruFields" class="subsection" hidden>
           <div class="notice">
-            Uses your local <code>realbooru_scraper</code> companion on
-            <code>127.0.0.1</code>. It randomizes across Realbooru pages and
-            receives no OnlyFans data.
+            Fetches public Realbooru listing and post pages directly inside the
+            extension. A bundled hidden parser extracts fixed image metadata; no
+            companion program or OnlyFans data is involved.
           </div>
 
-          <label for="realbooruEndpoint">Local scraper endpoint</label>
-          <input
-            id="realbooruEndpoint"
-            type="url"
-            autocomplete="off"
-            value="http://127.0.0.1:47831"
-          >
           <p class="hint">
-            Start it with
-            <code>dart run bin/realbooru_scraper.dart</code> from your scraper
-            folder before loading new avatars.
+            Realbooru’s public API is offline, so this personal edition parses
+            inert public HTML locally. All scripts still come from the extension
+            package.
           </p>
           <div class="inline-actions">
-            <button id="testRealbooru" type="button">Test Realbooru scraper</button>
+            <button id="testRealbooru" type="button">
+              Test Realbooru connection
+            </button>
           </div>
           <p id="realbooruDebug" class="hint" aria-live="polite">
-            No local scraper test has been run yet.
+            No Realbooru connection test has been run yet.
           </p>
         </div>
 
@@ -130,10 +329,14 @@
           </div>
 
           <label for="customImages">Selfie images</label>
-          <input id="customImages" type="file" accept="image/*" multiple>
+          <input id="customImages" type="file" accept="image/*" multiple />
           <div class="inline-actions">
-            <button id="importImages" type="button">Import selected images</button>
-            <button id="clearImages" class="danger" type="button">Clear image pack</button>
+            <button id="importImages" type="button">
+              Import selected images
+            </button>
+            <button id="clearImages" class="danger" type="button">
+              Clear image pack
+            </button>
           </div>
           <p id="importProgress" class="hint"></p>
         </div>
@@ -154,13 +357,26 @@
         </div>
       </section>
 
-      <details class="card history-card">
-        <summary>Previously used remote pictures</summary>
+      <details class="card avatar-manager" open>
+        <summary>Mapped account pictures</summary>
         <p class="hint">
-          These post IDs remain blocked from reuse, including after resetting
-          identity mappings.
+          Current tiles use masked names only. Regenerating a picture preserves
+          that masked identity everywhere it appears.
         </p>
-        <ol id="gelbooruHistory"></ol>
+        <h3>Current masked accounts</h3>
+        <div id="currentAvatarGrid" class="avatar-grid"></div>
+        <p id="currentAvatarEmpty" class="hint" hidden>
+          No masked accounts have been mapped yet.
+        </p>
+
+        <h3>Retired pictures</h3>
+        <p class="hint">
+          Re-enabling a retired picture allows it to be randomly selected again.
+        </p>
+        <div id="retiredAvatarGrid" class="avatar-grid"></div>
+        <p id="retiredAvatarEmpty" class="hint" hidden>
+          No pictures are currently retired.
+        </p>
       </details>
 
       <p id="avatarError" class="error" hidden></p>
@@ -168,7 +384,9 @@
 
       <div class="actions">
         <button id="save" class="primary" type="button">Save settings</button>
-        <button id="reset" class="danger" type="button">Reset all mappings</button>
+        <button id="reset" class="danger" type="button">
+          Reset all mappings
+        </button>
       </div>
 
       <section class="footnote">
@@ -180,6 +398,8 @@
         </p>
       </section>
     </main>
+    <script src="creator-tools/registry.js"></script>
+    <script src="creator-tools/catalogue-client.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

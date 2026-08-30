@@ -2,6 +2,25 @@
 
 const AVATAR_CACHE_SIZE = 96;
 const $ = (selector) => document.querySelector(selector);
+const CREATOR_REGISTRY = globalThis.CreatorToolkitRegistry;
+const CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
+if (!CREATOR_REGISTRY) {
+  throw new Error("Creator toolkit settings registry failed to load.");
+}
+if (!CATALOGUE_CLIENT) {
+  throw new Error("Creator catalogue client failed to load.");
+}
+const TOOLKIT_CONTROLS = Object.freeze({
+  uploadTraceRecorder: "#toolUploadTraceRecorder",
+  c4sUpload: "#toolC4sUpload",
+  phUploader: "#toolPhUploader",
+  fanslyPrefill: "#toolFanslyPrefill",
+  manyvidsAutofill: "#toolManyvidsAutofill",
+  sheerTags: "#toolSheerTags",
+  onlyfansAutoSelect: "#toolOnlyfansAutoSelect",
+  onlyfansAutoFollow: "#toolOnlyfansAutoFollow",
+  redditBannerCensor: "#toolRedditBannerCensor",
+});
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -24,6 +43,39 @@ function showStatus(message, isError = false) {
   status.textContent = message;
   status.style.color = isError ? "#ffb4c4" : "#91d8ac";
 }
+
+function showWorkflowStatus(message, isError = false) {
+  const status = $("#workflowStatus");
+  status.textContent = message;
+  status.style.color = isError ? "#ffb4c4" : "#91d8ac";
+}
+
+function showCatalogueStatus(message, isError = false) {
+  const status = $("#catalogueBridgeStatus");
+  status.textContent = message;
+  status.style.color = isError ? "#ffb4c4" : "#91d8ac";
+}
+
+const TOOL_PERMISSION_ORIGINS = Object.freeze({
+  uploadTraceRecorder: [
+    "https://onlyfans.com/*",
+    "https://fansly.com/*",
+    "https://www.manyvids.com/*",
+    "https://pornhub.mainhub.com/*",
+  ],
+  c4sUpload: ["https://workspace.clips4sale.com/*"],
+  phUploader: ["https://pornhub.mainhub.com/*"],
+  fanslyPrefill: ["https://fansly.com/*"],
+  manyvidsAutofill: ["https://www.manyvids.com/*"],
+  sheerTags: ["https://my.sheer.com/*"],
+  onlyfansAutoSelect: ["https://onlyfans.com/*"],
+  onlyfansAutoFollow: ["https://onlyfans.com/*"],
+  redditBannerCensor: [
+    "https://www.reddit.com/*",
+    "https://sh.reddit.com/*",
+    "https://old.reddit.com/*",
+  ],
+});
 
 function toggleGelbooruFields() {
   const mode = $("#avatarMode").value;
@@ -53,72 +105,238 @@ function validateGelbooruCredentials() {
   }
   if (!/^\d+$/.test(credentials.userId)) {
     throw new Error(
-      "Gelbooru user ID must contain digits only—not your username. Check your profile URL for ?id=…"
+      "Gelbooru user ID must contain digits only—not your username. Check your profile URL for ?id=…",
     );
   }
   return credentials;
 }
 
-async function load() {
-  const [{ settings }, { stats }, { history }] = await Promise.all([
-    sendMessage({ type: "GET_SETTINGS" }),
-    sendMessage({ type: "GET_STATS" }),
-    sendMessage({ type: "GET_GELBOORU_HISTORY" })
+async function loadWorkflowSettings() {
+  const stored = await chrome.storage.local.get([
+    CREATOR_REGISTRY.STORAGE_KEY,
+    CREATOR_REGISTRY.LEGACY_STORAGE_KEY,
+    CREATOR_REGISTRY.ACTION_LOG_KEY,
   ]);
+  const settings = stored[CREATOR_REGISTRY.STORAGE_KEY]
+    ? CREATOR_REGISTRY.normalizeSettings(stored[CREATOR_REGISTRY.STORAGE_KEY])
+        .value
+    : CREATOR_REGISTRY.migrateLegacySettings(
+        stored[CREATOR_REGISTRY.LEGACY_STORAGE_KEY],
+      );
+  if (!stored[CREATOR_REGISTRY.STORAGE_KEY]) {
+    await chrome.storage.local.set({
+      [CREATOR_REGISTRY.STORAGE_KEY]: settings,
+    });
+  }
+  for (const [key, selector] of Object.entries(TOOLKIT_CONTROLS)) {
+    $(selector).checked = settings.tools[key]?.enabled === true;
+  }
+  $("#workflowProfiles").value = JSON.stringify(settings.profiles, null, 2);
+  renderWorkflowHistory(stored[CREATOR_REGISTRY.ACTION_LOG_KEY]);
+  return settings;
+}
 
+async function loadCatalogueBridge() {
+  const config = await CATALOGUE_CLIENT.loadConfig();
+  $("#catalogueBridgeUrl").value = config.endpoint;
+  $("#catalogueBridgeSecret").value = config.secret;
+  showCatalogueStatus(
+    config.endpoint && config.secret
+      ? "Catalogue bridge settings are stored locally."
+      : "Catalogue bridge is not configured yet.",
+  );
+}
+
+async function saveCatalogueBridge() {
+  showCatalogueStatus("");
+  const config = CATALOGUE_CLIENT.normalizeConfig({
+    endpoint: $("#catalogueBridgeUrl").value,
+    secret: $("#catalogueBridgeSecret").value,
+  });
+  if (!config.valid) throw new Error(config.errors.join(" "));
+  const granted = await chrome.permissions.request({
+    origins: [
+      "https://script.google.com/*",
+      "https://script.googleusercontent.com/*",
+    ],
+  });
+  if (!granted) throw new Error("Apps Script site permission was not granted.");
+  const saved = await CATALOGUE_CLIENT.saveConfig(config.value);
+  $("#catalogueBridgeUrl").value = saved.endpoint;
+  $("#catalogueBridgeSecret").value = saved.secret;
+  showCatalogueStatus("Catalogue bridge saved for the upload console.");
+}
+
+function renderWorkflowHistory(history) {
+  const list = $("#workflowHistory");
+  list.replaceChildren();
+  const entries = Array.isArray(history) ? history.slice(0, 50) : [];
+  for (const entry of entries) {
+    const row = document.createElement("li");
+    const time = entry.timestamp
+      ? new Date(entry.timestamp).toLocaleString()
+      : "unknown time";
+    row.textContent = `${time} · ${entry.toolId || "unknown tool"} · ${
+      entry.status || "unknown"
+    } · ${entry.summary || "no summary"}`;
+    list.appendChild(row);
+  }
+  if (!entries.length) {
+    const row = document.createElement("li");
+    row.textContent = "No workflow actions have been recorded.";
+    list.appendChild(row);
+  }
+}
+
+async function loadIdentitySettings() {
+  const { settings } = await sendMessage({ type: "GET_SETTINGS" });
   $("#enabled").checked = settings.enabled;
   $("#ownHandles").value = settings.ownHandles.join(", ");
   $("#avatarMode").value = settings.avatarMode;
   $("#gelbooruRatingMode").value = settings.gelbooruRatingMode || "any";
   $("#gelbooruUserId").value = settings.gelbooruUserId;
   $("#gelbooruApiKey").value = settings.gelbooruApiKey;
-  $("#realbooruEndpoint").value =
-    settings.realbooruEndpoint || "http://127.0.0.1:47831";
+  toggleGelbooruFields();
+}
+
+async function loadIdentityStats() {
+  const { stats } = await sendMessage({ type: "GET_STATS" });
   $("#mappedAccounts").textContent = stats.mappedAccounts;
   $("#usedAnimeSelfies").textContent =
     stats.usedRemoteSelfies ?? stats.usedAnimeSelfies;
   $("#importedAvatars").textContent = stats.importedAvatars;
-
-  const historyList = $("#gelbooruHistory");
-  historyList.replaceChildren();
-  for (const item of history.slice(0, 100)) {
-    const row = document.createElement("li");
-    const source = item.source || "gelbooru";
-    const label = item.usedAt
-      ? `${source} #${item.id} · ${item.action} · ${new Date(item.usedAt).toLocaleString()}`
-      : `${source} #${item.id} · previously used`;
-    if (item.postUrl) {
-      const link = document.createElement("a");
-      link.href = item.postUrl;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.textContent = label;
-      row.appendChild(link);
-    } else {
-      row.textContent = label;
-    }
-    historyList.appendChild(row);
-  }
-  if (!history.length) {
-    const row = document.createElement("li");
-    row.textContent = "No remote pictures have been assigned yet.";
-    historyList.appendChild(row);
-  }
 
   const error = $("#avatarError");
   error.hidden = !stats.lastAvatarError;
   error.textContent = stats.lastAvatarError
     ? `Latest remote-avatar fallback: ${stats.lastAvatarError}`
     : "";
-
   $("#gelbooruDebug").textContent = stats.lastAvatarError
     ? `Last background result: ${stats.lastAvatarError}`
     : "No Gelbooru error is currently recorded.";
   $("#realbooruDebug").textContent = stats.lastAvatarError
     ? `Last background result: ${stats.lastAvatarError}`
     : "No Realbooru error is currently recorded.";
+}
 
-  toggleGelbooruFields();
+function createAvatarTile({ imageUrl, title, subtitle, action, run }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "avatar-tile";
+  button.setAttribute("aria-label", `${action}: ${title} ${subtitle}`.trim());
+
+  const media = document.createElement("span");
+  media.className = "avatar-tile-media";
+  const image = document.createElement("img");
+  image.alt = "";
+  image.loading = "lazy";
+  const fallback = document.createElement("span");
+  fallback.className = "avatar-tile-fallback";
+  fallback.textContent = "Image unavailable";
+  fallback.hidden = Boolean(imageUrl);
+  if (imageUrl) {
+    image.src = imageUrl;
+    image.addEventListener("error", () => {
+      image.hidden = true;
+      fallback.hidden = false;
+    });
+  }
+  const overlay = document.createElement("span");
+  overlay.className = "avatar-tile-action";
+  overlay.textContent = action;
+  media.append(image, fallback, overlay);
+
+  const caption = document.createElement("span");
+  caption.className = "avatar-tile-caption";
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+  const detail = document.createElement("small");
+  detail.textContent = subtitle;
+  caption.append(heading, detail);
+  button.append(media, caption);
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await run();
+      await Promise.all([loadAvatarManagementView(), loadIdentityStats()]);
+      showStatus(`${action} completed.`);
+    } catch (error) {
+      showStatus(error.message, true);
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
+  });
+  return button;
+}
+
+async function loadAvatarManagementView() {
+  const { avatarView } = await sendMessage({
+    type: "GET_AVATAR_MANAGEMENT_VIEW",
+  });
+  const currentGrid = $("#currentAvatarGrid");
+  const retiredGrid = $("#retiredAvatarGrid");
+  currentGrid.replaceChildren();
+  retiredGrid.replaceChildren();
+
+  for (const item of avatarView.current) {
+    const handle = item.handle
+      ? `@${item.handle.replace(/^@/, "")}`
+      : "Masked account";
+    currentGrid.appendChild(
+      createAvatarTile({
+        imageUrl: item.avatarUrl,
+        title: item.displayName,
+        subtitle: handle,
+        action: "Regenerate",
+        run: () =>
+          sendMessage({
+            type: "ROTATE_AVATAR",
+            primaryKey: item.primaryKey,
+            aliases: [],
+          }),
+      }),
+    );
+  }
+
+  for (const item of avatarView.retired) {
+    retiredGrid.appendChild(
+      createAvatarTile({
+        imageUrl: item.sourceUrl,
+        title: item.source || "gelbooru",
+        subtitle: `#${item.id}`,
+        action: "Re-enable",
+        run: () =>
+          sendMessage({
+            type: "REENABLE_REMOTE_AVATAR",
+            source: item.source,
+            id: item.id,
+          }),
+      }),
+    );
+  }
+
+  $("#currentAvatarEmpty").hidden = avatarView.current.length > 0;
+  $("#retiredAvatarEmpty").hidden = avatarView.retired.length > 0;
+}
+
+async function load() {
+  const results = await Promise.allSettled([
+    loadWorkflowSettings(),
+    loadCatalogueBridge(),
+    loadIdentitySettings(),
+    loadIdentityStats(),
+    loadAvatarManagementView(),
+  ]);
+  const failures = results
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason?.message || String(result.reason));
+  if (failures.length) {
+    showStatus(
+      `Some settings panels could not load: ${failures.join(" ")}`,
+      true,
+    );
+  }
 }
 
 function clamp(value, minimum, maximum) {
@@ -136,7 +354,7 @@ function cropAroundFace(bitmap, face) {
     x: clamp(centerX - side / 2, 0, bitmap.width - side),
     y: clamp(centerY - side / 2, 0, bitmap.height - side),
     side,
-    detection: "face"
+    detection: "face",
   };
 }
 
@@ -145,7 +363,7 @@ async function nativeFaceCrop(bitmap) {
   try {
     const detector = new FaceDetector({
       fastMode: true,
-      maxDetectedFaces: 5
+      maxDetectedFaces: 5,
     });
     const faces = await detector.detect(bitmap);
     if (!faces.length) return null;
@@ -174,7 +392,9 @@ function smartCrop(bitmap) {
 
   const luminance = (x, y) => {
     const index = (y * width + x) * 4;
-    return data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+    return (
+      data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114
+    );
   };
 
   let total = 0;
@@ -206,12 +426,15 @@ function smartCrop(bitmap) {
     x: clamp(centerX - side / 2, 0, bitmap.width - side),
     y: clamp(centerY - side / 2, 0, bitmap.height - side),
     side,
-    detection: "smart"
+    detection: "smart",
   };
 }
 
 async function hashFile(file) {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    await file.arrayBuffer(),
+  );
   return [...new Uint8Array(digest)]
     .slice(0, 16)
     .map((value) => value.toString(16).padStart(2, "0"))
@@ -219,7 +442,10 @@ async function hashFile(file) {
 }
 
 async function cropImportedImage(file) {
-  const [bitmap, id] = await Promise.all([createImageBitmap(file), hashFile(file)]);
+  const [bitmap, id] = await Promise.all([
+    createImageBitmap(file),
+    hashFile(file),
+  ]);
   try {
     const crop = (await nativeFaceCrop(bitmap)) || smartCrop(bitmap);
     const canvas = document.createElement("canvas");
@@ -235,12 +461,12 @@ async function cropImportedImage(file) {
       0,
       0,
       canvas.width,
-      canvas.height
+      canvas.height,
     );
     return {
       id,
       detection: crop.detection,
-      url: canvas.toDataURL("image/webp", 0.8)
+      url: canvas.toDataURL("image/webp", 0.8),
     };
   } finally {
     bitmap.close();
@@ -267,7 +493,7 @@ async function importImages() {
     if (batch.length === 20 || index === files.length - 1) {
       const response = await sendMessage({
         type: "ADD_CUSTOM_AVATARS",
-        avatars: batch
+        avatars: batch,
       });
       imported = response.importedAvatars;
       batch = [];
@@ -291,13 +517,13 @@ async function clearImages() {
 
 async function requestGelbooruPermission() {
   return chrome.permissions.request({
-    origins: ["https://gelbooru.com/*", "https://*.gelbooru.com/*"]
+    origins: ["https://gelbooru.com/*", "https://*.gelbooru.com/*"],
   });
 }
 
 async function requestRealbooruPermission() {
   return chrome.permissions.request({
-    origins: ["https://realbooru.com/*", "http://127.0.0.1/*"]
+    origins: ["https://realbooru.com/*"],
   });
 }
 
@@ -319,7 +545,7 @@ async function testGelbooru() {
       type: "TEST_GELBOORU",
       gelbooruUserId: credentials.userId,
       gelbooruApiKey: credentials.apiKey,
-      gelbooruRatingMode: $("#gelbooruRatingMode").value
+      gelbooruRatingMode: $("#gelbooruRatingMode").value,
     });
     debug.textContent =
       `${test.message} Query: ${test.query}. ` +
@@ -340,38 +566,120 @@ async function testRealbooru() {
   const button = $("#testRealbooru");
   const granted = await requestRealbooruPermission();
   if (!granted) {
-    throw new Error("Realbooru and local-scraper permissions were not granted.");
+    throw new Error("Realbooru site permission was not granted.");
   }
 
   button.disabled = true;
   button.textContent = "Testing…";
-  debug.textContent = "Contacting the loopback scraper without OnlyFans data…";
+  debug.textContent =
+    "Fetching public Realbooru pages inside the extension without OnlyFans data…";
 
   try {
-    const { test } = await sendMessage({
-      type: "TEST_REALBOORU",
-      realbooruEndpoint: $("#realbooruEndpoint").value.trim()
-    });
+    const { test } = await sendMessage({ type: "TEST_REALBOORU" });
     debug.textContent =
       `${test.message} Returned: ${test.returnedPosts}; ` +
       `usable after local filters: ${test.usablePosts}.`;
-    showStatus("Realbooru scraper test completed.");
+    showStatus("Realbooru connection test completed.");
   } catch (error) {
     debug.textContent = `Test failed: ${error.message}`;
     throw error;
   } finally {
     button.disabled = false;
-    button.textContent = "Test Realbooru scraper";
+    button.textContent = "Test Realbooru connection";
   }
+}
+
+function workflowSettingsFromForm() {
+  let profiles;
+  try {
+    profiles = JSON.parse($("#workflowProfiles").value);
+  } catch (error) {
+    throw new Error(`Workflow profile JSON is invalid: ${error.message}`, {
+      cause: error,
+    });
+  }
+  const tools = Object.fromEntries(
+    Object.entries(TOOLKIT_CONTROLS).map(([key, selector]) => [
+      key,
+      {
+        enabled: $(selector).checked === true,
+        autorun: key === "redditBannerCensor" && $(selector).checked === true,
+      },
+    ]),
+  );
+  const normalized = CREATOR_REGISTRY.normalizeSettings({
+    schemaVersion: CREATOR_REGISTRY.SCHEMA_VERSION,
+    tools,
+    profiles,
+  });
+  if (normalized.errors.length) {
+    throw new Error(normalized.errors.join(" "));
+  }
+  return normalized.value;
+}
+
+async function requestWorkflowPermissions(settings) {
+  const origins = new Set();
+  for (const [toolId, tool] of Object.entries(settings.tools)) {
+    if (!tool.enabled) continue;
+    for (const origin of TOOL_PERMISSION_ORIGINS[toolId] || []) {
+      if (origin !== "https://onlyfans.com/*") origins.add(origin);
+    }
+  }
+  if (!origins.size) return true;
+  return chrome.permissions.request({ origins: Array.from(origins).sort() });
+}
+
+async function saveWorkflowSettings() {
+  showWorkflowStatus("");
+  const settings = workflowSettingsFromForm();
+  const granted = await requestWorkflowPermissions(settings);
+  if (!granted) {
+    throw new Error(
+      "Required creator-site permission was not granted. Workflow settings were not changed.",
+    );
+  }
+  await chrome.storage.local.set({
+    [CREATOR_REGISTRY.STORAGE_KEY]: settings,
+  });
+  const { creatorTools } = await sendMessage({
+    type: "SYNC_CREATOR_TOOLS",
+  });
+  $("#workflowProfiles").value = JSON.stringify(settings.profiles, null, 2);
+  const skipped = creatorTools.skipped || [];
+  showWorkflowStatus(
+    skipped.length
+      ? `Saved, but ${skipped.length} helper registration(s) were skipped because a site permission is missing.`
+      : "Workflow settings saved. Active tools stop immediately when disabled; reload a site tab after newly enabling its panel.",
+    skipped.length > 0,
+  );
+}
+
+function resetWorkflowProfiles() {
+  $("#workflowProfiles").value = JSON.stringify(
+    CREATOR_REGISTRY.DEFAULT_PROFILES,
+    null,
+    2,
+  );
+  showWorkflowStatus(
+    "Safe profile defaults restored in the editor. Review them, then click Save workflow settings.",
+  );
+}
+
+async function clearWorkflowHistory() {
+  await chrome.storage.local.set({
+    [CREATOR_REGISTRY.ACTION_LOG_KEY]: [],
+  });
+  renderWorkflowHistory([]);
+  showWorkflowStatus("Local workflow history cleared.");
 }
 
 async function save() {
   showStatus("");
   const avatarMode = $("#avatarMode").value;
-  const credentials =
-    ["gelbooru", "mixed"].includes(avatarMode)
-      ? validateGelbooruCredentials()
-      : gelbooruCredentials();
+  const credentials = ["gelbooru", "mixed"].includes(avatarMode)
+    ? validateGelbooruCredentials()
+    : gelbooruCredentials();
 
   if (["gelbooru", "mixed"].includes(avatarMode)) {
     const granted = await requestGelbooruPermission();
@@ -380,38 +688,39 @@ async function save() {
   if (["realbooru", "mixed"].includes(avatarMode)) {
     const granted = await requestRealbooruPermission();
     if (!granted) {
-      throw new Error("Realbooru and local-scraper permissions were not granted.");
+      throw new Error("Realbooru site permission was not granted.");
     }
   }
   if (avatarMode === "custom") {
     const { stats } = await sendMessage({ type: "GET_STATS" });
     if (!stats.importedAvatars) {
-      throw new Error("Import at least one selfie before selecting the custom pack.");
+      throw new Error(
+        "Import at least one selfie before selecting the custom pack.",
+      );
     }
   }
 
   const patch = {
     enabled: $("#enabled").checked,
-    ownHandles: $("#ownHandles").value
-      .split(",")
+    ownHandles: $("#ownHandles")
+      .value.split(",")
       .map((value) => value.trim().replace(/^@/, ""))
       .filter(Boolean),
     avatarMode,
     gelbooruRatingMode: $("#gelbooruRatingMode").value,
     gelbooruUserId: credentials.userId,
     gelbooruApiKey: credentials.apiKey,
-    realbooruEndpoint: $("#realbooruEndpoint").value.trim()
   };
 
   await sendMessage({ type: "SET_SETTINGS", patch });
   $("#gelbooruUserId").value = credentials.userId;
   $("#gelbooruApiKey").value = credentials.apiKey;
-  showStatus("Saved. Reload any open OnlyFans tabs to apply immediately.");
+  showStatus("Identity-mask settings saved.");
 }
 
 async function resetMappings() {
   const confirmed = confirm(
-    "Reset every saved fan alias and avatar assignment? The next page load will create new identities."
+    "Reset every saved fan alias and avatar assignment? The next page load will create new identities.",
   );
   if (!confirmed) return;
 
@@ -423,6 +732,22 @@ async function resetMappings() {
 $("#avatarMode").addEventListener("change", toggleGelbooruFields);
 $("#save").addEventListener("click", () => {
   save().catch((error) => showStatus(error.message, true));
+});
+$("#saveWorkflow").addEventListener("click", () => {
+  saveWorkflowSettings().catch((error) =>
+    showWorkflowStatus(error.message, true),
+  );
+});
+$("#saveCatalogueBridge").addEventListener("click", () => {
+  saveCatalogueBridge().catch((error) =>
+    showCatalogueStatus(error.message, true),
+  );
+});
+$("#resetWorkflowProfiles").addEventListener("click", resetWorkflowProfiles);
+$("#clearWorkflowHistory").addEventListener("click", () => {
+  clearWorkflowHistory().catch((error) =>
+    showWorkflowStatus(error.message, true),
+  );
 });
 $("#reset").addEventListener("click", () => {
   resetMappings().catch((error) => showStatus(error.message, true));

@@ -180,10 +180,19 @@ button:disabled {
   opacity: 0.55;
 }
 
+button.primary {
+  background: #00aff0;
+  color: #06141a;
+}
+
+button.primary:hover {
+  background: #42c8f7;
+}
+
 #resetPictures {
   background: #3b2d46;
 }
 
 #options {
-  margin-top: 2px;
+  margin-top: 8px;
 }

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Creator upload console</title>
+    <link rel="stylesheet" href="upload-console.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Creator Workflow Toolkit</p>
+        <h1>Upload console</h1>
+        <p class="lede">
+          Select the full episode once and review the platform plan. Yes opens
+          your signed-in platform tabs and starts uploading. Connecting your
+          catalogue sheet is optional.
+        </p>
+      </header>
+
+      <section class="card draft-card" aria-labelledby="draftHeading">
+        <div class="section-heading">
+          <div>
+            <p class="step">Step 1</p>
+            <h2 id="draftHeading">Prepare the episode</h2>
+          </div>
+          <span class="local-badge">Kept in this tab</span>
+        </div>
+
+        <label for="uploadFullVideo">Full video</label>
+        <input
+          id="uploadFullVideo"
+          type="file"
+          accept="video/*,.mkv,.avi"
+          required
+          aria-describedby="fullFileSummary draftErrors"
+        />
+        <p id="fullFileSummary" class="hint">
+          Required. It starts transferring after Yes and remains only in this
+          open tab.
+        </p>
+
+        <label for="uploadTeaser">Shared teaser (Fansly + ManyVids)</label>
+        <input
+          id="uploadTeaser"
+          type="file"
+          accept="video/*,.mkv,.avi"
+          aria-describedby="teaserFileSummary draftErrors"
+        />
+        <p id="teaserFileSummary" class="hint">
+          Optional for Fansly and required for ManyVids.
+        </p>
+
+        <label for="uploadManyvidsThumbnail"
+          >ManyVids thumbnail (optional)</label
+        >
+        <input
+          id="uploadManyvidsThumbnail"
+          type="file"
+          accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+          aria-describedby="manyvidsThumbnailSummary draftErrors"
+        />
+        <p id="manyvidsThumbnailSummary" class="hint">
+          Optional. If empty, ManyVids keeps its site-generated thumbnail.
+        </p>
+
+        <div class="field-grid">
+          <div>
+            <label for="uploadTitle">Title</label>
+            <input
+              id="uploadTitle"
+              type="text"
+              autocomplete="off"
+              required
+              aria-describedby="draftErrors"
+            />
+          </div>
+          <div>
+            <label for="releaseDate">Release Friday</label>
+            <input
+              id="releaseDate"
+              type="date"
+              required
+              aria-describedby="draftErrors"
+            />
+            <p id="releaseTimeSummary" class="hint"></p>
+          </div>
+        </div>
+
+        <label for="uploadDescription">Description</label>
+        <textarea
+          id="uploadDescription"
+          rows="6"
+          spellcheck="true"
+          placeholder="Enter the description, or fill it from a connected catalogue"
+        ></textarea>
+      </section>
+
+      <section class="card" aria-labelledby="targetsHeading">
+        <div class="section-heading">
+          <div>
+            <p class="step">Step 2</p>
+            <h2 id="targetsHeading">Choose platforms</h2>
+          </div>
+        </div>
+
+        <div class="target-grid">
+          <label class="target-option">
+            <input
+              id="targetOnlyfans"
+              type="checkbox"
+              value="onlyfans"
+              checked
+            />
+            <span
+              ><strong>OnlyFans</strong
+              ><small>Full video · description · no label changes</small></span
+            >
+          </label>
+          <label class="target-option">
+            <input id="targetManyvids" type="checkbox" value="manyvids" />
+            <span
+              ><strong>ManyVids</strong
+              ><small
+                >Full · teaser preview · $19.99 · Friday 15:00 UTC</small
+              ></span
+            >
+          </label>
+          <label class="target-option">
+            <input id="targetFansly" type="checkbox" value="fansly" checked />
+            <span
+              ><strong>Fansly</strong
+              ><small
+                >Teaser as Free Preview · full locked with defaulT</small
+              ></span
+            >
+          </label>
+        </div>
+
+        <p id="draftErrors" class="error" role="alert"></p>
+        <p id="matchStatus" class="status" role="status">
+          Choose a full video to preview the upload. No sheet setup is required.
+        </p>
+        <button id="continueWithoutSheet" type="button" hidden>
+          Continue without sheet
+        </button>
+        <p class="hint">
+          <a
+            href="options.html#catalogueBridgeHeading"
+            target="_blank"
+            rel="noopener"
+            >Optional: connect your catalogue sheet</a
+          >
+          for matching and saving post links.
+        </p>
+      </section>
+
+      <section
+        id="confirmation"
+        class="card confirmation"
+        hidden
+        aria-labelledby="confirmationHeading"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="step">Step 3</p>
+            <h2 id="confirmationHeading">Confirm the exact upload</h2>
+          </div>
+          <span id="matchBadge" class="local-badge"></span>
+        </div>
+        <p id="matchQuestion" class="confirmation-question"></p>
+        <dl id="uploadSummary" class="upload-summary"></dl>
+        <p id="confirmationNotice" class="hint">
+          Yes may upload and schedule real platform posts and fill only the
+          confirmed catalogue row's empty platform link cells.
+        </p>
+        <div class="confirmation-actions">
+          <button id="confirmUpload" class="primary" type="button">
+            Yes, upload now
+          </button>
+          <button id="rejectMatch" type="button">No</button>
+        </div>
+      </section>
+
+      <section id="results" class="results" aria-live="polite"></section>
+
+      <aside class="safety-note">
+        <strong>Safety boundary</strong>
+        <span
+          >Files stay in this tab and are transferred through the sites' real
+          controls. The extension never stores video bytes or recreates private
+          authenticated API requests.</span
+        >
+      </aside>
+    </main>
+    <script src="creator-tools/catalogue-client.js"></script>
+    <script src="upload-console.js"></script>
+  </body>
+</html>

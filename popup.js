@@ -49,7 +49,7 @@ async function requestSourcePermissions(percentage) {
     origins.push("https://gelbooru.com/*", "https://*.gelbooru.com/*");
   }
   if (percentage > 0) {
-    origins.push("https://realbooru.com/*", "http://127.0.0.1/*");
+    origins.push("https://realbooru.com/*");
   }
   return chrome.permissions.request({ origins });
 }
@@ -73,7 +73,7 @@ $("#enabled").addEventListener("change", async (event) => {
     type: "SET_SETTINGS",
     patch: { enabled: event.target.checked }
   });
-  $("#note").textContent = "Enabled setting saved—reload OnlyFans.";
+  $("#note").textContent = "Identity-mask setting saved—reload OnlyFans.";
 });
 
 $("#sourceMix").addEventListener("input", (event) => {
@@ -138,6 +138,12 @@ $("#resetPictures").addEventListener("click", () => {
 
 $("#options").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
+});
+
+$("#uploadConsole").addEventListener("click", () => {
+  sendMessage({ type: "OPEN_UPLOAD_CONSOLE" }).catch((error) => {
+    $("#note").textContent = error.message;
+  });
 });
 
 load().catch((error) => {

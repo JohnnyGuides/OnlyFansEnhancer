@@ -1,21 +1,32 @@
 {
   "manifest_version": 3,
-  "name": "Fan Identity Mask",
-  "version": "0.6.1",
-  "description": "Locally replaces fan names and avatars with persistent aliases on supported OnlyFans views.",
+  "name": "Creator Workflow Toolkit",
+  "version": "0.11.0",
+  "minimum_chrome_version": "116",
+  "description": "Local identity masking and workflow helpers for adult creators across supported publishing and community sites.",
   "permissions": [
     "storage",
+    "scripting",
+    "webNavigation",
+    "offscreen",
     "declarativeNetRequestWithHostAccess"
   ],
   "optional_host_permissions": [
     "https://gelbooru.com/*",
     "https://*.gelbooru.com/*",
     "https://realbooru.com/*",
-    "http://127.0.0.1/*"
+    "https://workspace.clips4sale.com/*",
+    "https://pornhub.mainhub.com/*",
+    "https://fansly.com/*",
+    "https://www.manyvids.com/*",
+    "https://my.sheer.com/*",
+    "https://www.reddit.com/*",
+    "https://sh.reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
   ],
-  "host_permissions": [
-    "https://onlyfans.com/*"
-  ],
+  "host_permissions": ["https://onlyfans.com/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -29,23 +40,26 @@
     ]
   },
   "action": {
-    "default_title": "Fan Identity Mask",
+    "default_title": "Creator Workflow Toolkit",
     "default_popup": "popup.html"
   },
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": [
-        "https://onlyfans.com/*"
-      ],
-      "js": [
-        "core.js",
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
+      "matches": ["https://onlyfans.com/*"],
+      "js": ["core.js", "content.js"],
+      "css": ["content.css"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["file-bridge.html", "file-bridge.js"],
+      "matches": [
+        "https://onlyfans.com/*",
+        "https://fansly.com/*",
+        "https://www.manyvids.com/*"
+      ]
     }
   ]
 }

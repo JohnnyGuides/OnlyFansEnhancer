@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "WebWorker"],
+    "types": ["chrome"],
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "useDefineForClassFields": true
+  },
+  "include": ["creator-tools/**/*.js", "realbooru-parser.js"]
+}
