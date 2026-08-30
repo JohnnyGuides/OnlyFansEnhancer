@@ -1164,6 +1164,71 @@ test("catalogue bridge chooses a credible existing Friday row or a unique empty-
   assert.equal(collision.candidate.id, "episode-42-2");
 });
 
+test("catalogue snapshot exposes proposal fields and the first fully empty A:L row", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const rows = [
+    {
+      row: 2,
+      id: "battlefield-ep02",
+      releaseDate: "2026-02-20",
+      title: "playin Battlefield 6 while Cumming",
+      description: "Battlefield episode",
+      seasonArc: "Battlefield",
+      episode: "2",
+      pornhubLink: "",
+      onlyfansLink: "https://onlyfans.com/1/johnny_guides",
+      fanslyLink: "https://fansly.com/post/2",
+      manyvidsLink: "https://www.manyvids.com/Video/3",
+      empty: false,
+    },
+    {
+      row: 3,
+      id: "",
+      releaseDate: "",
+      title: "",
+      description: "",
+      seasonArc: "",
+      episode: "",
+      pornhubLink: "",
+      onlyfansLink: "",
+      fanslyLink: "",
+      manyvidsLink: "",
+      empty: true,
+    },
+  ];
+
+  const snapshot = plain(bridge.snapshot(rows));
+
+  assert.equal(snapshot.status, "snapshot");
+  assert.equal(snapshot.rows[0].seasonArc, "Battlefield");
+  assert.equal(snapshot.rows[0].episode, "2");
+  assert.equal(snapshot.rows[0].pornhubLink, "");
+  assert.equal(snapshot.emptyRow.row, 3);
+  assert.match(snapshot.rows[0].fingerprint, /^[a-f0-9]{8}$/);
+});
+
+test("catalogue snapshot does not reuse a category-only A:L row or expose its internal emptiness flag", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const sheet = {
+    getLastRow: () => 2,
+    getMaxRows: () => 3,
+    getRange: () => ({
+      getValues: () => [
+        ["", "", "", "", "", "category-only", "", "", "", "", "", ""],
+        Array(12).fill(""),
+      ],
+    }),
+  };
+
+  const snapshot = plain(bridge.snapshot(bridge.readRows(sheet)));
+
+  assert.equal(snapshot.emptyRow.row, 3);
+  assert.equal(Object.hasOwn(snapshot.emptyRow, "empty"), false);
+  assert.equal(Object.hasOwn(snapshot.rows[0], "empty"), false);
+});
+
 test("catalogue bridge reads the next writable row and does not truncate row 1002", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
   const bridge = context.CreatorCatalogueBridgeTest;
@@ -1323,6 +1388,39 @@ test("catalogue client sends bounded metadata only in a no-referrer POST body", 
     "this-is-a-long-random-secret-123456",
   );
   assert.equal(request.options.body.payload.title, "Private title");
+});
+
+test("catalogue client sends an empty bounded snapshot payload", async () => {
+  const context = loadScripts("creator-tools/catalogue-client.js");
+  const requests = [];
+  const result = await context.CreatorCatalogueClient.request(
+    {
+      endpoint:
+        "https://script.google.com/macros/s/fixture-bridge-12345678901234567890/exec",
+      secret: "fixture-bridge-secret-1234567890",
+    },
+    "getCatalogueSnapshot",
+    {},
+    {
+      fetchImpl: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              status: "snapshot",
+              rows: [],
+              emptyRow: { row: 2 },
+            },
+          }),
+        );
+      },
+    },
+  );
+
+  assert.equal(result.status, "snapshot");
+  assert.equal(requests[0].body.action, "getCatalogueSnapshot");
+  assert.deepEqual(requests[0].body.payload, {});
 });
 
 test("upload console performs no platform mutation before the single Yes confirmation", async () => {

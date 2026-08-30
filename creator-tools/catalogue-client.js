@@ -4,7 +4,11 @@
   if (globalThis.CreatorCatalogueClient) return;
 
   const STORAGE_KEY = "creatorUploadSheetBridgeV1";
-  const ACTIONS = new Set(["matchCatalogue", "commitPlatformLink"]);
+  const ACTIONS = new Set([
+    "getCatalogueSnapshot",
+    "matchCatalogue",
+    "commitPlatformLink",
+  ]);
 
   function normalizeConfig(value = {}) {
     const endpoint = String(value.endpoint || "").trim();
@@ -35,6 +39,7 @@
   }
 
   function boundedPayload(action, payload = {}) {
+    if (action === "getCatalogueSnapshot") return {};
     if (action === "matchCatalogue") {
       const value = {
         filename: String(payload.filename || "").slice(0, 255),
@@ -46,7 +51,7 @@
           .slice(0, 10_000),
         releaseDate: String(payload.releaseDate || ""),
         targets: Array.isArray(payload.targets)
-          ? payload.targets.slice(0, 2)
+          ? payload.targets.slice(0, 3)
           : [],
         forceNew: payload.forceNew === true,
       };
@@ -55,7 +60,7 @@
         !/^\d{4}-\d{2}-\d{2}$/.test(value.releaseDate) ||
         !value.targets.length ||
         value.targets.some(
-          (target) => !new Set(["onlyfans", "fansly"]).has(target),
+          (target) => !new Set(["onlyfans", "fansly", "manyvids"]).has(target),
         )
       ) {
         throw new Error("Invalid catalogue match request.");
@@ -79,7 +84,7 @@
       !Number.isInteger(value.row) ||
       value.row < 2 ||
       !/^[a-f0-9]{8,64}$/i.test(value.fingerprint) ||
-      !new Set(["onlyfans", "fansly"]).has(value.platform) ||
+      !new Set(["onlyfans", "fansly", "manyvids"]).has(value.platform) ||
       !value.postUrl
     ) {
       throw new Error("Invalid catalogue commit request.");
@@ -157,6 +162,10 @@
     return request(await loadConfig(), "matchCatalogue", payload, options);
   }
 
+  async function getCatalogueSnapshot(options) {
+    return request(await loadConfig(), "getCatalogueSnapshot", {}, options);
+  }
+
   async function commitPlatformLink(payload, options) {
     return request(await loadConfig(), "commitPlatformLink", payload, options);
   }
@@ -164,6 +173,7 @@
   globalThis.CreatorCatalogueClient = Object.freeze({
     STORAGE_KEY,
     commitPlatformLink,
+    getCatalogueSnapshot,
     loadConfig,
     matchCatalogue,
     normalizeConfig,

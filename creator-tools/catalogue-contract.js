@@ -127,6 +127,9 @@
       row.releaseDate,
       row.title,
       row.description,
+      row.seasonArc,
+      row.episode,
+      row.pornhubLink,
       row.onlyfansLink,
       row.fanslyLink,
       row.manyvidsLink,
@@ -147,6 +150,8 @@
     normalizedText,
     safeLinkCommit,
     scoreRow,
+    similarity,
     slugify,
+    tokens,
   });
 })();
