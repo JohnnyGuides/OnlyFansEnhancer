@@ -1,360 +1,306 @@
-CreatorToolkit.runWhenEnabled("onlyfansAutoFollow", async () => {
-(function () {
-  'use strict';
+(() => {
+  "use strict";
 
-  const PANEL_ID = 'vm-of-autofollow-panel';
-  const STATUS_ID = 'vm-of-autofollow-status';
-  const ROW_SELECTOR = '.b-users__item.m-fans';
-
-  let running = false;
-  let stopRequested = false;
-  let popupWatchTimer = null;
-
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  function rand(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+  const toolkit = globalThis.CreatorToolkit;
+  const lists = globalThis.CreatorToolkitOnlyFansLists;
+  if (!toolkit || !lists) {
+    throw new Error("OnlyFans list runtime dependencies are unavailable.");
   }
 
-  function isVisible(el) {
-    if (!el || !el.isConnected) return false;
-    const rect = el.getBoundingClientRect();
-    const style = window.getComputedStyle(el);
-    return (
-      rect.width > 0 &&
-      rect.height > 0 &&
-      rect.bottom > 0 &&
-      rect.top < window.innerHeight &&
-      style.visibility !== 'hidden' &&
-      style.display !== 'none'
-    );
-  }
-
-  function getUserId(row) {
-    const username = row.querySelector('.g-user-username')?.textContent?.trim();
-    const name = row.querySelector('.g-user-name')?.textContent?.trim();
-    return username || name || '';
-  }
-
-  function getRows({ visibleOnly = false } = {}) {
-    let rows = [...document.querySelectorAll(ROW_SELECTOR)];
-    if (visibleOnly) rows = rows.filter(isVisible);
-    return rows;
-  }
-
-  function getButtonText(el) {
-    return (el?.textContent || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function getFollowButton(row) {
-    if (!row) return null;
-
-    const candidates = [...row.querySelectorAll('.g-btn, [role="button"], button, a')];
-    for (const el of candidates) {
-      const text = getButtonText(el);
-      if (text === 'Follow') return el;
-    }
-
-    return null;
-  }
-
-  function rowNeedsFollow(row) {
-    return !!getFollowButton(row);
-  }
-
-  function fireClick(el) {
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const x = rect.left + Math.max(4, Math.min(rect.width / 2, rect.width - 4));
-    const y = rect.top + Math.max(4, Math.min(rect.height / 2, rect.height - 4));
-
-    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-      el.dispatchEvent(new MouseEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: x,
-        clientY: y,
-      }));
-    }
-  }
-
-  function updateStatus(text) {
-    const el = document.getElementById(STATUS_ID);
-    if (el) el.textContent = text;
-  }
-
-  function getSubscribeModal() {
-    return document.querySelector('#ModalSubscribe.show, #ModalSubscribe[style*="display: block"]');
-  }
-
-  function getSubscribeModalCloseButton() {
-    const modal = getSubscribeModal();
-    if (!modal) return null;
-
-    const buttons = [...modal.querySelectorAll('button, .g-btn')];
-    return buttons.find((btn) => getButtonText(btn) === 'Close') || null;
-  }
-
-  async function dismissBlockingPopup() {
-    const modal = getSubscribeModal();
-    if (!modal) return false;
-
-    const closeBtn = getSubscribeModalCloseButton();
-    if (!closeBtn) return false;
-
-    fireClick(closeBtn);
-    await sleep(rand(180, 320));
-
-    const stillOpen = !!getSubscribeModal();
-    if (!stillOpen) {
-      updateStatus('Closed blocking popup. Continuing…');
-      return true;
-    }
-
-    // fallback
-    closeBtn.click();
-    await sleep(rand(180, 320));
-    const gone = !getSubscribeModal();
-    if (gone) updateStatus('Closed blocking popup. Continuing…');
-    return gone;
-  }
-
-  async function ensureNoPopup() {
-    // Sometimes body stays modal-open briefly after dismissal
-    for (let i = 0; i < 3; i++) {
-      const closed = await dismissBlockingPopup();
-      if (!getSubscribeModal()) return true;
-      if (!closed) await sleep(120);
-    }
-    return !getSubscribeModal();
-  }
-
-async function clickFollow(row) {
-  if (!row || !rowNeedsFollow(row)) return false;
-
-  const userId = getUserId(row);
-
-  await ensureNoPopup();
-
-  row.scrollIntoView({ block: 'center', behavior: 'instant' });
-  await sleep(rand(80, 160));
-
-  const btn = getFollowButton(row);
-  if (!btn) return false;
-
-  fireClick(btn);
-  await sleep(rand(350, 650));
-
-  // If the follow click triggered a subscribe popup, close it
-  if (getSubscribeModal()) {
-    await dismissBlockingPopup();
-    await sleep(rand(150, 300));
-  }
-
-  // OF may rerender the row, so re-find it by user id if possible
-  const matchingRow = [...document.querySelectorAll(ROW_SELECTOR)].find((r) => getUserId(r) === userId) || row;
-
-  // Count as success if the row no longer has a visible "Follow" button
-  if (!matchingRow.isConnected) return true;
-  return !rowNeedsFollow(matchingRow);
-}
-
-  async function followVisible() {
-    if (running) return;
-    running = true;
-    stopRequested = false;
-
-    try {
-      let followed = 0;
-      await ensureNoPopup();
-
-      const rows = getRows({ visibleOnly: true });
-      for (const row of rows) {
-        if (stopRequested) break;
-
-        await ensureNoPopup();
-        if (!rowNeedsFollow(row)) continue;
-
-        const ok = await clickFollow(row);
-        if (ok) followed += 1;
+  function inspectVisibleRows() {
+    const candidates = [];
+    const invalid = [];
+    for (const row of lists.rows({ visibleOnly: true })) {
+      let button;
+      try {
+        button = lists.followButton(row);
+      } catch (error) {
+        invalid.push({
+          key: lists.stableUserKey(row) || "unidentified row",
+          reason: error.message,
+        });
+        continue;
       }
-
-      updateStatus(`Followed ${followed} visible user(s).`);
-    } finally {
-      running = false;
+      if (!button) continue;
+      const key = lists.stableUserKey(row);
+      if (!key) {
+        invalid.push({
+          key: "unidentified row",
+          reason: "no stable profile/user identity",
+        });
+      } else {
+        candidates.push({ key, row, button });
+      }
     }
+    return { candidates, invalid };
   }
 
-  async function autoFollowAll() {
-    if (running) return;
-    running = true;
-    stopRequested = false;
-
-    try {
-      const touched = new Set();
-      let totalFollowed = 0;
-      let stablePasses = 0;
-      let lastScrollY = -1;
-
-      updateStatus('Running…');
-      await ensureNoPopup();
-
-      while (!stopRequested) {
-        let followedThisPass = 0;
-
-        const visibleRows = getRows({ visibleOnly: true });
-        for (const row of visibleRows) {
-          if (stopRequested) break;
-
-          await ensureNoPopup();
-          if (!rowNeedsFollow(row)) continue;
-
-          const id = getUserId(row);
-          if (id && touched.has(id)) continue;
-
-          const ok = await clickFollow(row);
-          if (id) touched.add(id);
-          if (ok) {
-            followedThisPass += 1;
-            totalFollowed += 1;
-          }
-        }
-
-        updateStatus(`Running… followed ${totalFollowed} so far`);
-
-        await ensureNoPopup();
-
-        const before = window.scrollY;
-        window.scrollBy({ top: Math.floor(window.innerHeight * 0.85), behavior: 'instant' });
-        await sleep(rand(450, 700));
-
-        await ensureNoPopup();
-
-        const after = window.scrollY;
-        const remainingVisibleFollowButtons = getRows({ visibleOnly: true }).filter(rowNeedsFollow).length;
-
-        const noProgress =
-          followedThisPass === 0 &&
-          remainingVisibleFollowButtons === 0 &&
-          (after === before || after === lastScrollY);
-
-        if (noProgress) {
-          stablePasses += 1;
-        } else {
-          stablePasses = 0;
-        }
-
-        lastScrollY = after;
-
-        if (stablePasses >= 4) break;
-      }
-
-      updateStatus(
-        stopRequested
-          ? `Stopped. Followed ${totalFollowed} user(s).`
-          : `Done. Followed ${totalFollowed} user(s).`
+  function assertNoBlockers() {
+    const rateLimit = lists.visibleRateLimitMessage();
+    if (rateLimit) {
+      throw new toolkit.ToolkitError(
+        "RATE_LIMIT",
+        `OnlyFans reported a blocking condition: ${toolkit
+          .displayText(rateLimit.textContent)
+          .slice(0, 240)}`,
       );
-    } finally {
-      running = false;
+    }
+    const dialogs = lists.visibleBlockingDialogs();
+    if (dialogs.length) {
+      throw new toolkit.ToolkitError(
+        "BLOCKING_MODAL",
+        "A visible dialog is blocking the follow action. Close or resolve it manually, then preview again.",
+      );
     }
   }
 
-  function stopRun() {
-    stopRequested = true;
-    updateStatus('Stopping…');
-  }
+  async function followCandidate(candidate, signal, budget) {
+    toolkit.throwIfAborted(signal);
+    assertNoBlockers();
 
-  function makeButton(label, onClick, bg = '#00aff0') {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = label;
-    btn.style.cssText = `
-      border: 0;
-      border-radius: 8px;
-      padding: 8px 10px;
-      cursor: pointer;
-      background: ${bg};
-      color: white;
-      font: 600 13px/1.2 system-ui, sans-serif;
-    `;
-    btn.addEventListener('click', onClick);
-    return btn;
-  }
+    const row = lists.findRowByKey(candidate.key);
+    if (!row || !toolkit.isVisible(row)) {
+      throw new toolkit.ToolkitError(
+        "STALE_ROW",
+        `${candidate.key} is no longer visible.`,
+      );
+    }
+    if (lists.followingState(row) === "following") {
+      return {
+        label: candidate.key,
+        status: "unchanged",
+        detail: "already following",
+      };
+    }
+    const button = lists.followButton(row);
+    if (!button) {
+      throw new toolkit.ToolkitError(
+        "MISSING_FOLLOW",
+        `No exact Follow control exists for ${candidate.key}.`,
+      );
+    }
 
-  function mountPanel() {
-    if (document.getElementById(PANEL_ID)) return;
+    row.scrollIntoView({ block: "center", behavior: "instant" });
+    await toolkit.sleep(80, signal);
+    assertNoBlockers();
+    budget.step();
+    toolkit.clickElement(button, signal);
 
-    const panel = document.createElement('div');
-    panel.id = PANEL_ID;
-    panel.style.cssText = `
-      position: fixed;
-      right: 16px;
-      bottom: 16px;
-      z-index: 999999;
-      width: 260px;
-      background: rgba(20,20,20,0.96);
-      color: white;
-      border-radius: 12px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-      padding: 12px;
-      font: 13px/1.35 system-ui, sans-serif;
-    `;
-
-    const title = document.createElement('div');
-    title.textContent = 'Expired follow helper';
-    title.style.cssText = 'font-weight: 700; margin-bottom: 8px;';
-
-    const status = document.createElement('div');
-    status.id = STATUS_ID;
-    status.textContent = 'Ready.';
-    status.style.cssText = 'opacity: 0.9; margin-bottom: 10px; min-height: 34px;';
-
-    const row1 = document.createElement('div');
-    row1.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;';
-    row1.append(
-      makeButton('Follow visible', followVisible),
-      makeButton('Auto-follow all', autoFollowAll)
+    const result = await toolkit.waitFor(
+      () => {
+        toolkit.throwIfAborted(signal);
+        const rateLimit = lists.visibleRateLimitMessage();
+        if (rateLimit) {
+          throw new toolkit.ToolkitError(
+            "RATE_LIMIT",
+            toolkit.displayText(rateLimit.textContent).slice(0, 240),
+          );
+        }
+        if (lists.visibleBlockingDialogs().length) {
+          throw new toolkit.ToolkitError(
+            "BLOCKING_MODAL",
+            "A dialog appeared after Follow. The result is unknown, so the batch stopped.",
+          );
+        }
+        const currentRow = lists.findRowByKey(candidate.key);
+        if (!currentRow) {
+          throw new toolkit.ToolkitError(
+            "UNKNOWN_RESULT",
+            "The row was virtualized or removed before success could be verified.",
+          );
+        }
+        return lists.followingState(currentRow) === "following"
+          ? currentRow
+          : null;
+      },
+      {
+        signal,
+        timeoutMs: 5000,
+        intervalMs: 100,
+        description: `explicit Following state for ${candidate.key}`,
+      },
     );
 
-    const row2 = document.createElement('div');
-    row2.style.cssText = 'display: grid; grid-template-columns: 1fr; gap: 8px;';
-    row2.append(makeButton('Stop', stopRun, '#666'));
-
-    const note = document.createElement('div');
-    note.textContent = 'Auto-closes the blocking subscribe popup and keeps going.';
-    note.style.cssText = 'margin-top: 10px; opacity: 0.7; font-size: 12px;';
-
-    panel.append(title, status, row1, row2, note);
-    document.body.appendChild(panel);
-  }
-
-  function startPopupWatcher() {
-    if (popupWatchTimer) return;
-    popupWatchTimer = window.setInterval(() => {
-      if (!running) return;
-      if (getSubscribeModal()) {
-        dismissBlockingPopup().catch(() => {});
-      }
-    }, 500);
-  }
-
-  function init() {
-    mountPanel();
-    updateStatus('Ready.');
-    startPopupWatcher();
-  }
-
-  const observer = new MutationObserver(() => {
-    if (!document.getElementById(PANEL_ID)) mountPanel();
-    if (running && getSubscribeModal()) {
-      dismissBlockingPopup().catch(() => {});
+    if (!result) {
+      throw new toolkit.ToolkitError(
+        "POSTCONDITION_FAILED",
+        `Could not verify Following state for ${candidate.key}.`,
+      );
     }
+    return {
+      label: candidate.key,
+      status: "changed",
+      detail: "Following state verified",
+    };
+  }
+
+  async function runFollow({ mode, signal, budget, profile, panel }) {
+    lists.requireExpiredListContext();
+    assertNoBlockers();
+    const outcomes = [];
+    const processed = new Set();
+    let followed = 0;
+    let stablePasses = 0;
+    let scrollContainer = null;
+    let fatalFailure = false;
+
+    while (followed < profile.batchLimit && !fatalFailure) {
+      toolkit.throwIfAborted(signal);
+      budget.check();
+      assertNoBlockers();
+      const inspection = inspectVisibleRows();
+      for (const invalid of inspection.invalid) {
+        outcomes.push({
+          label: invalid.key,
+          status: "skipped",
+          detail: invalid.reason,
+        });
+      }
+      const pending = inspection.candidates.filter(
+        (candidate) => !processed.has(candidate.key),
+      );
+      let changedThisPass = 0;
+
+      for (const candidate of pending) {
+        if (followed >= profile.batchLimit) break;
+        processed.add(candidate.key);
+        try {
+          const outcome = await followCandidate(candidate, signal, budget);
+          outcomes.push(outcome);
+          if (outcome.status === "changed") {
+            followed += 1;
+            changedThisPass += 1;
+          }
+        } catch (error) {
+          if (error?.name === "AbortError" || signal.aborted) throw error;
+          outcomes.push({
+            label: candidate.key,
+            status: "failed",
+            detail: error?.message || String(error),
+          });
+          fatalFailure = true;
+          break;
+        }
+        panel.setStatus(
+          `Following… ${followed}/${profile.batchLimit} explicitly verified.`,
+          "neutral",
+        );
+        await toolkit.sleep(profile.delayMs, signal);
+      }
+
+      if (mode === "visible" || fatalFailure) break;
+      if (!scrollContainer) {
+        scrollContainer = lists.nearestScrollContainer(
+          inspection.candidates[0]?.row || lists.rows()[0],
+        );
+      }
+      const scroll = await lists.advanceScroll(scrollContainer, signal);
+      if (!changedThisPass && !pending.length && !scroll.moved) {
+        stablePasses += 1;
+      } else {
+        stablePasses = 0;
+      }
+      if (stablePasses >= 3) break;
+    }
+
+    const failures = outcomes.filter((item) => item.status === "failed").length;
+    return {
+      status: failures ? (followed ? "partial" : "failed") : "success",
+      summary: failures
+        ? `Stopped after ${followed} verified follow(s) because a result became unsafe or unverifiable.`
+        : followed >= profile.batchLimit
+          ? `Stopped at the configured ${profile.batchLimit}-follow cap.`
+          : `Completed with ${followed} explicitly verified follow(s).`,
+      items: outcomes,
+    };
+  }
+
+  async function mount({ signal, profile }) {
+    const panel = toolkit.createToolPanel({
+      id: "onlyfansAutoFollow",
+      title: "OnlyFans expired-list follow",
+      description:
+        "Bounded, confirmed, exact Follow actions. Unknown dialogs and unverifiable results stop the batch.",
+    });
+    const runner = toolkit.createActionRunner({
+      toolId: "onlyfansAutoFollow",
+      panel,
+      lifecycleSignal: signal,
+      maxActions: profile.batchLimit,
+      maxDurationMs: profile.maxDurationMs,
+    });
+
+    async function preview(mode) {
+      lists.requireExpiredListContext();
+      assertNoBlockers();
+      const inspection = inspectVisibleRows();
+      panel.showPlan({
+        summary:
+          mode === "visible"
+            ? "Review visible Follow actions."
+            : "Review the bounded lazy-list Follow batch.",
+        items: [
+          `${inspection.candidates.length} visible exact Follow control(s) have stable user identities.`,
+          `${inspection.invalid.length} ambiguous/unidentified row(s) will be skipped.`,
+          `Hard cap: ${profile.batchLimit} follow(s).`,
+          `Minimum delay: ${profile.delayMs} ms between verified actions.`,
+          "Any modal, rate-limit signal, missing row, or unverified state stops the batch.",
+        ],
+        confirmLabel:
+          mode === "visible"
+            ? `Follow up to ${Math.min(
+                inspection.candidates.length,
+                profile.batchLimit,
+              )} visible`
+            : `Follow up to ${profile.batchLimit}`,
+        onConfirm: () =>
+          runner.run("Following OnlyFans users", ({ signal, budget }) =>
+            runFollow({ mode, signal, budget, profile, panel }),
+          ),
+      });
+      panel.setStatus(
+        "Preview ready. No Follow action has occurred.",
+        "neutral",
+      );
+    }
+
+    panel.addAction({
+      id: "preview-visible",
+      label: "Preview visible",
+      onClick: () => preview("visible"),
+    });
+    panel.addAction({
+      id: "preview-all",
+      label: "Preview bounded all",
+      variant: "primary",
+      onClick: () => preview("all"),
+    });
+    panel.addAction({
+      id: "stop",
+      label: "Stop",
+      variant: "danger",
+      allowWhileRunning: true,
+      onClick: () => runner.stop(),
+    });
+
+    return () => {
+      runner.stop("OnlyFans follow tool disposed.");
+      panel.destroy();
+    };
+  }
+
+  globalThis.CreatorToolkitAdapters ||= {};
+  globalThis.CreatorToolkitAdapters.onlyfansAutoFollow = Object.freeze({
+    inspectVisibleRows,
+    assertNoBlockers,
+    followCandidate,
   });
 
-  init();
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  toolkit.mountTool({
+    id: "onlyfansAutoFollow",
+    match: (location) =>
+      location.origin === "https://onlyfans.com" &&
+      location.pathname.startsWith("/my/collections/user-lists/"),
+    mount,
+  });
 })();
-}).catch((error) => {
-  console.error("[Creator Workflow Toolkit] onlyfans-auto-follow.js failed:", error);
-});

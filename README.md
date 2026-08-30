@@ -31,30 +31,73 @@ replacement. All masked avatars are forced into the same circular frame.
 
 ## Creator workflow helpers
 
-Each helper has its own toggle in the extension settings:
+Each helper has its own opt-in toggle and versioned profile in extension
+settings. State-changing helpers are disabled by default. Enabling one requests
+only that site's optional permission and adds a manual **preview → confirm →
+verified result** panel. The upload console is the deliberate exception: after
+one exact Yes confirmation, it may drive the observed OnlyFans, Fansly, and
+ManyVids upload/schedule controls and reconcile the resulting links.
 
-- **Clips4Sale upload assistant** selects a random main category and five
-  related categories from the bundled 1,116-item category file, assigns
-  Johnny Guides as performer, and opens an audience/video-type dialog. The
-  chosen type controls price and optional description prefixes; the audience
-  controls the keyword pack.
-- **Pornhub uploader presets** adds manual buttons for Straight, Gay, Lesbian,
-  Bisexual Male, and Transgender orientation/tag/category packs.
-- **Fansly post prefill** fills an empty composer with the GameSync hashtag pack
-  and applies the configured FYP, Walls, and reply toggles. It does not click
-  Post.
-- **ManyVids edit autofill** sets co-performer to No, price to 19.99, launch
-  time to 03:00 PM, excludes the video from the membership bundle, and adds ten
-  tags. It does not save the form.
-- **Sheer tag replacement** replaces the tag selection with the configured
-  exact-match tag pack. It does not save the form.
-- **OnlyFans expired-list auto-select** provides select-visible,
-  auto-select-all, stop, and separate Add controls. It remains disabled by
-  default, matching the Tampermonkey backup.
-- **OnlyFans expired-list follow helper** provides follow-visible and
-  auto-follow-all controls, automatically dismissing the blocking subscription
-  popup while it runs.
-- **Reddit banner censor** covers subreddit banners with a local neutral panel.
+- **Upload console** keeps the full video, shared Fansly/ManyVids teaser, and
+  optional ManyVids thumbnail only in its open tab and shows one exact Yes/No
+  plan. Sheet setup is optional: without a
+  bridge, **Yes, upload now** opens or reuses the selected platform tabs without
+  reading or writing the sheet. A configured but failing bridge offers an
+  explicit **Continue without sheet** choice. Upload-only mode shows captured
+  post links in the console but cannot check existing catalogue links.
+  With a connected bridge, it deterministically matches `Work / 2026 Video Catalogue`.
+  Yes starts the full upload on all selected authenticated sites,
+  schedules Friday at 15:00 UTC, leaves OnlyFans labels unchanged, and gives
+  Fansly a teaser attached through **Add Free Preview** to full media locked
+  with exact preset `defaulT`. On ManyVids it waits up to 45 minutes for the
+  named upload card to finish, immediately opens that card's editor, attaches
+  the teaser as Custom Preview, fills the verified $19.99/Friday 15:00 UTC
+  profile and ten exact tags, optionally uploads the supplied thumbnail, and
+  clicks Save once. It observes only the OnlyFans/Fansly final create-post XHRs;
+  ManyVids is resolved from its exact numeric edit route after the success
+  navigation. Empty catalogue J/K/L cells are filled immediately and
+  independently when connected. A conflict is never overwritten. Only
+  pre-submission platform failures can retry the
+  upload; after submission, a known post URL retries the sheet write only and
+  an unresolved link requires manual recovery so the extension cannot create a
+  duplicate post. A ManyVids correction after its numeric ID is known resumes
+  that exact editor and never uploads the full video again.
+- **Upload trace recorder** is a read-only development helper enabled by
+  default. Its small panel remains idle until **Start trace** is clicked, then
+  records bounded, sanitized upload evidence across same-site refreshes for
+  OnlyFans, Fansly, ManyVids, or Pornhub. It never captures captions, file
+  names, file bytes, raw status text, cookies, headers, or request bodies and
+  never publishes anything. It distinguishes trusted user choices, toolkit
+  actions, and site reactions so a manual success can be compared with the
+  corresponding autofill run.
+- **Clips4Sale upload assistant** serializes exact category, related-category,
+  performer, audience, price, description, and keyword changes. The corrupt
+  legacy 1,116-entry random taxonomy was removed; category changes require an
+  approved profile value.
+- **Pornhub uploader presets** preserve existing metadata and append only fresh
+  exact autocomplete matches. Missing or ambiguous values stop the preset.
+- **Fansly composer assistant** operates on one visible composer after preview,
+  preserves existing text by default, applies posting toggles independently,
+  and never focuses or clicks Post.
+- **ManyVids edit assistant** shows every nonempty-field overwrite before
+  applying it, verifies exact tags and options, caps tags at ten, and leaves
+  semantically unverified mode controls untouched until their exact labels are
+  configured.
+- **Sheer tag assistant** uses native select state rather than page jQuery,
+  appends by default, and refuses an incomplete replacement.
+- **OnlyFans expired-list selection assistant** uses stable profile/user keys,
+  hard action/time limits, verified selection state, and a real abort barrier.
+  It never clicks Add.
+- **OnlyFans expired-list follow assistant** requires a preview and
+  confirmation, enforces a conservative cap and delay, and stops on any modal,
+  rate-limit signal, missing identity, or unverifiable result.
+- **Reddit banner censor** injects fail-closed CSS at document start and adds a
+  neutral local cover for supported current, sh, and old Reddit layouts.
+
+The tools share one route-aware lifecycle, abortable action runner, accessible
+Shadow DOM panel system, and local action log. Disabling a tool aborts it in
+already-open tabs. Workflow profiles and the last 100 concise outcomes stay in
+Chrome local extension storage and are never sent anywhere.
 
 The third-party **Bypass All Shortlinks Debloated** userscript is deliberately
 not included.
@@ -66,8 +109,20 @@ not included.
 3. Click **Load unpacked**.
 4. Select this repository folder.
 5. Open the extension’s **Details**, then **Extension options**.
-6. Confirm your own handle is listed and choose an avatar source.
-7. Reload OnlyFans.
+6. **Optional, only for catalogue reconciliation:** copy `apps-script/catalogue-bridge.gs` into
+   the Apps Script project attached to `Work`, set Script Property
+   `CREATOR_UPLOAD_SECRET`, deploy it as a web app executing as you with access
+   set to **Anyone**, then save the deployment URL and same long random secret
+   under **Video catalogue bridge**. The secret authorizes the otherwise
+   anonymous extension request; do not share either value.
+7. Confirm your own handle is listed and choose an avatar source.
+8. Enable only the workflow helpers you want and approve their per-site
+   permissions. The upload trace recorder is enabled but idle by default;
+   recording begins only after **Start trace**. Review the advanced profile
+   JSON if you need different metadata, limits, or exact mode labels.
+9. Reload a newly enabled creator-site tab. Existing enabled tools stop
+   immediately when disabled.
+10. Reload OnlyFans.
 
 The personal edition requests access only to the supported creator-site routes
 listed in `manifest.json`.
@@ -102,8 +157,11 @@ API result pages are selected with Web Crypto randomness across the reported
 result count, and each page is shuffled before assignment. Persistent sets of
 used Gelbooru post IDs, source URLs, and API-provided MD5 fingerprints are
 reserved in Chrome storage before any image download. Assigned and manually
-rejected assets remain retired after mapping resets; clearing extension storage
-or uninstalling the extension removes that history.
+rejected assets remain retired after mapping resets. The settings page shows
+current masked accounts and genuinely retired pictures in separate grids:
+current pictures can be regenerated without changing the masked name or handle,
+and an unassigned retired picture can be explicitly re-enabled for future random
+selection.
 
 Clicking directly on a masked profile picture requests a different unused
 remote picture without opening the profile card. The circle contracts, shows a
@@ -125,23 +183,23 @@ any other host.
 Gelbooru ratings and tags are community-maintained and can be wrong. The API key
 is stored in Chrome local extension storage, which is not encrypted.
 
-### Realbooru local scraper
+### Extension-native Realbooru
 
-Realbooru mode uses the separately installed `realbooru_scraper` companion
-project. Its executable binds only to `127.0.0.1:47831`; the extension sends it
-the fixed selfie query and receives post metadata. No OnlyFans identifier, name,
-message, or comment is sent to the companion or Realbooru.
+Realbooru mode is self-contained in the personal extension. Its service worker
+fetches fixed public Realbooru listing and post URLs, while a bundled offscreen
+document uses `DOMParser` to extract inert metadata. No Dart installation,
+companion executable, localhost service, or permanently open console is
+required.
 
-The companion uses the user's `realbooru 0.3.0` dependency for post-detail
-scraping. Its wrapper selects a random paginator page first because the
-dependency's built-in random path currently omits the page offset. Start
-`start_scraper.cmd` and leave its console open while Realbooru or mixed mode is
-enabled. The options page has a connection test.
+Realbooru’s public DAPI currently reports that it is offline, so the extension
+uses the public HTML pages. It never executes page scripts or accepts an
+arbitrary URL from a content script. Parsed URLs must remain on
+`https://realbooru.com`, listing/detail responses are size-limited, and only
+supported original-image paths are accepted. The parser document is closed
+after each bounded scrape. The options page has a direct connection test.
 
-The companion is not loaded into Chrome as a second extension. Chrome cannot
-execute Dart or start local programs, so the Chrome extension requests post
-metadata from the loopback companion, which then contacts Realbooru. The
-compiled service listens only on the local machine.
+No OnlyFans identifier, name, message, comment, or browsing URL is included in
+Realbooru requests.
 
 Realbooru results locally require `selfie`, `solo`, and female-identifying tags.
 The same narrow age-safety exclusion used for Gelbooru remains active. Image
@@ -214,8 +272,15 @@ Install the test dependency and run the self-contained test suite:
 
 ```powershell
 npm install
-npm test
+npm run check
 ```
+
+`npm run check` runs type-aware ESLint async rules, JavaScript type checking,
+formatting and source-encoding checks, unit/DOM/browser behavior tests, both
+extension-edition regressions, and both package builds. The creator-tool
+fixtures specifically cover fail-closed matching, stale autocomplete results,
+replacement safety, abort barriers, action caps, and SPA/settings lifecycle
+cleanup.
 
 The optional saved-page test requires locally saved OnlyFans post and DM pages:
 

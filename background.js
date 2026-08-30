@@ -1,4 +1,10 @@
-"use strict";
+importScripts(
+  "creator-tools/registry.js",
+  "creator-tools/catalogue-contract.js",
+  "creator-tools/catalogue-client.js",
+);
+
+("use strict");
 
 const SETTINGS_KEY = "fimSettingsV1";
 const STATE_KEY = "fimStateV1";
@@ -9,8 +15,14 @@ const GELBOORU_PAGE_SIZE = 100;
 const GELBOORU_REQUIRED_POST_TAGS = ["selfie", "1girl", "solo"];
 const REALBOORU_QUERY_TAGS = "1girl solo selfie score:>=20";
 const REALBOORU_BATCH_SIZE = 12;
-const GELBOORU_FORBIDDEN_TAG_PARTS =
-  /(^|_)(trans)(_|$)/i;
+const REALBOORU_PAGE_SIZE = 42;
+const REALBOORU_ORIGIN = "https://realbooru.com";
+const REALBOORU_PARSER_PATH = "realbooru-parser.html";
+const REALBOORU_MAX_HTML_LENGTH = 2_000_000;
+const CREATOR_REGISTRY = globalThis.CreatorToolkitRegistry;
+const CREATOR_CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
+const CREATOR_CATALOGUE_CONTRACT = globalThis.CreatorCatalogueContract;
+const GELBOORU_FORBIDDEN_TAG_PARTS = /(^|_)(trans)(_|$)/i;
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
@@ -19,53 +31,293 @@ const DEFAULT_SETTINGS = Object.freeze({
   gelbooruRatingMode: "any",
   gelbooruUserId: "",
   gelbooruApiKey: "",
-  realbooruEndpoint: "http://127.0.0.1:47831",
-  realbooruPercentage: 50
+  realbooruPercentage: 50,
 });
 
 const FIRST_NAMES = [
-  "Ada", "Adaline", "Adelaide", "Adriana", "Aiko", "Alana", "Alba", "Alexandra",
-  "Alice", "Alina", "Allegra", "Amalia", "Amara", "Amaya", "Amelie", "Anais",
-  "Anastasia", "Anika", "Annabel", "Annika", "Antonia", "Arabella", "Araceli", "Aria",
-  "Ariana", "Arielle", "Astrid", "Athena", "Audrey", "Aurora", "Ava", "Aviva",
-  "Aya", "Beatrice", "Bianca", "Billie", "Blair", "Blythe", "Bria", "Briar",
-  "Bridget", "Calla", "Callie", "Calista", "Camille", "Carina", "Carmen", "Caroline",
-  "Cassandra", "Cecilia", "Celeste", "Celine", "Charlotte", "Chloe", "Chiara", "Clara",
-  "Cleo", "Colette", "Coral", "Cordelia", "Corinne", "Dahlia", "Daphne", "Delia",
-  "Diana", "Eden", "Edith", "Elara", "Eleanor", "Elena", "Elise", "Eliza",
-  "Elizabeth", "Ella", "Eloise", "Elodie", "Elsie", "Emilia", "Emily", "Emma",
-  "Emmeline", "Esme", "Estelle", "Eugenia", "Eva", "Evangeline", "Evelina", "Evelyn",
-  "Faye", "Felicity", "Fern", "Flora", "Florence", "Frances", "Francesca", "Freya",
-  "Gabriella", "Gaia", "Gemma", "Genevieve", "Georgia", "Giselle", "Gloria", "Grace",
-  "Greta", "Gwen", "Hana", "Harlow", "Hazel", "Helena", "Ilaria", "Imogen",
-  "Indigo", "Ines", "Iris", "Isabel", "Isla", "Ivy", "Jane", "Jasmine",
-  "Joanna", "Josephine", "Josette", "Julia", "Juliet", "Juniper", "Kaia", "Kaori",
-  "Karina", "Katherine", "Keira", "Kira", "Lana", "Laurel", "Layla", "Leilani",
-  "Lena", "Lenore", "Leona", "Leora", "Lila", "Liliana", "Lily", "Linnea",
-  "Lorelei", "Lorraine", "Louisa", "Lucia", "Lucy", "Luna", "Lydia", "Lyla",
-  "Lyra", "Mae", "Magnolia", "Maia", "Malia", "Margot", "Mariana", "Marina",
-  "Maren", "Marigold", "Marisol", "Matilda", "Maya", "Meadow", "Mei", "Melina",
-  "Melody", "Meredith", "Mila", "Mira", "Miriam", "Morgan", "Nadia", "Nadine",
-  "Naomi", "Nell", "Nina", "Noelle", "Nora", "Nova", "Octavia", "Odessa",
-  "Olive", "Olivia", "Oona", "Opal", "Paloma", "Pandora", "Penelope", "Phoebe",
-  "Poppy", "Ramona", "Rebecca", "Rei", "Rhea", "Rina", "Rosalie", "Rosalind",
-  "Rose", "Rowan", "Rowena", "Ruby", "Sabine", "Sage", "Sakura", "Selene",
-  "Serena", "Sienna", "Simone", "Sloane", "Sofia", "Sora", "Stella", "Susannah",
-  "Sylvie", "Talia", "Tessa", "Thea", "Valentina", "Valerie", "Vera", "Veronica",
-  "Victoria", "Violet", "Vivian", "Viviana", "Willa", "Willow", "Winona", "Yara",
-  "Yuna", "Yuki", "Zara", "Zelie", "Zinnia", "Zoe"
+  "Ada",
+  "Adaline",
+  "Adelaide",
+  "Adriana",
+  "Aiko",
+  "Alana",
+  "Alba",
+  "Alexandra",
+  "Alice",
+  "Alina",
+  "Allegra",
+  "Amalia",
+  "Amara",
+  "Amaya",
+  "Amelie",
+  "Anais",
+  "Anastasia",
+  "Anika",
+  "Annabel",
+  "Annika",
+  "Antonia",
+  "Arabella",
+  "Araceli",
+  "Aria",
+  "Ariana",
+  "Arielle",
+  "Astrid",
+  "Athena",
+  "Audrey",
+  "Aurora",
+  "Ava",
+  "Aviva",
+  "Aya",
+  "Beatrice",
+  "Bianca",
+  "Billie",
+  "Blair",
+  "Blythe",
+  "Bria",
+  "Briar",
+  "Bridget",
+  "Calla",
+  "Callie",
+  "Calista",
+  "Camille",
+  "Carina",
+  "Carmen",
+  "Caroline",
+  "Cassandra",
+  "Cecilia",
+  "Celeste",
+  "Celine",
+  "Charlotte",
+  "Chloe",
+  "Chiara",
+  "Clara",
+  "Cleo",
+  "Colette",
+  "Coral",
+  "Cordelia",
+  "Corinne",
+  "Dahlia",
+  "Daphne",
+  "Delia",
+  "Diana",
+  "Eden",
+  "Edith",
+  "Elara",
+  "Eleanor",
+  "Elena",
+  "Elise",
+  "Eliza",
+  "Elizabeth",
+  "Ella",
+  "Eloise",
+  "Elodie",
+  "Elsie",
+  "Emilia",
+  "Emily",
+  "Emma",
+  "Emmeline",
+  "Esme",
+  "Estelle",
+  "Eugenia",
+  "Eva",
+  "Evangeline",
+  "Evelina",
+  "Evelyn",
+  "Faye",
+  "Felicity",
+  "Fern",
+  "Flora",
+  "Florence",
+  "Frances",
+  "Francesca",
+  "Freya",
+  "Gabriella",
+  "Gaia",
+  "Gemma",
+  "Genevieve",
+  "Georgia",
+  "Giselle",
+  "Gloria",
+  "Grace",
+  "Greta",
+  "Gwen",
+  "Hana",
+  "Harlow",
+  "Hazel",
+  "Helena",
+  "Ilaria",
+  "Imogen",
+  "Indigo",
+  "Ines",
+  "Iris",
+  "Isabel",
+  "Isla",
+  "Ivy",
+  "Jane",
+  "Jasmine",
+  "Joanna",
+  "Josephine",
+  "Josette",
+  "Julia",
+  "Juliet",
+  "Juniper",
+  "Kaia",
+  "Kaori",
+  "Karina",
+  "Katherine",
+  "Keira",
+  "Kira",
+  "Lana",
+  "Laurel",
+  "Layla",
+  "Leilani",
+  "Lena",
+  "Lenore",
+  "Leona",
+  "Leora",
+  "Lila",
+  "Liliana",
+  "Lily",
+  "Linnea",
+  "Lorelei",
+  "Lorraine",
+  "Louisa",
+  "Lucia",
+  "Lucy",
+  "Luna",
+  "Lydia",
+  "Lyla",
+  "Lyra",
+  "Mae",
+  "Magnolia",
+  "Maia",
+  "Malia",
+  "Margot",
+  "Mariana",
+  "Marina",
+  "Maren",
+  "Marigold",
+  "Marisol",
+  "Matilda",
+  "Maya",
+  "Meadow",
+  "Mei",
+  "Melina",
+  "Melody",
+  "Meredith",
+  "Mila",
+  "Mira",
+  "Miriam",
+  "Morgan",
+  "Nadia",
+  "Nadine",
+  "Naomi",
+  "Nell",
+  "Nina",
+  "Noelle",
+  "Nora",
+  "Nova",
+  "Octavia",
+  "Odessa",
+  "Olive",
+  "Olivia",
+  "Oona",
+  "Opal",
+  "Paloma",
+  "Pandora",
+  "Penelope",
+  "Phoebe",
+  "Poppy",
+  "Ramona",
+  "Rebecca",
+  "Rei",
+  "Rhea",
+  "Rina",
+  "Rosalie",
+  "Rosalind",
+  "Rose",
+  "Rowan",
+  "Rowena",
+  "Ruby",
+  "Sabine",
+  "Sage",
+  "Sakura",
+  "Selene",
+  "Serena",
+  "Sienna",
+  "Simone",
+  "Sloane",
+  "Sofia",
+  "Sora",
+  "Stella",
+  "Susannah",
+  "Sylvie",
+  "Talia",
+  "Tessa",
+  "Thea",
+  "Valentina",
+  "Valerie",
+  "Vera",
+  "Veronica",
+  "Victoria",
+  "Violet",
+  "Vivian",
+  "Viviana",
+  "Willa",
+  "Willow",
+  "Winona",
+  "Yara",
+  "Yuna",
+  "Yuki",
+  "Zara",
+  "Zelie",
+  "Zinnia",
+  "Zoe",
 ];
 
 const NICKNAMES = [
-  "angel", "babe", "baby", "bee", "belle", "bloom", "bunny", "cherry",
-  "cloud", "daisy", "doll", "dream", "fairy", "glow", "honey", "kitty",
-  "lilac", "love", "moon", "nova", "peach", "petal", "rose", "softie",
-  "spark", "star", "sunny", "velvet"
+  "angel",
+  "babe",
+  "baby",
+  "bee",
+  "belle",
+  "bloom",
+  "bunny",
+  "cherry",
+  "cloud",
+  "daisy",
+  "doll",
+  "dream",
+  "fairy",
+  "glow",
+  "honey",
+  "kitty",
+  "lilac",
+  "love",
+  "moon",
+  "nova",
+  "peach",
+  "petal",
+  "rose",
+  "softie",
+  "spark",
+  "star",
+  "sunny",
+  "velvet",
 ];
 
 const HANDLE_SUFFIXES = [
-  "archive", "diary", "dreams", "files", "garden", "jpg", "online", "room",
-  "verse", "world", "xo"
+  "archive",
+  "diary",
+  "dreams",
+  "files",
+  "garden",
+  "jpg",
+  "online",
+  "room",
+  "verse",
+  "world",
+  "xo",
 ];
 
 let stateQueue = Promise.resolve();
@@ -115,13 +367,15 @@ function generatedAvatar(key, displayName) {
     '<rect width="160" height="160" rx="80" fill="url(#g)"/>',
     '<circle cx="126" cy="32" r="18" fill="rgba(255,255,255,.18)"/>',
     `<text x="80" y="96" text-anchor="middle" fill="white" font-family="system-ui,sans-serif" font-size="48" font-weight="700">${initials}</text>`,
-    "</svg>"
+    "</svg>",
   ].join("");
 
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function normalizeSettings(value = {}) {
+  const safeValue = { ...value };
+  delete safeValue.realbooruEndpoint;
   const ownHandles = Array.isArray(value.ownHandles)
     ? value.ownHandles
     : String(value.ownHandle || DEFAULT_SETTINGS.ownHandles[0]).split(",");
@@ -133,8 +387,8 @@ function normalizeSettings(value = {}) {
       0,
       Number.isFinite(Number(value.realbooruPercentage))
         ? Math.round(Number(value.realbooruPercentage))
-        : DEFAULT_SETTINGS.realbooruPercentage
-    )
+        : DEFAULT_SETTINGS.realbooruPercentage,
+    ),
   );
 
   if (/(?:^|[?&])api_key=/i.test(gelbooruApiKey)) {
@@ -146,12 +400,12 @@ function normalizeSettings(value = {}) {
 
   return {
     ...DEFAULT_SETTINGS,
-    ...value,
+    ...safeValue,
     ownHandles: ownHandles
       .map((handle) => String(handle).trim().replace(/^@/, "").toLowerCase())
       .filter(Boolean),
     avatarMode: ["gelbooru", "realbooru", "mixed", "custom"].includes(
-      value.avatarMode
+      value.avatarMode,
     )
       ? value.avatarMode
       : "generated",
@@ -159,29 +413,8 @@ function normalizeSettings(value = {}) {
       value.gelbooruRatingMode === "general" ? "general" : "any",
     gelbooruUserId,
     gelbooruApiKey,
-    realbooruEndpoint: normalizeRealbooruEndpoint(
-      value.realbooruEndpoint || DEFAULT_SETTINGS.realbooruEndpoint
-    ),
-    realbooruPercentage
+    realbooruPercentage,
   };
-}
-
-function normalizeRealbooruEndpoint(value) {
-  try {
-    const endpoint = new URL(String(value || ""));
-    if (
-      endpoint.protocol !== "http:" ||
-      endpoint.hostname !== "127.0.0.1"
-    ) {
-      return DEFAULT_SETTINGS.realbooruEndpoint;
-    }
-    endpoint.pathname = "";
-    endpoint.search = "";
-    endpoint.hash = "";
-    return endpoint.toString().replace(/\/$/, "");
-  } catch {
-    return DEFAULT_SETTINGS.realbooruEndpoint;
-  }
 }
 
 function normalizeState(value = {}) {
@@ -204,9 +437,10 @@ function normalizeState(value = {}) {
   for (const id of Object.keys(usedAvatarIds)) {
     if (recordedIds.has(String(id))) continue;
     const identity = Object.values(identities).find(
-      (item) => String(item.avatarId) === String(id)
+      (item) => String(item.avatarId) === String(id),
     );
-    if (identity?.avatarSourceUrl) usedAvatarUrls[identity.avatarSourceUrl] = true;
+    if (identity?.avatarSourceUrl)
+      usedAvatarUrls[identity.avatarSourceUrl] = true;
     if (identity?.avatarFingerprint) {
       usedAvatarFingerprints[identity.avatarFingerprint] = true;
     }
@@ -216,7 +450,7 @@ function normalizeState(value = {}) {
       sourceUrl: identity?.avatarSourceUrl || "",
       fingerprint: identity?.avatarFingerprint || "",
       action: "previously-used",
-      usedAt: 0
+      usedAt: 0,
     });
   }
 
@@ -249,7 +483,7 @@ function normalizeState(value = {}) {
     pictureResetGeneration: Number.isInteger(value.pictureResetGeneration)
       ? value.pictureResetGeneration
       : 0,
-    lastAvatarError: value.lastAvatarError || ""
+    lastAvatarError: value.lastAvatarError || "",
   };
 }
 
@@ -303,7 +537,7 @@ function createName(key, state, ownerKey = key) {
     `${first} xo`,
     `its ${first.toLowerCase()}`,
     `${first.toLowerCase()}.jpg`,
-    nickname
+    nickname,
   ];
   const handleBases = [
     firstHandle,
@@ -314,7 +548,7 @@ function createName(key, state, ownerKey = key) {
     `${nickname}${firstHandle}`,
     `${firstHandle}${nickname}`,
     `${firstHandle}${compactNumber}`,
-    `x${firstHandle}x`
+    `x${firstHandle}x`,
   ];
 
   return {
@@ -322,8 +556,8 @@ function createName(key, state, ownerKey = key) {
     handle: uniqueHandle(
       handleBases[(hash >>> 12) % handleBases.length],
       state,
-      ownerKey
-    )
+      ownerKey,
+    ),
   };
 }
 
@@ -338,7 +572,7 @@ function parseGelbooruResponse(payload, ratingMode = "any") {
     .filter(
       (post) =>
         ratingMode === "any" ||
-        ["general", "safe"].includes(String(post.rating).toLowerCase())
+        ["general", "safe"].includes(String(post.rating).toLowerCase()),
     )
     .filter((post) => {
       const tags = String(post.tags || "")
@@ -358,7 +592,7 @@ function parseGelbooruResponse(payload, ratingMode = "any") {
       fingerprint: /^[a-f0-9]{32}$/i.test(String(post.md5 || ""))
         ? String(post.md5).toLowerCase()
         : "",
-      postUrl: `https://gelbooru.com/index.php?page=post&s=view&id=${post.id}`
+      postUrl: `https://gelbooru.com/index.php?page=post&s=view&id=${post.id}`,
     }))
     .filter((post) => post.id && /^https:\/\//i.test(post.url));
 }
@@ -371,31 +605,33 @@ function normalizeBooruTags(value) {
       tag
         .trim()
         .toLowerCase()
-        .replace(/[\s-]+/g, "_")
+        .replace(/[\s-]+/g, "_"),
     )
     .filter(Boolean);
+}
+
+function hasEligibleRealbooruTags(value) {
+  const tags = normalizeBooruTags(value);
+  const tagSet = new Set(tags);
+  const femaleEvidence = [
+    "1girl",
+    "female",
+    "female_only",
+    "female_solo",
+    "solo_female",
+  ].some((tag) => tagSet.has(tag));
+  return (
+    tagSet.has("selfie") &&
+    tagSet.has("solo") &&
+    femaleEvidence &&
+    !tags.some((tag) => GELBOORU_FORBIDDEN_TAG_PARTS.test(tag))
+  );
 }
 
 function parseRealbooruResponse(payload) {
   const posts = Array.isArray(payload?.posts) ? payload.posts : [];
   return posts
-    .filter((post) => {
-      const tags = normalizeBooruTags(post.tags);
-      const tagSet = new Set(tags);
-      const femaleEvidence = [
-        "1girl",
-        "female",
-        "female_only",
-        "female_solo",
-        "solo_female"
-      ].some((tag) => tagSet.has(tag));
-      return (
-        tagSet.has("selfie") &&
-        tagSet.has("solo") &&
-        femaleEvidence &&
-        !tags.some((tag) => GELBOORU_FORBIDDEN_TAG_PARTS.test(tag))
-      );
-    })
+    .filter((post) => hasEligibleRealbooruTags(post.tags))
     .map((post) => ({
       source: "realbooru",
       id: String(post.id || ""),
@@ -403,79 +639,224 @@ function parseRealbooruResponse(payload) {
       fingerprint: /^[a-f0-9]{32}$/i.test(String(post.fingerprint || ""))
         ? String(post.fingerprint).toLowerCase()
         : "",
-      postUrl: String(post.postUrl || "")
+      postUrl: String(post.postUrl || ""),
     }))
     .filter(
       (post) =>
         post.id &&
         /^https:\/\/realbooru\.com\//i.test(post.url) &&
-        /^https:\/\/realbooru\.com\//i.test(post.postUrl)
+        /^https:\/\/realbooru\.com\//i.test(post.postUrl),
     );
 }
 
 async function hasGelbooruPermission() {
   return chrome.permissions.contains({
-    origins: ["https://gelbooru.com/*", "https://*.gelbooru.com/*"]
+    origins: ["https://gelbooru.com/*", "https://*.gelbooru.com/*"],
   });
 }
 
 async function hasRealbooruPermission() {
   return chrome.permissions.contains({
-    origins: ["https://realbooru.com/*", "http://127.0.0.1/*"]
+    origins: ["https://realbooru.com/*"],
   });
 }
 
-async function requestRealbooruPosts(settings, count = REALBOORU_BATCH_SIZE) {
-  if (!(await hasRealbooruPermission())) {
+let realbooruOffscreenCreating = null;
+let realbooruScrapeQueue = Promise.resolve();
+
+async function hasRealbooruParser() {
+  const parserUrl = chrome.runtime.getURL(REALBOORU_PARSER_PATH);
+  if (typeof chrome.runtime.getContexts === "function") {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [parserUrl],
+    });
+    return contexts.length > 0;
+  }
+  const contexts = await globalThis.clients?.matchAll();
+  return Array.isArray(contexts)
+    ? contexts.some((client) => client.url === parserUrl)
+    : false;
+}
+
+async function ensureRealbooruParser() {
+  if (await hasRealbooruParser()) return;
+  if (!realbooruOffscreenCreating) {
+    realbooruOffscreenCreating = chrome.offscreen
+      .createDocument({
+        url: REALBOORU_PARSER_PATH,
+        reasons: ["DOM_PARSER"],
+        justification:
+          "Parse inert Realbooru listing and post HTML fetched by the extension.",
+      })
+      .finally(() => {
+        realbooruOffscreenCreating = null;
+      });
+  }
+  await realbooruOffscreenCreating;
+}
+
+async function closeRealbooruParser() {
+  try {
+    if (await hasRealbooruParser()) await chrome.offscreen.closeDocument();
+  } catch (error) {
+    console.warn("Could not close the Realbooru parser document.", error);
+  }
+}
+
+async function parseRealbooruHtml(kind, html, expectedId = "") {
+  await ensureRealbooruParser();
+  const response = await chrome.runtime.sendMessage({
+    target: "realbooru-offscreen-parser",
+    kind,
+    html,
+    expectedId,
+  });
+  if (response?.ok !== true) {
     throw new Error(
-      "Realbooru and loopback scraper permissions have not been granted."
+      `Bundled Realbooru parser failed: ${cleanGelbooruReason(response?.error)}`,
     );
   }
-  const endpoint = normalizeRealbooruEndpoint(settings.realbooruEndpoint);
+  return response.result;
+}
+
+function realbooruListingUrl(pid = 0) {
   const query = new URLSearchParams({
+    page: "post",
+    s: "list",
     tags: REALBOORU_QUERY_TAGS,
-    count: String(Math.min(20, Math.max(1, count)))
   });
+  if (pid > 0) query.set("pid", String(pid));
+  return `${REALBOORU_ORIGIN}/index.php?${query}`;
+}
+
+async function fetchRealbooruHtml(url) {
+  const target = new URL(url);
+  if (target.origin !== REALBOORU_ORIGIN || target.pathname !== "/index.php") {
+    throw new Error("Refused an unexpected Realbooru request URL.");
+  }
   let response;
   try {
-    response = await fetch(`${endpoint}/random?${query}`, {
+    const signal = globalThis.AbortSignal?.timeout?.(20000);
+    response = await fetch(target.href, {
       credentials: "omit",
-      headers: { Accept: "application/json" }
+      headers: { Accept: "text/html" },
+      redirect: "follow",
+      ...(signal ? { signal } : {}),
     });
   } catch (error) {
-    throw new Error(
-      `Could not reach the local Realbooru scraper at ${endpoint}: ${error.message}`
-    );
+    throw new Error(`Could not reach Realbooru: ${error.message}`);
   }
   if (!response.ok) {
-    throw new Error(`Local Realbooru scraper returned HTTP ${response.status}.`);
+    throw new Error(`Realbooru returned HTTP ${response.status}.`);
   }
-  const payload = await readGelbooruResponse(response);
-  if (payload?.ok !== true) {
+  if (response.url) {
+    const finalUrl = new URL(response.url);
+    if (
+      finalUrl.origin !== target.origin ||
+      finalUrl.pathname !== target.pathname ||
+      finalUrl.searchParams.get("page") !== target.searchParams.get("page") ||
+      finalUrl.searchParams.get("s") !== target.searchParams.get("s") ||
+      (target.searchParams.get("s") === "view" &&
+        finalUrl.searchParams.get("id") !== target.searchParams.get("id"))
+    ) {
+      throw new Error("Realbooru redirected to an unexpected page.");
+    }
+  }
+  const contentType = response.headers?.get("content-type") || "";
+  if (!/\btext\/html\b/i.test(contentType)) {
     throw new Error(
-      `Local Realbooru scraper failed: ${cleanGelbooruReason(payload?.error)}`
+      `Realbooru returned unexpected content type ${contentType}.`,
     );
   }
+  const html = await response.text();
+  if (!html || html.length > REALBOORU_MAX_HTML_LENGTH) {
+    throw new Error("Realbooru returned empty or oversized HTML.");
+  }
+  return html;
+}
+
+async function scrapeRealbooruPosts(count) {
+  const firstListing = await parseRealbooruHtml(
+    "listing",
+    await fetchRealbooruHtml(realbooruListingUrl()),
+  );
+  const pageCount =
+    Math.floor(
+      Math.max(0, Number(firstListing.maxPid) || 0) / REALBOORU_PAGE_SIZE,
+    ) + 1;
+  const selectedPid = randomInt(pageCount) * REALBOORU_PAGE_SIZE;
+  const listing =
+    selectedPid > 0
+      ? await parseRealbooruHtml(
+          "listing",
+          await fetchRealbooruHtml(realbooruListingUrl(selectedPid)),
+        )
+      : firstListing;
+  const candidates = Array.isArray(listing.posts) ? listing.posts : [];
+  const eligible = candidates.filter((post) =>
+    hasEligibleRealbooruTags(post.tags),
+  );
+  for (let index = eligible.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomInt(index + 1);
+    [eligible[index], eligible[swapIndex]] = [
+      eligible[swapIndex],
+      eligible[index],
+    ];
+  }
+
+  const posts = [];
+  for (const candidate of eligible) {
+    if (posts.length >= count) break;
+    try {
+      const detail = await parseRealbooruHtml(
+        "detail",
+        await fetchRealbooruHtml(candidate.postUrl),
+        candidate.id,
+      );
+      posts.push({ ...detail, tags: candidate.tags });
+    } catch (error) {
+      console.warn(
+        `Skipped unverifiable Realbooru post ${candidate.id}.`,
+        error,
+      );
+    }
+  }
   return {
-    returnedPosts: Array.isArray(payload.posts) ? payload.posts.length : 0,
-    posts: parseRealbooruResponse(payload)
+    returnedPosts: candidates.length,
+    posts: parseRealbooruResponse({ posts }),
   };
 }
 
-async function testRealbooruConnection(realbooruEndpoint) {
-  const settings = normalizeSettings({
-    realbooruEndpoint,
-    avatarMode: "realbooru"
-  });
+async function requestRealbooruPosts(_settings, count = REALBOORU_BATCH_SIZE) {
+  if (!(await hasRealbooruPermission())) {
+    throw new Error("Realbooru site permission has not been granted.");
+  }
+  const boundedCount = Math.min(20, Math.max(1, Number(count) || 1));
+  const next = realbooruScrapeQueue
+    .catch(() => {})
+    .then(async () => {
+      try {
+        return await scrapeRealbooruPosts(boundedCount);
+      } finally {
+        await closeRealbooruParser();
+      }
+    });
+  realbooruScrapeQueue = next.catch(() => {});
+  return next;
+}
+
+async function testRealbooruConnection() {
+  const settings = normalizeSettings({ avatarMode: "realbooru" });
   const result = await requestRealbooruPosts(settings, 3);
   return {
-    endpoint: settings.realbooruEndpoint,
+    query: REALBOORU_QUERY_TAGS,
     returnedPosts: result.returnedPosts,
     usablePosts: result.posts.length,
     message:
       result.posts.length > 0
-        ? "The local scraper and Realbooru post filtering both work."
-        : "The local scraper responded, but this random page had no eligible solo selfies."
+        ? "The extension-native Realbooru fetcher and local filtering both work."
+        : "Realbooru responded, but this random page had no eligible solo selfies.",
   };
 }
 
@@ -485,7 +866,7 @@ function validateGelbooruSettings(settings) {
   }
   if (!/^\d+$/.test(String(settings.gelbooruUserId))) {
     throw new Error(
-      "Gelbooru user ID must be numeric, not a username. Copy the digits shown beside your API key or in your profile URL."
+      "Gelbooru user ID must be numeric, not a username. Copy the digits shown beside your API key or in your profile URL.",
     );
   }
 }
@@ -508,7 +889,7 @@ async function readGelbooruResponse(response) {
 
   if (/captcha|cloudflare|checking your browser|just a moment/i.test(rawText)) {
     throw new Error(
-      "Gelbooru returned a CAPTCHA/Cloudflare page instead of API data. This is a Gelbooru-side block; wait a little and test again."
+      "Gelbooru returned a CAPTCHA/Cloudflare page instead of API data. This is a Gelbooru-side block; wait a little and test again.",
     );
   }
 
@@ -516,7 +897,7 @@ async function readGelbooruResponse(response) {
     return JSON.parse(rawText);
   } catch {
     throw new Error(
-      "Gelbooru returned a non-JSON response. The API may be temporarily blocked or unavailable."
+      "Gelbooru returned a non-JSON response. The API may be temporarily blocked or unavailable.",
     );
   }
 }
@@ -536,7 +917,7 @@ async function requestGelbooruPage(settings, pid, limit = 100) {
     pid: String(pid),
     tags: GELBOORU_QUERY_TAGS,
     user_id: settings.gelbooruUserId,
-    api_key: settings.gelbooruApiKey
+    api_key: settings.gelbooruApiKey,
   });
 
   let response;
@@ -544,8 +925,8 @@ async function requestGelbooruPage(settings, pid, limit = 100) {
     response = await fetch(`https://gelbooru.com/index.php?${query}`, {
       credentials: "omit",
       headers: {
-        Accept: "application/json"
-      }
+        Accept: "application/json",
+      },
     });
   } catch (error) {
     throw new Error(`Could not reach Gelbooru: ${error.message}`);
@@ -553,16 +934,21 @@ async function requestGelbooruPage(settings, pid, limit = 100) {
 
   if (!response.ok) {
     throw new Error(
-      `Gelbooru API returned HTTP ${response.status}. Check the numeric user ID, API key, and try again later.`
+      `Gelbooru API returned HTTP ${response.status}. Check the numeric user ID, API key, and try again later.`,
     );
   }
 
   const payload = await readGelbooruResponse(response);
-  if (payload?.success === false || payload?.["@attributes"]?.success === "false") {
+  if (
+    payload?.success === false ||
+    payload?.["@attributes"]?.success === "false"
+  ) {
     const reason = cleanGelbooruReason(
-      payload.reason || payload.message || payload?.["@attributes"]?.reason
+      payload.reason || payload.message || payload?.["@attributes"]?.reason,
     );
-    throw new Error(`Gelbooru API rejected the request${reason ? `: ${reason}` : "."}`);
+    throw new Error(
+      `Gelbooru API rejected the request${reason ? `: ${reason}` : "."}`,
+    );
   }
 
   const rawPosts = Array.isArray(payload)
@@ -577,7 +963,7 @@ async function requestGelbooruPage(settings, pid, limit = 100) {
   return {
     rawCount: rawPosts.length,
     totalCount: Number.isFinite(totalCount) ? totalCount : rawPosts.length,
-    posts: parseGelbooruResponse(payload, settings.gelbooruRatingMode)
+    posts: parseGelbooruResponse(payload, settings.gelbooruRatingMode),
   };
 }
 
@@ -587,11 +973,11 @@ async function refillGelbooruPool(state, settings) {
     firstPageResult = await requestGelbooruPage(
       settings,
       0,
-      GELBOORU_PAGE_SIZE
+      GELBOORU_PAGE_SIZE,
     );
     state.gelbooruPageCount = Math.max(
       1,
-      Math.ceil(firstPageResult.totalCount / GELBOORU_PAGE_SIZE)
+      Math.ceil(firstPageResult.totalCount / GELBOORU_PAGE_SIZE),
     );
   }
 
@@ -599,7 +985,9 @@ async function refillGelbooruPool(state, settings) {
   let page = randomInt(state.gelbooruPageCount);
   for (
     let attempt = 0;
-    attempt < 12 && recentPages.has(page) && recentPages.size < state.gelbooruPageCount;
+    attempt < 12 &&
+    recentPages.has(page) &&
+    recentPages.size < state.gelbooruPageCount;
     attempt += 1
   ) {
     page = randomInt(state.gelbooruPageCount);
@@ -612,13 +1000,13 @@ async function refillGelbooruPool(state, settings) {
 
   state.gelbooruRecentPages.push(page);
   state.gelbooruRecentPages = state.gelbooruRecentPages.slice(
-    -Math.min(20, Math.max(1, state.gelbooruPageCount - 1))
+    -Math.min(20, Math.max(1, state.gelbooruPageCount - 1)),
   );
 
   const queuedIds = new Set(state.gelbooruPool.map((post) => post.id));
   const queuedUrls = new Set(state.gelbooruPool.map((post) => post.url));
   const queuedFingerprints = new Set(
-    state.gelbooruPool.map((post) => post.fingerprint).filter(Boolean)
+    state.gelbooruPool.map((post) => post.fingerprint).filter(Boolean),
   );
   const unused = result.posts.filter(
     (post) =>
@@ -627,7 +1015,7 @@ async function refillGelbooruPool(state, settings) {
       (!post.fingerprint || !state.usedAvatarFingerprints[post.fingerprint]) &&
       !queuedIds.has(post.id) &&
       !queuedUrls.has(post.url) &&
-      (!post.fingerprint || !queuedFingerprints.has(post.fingerprint))
+      (!post.fingerprint || !queuedFingerprints.has(post.fingerprint)),
   );
 
   for (let index = unused.length - 1; index > 0; index -= 1) {
@@ -643,7 +1031,7 @@ async function refillRealbooruPool(state, settings) {
   const queuedIds = new Set(state.realbooruPool.map((post) => post.id));
   const queuedUrls = new Set(state.realbooruPool.map((post) => post.url));
   const queuedFingerprints = new Set(
-    state.realbooruPool.map((post) => post.fingerprint).filter(Boolean)
+    state.realbooruPool.map((post) => post.fingerprint).filter(Boolean),
   );
   const unused = result.posts.filter(
     (post) =>
@@ -652,7 +1040,7 @@ async function refillRealbooruPool(state, settings) {
       (!post.fingerprint || !state.usedAvatarFingerprints[post.fingerprint]) &&
       !queuedIds.has(post.id) &&
       !queuedUrls.has(post.url) &&
-      (!post.fingerprint || !queuedFingerprints.has(post.fingerprint))
+      (!post.fingerprint || !queuedFingerprints.has(post.fingerprint)),
   );
 
   for (let index = unused.length - 1; index > 0; index -= 1) {
@@ -667,8 +1055,7 @@ function recordGelbooruUse(state, avatar, primaryKey, action) {
   const source = avatar.source || "gelbooru";
   if (
     !state.gelbooruHistory.some(
-      (item) =>
-        (item.source || "gelbooru") === source && item.id === avatar.id
+      (item) => (item.source || "gelbooru") === source && item.id === avatar.id,
     )
   ) {
     state.gelbooruHistory.push({
@@ -679,7 +1066,7 @@ function recordGelbooruUse(state, avatar, primaryKey, action) {
       fingerprint: avatar.fingerprint || "",
       primaryKey,
       action,
-      usedAt: Date.now()
+      usedAt: Date.now(),
     });
     state.gelbooruHistory = state.gelbooruHistory.slice(-1000);
   }
@@ -688,13 +1075,13 @@ function recordGelbooruUse(state, avatar, primaryKey, action) {
 async function testGelbooruConnection(
   gelbooruUserId,
   gelbooruApiKey,
-  gelbooruRatingMode = "any"
+  gelbooruRatingMode = "any",
 ) {
   const settings = normalizeSettings({
     avatarMode: "gelbooru",
     gelbooruRatingMode,
     gelbooruUserId: String(gelbooruUserId || "").trim(),
-    gelbooruApiKey: String(gelbooruApiKey || "").trim()
+    gelbooruApiKey: String(gelbooruApiKey || "").trim(),
   });
   const result = await requestGelbooruPage(settings, 0, 100);
   const usablePosts = result.posts.length;
@@ -709,7 +1096,7 @@ async function testGelbooruConnection(
         ? "Authentication and image filtering both work."
         : result.rawCount > 0
           ? "Authentication works, but this page had no solo selfies accepted by the local filters."
-          : "Authentication works, but Gelbooru returned no posts for this query."
+          : "Authentication works, but Gelbooru returned no posts for this query.",
   };
 }
 
@@ -720,8 +1107,7 @@ async function takeGelbooruAvatar(state, settings) {
       if (
         state.usedAvatarIds[avatar.id] ||
         state.usedAvatarUrls[avatar.url] ||
-        (avatar.fingerprint &&
-          state.usedAvatarFingerprints[avatar.fingerprint])
+        (avatar.fingerprint && state.usedAvatarFingerprints[avatar.fingerprint])
       ) {
         continue;
       }
@@ -749,8 +1135,7 @@ async function takeRealbooruAvatar(state, settings) {
       if (
         state.usedRealbooruIds[avatar.id] ||
         state.usedAvatarUrls[avatar.url] ||
-        (avatar.fingerprint &&
-          state.usedAvatarFingerprints[avatar.fingerprint])
+        (avatar.fingerprint && state.usedAvatarFingerprints[avatar.fingerprint])
       ) {
         continue;
       }
@@ -793,7 +1178,7 @@ async function takeConfiguredRemoteAvatar(state, settings) {
 
 function takeCustomAvatar(state, key) {
   const availableIds = Object.keys(state.customAvatars).filter(
-    (id) => !state.usedCustomAvatarIds[id]
+    (id) => !state.usedCustomAvatarIds[id],
   );
   if (availableIds.length === 0) {
     throw new Error("The imported avatar pack has no unused images.");
@@ -805,7 +1190,7 @@ function takeCustomAvatar(state, key) {
   return {
     id,
     url: state.customAvatars[id].url,
-    detection: state.customAvatars[id].detection || "smart"
+    detection: state.customAvatars[id].detection || "smart",
   };
 }
 
@@ -823,7 +1208,7 @@ function faceCrop(bitmap, face) {
     x: clamp(centerX - side / 2, 0, bitmap.width - side),
     y: clamp(centerY - side / 2, 0, bitmap.height - side),
     side,
-    mode: "face"
+    mode: "face",
   };
 }
 
@@ -832,7 +1217,7 @@ async function detectFaceCrop(bitmap) {
   try {
     const detector = new FaceDetector({
       fastMode: true,
-      maxDetectedFaces: 5
+      maxDetectedFaces: 5,
     });
     const faces = await detector.detect(bitmap);
     if (!faces.length) return null;
@@ -859,7 +1244,9 @@ function smartBitmapCrop(bitmap) {
 
   const luminance = (x, y) => {
     const index = (y * width + x) * 4;
-    return data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+    return (
+      data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114
+    );
   };
 
   let total = 0;
@@ -890,7 +1277,7 @@ function smartBitmapCrop(bitmap) {
     x: clamp(centerX - side / 2, 0, bitmap.width - side),
     y: clamp(centerY - side / 2, 0, bitmap.height - side),
     side,
-    mode: "smart"
+    mode: "smart",
   };
 }
 
@@ -905,9 +1292,10 @@ async function blobToDataUrl(blob) {
 
 async function cropRemoteAvatar(url) {
   const response = await fetch(url, {
-    credentials: "omit"
+    credentials: "omit",
   });
-  if (!response.ok) throw new Error(`Avatar image returned HTTP ${response.status}.`);
+  if (!response.ok)
+    throw new Error(`Avatar image returned HTTP ${response.status}.`);
 
   const sourceBlob = await response.blob();
   if (sourceBlob.type && !/^image\//i.test(sourceBlob.type)) {
@@ -916,7 +1304,7 @@ async function cropRemoteAvatar(url) {
 
   const cachedOriginal = async () => ({
     url: await blobToDataUrl(sourceBlob),
-    mode: "cached"
+    mode: "cached",
   });
 
   if (
@@ -947,15 +1335,15 @@ async function cropRemoteAvatar(url) {
         0,
         0,
         canvas.width,
-        canvas.height
+        canvas.height,
       );
       const avatarBlob = await canvas.convertToBlob({
         type: "image/webp",
-        quality: 0.8
+        quality: 0.8,
       });
       return {
         url: await blobToDataUrl(avatarBlob),
-        mode: crop.mode
+        mode: crop.mode,
       };
     } catch {
       return cachedOriginal();
@@ -979,7 +1367,7 @@ async function ensureIdentityAvatarCropped(identity, state) {
   } catch (error) {
     identity.avatarUrl = generatedAvatar(
       identity.handle || identity.avatarId || "fallback",
-      identity.displayName
+      identity.displayName,
     );
     identity.avatarCropMode = "fallback";
     state.lastAvatarError = `Remote image cache failed: ${error.message}`;
@@ -993,7 +1381,7 @@ async function createAvatar(primaryKey, displayName, state, settings) {
     kind: "generated",
     id: `generated:${generatedSeed}`,
     url: generatedAvatar(generatedSeed, displayName),
-    postUrl: ""
+    postUrl: "",
   };
 
   if (["gelbooru", "realbooru", "mixed"].includes(settings.avatarMode)) {
@@ -1003,7 +1391,7 @@ async function createAvatar(primaryKey, displayName, state, settings) {
         state,
         gelbooruAvatar,
         primaryKey,
-        "initial-assignment"
+        "initial-assignment",
       );
       avatar = {
         kind: gelbooruAvatar.source || "gelbooru",
@@ -1011,7 +1399,7 @@ async function createAvatar(primaryKey, displayName, state, settings) {
         url: gelbooruAvatar.url,
         postUrl: gelbooruAvatar.postUrl,
         sourceUrl: gelbooruAvatar.url,
-        fingerprint: gelbooruAvatar.fingerprint
+        fingerprint: gelbooruAvatar.fingerprint,
       };
       state.lastAvatarError = "";
     } catch (error) {
@@ -1024,7 +1412,7 @@ async function createAvatar(primaryKey, displayName, state, settings) {
         kind: "custom",
         id: customAvatar.id,
         url: customAvatar.url,
-        postUrl: ""
+        postUrl: "",
       };
       state.lastAvatarError = "";
     } catch (error) {
@@ -1037,7 +1425,12 @@ async function createAvatar(primaryKey, displayName, state, settings) {
 
 async function createIdentity(primaryKey, state, settings) {
   const name = createName(primaryKey, state);
-  const avatar = await createAvatar(primaryKey, name.displayName, state, settings);
+  const avatar = await createAvatar(
+    primaryKey,
+    name.displayName,
+    state,
+    settings,
+  );
 
   return {
     aliasStyleVersion: 2,
@@ -1054,7 +1447,7 @@ async function createIdentity(primaryKey, state, settings) {
         ? "generated"
         : avatar.kind === "custom"
           ? "imported"
-          : ""
+          : "",
   };
 }
 
@@ -1090,7 +1483,7 @@ async function migrateAvatarMode(identity, canonicalKey, state, settings) {
     canonicalKey,
     identity.displayName,
     state,
-    settings
+    settings,
   );
   identity.avatarUrl = avatar.url;
   identity.avatarKind = avatar.kind;
@@ -1116,15 +1509,17 @@ function resolveCanonicalKey(state, keys) {
 }
 
 function queueStateMutation(mutator) {
-  const operation = stateQueue.catch(() => undefined).then(async () => {
-    const [settings, state] = await Promise.all([getSettings(), getState()]);
-    const result = await mutator(state, settings);
-    await chrome.storage.local.set({ [STATE_KEY]: state });
-    return result;
-  });
+  const operation = stateQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const [settings, state] = await Promise.all([getSettings(), getState()]);
+      const result = await mutator(state, settings);
+      await chrome.storage.local.set({ [STATE_KEY]: state });
+      return result;
+    });
   stateQueue = operation.then(
     () => undefined,
-    () => undefined
+    () => undefined,
   );
   return operation;
 }
@@ -1138,7 +1533,7 @@ async function resolveIdentityInState(primaryKey, aliases, state, settings) {
     state.identities[canonicalKey] = await createIdentity(
       canonicalKey,
       state,
-      settings
+      settings,
     );
   } else {
     migrateIdentityStyle(state.identities[canonicalKey], canonicalKey, state);
@@ -1146,7 +1541,7 @@ async function resolveIdentityInState(primaryKey, aliases, state, settings) {
       state.identities[canonicalKey],
       canonicalKey,
       state,
-      settings
+      settings,
     );
   }
 
@@ -1160,7 +1555,7 @@ async function resolveIdentity(primaryKey, aliases = []) {
       primaryKey,
       aliases,
       state,
-      settings
+      settings,
     );
     await ensureIdentityAvatarCropped(identity, state);
     return identity;
@@ -1179,12 +1574,12 @@ async function resolveIdentities(items = []) {
           item.primaryKey,
           aliases,
           state,
-          settings
-        )
+          settings,
+        ),
       });
     }
     await Promise.all(
-      results.map((item) => ensureIdentityAvatarCropped(item.identity, state))
+      results.map((item) => ensureIdentityAvatarCropped(item.identity, state)),
     );
     return results;
   });
@@ -1192,12 +1587,10 @@ async function resolveIdentities(items = []) {
 
 async function rotateAvatar(primaryKey, aliases = []) {
   const outcome = await queueStateMutation(async (state, settings) => {
-    if (
-      !["gelbooru", "realbooru", "mixed"].includes(settings.avatarMode)
-    ) {
+    if (!["gelbooru", "realbooru", "mixed"].includes(settings.avatarMode)) {
       return {
         error:
-          "Click-to-change pictures is available in Gelbooru, Realbooru, or mixed mode."
+          "Click-to-change pictures is available in Gelbooru, Realbooru, or mixed mode.",
       };
     }
 
@@ -1240,7 +1633,67 @@ async function rotateAvatar(primaryKey, aliases = []) {
   });
 
   if (outcome.error) throw new Error(outcome.error);
+  await signalIdentityRefresh("pictures");
   return outcome;
+}
+
+async function reenableRemoteAvatar(sourceValue, idValue) {
+  const source = String(sourceValue || "").toLowerCase();
+  const id = String(idValue || "");
+  if (!["gelbooru", "realbooru"].includes(source) || !id) {
+    throw new Error("A valid retired remote picture is required.");
+  }
+
+  return queueStateMutation((state) => {
+    const index = state.gelbooruHistory.findIndex(
+      (item) =>
+        (item.source || "gelbooru") === source && String(item.id) === id,
+    );
+    if (index < 0) throw new Error("The retired picture was not found.");
+
+    const retired = state.gelbooruHistory[index];
+    const assigned = Object.values(state.identities).some(
+      (identity) =>
+        (identity.avatarKind === source && String(identity.avatarId) === id) ||
+        (retired.sourceUrl && identity.avatarSourceUrl === retired.sourceUrl) ||
+        (retired.fingerprint &&
+          identity.avatarFingerprint === retired.fingerprint),
+    );
+    if (assigned) {
+      throw new Error("A currently assigned picture cannot be re-enabled.");
+    }
+
+    state.gelbooruHistory.splice(index, 1);
+    const idMap =
+      source === "realbooru" ? state.usedRealbooruIds : state.usedAvatarIds;
+    if (
+      !state.gelbooruHistory.some(
+        (item) =>
+          (item.source || "gelbooru") === source && String(item.id) === id,
+      )
+    ) {
+      delete idMap[id];
+    }
+
+    const stillReferences = (historyKey, identityKey, value) =>
+      value &&
+      (state.gelbooruHistory.some((item) => item[historyKey] === value) ||
+        Object.values(state.identities).some(
+          (identity) => identity[identityKey] === value,
+        ));
+    if (
+      retired.sourceUrl &&
+      !stillReferences("sourceUrl", "avatarSourceUrl", retired.sourceUrl)
+    ) {
+      delete state.usedAvatarUrls[retired.sourceUrl];
+    }
+    if (
+      retired.fingerprint &&
+      !stillReferences("fingerprint", "avatarFingerprint", retired.fingerprint)
+    ) {
+      delete state.usedAvatarFingerprints[retired.fingerprint];
+    }
+  });
 }
 
 async function updateSettings(patch) {
@@ -1261,7 +1714,7 @@ async function resetMappings() {
     gelbooruHistory: previous.gelbooruHistory,
     realbooruPool: previous.realbooruPool,
     gelbooruPageCount: previous.gelbooruPageCount,
-    gelbooruRecentPages: previous.gelbooruRecentPages
+    gelbooruRecentPages: previous.gelbooruRecentPages,
   });
   await chrome.storage.local.set({ [STATE_KEY]: next });
 }
@@ -1270,8 +1723,8 @@ async function signalIdentityRefresh(kind) {
   await chrome.storage.local.set({
     [CONTROL_KEY]: {
       kind,
-      at: Date.now()
-    }
+      at: Date.now(),
+    },
   });
 }
 
@@ -1289,7 +1742,7 @@ async function resetNames() {
         const candidate = createName(
           `${canonicalKey}:name:${state.nameResetGeneration}:${attempt}`,
           state,
-          canonicalKey
+          canonicalKey,
         );
         if (
           candidate.displayName !== previousDisplayName &&
@@ -1308,8 +1761,8 @@ async function resetNames() {
         handle: uniqueHandle(
           `${previousHandle || "girl"}x`,
           state,
-          canonicalKey
-        )
+          canonicalKey,
+        ),
       };
       identity.displayName = replacement.displayName;
       identity.handle = replacement.handle;
@@ -1347,7 +1800,7 @@ async function addCustomAvatars(avatars = []) {
       if (!avatar?.id || !/^data:image\//i.test(avatar.url || "")) continue;
       state.customAvatars[avatar.id] = {
         url: avatar.url,
-        detection: avatar.detection || "smart"
+        detection: avatar.detection || "smart",
       };
     }
     return Object.keys(state.customAvatars).length;
@@ -1362,7 +1815,10 @@ async function clearCustomAvatars() {
       if (identity.avatarKind !== "custom") continue;
       identity.avatarKind = "generated";
       identity.avatarId = `generated:${identity.handle}`;
-      identity.avatarUrl = generatedAvatar(identity.handle, identity.displayName);
+      identity.avatarUrl = generatedAvatar(
+        identity.handle,
+        identity.displayName,
+      );
       identity.avatarPostUrl = "";
       identity.avatarCropMode = "generated";
     }
@@ -1382,8 +1838,58 @@ async function getStats() {
     importedAvatars: Object.keys(state.customAvatars).length,
     usedImportedAvatars: Object.keys(state.usedCustomAvatarIds).length,
     queuedAnimeSelfies: state.gelbooruPool.length,
-    lastAvatarError: state.lastAvatarError
+    lastAvatarError: state.lastAvatarError,
   };
+}
+
+async function getAvatarManagementView() {
+  const state = await getState();
+  const currentIds = new Set();
+  const currentUrls = new Set();
+  const currentFingerprints = new Set();
+
+  const current = Object.entries(state.identities).map(
+    ([primaryKey, identity]) => {
+      const source = ["gelbooru", "realbooru"].includes(identity.avatarKind)
+        ? identity.avatarKind
+        : "";
+      if (source && identity.avatarId) {
+        currentIds.add(`${source}:${identity.avatarId}`);
+      }
+      if (identity.avatarSourceUrl) currentUrls.add(identity.avatarSourceUrl);
+      if (identity.avatarFingerprint) {
+        currentFingerprints.add(identity.avatarFingerprint);
+      }
+      return {
+        primaryKey,
+        displayName: identity.displayName || "Masked account",
+        handle: identity.handle || "",
+        avatarUrl: identity.avatarUrl || "",
+        avatarKind: identity.avatarKind || "generated",
+      };
+    },
+  );
+
+  const retired = state.gelbooruHistory
+    .slice()
+    .reverse()
+    .filter((item) => {
+      const source = item.source || "gelbooru";
+      return (
+        !currentIds.has(`${source}:${item.id}`) &&
+        (!item.sourceUrl || !currentUrls.has(item.sourceUrl)) &&
+        (!item.fingerprint || !currentFingerprints.has(item.fingerprint))
+      );
+    })
+    .map(({ source, id, sourceUrl, postUrl, fingerprint }) => ({
+      source: source || "gelbooru",
+      id,
+      sourceUrl: sourceUrl || "",
+      postUrl: postUrl || "",
+      fingerprint: fingerprint || "",
+    }));
+
+  return { current, retired };
 }
 
 async function getGelbooruHistory() {
@@ -1396,19 +1902,1415 @@ async function getGelbooruHistory() {
       id,
       postUrl,
       action,
-      usedAt
+      usedAt,
     }));
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
-  const current = await chrome.storage.local.get([SETTINGS_KEY, STATE_KEY]);
-  const writes = {};
-  if (!current[SETTINGS_KEY]) writes[SETTINGS_KEY] = normalizeSettings();
-  if (!current[STATE_KEY]) writes[STATE_KEY] = normalizeState();
-  if (Object.keys(writes).length > 0) await chrome.storage.local.set(writes);
+const CREATOR_SCRIPT_DEFINITIONS = Object.freeze([
+  {
+    id: "creator-toolkit-upload-trace-onlyfans",
+    toolIds: ["uploadTraceRecorder"],
+    origins: ["https://onlyfans.com/*"],
+    matches: ["https://onlyfans.com/*"],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
+    id: "creator-toolkit-upload-trace-fansly",
+    toolIds: ["uploadTraceRecorder"],
+    origins: ["https://fansly.com/*"],
+    matches: ["https://fansly.com/*"],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
+    id: "creator-toolkit-upload-trace-manyvids",
+    toolIds: ["uploadTraceRecorder"],
+    origins: ["https://www.manyvids.com/*"],
+    matches: ["https://www.manyvids.com/*"],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
+    id: "creator-toolkit-upload-trace-pornhub",
+    toolIds: ["uploadTraceRecorder"],
+    origins: ["https://pornhub.mainhub.com/*"],
+    matches: ["https://pornhub.mainhub.com/*"],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
+    id: "creator-toolkit-c4s",
+    toolIds: ["c4sUpload"],
+    origins: ["https://workspace.clips4sale.com/*"],
+    matches: ["https://workspace.clips4sale.com/upload*"],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/c4s-upload.js",
+    ],
+    runAt: "document_idle",
+  },
+  {
+    id: "creator-toolkit-pornhub",
+    toolIds: ["phUploader"],
+    origins: ["https://pornhub.mainhub.com/*"],
+    matches: ["https://pornhub.mainhub.com/upload/uploader*"],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/ph-uploader.js",
+    ],
+    runAt: "document_idle",
+  },
+  {
+    id: "creator-toolkit-fansly",
+    toolIds: ["fanslyPrefill"],
+    origins: ["https://fansly.com/*"],
+    matches: ["https://fansly.com/*"],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/fansly-prefill.js",
+    ],
+    runAt: "document_idle",
+  },
+  {
+    id: "creator-toolkit-manyvids",
+    toolIds: ["manyvidsAutofill"],
+    origins: ["https://www.manyvids.com/*"],
+    matches: ["https://www.manyvids.com/Edit-vid/*"],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/manyvids-autofill.js",
+    ],
+    runAt: "document_idle",
+  },
+  {
+    id: "creator-toolkit-sheer",
+    toolIds: ["sheerTags"],
+    origins: ["https://my.sheer.com/*"],
+    matches: ["https://my.sheer.com/content/update/*"],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/sheer-tags.js",
+    ],
+    runAt: "document_idle",
+  },
+  {
+    id: "creator-toolkit-onlyfans-lists",
+    toolIds: ["onlyfansAutoSelect", "onlyfansAutoFollow"],
+    origins: ["https://onlyfans.com/*"],
+    matches: ["https://onlyfans.com/my/collections/user-lists*"],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/onlyfans-list-common.js",
+      "creator-tools/onlyfans-auto-select.js",
+      "creator-tools/onlyfans-auto-follow.js",
+    ],
+    runAt: "document_idle",
+  },
+  {
+    id: "creator-toolkit-reddit",
+    toolIds: ["redditBannerCensor"],
+    origins: [
+      "https://www.reddit.com/*",
+      "https://sh.reddit.com/*",
+      "https://old.reddit.com/*",
+    ],
+    matches: [
+      "https://www.reddit.com/r/*",
+      "https://sh.reddit.com/r/*",
+      "https://old.reddit.com/r/*",
+    ],
+    js: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/reddit-banner-censor.js",
+    ],
+    runAt: "document_start",
+  },
+]);
+
+async function getCreatorSettings() {
+  const stored = await chrome.storage.local.get([
+    CREATOR_REGISTRY.STORAGE_KEY,
+    CREATOR_REGISTRY.LEGACY_STORAGE_KEY,
+  ]);
+  if (stored[CREATOR_REGISTRY.STORAGE_KEY]) {
+    return CREATOR_REGISTRY.normalizeSettings(
+      stored[CREATOR_REGISTRY.STORAGE_KEY],
+    ).value;
+  }
+  const migrated = CREATOR_REGISTRY.migrateLegacySettings(
+    stored[CREATOR_REGISTRY.LEGACY_STORAGE_KEY],
+  );
+  await chrome.storage.local.set({
+    [CREATOR_REGISTRY.STORAGE_KEY]: migrated,
+  });
+  return migrated;
+}
+
+async function hasAllOrigins(origins) {
+  return chrome.permissions.contains({ origins });
+}
+
+function creatorDefinitionMatchesUrl(definition, url) {
+  try {
+    const currentOrigin = new URL(url).origin;
+    return definition.matches.some(
+      (match) => new URL(match.replace(/\*$/, "")).origin === currentOrigin,
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function performCreatorToolRegistrationSync(settings = null) {
+  const currentSettings = settings || (await getCreatorSettings());
+  const knownIds = CREATOR_SCRIPT_DEFINITIONS.map(
+    (definition) => definition.id,
+  );
+  const existing = await chrome.scripting.getRegisteredContentScripts({
+    ids: knownIds,
+  });
+  if (existing.length) {
+    await chrome.scripting.unregisterContentScripts({
+      ids: existing.map((entry) => entry.id),
+    });
+  }
+
+  const registrations = [];
+  const activeDefinitions = [];
+  const skipped = [];
+  for (const definition of CREATOR_SCRIPT_DEFINITIONS) {
+    const enabled = definition.toolIds.some(
+      (toolId) => currentSettings.tools[toolId]?.enabled === true,
+    );
+    if (!enabled) continue;
+    if (!(await hasAllOrigins(definition.origins))) {
+      skipped.push({
+        id: definition.id,
+        reason: "required optional site permission is not granted",
+      });
+      continue;
+    }
+    registrations.push({
+      id: definition.id,
+      matches: definition.matches,
+      js: definition.js,
+      runAt: definition.runAt,
+      allFrames: false,
+      persistAcrossSessions: true,
+      world: "ISOLATED",
+    });
+    activeDefinitions.push(definition);
+  }
+  if (registrations.length) {
+    await chrome.scripting.registerContentScripts(registrations);
+  }
+  for (const definition of activeDefinitions.filter((entry) =>
+    entry.toolIds.includes("uploadTraceRecorder"),
+  )) {
+    const tabs = await chrome.tabs.query({ url: definition.matches });
+    for (const tab of tabs) {
+      try {
+        const frames = await chrome.webNavigation.getAllFrames({
+          tabId: tab.id,
+        });
+        const mainFrame = frames?.find((frame) => frame.frameId === 0);
+        if (
+          !mainFrame?.documentId ||
+          !creatorDefinitionMatchesUrl(definition, mainFrame.url)
+        ) {
+          continue;
+        }
+        await chrome.scripting.executeScript({
+          target: {
+            tabId: tab.id,
+            documentIds: [mainFrame.documentId],
+          },
+          files: definition.js,
+        });
+      } catch (error) {
+        console.warn(
+          `Could not mount ${definition.id} in tab ${tab.id}.`,
+          error,
+        );
+      }
+    }
+  }
+  return {
+    registered: registrations.map((entry) => entry.id),
+    skipped,
+  };
+}
+
+let creatorRegistrationSync = Promise.resolve();
+
+function syncCreatorToolRegistrations(settings = null) {
+  const next = creatorRegistrationSync
+    .catch(() => {})
+    .then(() => performCreatorToolRegistrationSync(settings));
+  creatorRegistrationSync = next.catch(() => {});
+  return next;
+}
+
+const CREATOR_UPLOAD_TARGETS = Object.freeze({
+  onlyfans: Object.freeze({
+    match: "https://onlyfans.com/*",
+    landingUrl: "https://onlyfans.com/posts/create",
+    origin: "https://onlyfans.com",
+  }),
+  fansly: Object.freeze({
+    match: "https://fansly.com/*",
+    landingUrl: "https://fansly.com/",
+    origin: "https://fansly.com",
+  }),
+  manyvids: Object.freeze({
+    match: "https://www.manyvids.com/*",
+    landingUrl: "https://www.manyvids.com/upload-video",
+    origin: "https://www.manyvids.com",
+  }),
+});
+const CREATOR_UPLOAD_PROBE_FILE = "creator-tools/upload-capability-probe.js";
+let uploadConsoleOpening = null;
+let uploadConsoleTabId = null;
+let uploadConsoleTabPending = false;
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (tabId !== uploadConsoleTabId) return;
+  const consoleUrl = chrome.runtime.getURL("upload-console.html");
+  if (changeInfo.url && changeInfo.url !== consoleUrl) {
+    uploadConsoleTabId = null;
+    uploadConsoleTabPending = false;
+    return;
+  }
+  if (changeInfo.status === "complete") uploadConsoleTabPending = false;
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+async function waitForCreatorTab(tabId, timeoutMs = 20000) {
+  await new Promise((resolve, reject) => {
+    let timeout;
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") finish();
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    timeout = setTimeout(
+      () => finish(new Error("Timed out waiting for the platform tab.")),
+      timeoutMs,
+    );
+    chrome.tabs
+      .get(tabId)
+      .then((current) => {
+        if (current?.status === "complete") finish();
+      })
+      .catch(finish);
+  });
+}
+
+function manyVidsRoute(url, stage) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== "https://www.manyvids.com") return null;
+    if (stage === "success" && /^\/upload-video\/?$/.test(parsed.pathname)) {
+      return { url: parsed.href };
+    }
+    const edit = /^\/Edit-vid\/(\d+)\/?$/.exec(parsed.pathname);
+    return stage === "edit" && edit
+      ? { url: parsed.href, manyvidsId: edit[1] }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForManyVidsRoute(tabId, stage, timeoutMs = 45 * 60_000) {
+  if (!new Set(["edit", "success"]).has(stage)) {
+    throw new Error("Invalid ManyVids navigation stage.");
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const inspect = async () => {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        const result = tab?.status === "complete" && manyVidsRoute(tab.url, stage);
+        if (result) finish(null, result);
+      } catch (error) {
+        finish(error);
+      }
+    };
+    const onUpdated = (updatedTabId) => {
+      if (updatedTabId === tabId) inspect();
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    const timeout = setTimeout(
+      () =>
+        finish(
+          new Error(`Timed out waiting for the ManyVids ${stage} page.`),
+        ),
+      timeoutMs,
+    );
+    inspect();
+  });
+}
+
+function creatorUrlMatches(url, definition) {
+  try {
+    return new URL(url).origin === definition.origin;
+  } catch {
+    return false;
+  }
+}
+
+const CREATOR_UPLOAD_SESSION_PATTERN = /^[a-f0-9]{48}$/;
+const CREATOR_UPLOAD_FILE_BRIDGE = "creator-tools/upload-file-bridge.js";
+const CREATOR_UPLOAD_ADAPTERS = "creator-tools/upload-platform-adapters.js";
+const CREATOR_UPLOAD_RESPONSE_OBSERVER =
+  "creator-tools/upload-response-observer.js";
+
+function installCreatorUploadFileBridge(config) {
+  return globalThis.CreatorUploadFileBridge.install(config);
+}
+
+function installCreatorUploadResponseObserver(config) {
+  return globalThis.CreatorUploadResponseObserver.install(config);
+}
+
+function cancelCreatorUploadResponseObserverInPage(config) {
+  globalThis.CreatorUploadResponseObserver?.cancel(
+    config.sessionId,
+    config.platform,
+  );
+}
+const creatorUploadSessions = new Map();
+const creatorUploadConsolePorts = new Set();
+const creatorUploadFileRequests = new Map();
+let creatorUploadRequestCounter = 0;
+
+function creatorUploadClean(value, maximum) {
+  return String(value || "")
+    .trim()
+    .slice(0, maximum);
+}
+
+function validateCreatorUploadRequest(message) {
+  const sessionId = creatorUploadClean(message?.sessionId, 64);
+  if (!CREATOR_UPLOAD_SESSION_PATTERN.test(sessionId)) {
+    throw new Error("Invalid creator upload session.");
+  }
+  const targets = Array.isArray(message.targets)
+    ? [...new Set(message.targets)]
+    : [];
+  if (
+    !targets.length ||
+    targets.length !== message.targets.length ||
+    targets.some(
+      (platform) =>
+        typeof platform !== "string" ||
+        !Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform),
+    )
+  ) {
+    throw new Error("Choose an allow-listed upload platform.");
+  }
+  const draft = {
+    title: creatorUploadClean(message.draft?.title, 500),
+    description: creatorUploadClean(message.draft?.description, 10_000),
+    fullFilename: creatorUploadClean(message.draft?.fullFilename, 500),
+    releaseDate: creatorUploadClean(message.draft?.releaseDate, 10),
+    scheduledIso: creatorUploadClean(message.draft?.scheduledIso, 40),
+    timeZone: creatorUploadClean(message.draft?.timeZone, 100),
+    fanslyPreset: creatorUploadClean(message.draft?.fanslyPreset, 100),
+    manyvidsThumbnail: message.draft?.manyvidsThumbnail === true,
+  };
+  const scheduled = new Date(draft.scheduledIso);
+  if (
+    !draft.title ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(draft.releaseDate) ||
+    Number.isNaN(scheduled.getTime()) ||
+    scheduled.toISOString().slice(0, 10) !== draft.releaseDate ||
+    scheduled.getUTCDay() !== 5 ||
+    scheduled.getUTCHours() !== 15 ||
+    scheduled.getUTCMinutes() !== 0 ||
+    scheduled.getUTCSeconds() !== 0
+  ) {
+    throw new Error("Creator uploads must target Friday at 15:00 UTC.");
+  }
+  if (targets.includes("fansly") && draft.fanslyPreset !== "defaulT") {
+    throw new Error("Fansly full media requires the exact defaulT preset.");
+  }
+  if (targets.includes("manyvids")) {
+    if (!draft.fullFilename) {
+      throw new Error("ManyVids requires the selected full-video filename.");
+    }
+    if (
+      Object.hasOwn(message.draft || {}, "manyvidsThumbnail") &&
+      typeof message.draft.manyvidsThumbnail !== "boolean"
+    ) {
+      throw new Error("Invalid ManyVids thumbnail selection.");
+    }
+    const profile = CREATOR_REGISTRY.DEFAULT_PROFILES.manyvidsAutofill;
+    draft.manyvids = {
+      coPerformer: profile.coPerformer,
+      price: profile.price,
+      priceModeLabel: profile.priceModeExpectedLabel,
+      launchModeWords: ["custom", "launch", "date"],
+      launchTimeLabel: profile.launchTimeLabel,
+      membershipLabel: profile.membershipExpectedLabel,
+      premiumLabel: profile.premiumExpectedLabel,
+      tags: [...profile.tags],
+    };
+  }
+  // Only an explicit upload-only confirmation may omit catalogue validation.
+  if (message.catalogue === null) {
+    return { sessionId, targets, draft, catalogue: null };
+  }
+  const catalogue = {
+    row: Number(message.catalogue?.row),
+    id: creatorUploadClean(message.catalogue?.id, 500),
+    releaseDate: creatorUploadClean(message.catalogue?.releaseDate, 10),
+    title: creatorUploadClean(message.catalogue?.title, 500),
+    description: creatorUploadClean(message.catalogue?.description, 10_000),
+    onlyfansLink: creatorUploadClean(message.catalogue?.onlyfansLink, 500),
+    fanslyLink: creatorUploadClean(message.catalogue?.fanslyLink, 500),
+    manyvidsLink: creatorUploadClean(message.catalogue?.manyvidsLink, 500),
+    fingerprint: creatorUploadClean(message.catalogue?.fingerprint, 64),
+    status: creatorUploadClean(message.catalogue?.status, 20),
+  };
+  if (
+    !Number.isInteger(catalogue.row) ||
+    catalogue.row < 2 ||
+    catalogue.row > 5000 ||
+    !catalogue.id ||
+    !catalogue.title ||
+    catalogue.releaseDate !== draft.releaseDate ||
+    !/^[a-f0-9]{8,64}$/i.test(catalogue.fingerprint) ||
+    !new Set(["matched", "new"]).has(catalogue.status)
+  ) {
+    throw new Error("Invalid catalogue upload preview.");
+  }
+  for (const platform of ["onlyfans", "fansly", "manyvids"]) {
+    const field = `${platform}Link`;
+    const raw = catalogue[field];
+    const canonical = raw
+      ? CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(platform, raw)
+      : "";
+    if (raw && !canonical) {
+      throw new Error(`Invalid ${platform} catalogue link.`);
+    }
+    catalogue[field] = canonical;
+    if (targets.includes(platform) && canonical) {
+      const label =
+        platform === "onlyfans"
+          ? "OnlyFans"
+          : platform === "fansly"
+            ? "Fansly"
+            : "ManyVids";
+      throw new Error(`Catalogue row already has a ${label} link.`);
+    }
+  }
+  return { sessionId, targets, draft, catalogue };
+}
+
+function creatorUploadRandomToken() {
+  const values = crypto.getRandomValues(new Uint8Array(24));
+  return [...values]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function creatorUploadPort(sessionId) {
+  return [...creatorUploadConsolePorts].find(
+    (port) => port.creatorUploadSessionId === sessionId,
+  );
+}
+
+function creatorUploadPost(sessionId, message) {
+  const port = creatorUploadPort(sessionId);
+  if (!port) throw new Error("The upload console is not connected.");
+  port.postMessage({ sessionId, ...message });
+}
+
+function creatorUploadRequestFile(session, platform, role) {
+  const target = session.platforms.get(platform);
+  const token = target?.tokens?.[role];
+  if (!token)
+    return Promise.reject(
+      new Error("The requested upload file role is unavailable."),
+    );
+  const port = creatorUploadPort(session.id);
+  if (!port) return Promise.reject(new Error("The upload console was closed."));
+  creatorUploadRequestCounter += 1;
+  const requestId = `${session.id}:${creatorUploadRequestCounter}`;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      creatorUploadFileRequests.delete(requestId);
+      reject(
+        new Error(
+          `Timed out waiting for the ${role} video in the upload console.`,
+        ),
+      );
+    }, 60 * 60_000);
+    creatorUploadFileRequests.set(requestId, {
+      port,
+      resolve,
+      reject,
+      timeout,
+    });
+    port.postMessage({
+      type: "file-request",
+      sessionId: session.id,
+      requestId,
+      platform,
+      role,
+      token,
+    });
+  });
+}
+
+function creatorUploadHandlePortMessage(port, message) {
+  if (message?.type === "bind-session") {
+    const sessionId = creatorUploadClean(message.sessionId, 64);
+    if (!CREATOR_UPLOAD_SESSION_PATTERN.test(sessionId)) {
+      port.disconnect();
+      return;
+    }
+    port.creatorUploadSessionId = sessionId;
+    return;
+  }
+  if (message?.type !== "file-response") return;
+  const pending = creatorUploadFileRequests.get(message.requestId);
+  if (!pending || pending.port !== port) return;
+  clearTimeout(pending.timeout);
+  creatorUploadFileRequests.delete(message.requestId);
+  if (message.ok) pending.resolve();
+  else
+    pending.reject(
+      new Error(
+        creatorUploadClean(message.error, 500) || "Video transfer failed.",
+      ),
+    );
+}
+
+chrome.runtime.onConnect?.addListener((port) => {
+  if (port.name !== "creator-upload-console") return;
+  creatorUploadConsolePorts.add(port);
+  port.onMessage.addListener((message) =>
+    creatorUploadHandlePortMessage(port, message),
+  );
+  port.onDisconnect.addListener(() => {
+    creatorUploadConsolePorts.delete(port);
+    for (const [requestId, pending] of creatorUploadFileRequests) {
+      if (pending.port !== port) continue;
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("The upload console was closed."));
+      creatorUploadFileRequests.delete(requestId);
+    }
+  });
+});
+
+async function probeCreatorUploadTarget(platform) {
+  const supported =
+    typeof platform === "string" &&
+    Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform);
+  if (!supported) return { platform, status: "unsupported" };
+  const definition = CREATOR_UPLOAD_TARGETS[platform];
+
+  try {
+    const matches = await chrome.tabs.query({ url: definition.match });
+    if (matches.length > 1) {
+      return { platform, status: "ambiguous-tabs", tabCount: matches.length };
+    }
+    const created = matches.length === 0;
+    const tab = created
+      ? await chrome.tabs.create({ url: definition.landingUrl, active: true })
+      : await chrome.tabs.update(matches[0].id, { active: true });
+    if (created) await waitForCreatorTab(tab.id);
+
+    const beforeProbe = await chrome.tabs.get(tab.id);
+    if (!creatorUrlMatches(beforeProbe?.url, definition)) {
+      throw new Error(
+        "The platform tab left its expected origin before inspection.",
+      );
+    }
+    const execution = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: [CREATOR_UPLOAD_PROBE_FILE],
+    });
+    const report = execution?.[0]?.result;
+    if (!report || typeof report.status !== "string") {
+      throw new Error("The platform probe returned no capability report.");
+    }
+    const afterProbe = await chrome.tabs.get(tab.id);
+    if (
+      !creatorUrlMatches(afterProbe?.url, definition) ||
+      report.platform !== platform ||
+      !creatorUrlMatches(report.route, definition)
+    ) {
+      throw new Error("The platform tab changed origin during inspection.");
+    }
+    return {
+      ...report,
+      tabId: tab.id,
+      tabAction: created ? "opened" : "reused",
+    };
+  } catch (error) {
+    return {
+      platform,
+      status: /timed out/i.test(error.message)
+        ? "load-timeout"
+        : "probe-failed",
+      error: error.message,
+    };
+  }
+}
+
+async function probeCreatorUploadTargets(targets) {
+  const results = [];
+  for (const platform of Array.isArray(targets) ? targets : []) {
+    results.push(await probeCreatorUploadTarget(platform));
+  }
+  return results;
+}
+
+async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
+  const definition = CREATOR_UPLOAD_TARGETS[platform];
+  const existing = tabId
+    ? [await chrome.tabs.get(tabId)]
+    : await chrome.tabs.query({ url: definition.match });
+  const useExisting = existing.length === 1;
+  const tab = useExisting
+    ? await chrome.tabs.update(existing[0].id, {
+        active: true,
+        url: definition.landingUrl,
+      })
+    : await chrome.tabs.create({ url: definition.landingUrl, active: true });
+  await waitForCreatorTab(tab.id);
+  const loaded = await chrome.tabs.get(tab.id);
+  if (!creatorUrlMatches(loaded?.url, definition)) {
+    throw new Error(
+      `${platform} left its expected origin before upload preparation.`,
+    );
+  }
+  const tokens = {
+    full: creatorUploadRandomToken(),
+    ...(["fansly", "manyvids"].includes(platform)
+      ? { teaser: creatorUploadRandomToken() }
+      : {}),
+    ...(platform === "manyvids" && session.draft.manyvidsThumbnail
+      ? { thumbnail: creatorUploadRandomToken() }
+      : {}),
+  };
+  const roles =
+    platform === "onlyfans"
+      ? { full: { selector: "#file_upload_input", token: tokens.full } }
+      : platform === "fansly"
+        ? {
+          full: {
+            selector: "app-post-creation input[type='file']",
+            token: tokens.full,
+          },
+          teaser: {
+            selector: "app-post-creation input[type='file']",
+            token: tokens.teaser,
+          },
+          }
+        : {
+            full: {
+              selector:
+                "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])",
+              token: tokens.full,
+              kind: "video",
+            },
+          };
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: [CREATOR_UPLOAD_FILE_BRIDGE, CREATOR_UPLOAD_ADAPTERS],
+  });
+  const bridgeBase = chrome.runtime.getURL("file-bridge.html");
+  const bridgeOrigin = new URL(bridgeBase).origin;
+  const bridgeUrl = `${bridgeBase}?session=${encodeURIComponent(session.id)}&platform=${encodeURIComponent(platform)}&parentOrigin=${encodeURIComponent(definition.origin)}`;
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: installCreatorUploadFileBridge,
+    args: [
+      {
+        sessionId: session.id,
+        platform,
+        bridgeUrl,
+        bridgeOrigin,
+        roles,
+      },
+    ],
+  });
+  const target = {
+    platform,
+    tabId: tab.id,
+    tokens,
+    status: "prepared",
+  };
+  session.platforms.set(platform, target);
+  return target;
+}
+
+async function prepareCreatorManyVidsEdit(session, target) {
+  const definition = CREATOR_UPLOAD_TARGETS.manyvids;
+  const loaded = await chrome.tabs.get(target.tabId);
+  const editRoute = manyVidsRoute(loaded?.url, "edit");
+  if (!editRoute || editRoute.manyvidsId !== target.manyvidsId) {
+    throw new Error("ManyVids left the expected edit page.");
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId: target.tabId },
+    files: [CREATOR_UPLOAD_FILE_BRIDGE, CREATOR_UPLOAD_ADAPTERS],
+  });
+  const bridgeBase = chrome.runtime.getURL("file-bridge.html");
+  const bridgeOrigin = new URL(bridgeBase).origin;
+  const roles = {
+    teaser: {
+      selector: "input.noborder[name='file']",
+      token: target.tokens.teaser,
+      kind: "video",
+    },
+    ...(target.tokens.thumbnail
+      ? {
+          thumbnail: {
+            selector: "#fileUploader[name='image']",
+            token: target.tokens.thumbnail,
+            kind: "image",
+          },
+        }
+      : {}),
+  };
+  await chrome.scripting.executeScript({
+    target: { tabId: target.tabId },
+    func: installCreatorUploadFileBridge,
+    args: [
+      {
+        sessionId: session.id,
+        platform: "manyvids",
+        bridgeUrl: `${bridgeBase}?session=${encodeURIComponent(session.id)}&platform=manyvids&parentOrigin=${encodeURIComponent(definition.origin)}`,
+        bridgeOrigin,
+        roles,
+      },
+    ],
+  });
+}
+
+async function prepareCreatorUpload(message) {
+  const request = validateCreatorUploadRequest(message);
+  if (creatorUploadSessions.has(request.sessionId)) {
+    throw new Error("This creator upload session already exists.");
+  }
+  const session = {
+    id: request.sessionId,
+    draft: request.draft,
+    catalogue: request.catalogue,
+    platforms: new Map(),
+    commitChain: Promise.resolve(),
+    cleanupTimer: null,
+  };
+  creatorUploadSessions.set(session.id, session);
+  session.cleanupTimer = setTimeout(
+    () => creatorUploadSessions.delete(session.id),
+    2 * 60 * 60_000,
+  );
+  const platforms = [];
+  for (const platform of request.targets) {
+    try {
+      const prepared = await prepareCreatorUploadPlatform(session, platform);
+      platforms.push({
+        platform,
+        status: prepared.status,
+        tabId: prepared.tabId,
+      });
+    } catch (error) {
+      const failed = { platform, status: "failed", error: error.message };
+      session.platforms.set(platform, failed);
+      platforms.push(failed);
+    }
+  }
+  return { sessionId: session.id, platforms };
+}
+
+function invokeCreatorUploadAdapter(args) {
+  const send = (message) =>
+    new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response?.ok) {
+          reject(
+            new Error(response?.error || "Creator upload request failed."),
+          );
+          return;
+        }
+        resolve(response);
+      });
+    });
+  const context = {
+    draft: args.draft,
+    attachFile: async (role, selector) => {
+      if (selector !== args.selectors[role]) {
+        throw new Error(
+          "The platform adapter requested an unexpected file control.",
+        );
+      }
+      await send({
+        type: "DELIVER_CREATOR_UPLOAD_FILE",
+        sessionId: args.sessionId,
+        platform: args.platform,
+        role,
+      });
+      return globalThis.CreatorUploadFileBridge.waitFor(args.sessionId, role);
+    },
+    progress(status) {
+      send({
+        type: "CREATOR_UPLOAD_PLATFORM_PROGRESS",
+        sessionId: args.sessionId,
+        platform: args.platform,
+        status,
+      }).catch(() => {});
+    },
+  };
+  if (args.platform === "onlyfans") {
+    return globalThis.CreatorUploadPlatformAdapters.runOnlyFans(context);
+  }
+  if (args.platform === "fansly") {
+    return globalThis.CreatorUploadPlatformAdapters.runFansly(context);
+  }
+  if (args.platform === "manyvids" && args.stage === "upload") {
+    return globalThis.CreatorUploadPlatformAdapters.runManyVidsUpload(context);
+  }
+  if (args.platform === "manyvids" && args.stage === "edit") {
+    return globalThis.CreatorUploadPlatformAdapters.runManyVidsEdit(context);
+  }
+  throw new Error("Unknown creator upload adapter stage.");
+}
+
+async function prepareCreatorUploadResponseObserver(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    files: [
+      "creator-tools/catalogue-contract.js",
+      CREATOR_UPLOAD_RESPONSE_OBSERVER,
+    ],
+  });
+}
+
+function startCreatorUploadResponseObserver(tabId, sessionId, platform) {
+  return chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: installCreatorUploadResponseObserver,
+    args: [{ sessionId, platform }],
+  });
+}
+
+async function cancelCreatorUploadResponseObserver(tabId, sessionId, platform) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: cancelCreatorUploadResponseObserverInPage,
+      args: [{ sessionId, platform }],
+    });
+  } catch {
+    // Navigation may already have destroyed the observer world.
+  }
+}
+
+async function commitCreatorUploadResult(session, platform, postUrl) {
+  if (session.catalogue === null) return { status: "uploaded-no-sheet" };
+  session.commitChain = session.commitChain
+    .catch(() => {})
+    .then(async () => {
+      const result = await CREATOR_CATALOGUE_CLIENT.commitPlatformLink({
+        row: session.catalogue.row,
+        fingerprint: session.catalogue.fingerprint,
+        platform,
+        postUrl,
+        metadata: {
+          id: session.catalogue.id,
+          releaseDate: session.catalogue.releaseDate,
+          title: session.catalogue.title,
+          description: session.catalogue.description,
+        },
+      });
+      if (result.fingerprint)
+        session.catalogue.fingerprint = result.fingerprint;
+      return result;
+    });
+  return session.commitChain;
+}
+
+async function runCreatorManyVidsPlatform(session, target) {
+  const platform = "manyvids";
+  try {
+    if (!target.manyvidsId) {
+      target.status = "uploading-full";
+      creatorUploadPost(session.id, {
+        type: "platform-progress",
+        platform,
+        status: target.status,
+      });
+      const uploadExecution = await chrome.scripting.executeScript({
+        target: { tabId: target.tabId },
+        func: invokeCreatorUploadAdapter,
+        args: [
+          {
+            sessionId: session.id,
+            platform,
+            stage: "upload",
+            selectors: {
+              full: "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])",
+            },
+            draft: session.draft,
+          },
+        ],
+      });
+      if (uploadExecution?.[0]?.result?.status !== "edit-requested") {
+        throw new Error("ManyVids did not request its edit page.");
+      }
+      const editRoute = await waitForManyVidsRoute(
+        target.tabId,
+        "edit",
+        2 * 60_000,
+      );
+      target.manyvidsId = editRoute.manyvidsId;
+    }
+
+    target.status = "configuring";
+    creatorUploadPost(session.id, {
+      type: "platform-progress",
+      platform,
+      status: target.status,
+    });
+    await prepareCreatorManyVidsEdit(session, target);
+    const selectors = {
+      teaser: "input.noborder[name='file']",
+      ...(target.tokens.thumbnail
+        ? { thumbnail: "#fileUploader[name='image']" }
+        : {}),
+    };
+    const editExecution = await chrome.scripting.executeScript({
+      target: { tabId: target.tabId },
+      func: invokeCreatorUploadAdapter,
+      args: [
+        {
+          sessionId: session.id,
+          platform,
+          stage: "edit",
+          selectors,
+          draft: { ...session.draft, manyvidsId: target.manyvidsId },
+        },
+      ],
+    });
+    if (editExecution?.[0]?.result?.status !== "save-clicked") {
+      throw new Error("ManyVids did not confirm its final Save click.");
+    }
+    target.submitted = true;
+    target.status = "save-clicked";
+    creatorUploadPost(session.id, {
+      type: "platform-progress",
+      platform,
+      status: target.status,
+    });
+    await waitForManyVidsRoute(target.tabId, "success", 5 * 60_000);
+    const postUrl = CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(
+      platform,
+      target.manyvidsId,
+    );
+    if (!postUrl) throw new Error("ManyVids returned an invalid video ID.");
+    target.postUrl = postUrl;
+    const commit = await commitCreatorUploadResult(session, platform, postUrl);
+    const result = {
+      platform,
+      postUrl,
+      status:
+        commit.status === "updated" || commit.status === "idempotent"
+          ? "catalogue-updated"
+          : commit.status,
+      ...(commit.status === "conflict" || commit.status === "stale"
+        ? { error: `Catalogue commit stopped: ${commit.status}.` }
+        : {}),
+    };
+    Object.assign(target, result);
+    creatorUploadPost(session.id, {
+      type: "platform-result",
+      platform,
+      result,
+    });
+    return result;
+  } catch (error) {
+    const result = {
+      platform,
+      status: target.postUrl
+        ? "catalogue-commit-failed"
+        : target.submitted
+          ? "posted-link-unresolved"
+          : target.manyvidsId
+            ? "edit-failed"
+            : "failed",
+      ...(target.submitted ? { submitted: true } : {}),
+      ...(target.postUrl ? { postUrl: target.postUrl } : {}),
+      ...(target.manyvidsId ? { manyvidsId: target.manyvidsId } : {}),
+      error: error.message,
+    };
+    Object.assign(target, result);
+    try {
+      creatorUploadPost(session.id, {
+        type: "platform-result",
+        platform,
+        result,
+      });
+    } catch {
+      // The console may have closed after the platform operation started.
+    }
+    return result;
+  }
+}
+
+async function runCreatorUploadPlatform(session, platform) {
+  const target = session.platforms.get(platform);
+  if (!target?.tabId || target.status !== "prepared") {
+    return (
+      target || {
+        platform,
+        status: "failed",
+        error: "Platform was not prepared.",
+      }
+    );
+  }
+  if (platform === "manyvids") {
+    return runCreatorManyVidsPlatform(session, target);
+  }
+  target.status = "uploading-full";
+  creatorUploadPost(session.id, {
+    type: "platform-progress",
+    platform,
+    status: target.status,
+  });
+  let observerExecution = null;
+  try {
+    await prepareCreatorUploadResponseObserver(target.tabId);
+    observerExecution = startCreatorUploadResponseObserver(
+      target.tabId,
+      session.id,
+      platform,
+    ).then(
+      (value) => ({ ok: true, value }),
+      (error) => ({ ok: false, error }),
+    );
+    const selectors =
+      platform === "onlyfans"
+        ? { full: "#file_upload_input" }
+        : {
+            full: "app-post-creation input[type='file']",
+            teaser: "app-post-creation input[type='file']",
+          };
+    const execution = await chrome.scripting.executeScript({
+      target: { tabId: target.tabId },
+      func: invokeCreatorUploadAdapter,
+      args: [
+        {
+          sessionId: session.id,
+          platform,
+          selectors,
+          draft: session.draft,
+        },
+      ],
+    });
+    const adapterResult = execution?.[0]?.result;
+    if (adapterResult?.status !== "submitted") {
+      throw new Error("The platform adapter did not confirm final submission.");
+    }
+    target.submitted = true;
+    target.status = "submitted";
+    creatorUploadPost(session.id, {
+      type: "platform-progress",
+      platform,
+      status: target.status,
+    });
+    const observation = await observerExecution;
+    if (!observation.ok) throw observation.error;
+    const observedExecution = observation.value;
+    const observed = observedExecution?.[0]?.result;
+    const postUrl = CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(
+      platform,
+      observed?.postUrl,
+    );
+    if (observed?.status !== "link-captured" || !postUrl) {
+      throw new Error(
+        "The platform posted, but its post link could not be resolved safely.",
+      );
+    }
+    target.status = "link-captured";
+    target.postUrl = postUrl;
+    creatorUploadPost(session.id, {
+      type: "platform-progress",
+      platform,
+      status: target.status,
+    });
+    const commit = await commitCreatorUploadResult(session, platform, postUrl);
+    const result = {
+      platform,
+      postUrl,
+      status:
+        commit.status === "updated" || commit.status === "idempotent"
+          ? "catalogue-updated"
+          : commit.status,
+      ...(commit.status === "conflict" || commit.status === "stale"
+        ? { error: `Catalogue commit stopped: ${commit.status}.` }
+        : {}),
+    };
+    Object.assign(target, result);
+    creatorUploadPost(session.id, {
+      type: "platform-result",
+      platform,
+      result,
+    });
+    return result;
+  } catch (error) {
+    await cancelCreatorUploadResponseObserver(
+      target.tabId,
+      session.id,
+      platform,
+    );
+    const result = {
+      platform,
+      status: target.postUrl
+        ? "catalogue-commit-failed"
+        : target.submitted
+          ? "posted-link-unresolved"
+          : "failed",
+      ...(target.submitted ? { submitted: true } : {}),
+      ...(target.postUrl ? { postUrl: target.postUrl } : {}),
+      error: error.message,
+    };
+    Object.assign(target, result);
+    try {
+      creatorUploadPost(session.id, {
+        type: "platform-result",
+        platform,
+        result,
+      });
+    } catch {
+      // The console may have closed after the platform operation started.
+    }
+    return result;
+  }
+}
+
+async function startCreatorUpload(sessionId, targets) {
+  const session = creatorUploadSessions.get(creatorUploadClean(sessionId, 64));
+  if (!session) throw new Error("Unknown creator upload session.");
+  const requested = Array.isArray(targets) ? [...new Set(targets)] : [];
+  if (
+    !requested.length ||
+    requested.some((platform) => !session.platforms.has(platform))
+  ) {
+    throw new Error("Invalid creator upload targets.");
+  }
+  return Promise.all(
+    requested.map((platform) => runCreatorUploadPlatform(session, platform)),
+  );
+}
+
+async function retryCreatorUploadPlatform(sessionId, platform) {
+  const session = creatorUploadSessions.get(creatorUploadClean(sessionId, 64));
+  const target = session?.platforms.get(platform);
+  if (!session || !target || !Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform)) {
+    throw new Error("Unknown creator upload retry target.");
+  }
+  if (["catalogue-updated", "uploaded-no-sheet"].includes(target.status)) return [target];
+  if (target.postUrl) {
+    try {
+      const commit = await commitCreatorUploadResult(
+        session,
+        platform,
+        target.postUrl,
+      );
+      const result = {
+        platform,
+        status:
+          commit.status === "updated" || commit.status === "idempotent"
+            ? "catalogue-updated"
+            : commit.status,
+        submitted: true,
+        postUrl: target.postUrl,
+        ...(commit.status === "conflict" || commit.status === "stale"
+          ? { error: `Catalogue commit stopped: ${commit.status}.` }
+          : {}),
+      };
+      Object.assign(target, result);
+      try {
+        creatorUploadPost(session.id, {
+          type: "platform-result",
+          platform,
+          result,
+        });
+      } catch {
+        // The sheet retry remains valid if the console closed meanwhile.
+      }
+      return [result];
+    } catch (error) {
+      const result = {
+        platform,
+        status: "catalogue-commit-failed",
+        submitted: true,
+        postUrl: target.postUrl,
+        error: error.message,
+      };
+      Object.assign(target, result);
+      return [result];
+    }
+  }
+  if (target.submitted || target.status === "posted-link-unresolved") {
+    throw new Error(
+      "The platform submission may already exist; manual link recovery is required before any retry.",
+    );
+  }
+  if (platform === "manyvids" && target.manyvidsId) {
+    const editUrl = `https://www.manyvids.com/Edit-vid/${target.manyvidsId}`;
+    await chrome.tabs.update(target.tabId, { active: true, url: editUrl });
+    await waitForCreatorTab(target.tabId);
+    const route = await waitForManyVidsRoute(target.tabId, "edit", 20_000);
+    if (route.manyvidsId !== target.manyvidsId) {
+      throw new Error("ManyVids retry opened a different video.");
+    }
+    target.status = "prepared";
+    return [await runCreatorUploadPlatform(session, platform)];
+  }
+  const prepared = await prepareCreatorUploadPlatform(
+    session,
+    platform,
+    target.tabId,
+  );
+  return [await runCreatorUploadPlatform(session, prepared.platform)];
+}
+
+async function openUploadConsole() {
+  if (!uploadConsoleOpening) {
+    uploadConsoleOpening = (async () => {
+      const url = chrome.runtime.getURL("upload-console.html");
+      if (uploadConsoleTabId !== null) {
+        try {
+          const tracked = await chrome.tabs.get(uploadConsoleTabId);
+          const knownUrls = [tracked?.url, tracked?.pendingUrl].filter(Boolean);
+          if (
+            knownUrls.includes(url) ||
+            (uploadConsoleTabPending && knownUrls.length === 0)
+          ) {
+            const focused = await chrome.tabs.update(uploadConsoleTabId, {
+              active: true,
+            });
+            return { tabId: focused.id };
+          }
+        } catch {
+          // A closed tab is rediscovered below.
+        }
+        uploadConsoleTabId = null;
+        uploadConsoleTabPending = false;
+      }
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ["TAB"],
+        documentUrls: [url],
+      });
+      const tab = contexts[0]
+        ? await chrome.tabs.update(contexts[0].tabId, { active: true })
+        : await chrome.tabs.create({ url, active: true });
+      uploadConsoleTabId = tab.id;
+      uploadConsoleTabPending = !contexts[0] && tab.status !== "complete";
+      return { tabId: tab.id };
+    })();
+  }
+  try {
+    return await uploadConsoleOpening;
+  } finally {
+    uploadConsoleOpening = null;
+  }
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const current = await chrome.storage.local.get([
+    SETTINGS_KEY,
+    STATE_KEY,
+    CREATOR_REGISTRY.STORAGE_KEY,
+    CREATOR_REGISTRY.LEGACY_STORAGE_KEY,
+  ]);
+  const writes = {};
+  const normalizedIdentitySettings = normalizeSettings(
+    current[SETTINGS_KEY] || {},
+  );
+  if (
+    !current[SETTINGS_KEY] ||
+    JSON.stringify(current[SETTINGS_KEY]) !==
+      JSON.stringify(normalizedIdentitySettings)
+  ) {
+    writes[SETTINGS_KEY] = normalizedIdentitySettings;
+  }
+  if (!current[STATE_KEY]) writes[STATE_KEY] = normalizeState();
+  if (!current[CREATOR_REGISTRY.STORAGE_KEY]) {
+    writes[CREATOR_REGISTRY.STORAGE_KEY] =
+      CREATOR_REGISTRY.migrateLegacySettings(
+        current[CREATOR_REGISTRY.LEGACY_STORAGE_KEY],
+      );
+  }
+  if (Object.keys(writes).length > 0) await chrome.storage.local.set(writes);
+  await syncCreatorToolRegistrations();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  syncCreatorToolRegistrations().catch((error) => {
+    console.error("Creator tool registration sync failed on startup.", error);
+  });
+});
+
+function syncCreatorToolsAfterPermissionChange() {
+  return syncCreatorToolRegistrations().catch((error) => {
+    console.error(
+      "Creator tool registration sync failed after permission change.",
+      error,
+    );
+  });
+}
+
+chrome.permissions.onAdded.addListener(syncCreatorToolsAfterPermissionChange);
+chrome.permissions.onRemoved.addListener(syncCreatorToolsAfterPermissionChange);
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes[CREATOR_REGISTRY.STORAGE_KEY]) {
+    syncCreatorToolRegistrations().catch((error) => {
+      console.error("Creator tool registration sync failed.", error);
+    });
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
       case "GET_SETTINGS":
@@ -1419,17 +3321,100 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return { stats: await getStats() };
       case "GET_GELBOORU_HISTORY":
         return { history: await getGelbooruHistory() };
+      case "GET_AVATAR_MANAGEMENT_VIEW":
+        return { avatarView: await getAvatarManagementView() };
+      case "REENABLE_REMOTE_AVATAR":
+        await reenableRemoteAvatar(message.source, message.id);
+        return { avatarView: await getAvatarManagementView() };
+      case "GET_CREATOR_SETTINGS":
+        return { creatorSettings: await getCreatorSettings() };
+      case "OPEN_UPLOAD_CONSOLE":
+        return { uploadConsole: await openUploadConsole() };
+      case "PROBE_CREATOR_UPLOAD_TARGETS":
+        return {
+          results: await probeCreatorUploadTargets(message.targets),
+        };
+      case "PREPARE_CREATOR_UPLOAD":
+        return {
+          uploadSession: await prepareCreatorUpload(message),
+        };
+      case "START_CREATOR_UPLOAD":
+        return {
+          results: await startCreatorUpload(message.sessionId, message.targets),
+        };
+      case "RETRY_CREATOR_UPLOAD_PLATFORM":
+        return {
+          results: await retryCreatorUploadPlatform(
+            message.sessionId,
+            message.platform,
+          ),
+        };
+      case "DELIVER_CREATOR_UPLOAD_FILE": {
+        const session = creatorUploadSessions.get(
+          creatorUploadClean(message.sessionId, 64),
+        );
+        const target = session?.platforms.get(message.platform);
+        if (
+          !session ||
+          !target ||
+          sender.tab?.id !== target.tabId ||
+          !Object.hasOwn(target.tokens || {}, message.role)
+        ) {
+          throw new Error("Unauthorized creator upload file request.");
+        }
+        await creatorUploadRequestFile(session, message.platform, message.role);
+        return { delivered: true };
+      }
+      case "CREATOR_UPLOAD_PLATFORM_PROGRESS": {
+        const session = creatorUploadSessions.get(
+          creatorUploadClean(message.sessionId, 64),
+        );
+        const target = session?.platforms.get(message.platform);
+        if (!session || !target || sender.tab?.id !== target.tabId) {
+          throw new Error("Unauthorized creator upload progress update.");
+        }
+        const status = creatorUploadClean(message.status, 100);
+        if (
+          !new Set([
+            "uploading-full",
+            "configuring",
+            "waiting-for-teaser",
+            "upload-ready",
+            "edit-requested",
+            "save-clicked",
+            "submitted",
+          ]).has(status)
+        ) {
+          throw new Error("Invalid creator upload progress state.");
+        }
+        if (status === "submitted") target.submitted = true;
+        target.status = status;
+        creatorUploadPost(session.id, {
+          type: "platform-progress",
+          platform: message.platform,
+          status,
+        });
+        return { forwarded: true };
+      }
+      case "SYNC_CREATOR_TOOLS":
+        return {
+          creatorTools: await syncCreatorToolRegistrations(
+            message.settings
+              ? CREATOR_REGISTRY.normalizeSettings(message.settings).value
+              : null,
+          ),
+        };
       case "TEST_GELBOORU":
         return {
           test: await testGelbooruConnection(
             message.gelbooruUserId,
             message.gelbooruApiKey,
-            message.gelbooruRatingMode
-          )
+            message.gelbooruRatingMode,
+          ),
         };
       case "TEST_REALBOORU":
         return {
-          test: await testRealbooruConnection(message.realbooruEndpoint)
+          test: await testRealbooruConnection(),
         };
       case "RESET_MAPPINGS":
         await resetMappings();
@@ -1437,12 +3422,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       case "RESET_NAMES":
         return {
           resetAccounts: await resetNames(),
-          stats: await getStats()
+          stats: await getStats(),
         };
       case "RESET_PICTURES":
         return {
           resetAccounts: await resetPictures(),
-          stats: await getStats()
+          stats: await getStats(),
         };
       case "ADD_CUSTOM_AVATARS":
         return { importedAvatars: await addCustomAvatars(message.avatars) };
@@ -1451,15 +3436,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return { stats: await getStats() };
       case "RESOLVE_IDENTITY":
         return {
-          identity: await resolveIdentity(message.primaryKey, message.aliases)
+          identity: await resolveIdentity(message.primaryKey, message.aliases),
         };
       case "RESOLVE_IDENTITIES":
         return {
-          items: await resolveIdentities(message.items)
+          items: await resolveIdentities(message.items),
         };
       case "ROTATE_AVATAR":
         return {
-          result: await rotateAvatar(message.primaryKey, message.aliases)
+          result: await rotateAvatar(message.primaryKey, message.aliases),
         };
       default:
         throw new Error("Unknown extension request.");

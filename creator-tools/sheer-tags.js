@@ -1,94 +1,276 @@
-CreatorToolkit.runWhenEnabled("sheerTags", async () => {
 (() => {
-  'use strict';
+  "use strict";
 
-  // === EDIT THIS LIST ===
-  // Exact tag labels as they appear in the dropdown (case-insensitive).
-  // Example values mirror your “filled” state: roleplay, small cock, etc.
-  const TAGS = [
-    "0% pussy","3D","alien girl","busty hentai","CBT","cock cage","cock rubbing",
-    "commented gameplay","daddy","dating game","DL Site","domination","ecchi",
-    "erogames","for women","futa","Gangbang (3D)","goth","guy-guy",
-    "Japanese hentai game","male masseur","male solo anal","maledom","manga",
-    "moaning","multiple orgasms","naked gaming","Netorare","Oppai","orgasm deprivation",
-    "PC game","playing with 2 toys","porn game","prostitute","robot (3D)","roleplay",
-    "RPG maker","sex toy","small cock","teen (3d)"
-  ];
+  const toolkit = globalThis.CreatorToolkit;
+  if (!toolkit) throw new Error("CreatorToolkit runtime is unavailable.");
 
-  // 'replace' = only these tags; 'append' = keep existing and add these
-  const MODE = 'replace';
+  const SELECTOR = "#contentproform-genres";
 
-  const log = (...a) => console.log('[SheerTags]', ...a);
-
-  function waitFor(fn, { timeout = 20000, interval = 100 } = {}) {
-    return new Promise((resolve, reject) => {
-      const t0 = Date.now();
-      const id = setInterval(() => {
-        try {
-          const v = fn();
-          if (v) { clearInterval(id); resolve(v); }
-          else if (Date.now() - t0 > timeout) { clearInterval(id); reject(new Error('timeout')); }
-        } catch (e) { clearInterval(id); reject(e); }
-      }, interval);
-    });
-  }
-
-  function normalize(s) { return (s || '').trim().toLowerCase(); }
-
-  async function setTags(tagLabels) {
-    const $ = window.jQuery;
-    if (!$) throw new Error('jQuery not found');
-
-    const select = await waitFor(() => document.querySelector('#contentproform-genres'));
-    if (select.dataset.sheerTagsApplied === '1') {
-      log('already applied; skipping');
-      return;
+  function inspectSelect(select, profile) {
+    const optionGroups = new Map();
+    for (const option of Array.from(select.options)) {
+      const label = toolkit.displayText(option.textContent);
+      const key = toolkit.normalizeText(label);
+      if (!key || option.value === "") continue;
+      const group = optionGroups.get(key) || [];
+      group.push({ option, label, value: String(option.value) });
+      optionGroups.set(key, group);
     }
 
-    // Build maps from visible option text -> value
-    const options = Array.from(select.options);
-    const byTextLower = new Map();
-    for (const opt of options) byTextLower.set(normalize(opt.textContent), opt.value);
+    const currentValues = new Set(toolkit.selectedOptionValues(select));
+    const resolved = [];
+    const missing = [];
+    const ambiguous = [];
 
-    // Current values in the select
-    const currentVals = new Set((($(select).val()) || []).filter(Boolean));
-
-    // Resolve desired values exactly by label (case-insensitive). No fuzzy guesses.
-    const desired = [];
-    for (const label of tagLabels) {
-      const v = byTextLower.get(normalize(label));
-      if (!v) {
-        log('no exact match for tag label:', label);
-        continue;
+    for (const requestedLabel of profile.tags) {
+      const matches =
+        optionGroups.get(toolkit.normalizeText(requestedLabel)) || [];
+      if (matches.length === 1) {
+        resolved.push({
+          requestedLabel,
+          label: matches[0].label,
+          value: matches[0].value,
+        });
+      } else if (matches.length > 1) {
+        ambiguous.push(requestedLabel);
+      } else {
+        missing.push(requestedLabel);
       }
-      desired.push(v);
     }
 
-    const finalVals = MODE === 'append'
-      ? Array.from(new Set([...currentVals, ...desired]))
-      : Array.from(new Set(desired));
+    const resolvedValues = new Set(resolved.map((entry) => entry.value));
+    const finalValues =
+      profile.mode === "replace"
+        ? resolvedValues
+        : new Set([...currentValues, ...resolvedValues]);
+    const additions = resolved.filter(
+      (entry) => !currentValues.has(entry.value),
+    );
+    const removals =
+      profile.mode === "replace"
+        ? Array.from(select.selectedOptions)
+            .filter((option) => !finalValues.has(String(option.value)))
+            .map((option) => toolkit.displayText(option.textContent))
+        : [];
 
-    // Apply and notify Select2
-    $(select).val(finalVals).trigger('change');
-
-    select.dataset.sheerTagsApplied = '1';
-    log('applied values:', finalVals);
+    return {
+      select,
+      mode: profile.mode,
+      currentValues,
+      finalValues,
+      resolved,
+      additions,
+      removals,
+      missing,
+      ambiguous,
+      signature: Array.from(select.options)
+        .map(
+          (option) =>
+            `${option.value}\u0000${toolkit.displayText(option.textContent)}\u0000${
+              option.selected ? "1" : "0"
+            }`,
+        )
+        .join("\u0001"),
+    };
   }
 
-  // Run once after DOM is ready and Select2 has had a chance to init
-  (async () => {
-    try {
-      await setTags(TAGS);
-    } catch (e) {
-      console.warn('[SheerTags] failed:', e);
-    }
-  })();
+  async function locateSelect(signal) {
+    return toolkit.waitForStable(
+      () => {
+        const select = document.querySelector(SELECTOR);
+        if (
+          !(select instanceof HTMLSelectElement) ||
+          !select.isConnected ||
+          select.options.length < 2
+        ) {
+          return null;
+        }
+        return select;
+      },
+      {
+        signal,
+        timeoutMs: 15000,
+        stableMs: 500,
+        description: "the populated Sheer tag taxonomy",
+        signature: (select) =>
+          Array.from(select.options)
+            .map(
+              (option) =>
+                `${option.value}\u0000${toolkit.displayText(option.textContent)}`,
+            )
+            .join("\u0001"),
+      },
+    );
+  }
 
-  // Optional: manual re-apply with Alt+T (useful if the form reloads part of itself)
-  document.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key === 'T') setTags(TAGS);
+  function validatePlan(plan, profile) {
+    if (!plan.resolved.length) {
+      throw new toolkit.ToolkitError(
+        "NO_RESOLVED_TAGS",
+        "None of the configured Sheer tags exists in the current taxonomy.",
+      );
+    }
+    if (plan.ambiguous.length) {
+      throw new toolkit.ToolkitError(
+        "AMBIGUOUS_TAGS",
+        `Ambiguous Sheer tags: ${plan.ambiguous.join(", ")}.`,
+      );
+    }
+    if (
+      plan.mode === "replace" &&
+      profile.requireAllForReplace &&
+      plan.missing.length
+    ) {
+      throw new toolkit.ToolkitError(
+        "INCOMPLETE_REPLACE",
+        `Replace cancelled because these exact tags are missing: ${plan.missing.join(
+          ", ",
+        )}.`,
+      );
+    }
+  }
+
+  async function mount({ signal, profile }) {
+    const panel = toolkit.createToolPanel({
+      id: "sheerTags",
+      title: "Sheer tag assistant",
+      description:
+        "Exact matches only. Append is safe by default; replacement requires a complete preview.",
+    });
+    const runner = toolkit.createActionRunner({
+      toolId: "sheerTags",
+      panel,
+      lifecycleSignal: signal,
+      maxActions: Math.max(10, profile.tags.length + 2),
+      maxDurationMs: 30000,
+    });
+
+    async function preview() {
+      const select = await locateSelect(signal);
+      const plan = inspectSelect(select, profile);
+      validatePlan(plan, profile);
+
+      const items = [
+        `Mode: ${plan.mode}`,
+        `Add ${plan.additions.length}: ${
+          plan.additions.map((entry) => entry.label).join(", ") || "none"
+        }`,
+      ];
+      if (plan.removals.length) {
+        items.push(
+          `Remove ${plan.removals.length}: ${plan.removals.join(", ")}`,
+        );
+      }
+      if (plan.missing.length) {
+        items.push(
+          `Skip ${plan.missing.length} unavailable exact matches: ${plan.missing.join(
+            ", ",
+          )}`,
+        );
+      }
+
+      panel.showPlan({
+        summary: `Review ${plan.mode} changes before applying.`,
+        items,
+        confirmLabel:
+          plan.mode === "replace" ? "Confirm replacement" : "Append exact tags",
+        onConfirm: () =>
+          runner.run(
+            "Applying Sheer tags",
+            async ({ signal: runSignal, budget }) => {
+              const currentSelect = await locateSelect(runSignal);
+              const currentPlan = inspectSelect(currentSelect, profile);
+              validatePlan(currentPlan, profile);
+              if (currentPlan.signature !== plan.signature) {
+                throw new toolkit.ToolkitError(
+                  "STALE_PREVIEW",
+                  "The tag form changed after the preview. Preview again before applying.",
+                );
+              }
+
+              budget.step();
+              toolkit.setSelectValues(
+                currentSelect,
+                Array.from(currentPlan.finalValues),
+              );
+              await toolkit.sleep(100, runSignal);
+
+              const actual = new Set(
+                toolkit.selectedOptionValues(currentSelect),
+              );
+              const expected = currentPlan.finalValues;
+              const verified =
+                actual.size === expected.size &&
+                Array.from(expected).every((value) => actual.has(value));
+              if (!verified) {
+                throw new toolkit.ToolkitError(
+                  "POSTCONDITION_FAILED",
+                  "Sheer did not retain the exact selected values after the change event.",
+                );
+              }
+
+              const resultItems = [
+                ...currentPlan.additions.map((entry) => ({
+                  label: entry.label,
+                  status: "changed",
+                  detail: "added",
+                })),
+                ...currentPlan.removals.map((label) => ({
+                  label,
+                  status: "changed",
+                  detail: "removed after confirmed replacement",
+                })),
+                ...currentPlan.missing.map((label) => ({
+                  label,
+                  status: "skipped",
+                  detail: "no exact taxonomy match",
+                })),
+              ];
+              return {
+                status: currentPlan.missing.length ? "partial" : "success",
+                summary: `Sheer ${currentPlan.mode} completed and was verified.`,
+                items: resultItems,
+              };
+            },
+          ),
+      });
+      panel.setStatus(
+        `${plan.additions.length} addition(s), ${plan.removals.length} removal(s), ${plan.missing.length} skipped.`,
+        plan.missing.length ? "warning" : "neutral",
+      );
+    }
+
+    panel.addAction({
+      id: "preview",
+      label: "Preview tags",
+      variant: "primary",
+      onClick: preview,
+    });
+    panel.addAction({
+      id: "stop",
+      label: "Stop",
+      variant: "danger",
+      allowWhileRunning: true,
+      onClick: () => runner.stop(),
+    });
+
+    return () => {
+      runner.stop("Sheer tool disposed.");
+      panel.destroy();
+    };
+  }
+
+  globalThis.CreatorToolkitAdapters ||= {};
+  globalThis.CreatorToolkitAdapters.sheerTags = Object.freeze({
+    inspectSelect,
+    validatePlan,
+  });
+
+  toolkit.mountTool({
+    id: "sheerTags",
+    match: (location) =>
+      location.origin === "https://my.sheer.com" &&
+      location.pathname.startsWith("/content/update/"),
+    mount,
   });
 })();
-}).catch((error) => {
-  console.error("[Creator Workflow Toolkit] sheer-tags.js failed:", error);
-});

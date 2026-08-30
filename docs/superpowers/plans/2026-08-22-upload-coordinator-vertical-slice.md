@@ -102,7 +102,7 @@ Expected: PASS with the recorder and unpacked-extension messages.
 - The background coordinator in Task 4 consumes the message. No draft text or
   file object crosses the message boundary.
 
-- [ ] **Step 1: Write failing pure-behavior tests**
+- [x] **Step 1: Write failing pure-behavior tests**
 
 Add literal cases proving:
 
@@ -130,7 +130,7 @@ assert.deepEqual(
 Also prove missing files, non-video MIME types, blank titles, invalid dates,
 and empty target lists produce specific errors.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -140,7 +140,7 @@ node --test tests/upload-coordinator.test.cjs
 
 Expected: FAIL because `upload-console.js` and its hooks do not exist.
 
-- [ ] **Step 3: Implement the minimum console**
+- [x] **Step 3: Implement the minimum console**
 
 Use native controls only. Keep the selected `File` in a module variable. The
 check handler constructs only:
@@ -155,7 +155,7 @@ const response = await sendMessage({
 Request `https://fansly.com/*` only when Fansly is selected. Render one bounded
 status card per result. Do not use `FileReader`, `chrome.storage`, or base64.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run:
 
@@ -183,7 +183,7 @@ Expected: pure console tests PASS.
   `login-required`, or `ambiguous`.
 - Task 4 injects the file and calls `probe()` in the isolated world.
 
-- [ ] **Step 1: Write failing fixture tests**
+- [x] **Step 1: Write failing fixture tests**
 
 Create Playwright pages for:
 
@@ -200,7 +200,7 @@ controls return `page-detected`, and two equally scored post buttons return
 `ambiguous`. Put private text in the textarea and assert it is absent from the
 serialized report.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -210,7 +210,7 @@ node --test tests/upload-coordinator.test.cjs
 
 Expected: FAIL because the probe global is unavailable.
 
-- [ ] **Step 3: Implement semantic candidate scoring**
+- [x] **Step 3: Implement semantic candidate scoring**
 
 Inspect only element tag/type/role/name/id/ARIA/placeholder/test-ID tokens.
 Never inspect `.value` or class names. Choose the top candidate only when its
@@ -228,7 +228,7 @@ Return compact signatures shaped as:
 }
 ```
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run:
 
@@ -254,7 +254,7 @@ Expected: all draft and probe tests PASS.
 - Produces: `{ results: CapabilityResult[] }`, preserving requested order.
 - Handles `OPEN_UPLOAD_CONSOLE` and returns the focused/created console tab ID.
 
-- [ ] **Step 1: Extend the background fake and write failing coordination tests**
+- [x] **Step 1: Extend the background fake and write failing coordination tests**
 
 Add `chrome.tabs.query/create/update/get/onUpdated` and
 `chrome.scripting.executeScript` fakes. Prove:
@@ -274,7 +274,7 @@ Also prove one matching tab is reused, zero tabs creates the allow-listed
 landing URL, multiple tabs return `ambiguous-tabs`, unknown IDs return
 `unsupported`, and the second target begins only after the first completes.
 
-- [ ] **Step 2: Run the focused background test and verify RED**
+- [x] **Step 2: Run the focused background test and verify RED**
 
 Run:
 
@@ -284,7 +284,7 @@ node --test tests/background.test.cjs
 
 Expected: FAIL because the two message types are unhandled.
 
-- [ ] **Step 3: Implement the allow-listed coordinator**
+- [x] **Step 3: Implement the allow-listed coordinator**
 
 Add fixed definitions:
 
@@ -302,15 +302,13 @@ const CREATOR_UPLOAD_TARGETS = Object.freeze({
 ```
 
 Use a `for...of` loop, never `Promise.all`. Wait at most 20 seconds for a
-created tab. Inject `creator-tools/upload-capability-probe.js`, then execute:
+created tab. Inject `creator-tools/upload-capability-probe.js` once and use the
+file's final expression as the serialized report. Validate the tab origin
+before and after that single execution, and validate the report's platform and
+route before accepting it. Normalize thrown errors into per-platform
+`probe-failed` results.
 
-```js
-() => globalThis.CreatorUploadCapabilityProbe.probe();
-```
-
-Normalize thrown errors into per-platform `probe-failed` results.
-
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -342,14 +340,14 @@ Expected: coordinator and probe tests PASS.
 - The personal ZIP includes the three console files and probe.
 - The store ZIP contains none of them.
 
-- [ ] **Step 1: Write failing package and unpacked-extension assertions**
+- [x] **Step 1: Write failing package and unpacked-extension assertions**
 
 Assert the personal files exist, the store source does not reference
 `upload-console` or `upload-capability-probe`, and clicking the popup button
 opens exactly one extension console tab containing `#uploadVideo` and
 `#checkSites`.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -359,13 +357,13 @@ node --test tests/creator-tools.test.cjs tests/store-edition.test.cjs tests/exte
 
 Expected: FAIL on missing entry point or package assertions.
 
-- [ ] **Step 3: Add the popup, package, and privacy wiring**
+- [x] **Step 3: Add the popup, package, and privacy wiring**
 
 Add the root files to `$relativeFiles` and `$requiredArchiveEntries` in the
 personal build script. Document that the file and metadata remain only in the
 open console and that probes are read-only. Do not change `store/`.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -375,7 +373,7 @@ node --test tests/creator-tools.test.cjs tests/store-edition.test.cjs tests/exte
 
 Expected: focused integration tests PASS.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run:
 
@@ -386,9 +384,29 @@ npm run check
 Expected: lint, typecheck, formatting, all tests, and both package builds exit
 zero. Inspect the personal ZIP entries and SHA-256 reported by the build.
 
-- [ ] **Step 6: Inspect the rendered console without posting**
+- [x] **Step 6: Inspect the rendered console without posting**
 
 Load the unpacked extension fixture, open the console from the popup, select a
 small synthetic local video fixture, and inspect the layout and states. If an
 authenticated browser session is available, run only **Check selected sites**;
 do not select any platform upload control or click Post/Schedule.
+
+---
+
+### Task 6: Close adversarial review gaps
+
+- [x] Reject inherited object keys such as `__proto__` and `constructor` from
+      the platform allow-list.
+- [x] Require video/upload, caption/post, and publish/post semantics inside one
+      correlated composer boundary; reject profile forms, disabled ancestors,
+      invisible ancestors, and separated sibling forms.
+- [x] Coalesce concurrent opens and retain the created console tab ID so an
+      immediate sequential request cannot race Chrome context registration.
+- [x] Register load listeners before rechecking tab status, clean them up after
+      timeout, use one probe injection, and fail closed on navigation or report
+      origin mismatch.
+- [x] Make title validation reachable and native, reject explicit non-video MIME
+      types even when filenames use video extensions, and declare Chrome 116 as
+      the minimum supported version.
+- [x] Reproduce these cases in unit fixtures and the actual unpacked-Chromium
+      integration test before running the full package check.

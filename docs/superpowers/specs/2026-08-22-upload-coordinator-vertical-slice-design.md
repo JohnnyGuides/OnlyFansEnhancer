@@ -95,8 +95,9 @@ Platforms run serially. For each platform the coordinator:
    exists;
 4. refuses to choose when multiple matching tabs exist;
 5. waits up to 20 seconds for a newly opened tab to finish loading;
-6. injects the read-only probe file;
-7. requests and returns one sanitized capability report.
+6. validates the expected platform origin, injects the read-only probe once,
+   then validates the tab and report origins again;
+7. returns one sanitized capability report.
 
 The result never contains page text beyond bounded redacted semantic labels and
 never contains the draft text or file bytes.
@@ -117,9 +118,11 @@ custom media picker. Other controls must be visible and enabled. Stable
 attributes such as `type`, `role`, `name`, `id`, `aria-label`, placeholder, and
 test IDs contribute bounded tokens. Class names and control values do not.
 
-A password field or login/sign-in route yields `login-required`. A unique file
-input plus caption editor and final control yields `composer-detected`. Missing
-capabilities yield `page-detected`; tied top candidates yield `ambiguous`.
+A password field or login/sign-in route yields `login-required`. A unique
+video/upload input plus caption editor and publish control inside one semantic
+composer boundary yields `composer-detected`. Missing capabilities, disabled or
+invisible ancestor containers, and controls split across separate forms yield
+`page-detected`; tied top candidates yield `ambiguous`.
 
 ## Failure handling
 

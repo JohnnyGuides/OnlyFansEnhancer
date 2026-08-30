@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $storeRoot = Join-Path $repositoryRoot "store"

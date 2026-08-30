@@ -1,6 +1,13 @@
 :root {
   color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   background: #10141d;
   color: #eef3f8;
 }
@@ -13,7 +20,11 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 10% 0%, rgba(89, 173, 255, 0.15), transparent 34rem),
+    radial-gradient(
+      circle at 10% 0%,
+      rgba(89, 173, 255, 0.15),
+      transparent 34rem
+    ),
     #10141d;
 }
 
@@ -73,8 +84,10 @@ label {
 }
 
 input[type="text"],
+input[type="url"],
 input[type="password"],
 input[type="file"],
+textarea,
 select {
   width: 100%;
   min-height: 46px;
@@ -102,6 +115,7 @@ input[type="file"]::file-selector-button {
 }
 
 input:focus,
+textarea:focus,
 select:focus {
   border-color: #61bfff;
   box-shadow: 0 0 0 3px rgba(42, 169, 255, 0.16);
@@ -163,6 +177,29 @@ select:focus {
   width: 22px;
   height: 22px;
   accent-color: #00aff0;
+}
+
+.profile-editor {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #29354a;
+}
+
+.profile-editor summary {
+  cursor: pointer;
+  color: #dce6f0;
+  font-weight: 750;
+}
+
+.profile-editor textarea {
+  min-height: 360px;
+  resize: vertical;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  tab-size: 2;
 }
 
 .subsection {
@@ -274,28 +311,98 @@ button:disabled {
   color: #dbe7f3;
 }
 
-.history-card summary {
+.avatar-manager summary {
   cursor: pointer;
   font-weight: 750;
 }
 
-.history-card ol {
+.avatar-manager h3 {
+  margin: 22px 0 10px;
+  font-size: 14px;
+}
+
+.avatar-grid {
   display: grid;
-  gap: 7px;
-  margin: 14px 0 0;
-  max-height: 280px;
-  overflow: auto;
-  padding-left: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 12px;
 }
 
-.history-card li,
-.history-card a {
-  color: #a9bad0;
-  font-size: 13px;
+.avatar-tile {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #334159;
+  border-radius: 12px;
+  background: #111722;
+  text-align: left;
 }
 
-.history-card a:hover {
-  color: #72cbff;
+.avatar-tile:focus-visible {
+  outline: 3px solid #61bfff;
+  outline-offset: 2px;
+}
+
+.avatar-tile-media {
+  position: relative;
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  place-items: center;
+  background: #202a3a;
+}
+
+.avatar-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-tile-fallback {
+  padding: 12px;
+  color: #94a3b7;
+  font-size: 12px;
+  text-align: center;
+}
+
+.avatar-tile-action {
+  position: absolute;
+  inset: auto 8px 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.avatar-tile:hover .avatar-tile-action,
+.avatar-tile:focus-visible .avatar-tile-action {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.avatar-tile-caption {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+}
+
+.avatar-tile-caption strong,
+.avatar-tile-caption small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-tile-caption small {
+  color: #94a3b7;
 }
 
 @media (max-width: 520px) {

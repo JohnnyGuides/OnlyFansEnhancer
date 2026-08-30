@@ -12,7 +12,7 @@ const extensionRoot = path.join(repositoryRoot, "store");
 const screenshotPath = path.join(
   repositoryRoot,
   "store-listing",
-  "screenshot-settings.png"
+  "screenshot-settings.png",
 );
 
 function allFiles(root) {
@@ -26,7 +26,7 @@ function allFiles(root) {
 function chromeExecutable() {
   const playwrightRoot = path.join(
     process.env.LOCALAPPDATA || "",
-    "ms-playwright"
+    "ms-playwright",
   );
   const installedChromium = fs.existsSync(playwrightRoot)
     ? fs
@@ -35,7 +35,7 @@ function chromeExecutable() {
         .sort()
         .reverse()
         .map((name) =>
-          path.join(playwrightRoot, name, "chrome-win64", "chrome.exe")
+          path.join(playwrightRoot, name, "chrome-win64", "chrome.exe"),
         )
         .find((candidate) => fs.existsSync(candidate))
     : "";
@@ -50,14 +50,14 @@ function chromeExecutable() {
       }
     })(),
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
 test("store package is remote-free and minimally scoped", () => {
   const manifest = JSON.parse(
-    fs.readFileSync(path.join(extensionRoot, "manifest.json"), "utf8")
+    fs.readFileSync(path.join(extensionRoot, "manifest.json"), "utf8"),
   );
   assert.equal(manifest.version, "0.7.0");
   assert.deepEqual(manifest.permissions, ["storage"]);
@@ -72,9 +72,13 @@ test("store package is remote-free and minimally scoped", () => {
     .join("\n");
   assert.doesNotMatch(
     searchable,
-    /gelbooru|realbooru|127\.0\.0\.1|declarativeNetRequest|api[_ -]?key/i
+    /gelbooru|realbooru|127\.0\.0\.1|declarativeNetRequest|api[_ -]?key/i,
   );
   assert.doesNotMatch(searchable, /\bfetch\s*\(|XMLHttpRequest|WebSocket/i);
+  assert.doesNotMatch(
+    searchable,
+    /upload-console|upload-capability-probe|file-bridge|catalogue-bridge|upload-platform-adapters/i,
+  );
 });
 
 test("store edition loads, requires consent, and renders listing screenshot", async () => {
@@ -89,8 +93,8 @@ test("store edition loads, requires consent, and renders listing screenshot", as
       `--disable-extensions-except=${extensionRoot}`,
       `--load-extension=${extensionRoot}`,
       "--window-position=-32000,-32000",
-      "--window-size=1280,800"
-    ]
+      "--window-size=1280,800",
+    ],
   });
 
   try {
