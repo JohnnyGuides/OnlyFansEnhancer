@@ -556,6 +556,22 @@ function send(message) {
     validatedUpload.catalogue.pornhubLink,
     "https://www.pornhub.com/view_video.php?viewkey=episode42",
   );
+  context.boundedCatalogueContext = {
+    ...validatedUpload,
+    catalogue: {
+      ...validatedUpload.catalogue,
+      seasonArc: "s".repeat(600),
+      episode: "4".repeat(100),
+      pornhubLink: `https://www.pornhub.com/view_video.php?viewkey=${"x".repeat(600)}`,
+    },
+  };
+  const boundedCatalogueContext = vm.runInContext(
+    "validateCreatorUploadRequest(boundedCatalogueContext)",
+    context,
+  );
+  assert.equal(boundedCatalogueContext.catalogue.seasonArc.length, 500);
+  assert.equal(boundedCatalogueContext.catalogue.episode.length, 40);
+  assert.equal(boundedCatalogueContext.catalogue.pornhubLink.length, 500);
   context.historicalUploadRequest = {
     ...validatedUpload,
     draft: {

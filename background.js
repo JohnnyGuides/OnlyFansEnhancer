@@ -2392,7 +2392,7 @@ function validateCreatorUploadRequest(message) {
     title: creatorUploadClean(message.catalogue?.title, 500),
     description: creatorUploadClean(message.catalogue?.description, 10_000),
     seasonArc: creatorUploadClean(message.catalogue?.seasonArc, 500),
-    episode: creatorUploadClean(message.catalogue?.episode, 100),
+    episode: creatorUploadClean(message.catalogue?.episode, 40),
     pornhubLink: creatorUploadClean(message.catalogue?.pornhubLink, 500),
     onlyfansLink: creatorUploadClean(message.catalogue?.onlyfansLink, 500),
     fanslyLink: creatorUploadClean(message.catalogue?.fanslyLink, 500),
