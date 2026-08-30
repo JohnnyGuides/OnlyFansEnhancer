@@ -86,7 +86,7 @@
     if (Object.hasOwn(value, "manyvidsThumbnail")) {
       output.manyvidsThumbnail = value.manyvidsThumbnail === true;
     }
-    for (const field of ["profiles", "manyvids"]) {
+    for (const field of ["profiles"]) {
       if (!Object.hasOwn(value, field)) continue;
       const safe = safeJson(value[field]);
       if (safe !== undefined) output[field] = safe;

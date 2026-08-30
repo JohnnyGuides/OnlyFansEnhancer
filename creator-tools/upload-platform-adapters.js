@@ -74,6 +74,33 @@
     element.click();
   }
 
+  async function beforeCommit(context, platform) {
+    if (typeof context.beforeCommit !== "function") {
+      throw new Error(`${platform} final action is not durably armed.`);
+    }
+    const result = await context.beforeCommit();
+    if (result?.armed !== true) {
+      throw new Error(`${platform} final action was not durably armed.`);
+    }
+  }
+
+  async function runSharedRecipe(adapter, plan, signal, maximumActions) {
+    const toolkit = globalThis.CreatorToolkit;
+    if (!adapter || !toolkit) return null;
+    const result = await adapter.applyPlan(
+      plan,
+      signal,
+      toolkit.createBudget(signal, {
+        maxActions: maximumActions,
+        maxDurationMs: 180_000,
+      }),
+    );
+    if (result.status !== "success") {
+      throw new Error(result.summary || "Shared metadata recipe stopped.");
+    }
+    return result;
+  }
+
   async function waitFor(
     probe,
     label,
@@ -220,105 +247,6 @@
       .toLowerCase();
   }
 
-  function controlLabel(control) {
-    const label = control?.id
-      ? document.querySelector(`label[for="${CSS.escape(control.id)}"]`)
-      : null;
-    return String(
-      control?.getAttribute("aria-label") ||
-        label?.textContent ||
-        control?.closest("label")?.textContent ||
-        "",
-    ).trim();
-  }
-
-  function selectManyVidsRadio(selector, expected, label, requiredWords = []) {
-    const control = one(selector, label, document, { allowHidden: true });
-    const actual = normalizedText(controlLabel(control));
-    const exact = expected && actual === normalizedText(expected);
-    const semantic =
-      !expected &&
-      requiredWords.length > 0 &&
-      requiredWords.every((word) => actual.includes(normalizedText(word)));
-    if (!exact && !semantic) {
-      throw new Error(
-        `${label} label changed; found “${controlLabel(control) || "unlabelled"}”.`,
-      );
-    }
-    if (!control.checked) {
-      const associated = control.id
-        ? document.querySelector(`label[for="${CSS.escape(control.id)}"]`)
-        : null;
-      click(associated || control, label);
-    }
-    if (!control.checked) throw new Error(`${label} did not remain selected.`);
-  }
-
-  function manyVidsSelectedTags(form) {
-    return new Set(
-      [...form.querySelectorAll('.multi-dropdown-list input[name="tags[]"]')]
-        .map((input) => {
-          const container = input.closest("[data-tag-name], li") || input;
-          return normalizedText(
-            container.getAttribute("data-tag-name") ||
-              input.getAttribute("data-label") ||
-              container.textContent,
-          );
-        })
-        .filter(Boolean),
-    );
-  }
-
-  async function addManyVidsExactTag(form, tag, signal) {
-    const expected = normalizedText(tag);
-    if (manyVidsSelectedTags(form).has(expected)) return;
-    if (manyVidsSelectedTags(form).size >= 10) {
-      throw new Error("ManyVids tag capacity is already full.");
-    }
-
-    const input = one(
-      "#input-new-custom-tag-filter",
-      "ManyVids tag input",
-      form,
-      { allowHidden: true },
-    );
-    fillTextControl(input, "");
-    fillTextControl(input, tag);
-    const option = await waitFor(
-      () => {
-        const menu = form.querySelector("#dropdown-items-custom-tags");
-        if (!menu || !visible(menu)) return null;
-        const matches = [
-          ...menu.querySelectorAll(
-            'li, [role="option"], [data-value], button[data-tag]',
-          ),
-        ].filter(
-          (candidate) =>
-            visible(candidate) &&
-            !candidate.matches(".not-found-button-section-custom-tag") &&
-            normalizedText(candidate.textContent) === expected,
-        );
-        if (matches.length > 1) {
-          throw new Error(
-            `ManyVids tag suggestion “${tag}” is ambiguous (${matches.length} matches).`,
-          );
-        }
-        return matches[0] || null;
-      },
-      `fresh exact ManyVids tag “${tag}”`,
-      5_000,
-      signal,
-    );
-    click(option, `ManyVids tag “${tag}”`);
-    await waitFor(
-      () => manyVidsSelectedTags(form).has(expected),
-      `selected ManyVids tag “${tag}”`,
-      2_500,
-      signal,
-    );
-    fillTextControl(input, "");
-  }
-
   function selectByOption(root, expectedValues, label, excluded = new Set()) {
     const expected = expectedValues.map(normalizedText);
     const matches = [...root.querySelectorAll("select")].filter(
@@ -346,7 +274,6 @@
 
   async function runManyVidsEdit(context) {
     const { draft, signal } = context;
-    const profile = draft.manyvids || {};
     const manyvidsId = String(draft.manyvidsId || "").trim();
     if (!/^\d+$/.test(manyvidsId)) {
       throw new Error("ManyVids edit ID is invalid.");
@@ -411,32 +338,22 @@
     fillTextControl(title, draft.title);
     fillTextControl(description, draft.description);
 
+    const sharedManyVids = globalThis.CreatorToolkitAdapters?.manyvidsAutofill;
+    const sharedManyVidsProfile = draft.profiles?.manyvidsAutofill;
+    if (!sharedManyVids || !sharedManyVidsProfile) {
+      throw new Error("ManyVids shared metadata recipe is unavailable.");
+    }
+    await runSharedRecipe(
+      sharedManyVids,
+      sharedManyVids.inspectForm(form, sharedManyVidsProfile),
+      signal,
+      40,
+    );
+
     const coPerformer = one(
       "select#co-performer",
       "ManyVids co-performer control",
       form,
-    );
-    selectOption(
-      coPerformer,
-      profile.coPerformer || "No",
-      "ManyVids co-performer",
-    );
-    selectManyVidsRadio(
-      "#free_vid_0",
-      profile.priceModeLabel,
-      "ManyVids price mode",
-    );
-    const price = one(
-      "#appendedPrependedInput[name='video_cost']",
-      "ManyVids price control",
-      form,
-    );
-    fillTextControl(price, profile.price || "19.99");
-    selectManyVidsRadio(
-      "#launchCustom",
-      "",
-      "ManyVids custom launch mode",
-      profile.launchModeWords || ["custom"],
     );
 
     const release = new Date(`${draft.releaseDate}T00:00:00.000Z`);
@@ -465,56 +382,13 @@
       "ManyVids launch year",
       excluded,
     );
-    const launchTime = one(
-      "#available_time",
-      "ManyVids launch time control",
-      form,
-      { allowHidden: true },
-    );
-    selectOption(
-      launchTime,
-      profile.launchTimeLabel || "03:00 PM",
-      "ManyVids launch time",
-    );
-    selectManyVidsRadio(
-      "#membership3",
-      profile.membershipLabel,
-      "ManyVids Vid Bundle mode",
-    );
-    selectManyVidsRadio(
-      "#premium2",
-      profile.premiumLabel,
-      "ManyVids Premium mode",
-    );
-
-    const configuredTags = profile.tags || [];
-    const expectedTags = configuredTags.map(normalizedText);
-    let selectedTags = manyVidsSelectedTags(form);
-    if (
-      expectedTags.length !== 10 ||
-      new Set(expectedTags).size !== 10 ||
-      [...selectedTags].some((tag) => !expectedTags.includes(tag)) ||
-      selectedTags.size > 10
-    ) {
-      throw new Error("ManyVids requires the ten exact configured tags.");
-    }
-    for (const tag of configuredTags) {
-      await addManyVidsExactTag(form, tag, signal);
-    }
-    selectedTags = manyVidsSelectedTags(form);
-    if (
-      selectedTags.size !== 10 ||
-      expectedTags.some((tag) => !selectedTags.has(tag))
-    ) {
-      throw new Error("ManyVids requires the ten exact configured tags.");
-    }
-
     const save = exactText(
       "#saveVideo",
       "Save",
       "ManyVids final Save control",
       form,
     );
+    await beforeCommit(context, "ManyVids");
     click(save, "ManyVids final Save control");
     context.progress?.("save-clicked");
     return { platform: "manyvids", status: "save-clicked", manyvidsId };
@@ -662,6 +536,7 @@
       UPLOAD_TIMEOUT,
       signal,
     );
+    await beforeCommit(context, "OnlyFans");
     click(commit, "OnlyFans final Save control");
     context.progress?.("submitted");
     return { platform: "onlyfans", status: "submitted" };
@@ -779,9 +654,29 @@
     context.progress?.("waiting-for-teaser");
     await attachFanslyPreview(context, composer, fullCard);
 
-    fillTextControl(
-      one("textarea", "Fansly description editor", composer),
-      draft.description,
+    const sharedFansly = globalThis.CreatorToolkitAdapters?.fanslyPrefill;
+    const sharedFanslyProfile = draft.profiles?.fanslyPrefill;
+    if (!sharedFansly || !sharedFanslyProfile) {
+      throw new Error("Fansly shared metadata recipe is unavailable.");
+    }
+    await runSharedRecipe(
+      {
+        applyPlan: (plan, currentSignal, budget) =>
+          sharedFansly.applyPlan(
+            plan,
+            sharedFanslyProfile,
+            currentSignal,
+            budget,
+          ),
+      },
+      sharedFansly.inspectComposer(composer, sharedFanslyProfile, {
+        desiredText: draft.fanslyCaption,
+        forceWrite: true,
+        finalAction:
+          "Master Uploader will schedule after a durable checkpoint.",
+      }),
+      signal,
+      10,
     );
     const parts = zonedParts(
       draft.scheduledIso,
@@ -878,6 +773,7 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
+    await beforeCommit(context, "Fansly");
     click(confirm, "Fansly final Post confirmation");
     context.progress?.("submitted");
     return { platform: "fansly", status: "submitted" };

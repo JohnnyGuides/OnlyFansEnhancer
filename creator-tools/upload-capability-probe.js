@@ -41,6 +41,7 @@
     if (host.includes("onlyfans.com")) return "onlyfans";
     if (host.includes("fansly.com")) return "fansly";
     if (host.includes("manyvids.com")) return "manyvids";
+    if (host.includes("pornhub.mainhub.com")) return "pornhub";
     return "unknown";
   }
 
@@ -235,6 +236,48 @@
       Array.from(documentRef.querySelectorAll("input[type='password']")).some(
         visible,
       );
+    if (platform === "pornhub") {
+      const metadataControls = {
+        orientation: documentRef.querySelectorAll(
+          'custom-dropdown[data-key="orientation"] .customSelectTrigger',
+        ),
+        tags: documentRef.querySelectorAll('input[name="tags"]'),
+        categories: documentRef.querySelectorAll(
+          'input[name="category"], input[name="categoryInput"]',
+        ),
+      };
+      const metadataCapabilities = Object.fromEntries(
+        Object.entries(metadataControls).map(([key, controls]) => [
+          key,
+          {
+            state:
+              controls.length === 1
+                ? "detected"
+                : controls.length
+                  ? "ambiguous"
+                  : "missing",
+            count: controls.length,
+            signature: controls.length === 1 ? signature(controls[0]) : null,
+          },
+        ]),
+      );
+      return {
+        platform,
+        route: `${origin}${pathname}`,
+        status: loginRequired
+          ? "login-required"
+          : Object.values(metadataCapabilities).every(
+                (capability) => capability.state === "detected",
+              )
+            ? "metadata-ready"
+            : Object.values(metadataCapabilities).some(
+                  (capability) => capability.state === "ambiguous",
+                )
+              ? "ambiguous"
+              : "page-detected",
+        capabilities: metadataCapabilities,
+      };
+    }
     const ambiguous = Object.values(capabilities).some(
       (capability) => capability.state === "ambiguous",
     );

@@ -531,13 +531,19 @@ test("ManyVids upload adapter clicks only the completed file card edit control",
         document.querySelector(".uppy-Dashboard-Item-action--remove").addEventListener("click", () => manyvidsRemoveClicks += 1);
       </script>
     `);
-    await page.addScriptTag({
-      path: path.join(
-        repositoryRoot,
-        "creator-tools",
-        "upload-platform-adapters.js",
-      ),
+    await page.evaluate(() => {
+      globalThis.CreatorToolkitMasterRun = true;
     });
+    for (const relativePath of [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/manyvids-autofill.js",
+      "creator-tools/upload-platform-adapters.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
     const state = await page.evaluate(async () => {
       const progress = [];
       const result = await CreatorUploadPlatformAdapters.runManyVidsUpload({
@@ -637,10 +643,14 @@ test("ManyVids edit adapter fills the verified form and clicks Save once", async
       <script>
         globalThis.manyvidsSaveClicks = 0;
         globalThis.manyvidsThumbSaveClicks = 0;
+        globalThis.manyvidsCommitEvents = [];
         document.querySelector("#custom-preview").addEventListener("click", () => document.querySelector("#preview-menu").hidden = false);
         document.querySelector("#preview-menu button").addEventListener("click", () => document.querySelector("#preview-menu").hidden = true);
         document.querySelector("#save_thumb").addEventListener("click", () => manyvidsThumbSaveClicks += 1);
-        document.querySelector("#saveVideo").addEventListener("click", () => manyvidsSaveClicks += 1);
+        document.querySelector("#saveVideo").addEventListener("click", () => {
+          manyvidsSaveClicks += 1;
+          manyvidsCommitEvents.push("click:save");
+        });
         document.querySelector("#input-new-custom-tag-filter").addEventListener("input", (event) => {
           const menu = document.querySelector("#dropdown-items-custom-tags");
           menu.replaceChildren();
@@ -658,13 +668,19 @@ test("ManyVids edit adapter fills the verified form and clicks Save once", async
         });
       </script>
     `);
-    await page.addScriptTag({
-      path: path.join(
-        repositoryRoot,
-        "creator-tools",
-        "upload-platform-adapters.js",
-      ),
+    await page.evaluate(() => {
+      globalThis.CreatorToolkitMasterRun = true;
     });
+    for (const relativePath of [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/manyvids-autofill.js",
+      "creator-tools/upload-platform-adapters.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
     const state = await page.evaluate(async (tags) => {
       const attached = [];
       const result = await CreatorUploadPlatformAdapters.runManyVidsEdit({
@@ -675,15 +691,13 @@ test("ManyVids edit adapter fills the verified form and clicks Save once", async
           scheduledIso: "2026-08-28T15:00:00.000Z",
           manyvidsId: "7783271",
           manyvidsThumbnail: true,
-          manyvids: {
-            coPerformer: "No",
-            price: "19.99",
-            priceModeLabel: "Set Your Price",
-            launchModeWords: ["custom", "launch", "date"],
-            launchTimeLabel: "03:00 PM",
-            membershipLabel: "This vid is not included in your Vid Bundle",
-            premiumLabel: "Include this Vid to Premium",
-            tags,
+          profiles: {
+            manyvidsAutofill: {
+              ...structuredClone(
+                CreatorToolkitRegistry.DEFAULT_PROFILES.manyvidsAutofill,
+              ),
+              tags,
+            },
           },
         },
         async attachFile(role, selector) {
@@ -702,6 +716,10 @@ test("ManyVids edit adapter fills the verified form and clicks Save once", async
           input.dispatchEvent(new Event("change", { bubbles: true }));
           attached.push(role);
         },
+        async beforeCommit() {
+          manyvidsCommitEvents.push("checkpoint:manyvids");
+          return { armed: true };
+        },
       });
       return {
         result,
@@ -716,6 +734,7 @@ test("ManyVids edit adapter fills the verified form and clicks Save once", async
         premium: document.querySelector("#premium2").checked,
         saveClicks: manyvidsSaveClicks,
         thumbSaveClicks: manyvidsThumbSaveClicks,
+        commitEvents: manyvidsCommitEvents,
       };
     }, tags);
 
@@ -735,6 +754,12 @@ test("ManyVids edit adapter fills the verified form and clicks Save once", async
     assert.equal(state.premium, true);
     assert.equal(state.thumbSaveClicks, 1);
     assert.equal(state.saveClicks, 1);
+    assert.equal(state.commitEvents.includes("checkpoint:manyvids"), true);
+    assert.equal(
+      state.commitEvents.indexOf("checkpoint:manyvids") <
+        state.commitEvents.indexOf("click:save"),
+      true,
+    );
   } finally {
     await browser.close();
   }
@@ -775,7 +800,11 @@ test("OnlyFans adapter uploads full media, fills description, schedules, and lea
         });
         document.querySelector("#time button").addEventListener("click", () => document.querySelector("#date-dialog").hidden = true);
         globalThis.onlyfansSaveClicks = 0;
-        document.querySelector("#save").addEventListener("click", () => onlyfansSaveClicks += 1);
+        globalThis.onlyfansCommitEvents = [];
+        document.querySelector("#save").addEventListener("click", () => {
+          onlyfansSaveClicks += 1;
+          onlyfansCommitEvents.push("click:save");
+        });
       </script>
     `);
     await page.addScriptTag({
@@ -810,6 +839,10 @@ test("OnlyFans adapter uploads full media, fills description, schedules, and lea
         progress(value) {
           progress.push(value);
         },
+        async beforeCommit() {
+          onlyfansCommitEvents.push("checkpoint:onlyfans");
+          return { armed: true };
+        },
       });
       return {
         result,
@@ -828,6 +861,7 @@ test("OnlyFans adapter uploads full media, fills description, schedules, and lea
         )?.textContent,
         saveClicks: globalThis.onlyfansSaveClicks,
         progress,
+        commitEvents: onlyfansCommitEvents,
       };
     });
 
@@ -842,6 +876,12 @@ test("OnlyFans adapter uploads full media, fills description, schedules, and lea
     assert.equal(result.selectedHour, "17");
     assert.equal(result.selectedMinute, "00");
     assert.equal(result.saveClicks, 1);
+    assert.equal(result.commitEvents.includes("checkpoint:onlyfans"), true);
+    assert.equal(
+      result.commitEvents.indexOf("checkpoint:onlyfans") <
+        result.commitEvents.indexOf("click:save"),
+      true,
+    );
     assert.ok(
       result.progress.indexOf("attached:full") <
         result.progress.indexOf("configuring"),
@@ -925,16 +965,25 @@ test("Fansly adapter uploads full first, locks it with defaulT, then adds a free
           document.querySelector(".new-post-btn").textContent = "Schedule";
         });
         document.querySelector(".new-post-btn").addEventListener("click", () => document.querySelector("#confirm-modal").hidden = false);
-        document.querySelector("#confirm-modal .btn").addEventListener("click", () => fanslyPostClicks += 1);
+        document.querySelector("#confirm-modal .btn").addEventListener("click", () => {
+          fanslyPostClicks += 1;
+          fanslyEvents.push("click:post");
+        });
       </script>
     `);
-    await page.addScriptTag({
-      path: path.join(
-        repositoryRoot,
-        "creator-tools",
-        "upload-platform-adapters.js",
-      ),
+    await page.evaluate(() => {
+      globalThis.CreatorToolkitMasterRun = true;
     });
+    for (const relativePath of [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/fansly-prefill.js",
+      "creator-tools/upload-platform-adapters.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
     const result = await page.evaluate(async () => {
       const progress = [];
       const result = await CreatorUploadPlatformAdapters.runFansly({
@@ -944,6 +993,14 @@ test("Fansly adapter uploads full first, locks it with defaulT, then adds a free
           scheduledIso: "2026-08-28T15:00:00.000Z",
           timeZone: "Europe/Zurich",
           fanslyPreset: "defaulT",
+          fanslyCaption: "Fansly episode description",
+          profiles: {
+            fanslyPrefill: {
+              message: "",
+              fillMode: "replace",
+              toggles: {},
+            },
+          },
         },
         async attachFile(role, selector) {
           setFanslyUploadRole(role);
@@ -958,6 +1015,10 @@ test("Fansly adapter uploads full first, locks it with defaulT, then adds a free
         },
         progress(value) {
           progress.push(value);
+        },
+        async beforeCommit() {
+          fanslyEvents.push("checkpoint:fansly");
+          return { armed: true };
         },
       });
       return {
@@ -984,6 +1045,8 @@ test("Fansly adapter uploads full first, locks it with defaulT, then adds a free
     assert.deepEqual(result.events, [
       "uploaded:full:episode-full.mp4",
       "preview:episode-teaser.mp4",
+      "checkpoint:fansly",
+      "click:post",
     ]);
     assert.equal(result.mediaCardCount, 1);
     assert.equal(result.full.locked, "true");

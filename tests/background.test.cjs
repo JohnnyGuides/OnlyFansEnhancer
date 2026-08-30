@@ -604,8 +604,8 @@ function send(message) {
   assert.equal(validatedUpload.draft.fanslyPreset, "defaulT");
   assert.equal(validatedUpload.draft.fullFilename, "Episode 42 (full).mp4");
   assert.equal(validatedUpload.draft.manyvidsThumbnail, true);
-  assert.equal(validatedUpload.draft.manyvids.price, "19.99");
-  assert.equal(validatedUpload.draft.manyvids.tags.length, 10);
+  assert.equal(validatedUpload.draft.profiles.manyvidsAutofill.price, "19.99");
+  assert.equal(validatedUpload.draft.profiles.manyvidsAutofill.tags.length, 10);
   assert.equal(validatedUpload.catalogue.fanslyLink, "");
   assert.equal(validatedUpload.catalogue.manyvidsLink, "");
   assert.equal(validatedUpload.catalogue.seasonArc, "GameSync Season 4");
@@ -620,7 +620,7 @@ function send(message) {
       ...validatedUpload.catalogue,
       seasonArc: "s".repeat(600),
       episode: "4".repeat(100),
-      pornhubLink: `https://www.pornhub.com/view_video.php?viewkey=${"x".repeat(600)}`,
+      pornhubLink: `https://www.pornhub.com/view_video.php?viewkey=${"x".repeat(100)}`,
     },
   };
   const boundedCatalogueContext = vm.runInContext(
@@ -629,7 +629,10 @@ function send(message) {
   );
   assert.equal(boundedCatalogueContext.catalogue.seasonArc.length, 500);
   assert.equal(boundedCatalogueContext.catalogue.episode.length, 40);
-  assert.equal(boundedCatalogueContext.catalogue.pornhubLink.length, 500);
+  assert.match(
+    boundedCatalogueContext.catalogue.pornhubLink,
+    /viewkey=x{100}$/,
+  );
   context.historicalUploadRequest = {
     ...validatedUpload,
     draft: {
@@ -737,6 +740,7 @@ function send(message) {
   const originalTabs = structuredClone([...openTabs]);
   const originalNextTabId = nextTabId;
   const uploadExecutions = [];
+  const fileBridgePlatforms = [];
   const manyVidsStages = [];
   let manyVidsEditFailuresRemaining = 0;
   context.armManyVidsEditFailure = () => {
@@ -750,7 +754,24 @@ function send(message) {
     if (details.files) return [{ frameId: 0 }];
     const name = details.func.name;
     uploadExecutions.push(name);
-    if (name === "installCreatorUploadFileBridge") return [{ frameId: 0 }];
+    if (name === "markCreatorToolkitMasterRun") return [{ frameId: 0 }];
+    if (name === "installCreatorUploadFileBridge") {
+      fileBridgePlatforms.push(details.args[0].platform);
+      return [{ frameId: 0 }];
+    }
+    if (name === "invokeCreatorPornhubPreparation") {
+      return [
+        {
+          frameId: 0,
+          result: {
+            platform: "pornhub",
+            status: "manual-submit-required",
+            effectiveFilename: details.args[0].effectiveFilename,
+            preset: details.args[0].contentPreset,
+          },
+        },
+      ];
+    }
     if (name === "invokeCreatorUploadAdapter") {
       const args = details.args[0];
       if (args.platform !== "manyvids") {
@@ -818,10 +839,41 @@ function send(message) {
         await prepareCreatorUpload(correctionRequest);
         const correctionFirst = await startCreatorUpload(correctionRequest.sessionId, ["manyvids"]);
         const correctionRetry = await retryCreatorUploadPlatform(correctionRequest.sessionId, "manyvids");
+        const pornhubRequest = {
+          ...uploadOnlyRequest,
+          sessionId: "222222222222222222222222222222222222222222222222",
+          targets: ["pornhub"],
+          draft: {
+            ...uploadOnlyRequest.draft,
+            pornhubFilename: "episode-limited.mp4",
+            contentPreset: "Straight"
+          }
+        };
+        const pornhubPort = {
+          creatorUploadSessionId: pornhubRequest.sessionId,
+          postMessage() {}
+        };
+        creatorUploadConsolePorts.add(pornhubPort);
+        const pornhubPrepared = await prepareCreatorUpload(pornhubRequest);
+        const pornhubResult = await startCreatorUpload(
+          pornhubRequest.sessionId,
+          pornhubRequest.targets
+        );
+        clearTimeout(creatorUploadSessions.get(pornhubRequest.sessionId)?.cleanupTimer);
+        creatorUploadSessions.delete(pornhubRequest.sessionId);
+        creatorUploadConsolePorts.delete(pornhubPort);
         clearTimeout(creatorUploadSessions.get(correctionRequest.sessionId)?.cleanupTimer);
         creatorUploadSessions.delete(correctionRequest.sessionId);
         creatorUploadConsolePorts.delete(correctionPort);
-        return JSON.stringify({ prepared, first, retry, correctionFirst, correctionRetry });
+        return JSON.stringify({
+          prepared,
+          first,
+          retry,
+          correctionFirst,
+          correctionRetry,
+          pornhubPrepared,
+          pornhubResult
+        });
       } finally {
         clearTimeout(creatorUploadSessions.get(uploadOnlyRequest.sessionId)?.cleanupTimer);
         creatorUploadSessions.delete(uploadOnlyRequest.sessionId);
@@ -861,6 +913,16 @@ function send(message) {
       },
     ]);
     assert.equal(directRun.retry[0].status, "uploaded-no-sheet");
+    assert.equal(directRun.pornhubPrepared.platforms[0].status, "prepared");
+    assert.deepEqual(directRun.pornhubResult, [
+      {
+        platform: "pornhub",
+        status: "manual-submit-required",
+        effectiveFilename: "episode-limited.mp4",
+        preset: "Straight",
+      },
+    ]);
+    assert.equal(fileBridgePlatforms.includes("pornhub"), false);
     assert.equal(
       directRun.correctionFirst[0].status,
       "edit-failed",
@@ -945,17 +1007,31 @@ function send(message) {
           id,
           platforms: new Map([
             ["onlyfans", { platform: "onlyfans", tabId: 41, status: "prepared" }],
-            ["fansly", { platform: "fansly", tabId: 50, status: "prepared" }]
+            ["fansly", { platform: "fansly", tabId: 50, status: "prepared" }],
+            ["manyvids", { platform: "manyvids", tabId: 51, status: "prepared" }],
+            ["pornhub", { platform: "pornhub", tabId: 52, status: "prepared" }]
           ])
         };
         creatorUploadSessions.set(id, session);
         runCreatorUploadPlatform = async (_session, platform) => {
           calls.push(platform);
-          return platform === "onlyfans"
-            ? { platform, status: "catalogue-updated" }
-            : { platform, status: "failed", error: "fixture failure" };
+          if (platform === "fansly") {
+            return { platform, status: "failed", error: "fixture failure" };
+          }
+          return {
+            platform,
+            status:
+              platform === "pornhub"
+                ? "manual-submit-required"
+                : "catalogue-updated"
+          };
         };
-        const first = await startCreatorUpload(id, ["onlyfans", "fansly"]);
+        const first = await startCreatorUpload(id, [
+          "onlyfans",
+          "fansly",
+          "manyvids",
+          "pornhub"
+        ]);
         prepareCreatorUploadPlatform = async (_session, platform, tabId) => {
           calls.push("prepare:" + platform + ":" + tabId);
           const prepared = { platform, tabId, status: "prepared" };
@@ -971,6 +1047,8 @@ function send(message) {
   assert.deepEqual(coordinator.first, [
     { platform: "onlyfans", status: "catalogue-updated" },
     { platform: "fansly", status: "failed", error: "fixture failure" },
+    { platform: "manyvids", status: "catalogue-updated" },
+    { platform: "pornhub", status: "manual-submit-required" },
   ]);
   assert.deepEqual(coordinator.retry, [
     { platform: "fansly", status: "failed", error: "fixture failure" },
@@ -978,6 +1056,8 @@ function send(message) {
   assert.deepEqual(coordinator.calls, [
     "onlyfans",
     "fansly",
+    "manyvids",
+    "pornhub",
     "prepare:fansly:50",
     "fansly",
   ]);
@@ -1021,7 +1101,7 @@ function send(message) {
           platform: "fansly",
           tabId: 50,
           status: "posted-link-unresolved",
-          submitted: true
+          submitAttempted: true
         });
         let unresolvedError = "";
         try {
@@ -1029,7 +1109,25 @@ function send(message) {
         } catch (error) {
           unresolvedError = error.message;
         }
-        return JSON.stringify({ commitRetry, unresolvedError, calls });
+        session.platforms.set("onlyfans", {
+          platform: "onlyfans",
+          tabId: 41,
+          status: "prepared"
+        });
+        const checkpoint = await checkpointCreatorUploadCommit(id, "onlyfans", 41);
+        let duplicateCheckpointError = "";
+        try {
+          await checkpointCreatorUploadCommit(id, "onlyfans", 41);
+        } catch (error) {
+          duplicateCheckpointError = error.message;
+        }
+        return JSON.stringify({
+          commitRetry,
+          unresolvedError,
+          checkpoint,
+          duplicateCheckpointError,
+          calls
+        });
       })()`,
       context,
     ),
@@ -1043,6 +1141,8 @@ function send(message) {
     },
   ]);
   assert.match(safeRetries.unresolvedError, /manual link recovery/i);
+  assert.deepEqual(safeRetries.checkpoint, { armed: true });
+  assert.match(safeRetries.duplicateCheckpointError, /manual link recovery/i);
   assert.deepEqual(safeRetries.calls, [
     "commit:fansly:https://fansly.com/post/987654321",
   ]);

@@ -582,11 +582,13 @@
     failedResult,
   });
 
-  toolkit.mountTool({
-    id: "manyvidsAutofill",
-    match: (location) =>
-      location.origin === "https://www.manyvids.com" &&
-      location.pathname.startsWith("/Edit-vid/"),
-    mount,
-  });
+  if (!globalThis.CreatorToolkitMasterRun) {
+    toolkit.mountTool({
+      id: "manyvidsAutofill",
+      match: (location) =>
+        location.origin === "https://www.manyvids.com" &&
+        location.pathname.startsWith("/Edit-vid/"),
+      mount,
+    });
+  }
 })();

@@ -269,9 +269,11 @@
     applyPlan,
   });
 
-  toolkit.mountTool({
-    id: "fanslyPrefill",
-    match: (location) => location.origin === "https://fansly.com",
-    mount,
-  });
+  if (!globalThis.CreatorToolkitMasterRun) {
+    toolkit.mountTool({
+      id: "fanslyPrefill",
+      match: (location) => location.origin === "https://fansly.com",
+      mount,
+    });
+  }
 })();

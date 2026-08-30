@@ -224,6 +224,27 @@ test("capability probe reports login, incomplete, and ambiguous pages", async ()
     assert.equal(manyvids.status, "page-detected");
 
     await page.setContent(`
+      <custom-dropdown data-key="orientation"><button class="customSelectTrigger">Orientation</button></custom-dropdown>
+      <input name="tags">
+      <input name="category">
+      <input type="file" id="must-not-be-read">
+      <button type="submit">Submit</button>
+    `);
+    const pornhub = await page.evaluate(() =>
+      CreatorUploadCapabilityProbe.inspect(document, {
+        origin: "https://pornhub.mainhub.com",
+        pathname: "/upload/uploader",
+      }),
+    );
+    assert.equal(pornhub.platform, "pornhub");
+    assert.equal(pornhub.status, "metadata-ready");
+    assert.deepEqual(Object.keys(pornhub.capabilities), [
+      "orientation",
+      "tags",
+      "categories",
+    ]);
+
+    await page.setContent(`
       <input type="file" name="mediaUpload" accept="video/*" hidden>
       <textarea aria-label="Post caption"></textarea>
       <button type="submit">Post</button>

@@ -356,7 +356,7 @@
       priceModeSelector: "#free_vid_0",
       priceModeExpectedLabel: "Set Your Price",
       launchModeSelector: "#launchCustom",
-      launchModeExpectedLabel: "",
+      launchModeExpectedLabel: "Custom launch date",
       membershipSelector: "#membership3",
       membershipExpectedLabel: "This vid is not included in your Vid Bundle",
       premiumSelector: "#premium2",
@@ -638,11 +638,12 @@
         "membershipExpectedLabel",
         "premiumExpectedLabel",
       ]) {
-        profiles.manyvidsAutofill[key] = normalizeString(
-          manyvids[key],
-          profiles.manyvidsAutofill[key],
-          200,
-        ).trim();
+        const fallback = profiles.manyvidsAutofill[key];
+        const normalized = normalizeString(manyvids[key], fallback, 200).trim();
+        profiles.manyvidsAutofill[key] =
+          key === "launchModeExpectedLabel"
+            ? normalized || fallback
+            : normalized;
       }
       profiles.manyvidsAutofill.tags = normalizeStringList(
         manyvids.tags,

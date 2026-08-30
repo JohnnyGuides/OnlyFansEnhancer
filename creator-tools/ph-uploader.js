@@ -431,11 +431,13 @@
     failedResult,
   });
 
-  toolkit.mountTool({
-    id: "phUploader",
-    match: (location) =>
-      location.origin === "https://pornhub.mainhub.com" &&
-      location.pathname.startsWith("/upload/uploader"),
-    mount,
-  });
+  if (!globalThis.CreatorToolkitMasterRun) {
+    toolkit.mountTool({
+      id: "phUploader",
+      match: (location) =>
+        location.origin === "https://pornhub.mainhub.com" &&
+        location.pathname.startsWith("/upload/uploader"),
+      mount,
+    });
+  }
 })();

@@ -833,6 +833,8 @@
           "catalogue-commit-failed": "Posted; sheet update failed",
           "catalogue-updated": "Catalogue updated",
           "uploaded-no-sheet": "Scheduled · sheet not connected",
+          "manual-submit-required":
+            "Metadata ready · attach the named file and submit manually",
           "already-linked": "Already linked",
           idempotent: "Catalogue already current",
           conflict: "Catalogue link conflict",
@@ -882,11 +884,19 @@
           card.append(message);
         }
         if (
-          state.status === "failed" ||
+          new Set([
+            "failed",
+            "edit-failed",
+            "catalogue-commit-failed",
+            "stale",
+            "conflict",
+          ]).has(state.status) ||
           (Boolean(state.postUrl) &&
-            new Set(["catalogue-commit-failed", "stale", "conflict"]).has(
-              state.status,
-            ))
+            !new Set([
+              "catalogue-updated",
+              "uploaded-no-sheet",
+              "idempotent",
+            ]).has(state.status))
         ) {
           const retry = document.createElement("button");
           retry.type = "button";
@@ -993,31 +1003,46 @@
     }
 
     function connectSession(sessionId) {
-      const port = chrome.runtime.connect({ name: "creator-upload-console" });
       const session = {
         id: sessionId,
-        port,
+        port: null,
         channel: null,
         pendingFiles: new Map(),
+        closed: false,
       };
-      port.onMessage.addListener((message) => {
-        if (message?.sessionId !== sessionId) return;
-        if (message.type === "file-request") {
-          deliverFile(session, message);
-          return;
-        }
-        if (message.type === "platform-progress") {
-          setPlatformState(message.platform, { status: message.status });
-          return;
-        }
-        if (message.type === "platform-result") {
-          setPlatformState(message.platform, message.result);
-        }
-      });
-      port.onDisconnect.addListener(() => {
-        session.channel?.close();
-      });
-      port.postMessage({ type: "bind-session", sessionId });
+      function connectPort() {
+        if (session.closed) return;
+        const port = chrome.runtime.connect({ name: "creator-upload-console" });
+        session.port = port;
+        port.onMessage.addListener((message) => {
+          if (message?.sessionId !== sessionId) return;
+          if (message.type === "file-request") {
+            deliverFile(session, message);
+            return;
+          }
+          if (message.type === "platform-progress") {
+            setPlatformState(message.platform, { status: message.status });
+            return;
+          }
+          if (message.type === "platform-result") {
+            setPlatformState(message.platform, message.result);
+            return;
+          }
+          if (message.type === "session-restored") {
+            for (const platform of message.platforms || []) {
+              setPlatformState(platform.platform, platform);
+            }
+          }
+        });
+        port.onDisconnect.addListener(() => {
+          if (session.port !== port || session.closed) return;
+          session.channel?.close();
+          session.channel = null;
+          setTimeout(connectPort, 250);
+        });
+        port.postMessage({ type: "bind-session", sessionId });
+      }
+      connectPort();
       return session;
     }
 
@@ -1312,7 +1337,8 @@
       }
     });
     globalThis.addEventListener("beforeunload", () => {
-      activeSession?.port.disconnect();
+      if (activeSession) activeSession.closed = true;
+      activeSession?.port?.disconnect();
       activeSession?.channel?.close();
     });
 

@@ -2177,6 +2177,11 @@ const CREATOR_UPLOAD_TARGETS = Object.freeze({
     landingUrl: "https://www.manyvids.com/upload-video",
     origin: "https://www.manyvids.com",
   }),
+  pornhub: Object.freeze({
+    match: "https://pornhub.mainhub.com/*",
+    landingUrl: "https://pornhub.mainhub.com/upload/uploader",
+    origin: "https://pornhub.mainhub.com",
+  }),
 });
 const CREATOR_UPLOAD_PROBE_FILE = "creator-tools/upload-capability-probe.js";
 let uploadConsoleOpening = null;
@@ -2298,6 +2303,38 @@ function installCreatorUploadResponseObserver(config) {
   return globalThis.CreatorUploadResponseObserver.install(config);
 }
 
+function markCreatorToolkitMasterRun() {
+  globalThis.CreatorToolkitMasterRun = true;
+}
+
+async function invokeCreatorPornhubPreparation(args) {
+  const adapter = globalThis.CreatorToolkitAdapters?.phUploader;
+  const toolkit = globalThis.CreatorToolkit;
+  if (!adapter || !toolkit) {
+    throw new Error("Pornhub metadata recipe is unavailable.");
+  }
+  const resolved = adapter.resolvePreset(args.profile, "", args.contentPreset);
+  if (!resolved) throw new Error("Pornhub content preset is unavailable.");
+  const plan = adapter.inspectPreset(resolved.name, resolved.preset);
+  const result = await adapter.applyPreset(
+    plan,
+    undefined,
+    toolkit.createBudget(undefined, {
+      maxActions: 100,
+      maxDurationMs: 180_000,
+    }),
+  );
+  if (result.status !== "success") {
+    throw new Error(result.summary || "Pornhub metadata preparation stopped.");
+  }
+  return {
+    platform: "pornhub",
+    status: "manual-submit-required",
+    effectiveFilename: args.effectiveFilename,
+    preset: resolved.name,
+  };
+}
+
 function cancelCreatorUploadResponseObserverInPage(config) {
   globalThis.CreatorUploadResponseObserver?.cancel(
     config.sessionId,
@@ -2364,6 +2401,13 @@ async function getCreatorUploadSession(sessionId) {
     cleanupTimer: null,
     restored: true,
   };
+  for (const target of session.platforms.values()) {
+    if (target.submitAttempted && !target.postUrl) {
+      target.status = "posted-link-unresolved";
+      target.error =
+        "The restored platform submission may already exist; recover its link manually.";
+    }
+  }
   creatorUploadSessions.set(id, session);
   session.cleanupTimer = setTimeout(
     () => creatorUploadSessions.delete(id),
@@ -2406,7 +2450,29 @@ function validateCreatorUploadRequest(message) {
     timeZone: creatorUploadClean(message.draft?.timeZone, 100),
     fanslyPreset: creatorUploadClean(message.draft?.fanslyPreset, 100),
     manyvidsThumbnail: message.draft?.manyvidsThumbnail === true,
+    pornhubFilename: creatorUploadClean(message.draft?.pornhubFilename, 500),
+    contentPreset: creatorUploadClean(message.draft?.contentPreset, 100),
+    fanslyCaption: creatorUploadClean(message.draft?.fanslyCaption, 15_000),
   };
+  const normalizedProfiles = CREATOR_REGISTRY.normalizeSettings({
+    profiles: message.draft?.profiles,
+  }).value.profiles;
+  draft.profiles = {
+    fanslyPrefill: normalizedProfiles.fanslyPrefill,
+    manyvidsAutofill: normalizedProfiles.manyvidsAutofill,
+    phUploader: normalizedProfiles.phUploader,
+  };
+  draft.profileSignature = JSON.stringify(draft.profiles);
+  const providedProfileSignature = creatorUploadClean(
+    message.draft?.profileSignature,
+    50_000,
+  );
+  if (
+    providedProfileSignature &&
+    providedProfileSignature !== draft.profileSignature
+  ) {
+    throw new Error("Creator workflow profiles changed after confirmation.");
+  }
   const scheduled = new Date(draft.scheduledIso);
   if (
     !draft.title ||
@@ -2423,6 +2489,21 @@ function validateCreatorUploadRequest(message) {
   if (targets.includes("fansly") && draft.fanslyPreset !== "defaulT") {
     throw new Error("Fansly full media requires the exact defaulT preset.");
   }
+  if (targets.includes("fansly") && !draft.fanslyCaption) {
+    draft.fanslyCaption = draft.description;
+  }
+  if (targets.includes("pornhub")) {
+    if (!draft.pornhubFilename || !draft.contentPreset) {
+      throw new Error(
+        "Pornhub preparation requires a file and content preset.",
+      );
+    }
+    if (
+      !Object.hasOwn(draft.profiles.phUploader.presets, draft.contentPreset)
+    ) {
+      throw new Error("Pornhub content preset is unavailable.");
+    }
+  }
   if (targets.includes("manyvids")) {
     if (!draft.fullFilename) {
       throw new Error("ManyVids requires the selected full-video filename.");
@@ -2433,17 +2514,6 @@ function validateCreatorUploadRequest(message) {
     ) {
       throw new Error("Invalid ManyVids thumbnail selection.");
     }
-    const profile = CREATOR_REGISTRY.DEFAULT_PROFILES.manyvidsAutofill;
-    draft.manyvids = {
-      coPerformer: profile.coPerformer,
-      price: profile.price,
-      priceModeLabel: profile.priceModeExpectedLabel,
-      launchModeWords: ["custom", "launch", "date"],
-      launchTimeLabel: profile.launchTimeLabel,
-      membershipLabel: profile.membershipExpectedLabel,
-      premiumLabel: profile.premiumExpectedLabel,
-      tags: [...profile.tags],
-    };
   }
   // Only an explicit upload-only confirmation may omit catalogue validation.
   if (message.catalogue === null) {
@@ -2481,7 +2551,7 @@ function validateCreatorUploadRequest(message) {
   ) {
     throw new Error("Invalid catalogue upload preview.");
   }
-  for (const platform of ["onlyfans", "fansly", "manyvids"]) {
+  for (const platform of ["pornhub", "onlyfans", "fansly", "manyvids"]) {
     const field = `${platform}Link`;
     const raw = catalogue[field];
     const canonical = raw
@@ -2492,12 +2562,12 @@ function validateCreatorUploadRequest(message) {
     }
     catalogue[field] = canonical;
     if (targets.includes(platform) && canonical) {
-      const label =
-        platform === "onlyfans"
-          ? "OnlyFans"
-          : platform === "fansly"
-            ? "Fansly"
-            : "ManyVids";
+      const label = {
+        pornhub: "Pornhub",
+        onlyfans: "OnlyFans",
+        fansly: "Fansly",
+        manyvids: "ManyVids",
+      }[platform];
       throw new Error(`Catalogue row already has a ${label} link.`);
     }
   }
@@ -2568,6 +2638,22 @@ function creatorUploadHandlePortMessage(port, message) {
       return;
     }
     port.creatorUploadSessionId = sessionId;
+    void getCreatorUploadSession(sessionId)
+      .then((session) => {
+        if (!session) return;
+        port.postMessage({
+          type: "session-restored",
+          sessionId,
+          platforms: [...session.platforms.values()].map((target) => ({
+            platform: target.platform,
+            status: target.status,
+            postUrl: target.postUrl,
+            manyvidsId: target.manyvidsId,
+            error: target.error,
+          })),
+        });
+      })
+      .catch(() => {});
     return;
   }
   if (message?.type !== "file-response") return;
@@ -2684,6 +2770,30 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       `${platform} left its expected origin before upload preparation.`,
     );
   }
+  if (platform === "pornhub") {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: markCreatorToolkitMasterRun,
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: [
+        "creator-tools/registry.js",
+        "creator-tools/common.js",
+        "creator-tools/ph-uploader.js",
+      ],
+    });
+    const target = {
+      platform,
+      tabId: tab.id,
+      stage: "prepared",
+      status: "prepared",
+      createdAt: Date.now(),
+    };
+    session.platforms.set(platform, target);
+    await checkpointCreatorUploadSession(session);
+    return target;
+  }
   const tokens = {
     full: creatorUploadRandomToken(),
     ...(["fansly", "manyvids"].includes(platform)
@@ -2715,9 +2825,25 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
               kind: "video",
             },
           };
+  if (platform === "fansly") {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: markCreatorToolkitMasterRun,
+    });
+  }
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    files: [CREATOR_UPLOAD_FILE_BRIDGE, CREATOR_UPLOAD_ADAPTERS],
+    files: [
+      ...(platform === "fansly"
+        ? [
+            "creator-tools/registry.js",
+            "creator-tools/common.js",
+            "creator-tools/fansly-prefill.js",
+          ]
+        : []),
+      CREATOR_UPLOAD_FILE_BRIDGE,
+      CREATOR_UPLOAD_ADAPTERS,
+    ],
   });
   const bridgeBase = chrome.runtime.getURL("file-bridge.html");
   const bridgeOrigin = new URL(bridgeBase).origin;
@@ -2757,7 +2883,17 @@ async function prepareCreatorManyVidsEdit(session, target) {
   }
   await chrome.scripting.executeScript({
     target: { tabId: target.tabId },
-    files: [CREATOR_UPLOAD_FILE_BRIDGE, CREATOR_UPLOAD_ADAPTERS],
+    func: markCreatorToolkitMasterRun,
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId: target.tabId },
+    files: [
+      "creator-tools/registry.js",
+      "creator-tools/common.js",
+      "creator-tools/manyvids-autofill.js",
+      CREATOR_UPLOAD_FILE_BRIDGE,
+      CREATOR_UPLOAD_ADAPTERS,
+    ],
   });
   const bridgeBase = chrome.runtime.getURL("file-bridge.html");
   const bridgeOrigin = new URL(bridgeBase).origin;
@@ -2872,6 +3008,13 @@ function invokeCreatorUploadAdapter(args) {
         platform: args.platform,
         status,
       }).catch(() => {});
+    },
+    beforeCommit() {
+      return send({
+        type: "CHECKPOINT_CREATOR_UPLOAD_COMMIT",
+        sessionId: args.sessionId,
+        platform: args.platform,
+      });
     },
   };
   if (args.platform === "onlyfans") {
@@ -3084,8 +3227,70 @@ async function runCreatorManyVidsPlatform(session, target) {
   }
 }
 
+async function runCreatorPornhubPlatform(session, target) {
+  const platform = "pornhub";
+  try {
+    const loaded = await chrome.tabs.get(target.tabId);
+    if (!creatorUrlMatches(loaded?.url, CREATOR_UPLOAD_TARGETS.pornhub)) {
+      throw new Error("Pornhub left the expected uploader origin.");
+    }
+    target.stage = "metadata";
+    target.status = "configuring";
+    await checkpointCreatorUploadSession(session);
+    const execution = await chrome.scripting.executeScript({
+      target: { tabId: target.tabId },
+      func: invokeCreatorPornhubPreparation,
+      args: [
+        {
+          profile: session.draft.profiles.phUploader,
+          contentPreset: session.draft.contentPreset,
+          effectiveFilename: session.draft.pornhubFilename,
+        },
+      ],
+    });
+    const result = execution?.[0]?.result;
+    if (result?.status !== "manual-submit-required") {
+      throw new Error("Pornhub metadata preparation did not finish safely.");
+    }
+    Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
+    creatorUploadPost(session.id, {
+      type: "platform-result",
+      platform,
+      result,
+    });
+    return result;
+  } catch (error) {
+    const result = { platform, status: "failed", error: error.message };
+    Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
+    try {
+      creatorUploadPost(session.id, {
+        type: "platform-result",
+        platform,
+        result,
+      });
+    } catch {
+      // The console may close while metadata is being prepared.
+    }
+    return result;
+  }
+}
+
 async function runCreatorUploadPlatform(session, platform) {
   const target = session.platforms.get(platform);
+  if (target?.submitAttempted && !target.postUrl) {
+    const result = {
+      platform,
+      status: "posted-link-unresolved",
+      submitted: true,
+      error:
+        "The restored platform submission may already exist; manual link recovery is required.",
+    };
+    Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
+    return result;
+  }
   if (!target?.tabId || target.status !== "prepared") {
     return (
       target || {
@@ -3097,6 +3302,9 @@ async function runCreatorUploadPlatform(session, platform) {
   }
   if (platform === "manyvids") {
     return runCreatorManyVidsPlatform(session, target);
+  }
+  if (platform === "pornhub") {
+    return runCreatorPornhubPlatform(session, target);
   }
   target.status = "uploading-full";
   target.stage = "upload";
@@ -3243,7 +3451,13 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
   if (!session || !target || !Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform)) {
     throw new Error("Unknown creator upload retry target.");
   }
-  if (["catalogue-updated", "uploaded-no-sheet"].includes(target.status))
+  if (
+    [
+      "catalogue-updated",
+      "uploaded-no-sheet",
+      "manual-submit-required",
+    ].includes(target.status)
+  )
     return [target];
   if (target.postUrl) {
     try {
@@ -3289,12 +3503,24 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
       return [result];
     }
   }
-  if (target.submitted || target.status === "posted-link-unresolved") {
+  if (
+    target.submitAttempted ||
+    target.submitted ||
+    target.status === "posted-link-unresolved"
+  ) {
     throw new Error(
       "The platform submission may already exist; manual link recovery is required before any retry.",
     );
   }
   if (platform === "manyvids" && target.manyvidsId) {
+    if (!target.tokens) {
+      target.tokens = {
+        teaser: creatorUploadRandomToken(),
+        ...(session.draft.manyvidsThumbnail
+          ? { thumbnail: creatorUploadRandomToken() }
+          : {}),
+      };
+    }
     const editUrl = `https://www.manyvids.com/Edit-vid/${target.manyvidsId}`;
     await chrome.tabs.update(target.tabId, { active: true, url: editUrl });
     await waitForCreatorTab(target.tabId);
@@ -3313,6 +3539,34 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
     target.tabId,
   );
   return [await runCreatorUploadPlatform(session, prepared.platform)];
+}
+
+async function checkpointCreatorUploadCommit(sessionId, platform, tabId) {
+  const session = await getCreatorUploadSession(sessionId);
+  const target = session?.platforms.get(platform);
+  if (
+    !session ||
+    !target ||
+    target.tabId !== tabId ||
+    !Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform)
+  ) {
+    throw new Error("Unauthorized creator upload commit checkpoint.");
+  }
+  if (target.submitAttempted) {
+    throw new Error(
+      "The platform submission may already exist; manual link recovery is required before any retry.",
+    );
+  }
+  target.stage = "submit-attempted";
+  target.commitArmed = true;
+  target.submitAttempted = true;
+  await checkpointCreatorUploadSession(session);
+  const persisted = await CREATOR_UPLOAD_SESSION_STORE.load(session.id);
+  const durable = persisted?.platforms?.[platform];
+  if (!durable?.commitArmed || !durable.submitAttempted) {
+    throw new Error("The creator upload commit checkpoint was not durable.");
+  }
+  return { armed: true };
 }
 
 async function openUploadConsole() {
@@ -3451,6 +3705,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             message.platform,
           ),
         };
+      case "CHECKPOINT_CREATOR_UPLOAD_COMMIT":
+        return checkpointCreatorUploadCommit(
+          message.sessionId,
+          message.platform,
+          sender.tab?.id,
+        );
       case "DELIVER_CREATOR_UPLOAD_FILE": {
         const session = await getCreatorUploadSession(message.sessionId);
         const target = session?.platforms.get(message.platform);
