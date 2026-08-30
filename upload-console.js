@@ -433,6 +433,7 @@
 
     function applyProposal(proposal, catalogueStatus = "matched") {
       currentProposal = proposal;
+      continueWithoutSheet.hidden = proposal.status !== "needs-queue-evidence";
       const candidate = proposal.candidate;
       if (!candidate) {
         currentMatch = null;

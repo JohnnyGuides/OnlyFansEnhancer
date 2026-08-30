@@ -45,8 +45,20 @@ ManyVids upload/schedule controls and reconcile the resulting links.
   reading or writing the sheet. A configured but failing bridge offers an
   explicit **Continue without sheet** choice. Upload-only mode shows captured
   post links in the console but cannot check existing catalogue links.
-  With a connected bridge, it deterministically matches `Work / 2026 Video Catalogue`.
-  Yes starts the full upload on all selected authenticated sites,
+  With a connected bridge, it reads a bounded `A:L` snapshot from
+  `Work / 2026 Video Catalogue` and ranks likely episodes locally from the
+  filename, title, ID, Season/Arc, Episode, existing platform links, and Friday
+  plan. This is deterministic fuzzy matching; it sends no video or catalogue
+  text to an AI service. A strong unique result becomes one Yes/No proposal.
+  No, an ambiguous result, or a weak result opens a searchable native picker
+  with an explicit **Add new catalogue entry** choice. Empty link cells infer
+  the missing platforms; Pornhub may be recommended but is not yet executable
+  from this console. Smart Yes remains disabled when authenticated platform
+  queue evidence is unavailable or stale, and the console offers the explicit
+  **Continue without sheet** route instead. Immediately before a smart Yes, it
+  rereads the chosen row and stops if its fingerprint, inferred targets, or
+  verified Friday plan changed. Yes starts the full upload on all selected
+  authenticated sites,
   schedules Friday at 15:00 UTC, leaves OnlyFans labels unchanged, and gives
   Fansly a teaser attached through **Add Free Preview** to full media locked
   with exact preset `defaulT`. On ManyVids it waits up to 45 minutes for the

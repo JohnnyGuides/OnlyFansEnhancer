@@ -1809,6 +1809,79 @@ test("ambiguous catalogue wording opens the picker without offering Yes", async 
   }
 });
 
+test("unverified platform queue keeps Yes disabled and offers explicit upload without the sheet", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    const html = fs
+      .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+      .replace(/<script[^>]+><\/script>/gi, "");
+    await page.setContent(html);
+    await page.evaluate(() => {
+      globalThis.consoleMessages = [];
+      globalThis.CreatorCatalogueClient = {
+        async loadConfig() {
+          return { endpoint: "https://script.google.com/fixture", secret: "x" };
+        },
+        async getCatalogueSnapshot() {
+          return {
+            status: "snapshot",
+            rows: [
+              {
+                row: 44,
+                id: "nervous-jo",
+                releaseDate: "2026-08-14",
+                title: "Nervous Jo",
+                description: "Catalogue description",
+                seasonArc: "GameSync",
+                episode: "4",
+                pornhubLink: "https://pornhub.com/view_video.php?viewkey=x",
+                onlyfansLink: "",
+                fanslyLink: "https://fansly.com/post/2",
+                manyvidsLink: "https://www.manyvids.com/Video/3",
+                fingerprint: "1234abcd",
+              },
+            ],
+            emptyRow: { row: 45, fingerprint: "empty-row" },
+          };
+        },
+      };
+      globalThis.chrome = {
+        runtime: {
+          lastError: null,
+          sendMessage(message, callback) {
+            globalThis.consoleMessages.push(structuredClone(message));
+            callback({ ok: true });
+          },
+        },
+      };
+    });
+    for (const relativePath of [
+      "creator-tools/catalogue-contract.js",
+      "creator-tools/catalogue-proposal.js",
+      "upload-console.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.join(repositoryRoot, relativePath),
+      });
+    }
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "Nervous Jo (full).mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("full-video"),
+    });
+    await page.getByText(/queue is not verified/i).waitFor();
+
+    assert.equal(await page.locator("#confirmUpload").isDisabled(), true);
+    await page.locator("#continueWithoutSheet").click();
+    await page.getByText(/Upload without sheet/i).waitFor();
+    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Yes rechecks the proposed catalogue row and stops before platform mutation when it changed", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();

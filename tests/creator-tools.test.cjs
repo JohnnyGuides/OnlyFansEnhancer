@@ -36,7 +36,7 @@ test("personal manifest uses least-privilege dynamic creator registrations", () 
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.11.0");
+  assert.equal(manifest.version, "0.12.0");
   assert.deepEqual(manifest.host_permissions, ["https://onlyfans.com/*"]);
   assert.ok(manifest.permissions.includes("scripting"));
   assert.ok(manifest.permissions.includes("offscreen"));
