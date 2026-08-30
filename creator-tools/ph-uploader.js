@@ -283,28 +283,6 @@
       }
     }
 
-    const solo = document.querySelector('input[type="radio"][value="solo"]');
-    if (solo instanceof HTMLInputElement && !solo.checked) {
-      if (
-        !(await step("Solo/Animation", async () => {
-          budget.step();
-          toolkit.clickElement(solo, signal);
-          await toolkit.waitFor(() => solo.checked, {
-            signal,
-            timeoutMs: 1500,
-            description: "Solo/Animation radio state",
-          });
-          return {
-            label: "Solo/Animation",
-            status: "changed",
-            detail: "selected and verified",
-          };
-        }))
-      ) {
-        return failedResult(outcomes);
-      }
-    }
-
     if (
       !(await step("Orientation", () =>
         selectOrientation(plan.preset.orientation, signal, budget),

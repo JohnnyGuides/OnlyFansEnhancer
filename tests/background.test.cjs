@@ -547,6 +547,19 @@ function send(message) {
               tabId: 41,
               status: "submitted",
               submitAttempted: true
+            },
+            fansly: {
+              platform: "fansly",
+              tabId: 50,
+              status: "uploading-full",
+              submitAttempted: false
+            },
+            manyvids: {
+              platform: "manyvids",
+              tabId: 51,
+              status: "configuring",
+              manyvidsId: "7783271",
+              submitAttempted: false
             }
           }
         });
@@ -557,14 +570,19 @@ function send(message) {
         await CreatorUploadSessionStore.remove(id);
         return JSON.stringify({
           title: restored.draft.title,
-          platform: restored.platforms.get("onlyfans")
+          onlyfans: restored.platforms.get("onlyfans"),
+          fansly: restored.platforms.get("fansly"),
+          manyvids: restored.platforms.get("manyvids")
         });
       })()`,
       context,
     ),
   );
   assert.equal(restoredUploadSession.title, "Restored episode");
-  assert.equal(restoredUploadSession.platform.submitAttempted, true);
+  assert.equal(restoredUploadSession.onlyfans.submitAttempted, true);
+  assert.equal(restoredUploadSession.onlyfans.status, "posted-link-unresolved");
+  assert.equal(restoredUploadSession.fansly.status, "failed");
+  assert.equal(restoredUploadSession.manyvids.status, "edit-failed");
 
   const validatedUpload = JSON.parse(
     vm.runInContext(
@@ -604,6 +622,30 @@ function send(message) {
   assert.equal(validatedUpload.draft.fanslyPreset, "defaulT");
   assert.equal(validatedUpload.draft.fullFilename, "Episode 42 (full).mp4");
   assert.equal(validatedUpload.draft.manyvidsThumbnail, true);
+  context.proofSession = {
+    draft: validatedUpload.draft,
+  };
+  context.validProof = {
+    fullFilename: validatedUpload.draft.fullFilename,
+    pornhubFilename: validatedUpload.draft.pornhubFilename,
+    manyvidsThumbnail: validatedUpload.draft.manyvidsThumbnail,
+    profileSignature: validatedUpload.draft.profileSignature,
+  };
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(proofSession, validProof)",
+      context,
+    ),
+    true,
+  );
+  context.changedProof = { ...context.validProof, fullFilename: "other.mp4" };
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(proofSession, changedProof)",
+      context,
+    ),
+    false,
+  );
   assert.equal(validatedUpload.draft.profiles.manyvidsAutofill.price, "19.99");
   assert.equal(validatedUpload.draft.profiles.manyvidsAutofill.tags.length, 10);
   assert.equal(validatedUpload.catalogue.fanslyLink, "");
@@ -743,8 +785,12 @@ function send(message) {
   const fileBridgePlatforms = [];
   const manyVidsStages = [];
   let manyVidsEditFailuresRemaining = 0;
+  let manyVidsPostCheckpointFailuresRemaining = 0;
   context.armManyVidsEditFailure = () => {
     manyVidsEditFailuresRemaining = 1;
+  };
+  context.armManyVidsPostCheckpointFailure = () => {
+    manyVidsPostCheckpointFailuresRemaining = 1;
   };
   context.crypto = require("node:crypto").webcrypto;
   context.fetch = async () => {
@@ -787,6 +833,22 @@ function send(message) {
         manyVidsEditFailuresRemaining -= 1;
         throw new Error("fixture edit failure");
       }
+      if (manyVidsPostCheckpointFailuresRemaining > 0) {
+        manyVidsPostCheckpointFailuresRemaining -= 1;
+        const target = await vm.runInContext(
+          `getCreatorUploadSession("${args.sessionId}").then((session) => session.platforms.get("manyvids"))`,
+          context,
+        );
+        target.commitArmed = true;
+        target.submitAttempted = true;
+        await context.CreatorUploadSessionStore.save(
+          await vm.runInContext(
+            `getCreatorUploadSession("${args.sessionId}").then(creatorUploadSessionRecord)`,
+            context,
+          ),
+        );
+        throw new Error("fixture response lost after durable checkpoint");
+      }
       tab.url = "https://www.manyvids.com/upload-video";
       return [
         {
@@ -825,6 +887,7 @@ function send(message) {
         const prepared = await prepareCreatorUpload(uploadOnlyRequest);
         const first = await startCreatorUpload(uploadOnlyRequest.sessionId, uploadOnlyRequest.targets);
         const retry = await retryCreatorUploadPlatform(uploadOnlyRequest.sessionId, "fansly");
+        const storedAfterSuccess = await CreatorUploadSessionStore.load(uploadOnlyRequest.sessionId);
         const correctionRequest = {
           ...uploadOnlyRequest,
           sessionId: "111111111111111111111111111111111111111111111111",
@@ -839,6 +902,26 @@ function send(message) {
         await prepareCreatorUpload(correctionRequest);
         const correctionFirst = await startCreatorUpload(correctionRequest.sessionId, ["manyvids"]);
         const correctionRetry = await retryCreatorUploadPlatform(correctionRequest.sessionId, "manyvids");
+        const uncertainRequest = {
+          ...uploadOnlyRequest,
+          sessionId: "333333333333333333333333333333333333333333333333",
+          targets: ["manyvids"]
+        };
+        const uncertainPort = {
+          creatorUploadSessionId: uncertainRequest.sessionId,
+          postMessage() {}
+        };
+        creatorUploadConsolePorts.add(uncertainPort);
+        armManyVidsPostCheckpointFailure();
+        await prepareCreatorUpload(uncertainRequest);
+        const uncertainResult = await startCreatorUpload(uncertainRequest.sessionId, ["manyvids"]);
+        let uncertainRetryError = "";
+        try {
+          await retryCreatorUploadPlatform(uncertainRequest.sessionId, "manyvids");
+        } catch (error) {
+          uncertainRetryError = error.message;
+        }
+        const storedAfterUncertain = await CreatorUploadSessionStore.load(uncertainRequest.sessionId);
         const pornhubRequest = {
           ...uploadOnlyRequest,
           sessionId: "222222222222222222222222222222222222222222222222",
@@ -865,12 +948,20 @@ function send(message) {
         clearTimeout(creatorUploadSessions.get(correctionRequest.sessionId)?.cleanupTimer);
         creatorUploadSessions.delete(correctionRequest.sessionId);
         creatorUploadConsolePorts.delete(correctionPort);
+        clearTimeout(creatorUploadSessions.get(uncertainRequest.sessionId)?.cleanupTimer);
+        creatorUploadSessions.delete(uncertainRequest.sessionId);
+        creatorUploadConsolePorts.delete(uncertainPort);
+        await CreatorUploadSessionStore.remove(uncertainRequest.sessionId);
         return JSON.stringify({
           prepared,
           first,
           retry,
+          storedAfterSuccess,
           correctionFirst,
           correctionRetry,
+          uncertainResult,
+          uncertainRetryError,
+          storedAfterUncertain,
           pornhubPrepared,
           pornhubResult
         });
@@ -913,6 +1004,7 @@ function send(message) {
       },
     ]);
     assert.equal(directRun.retry[0].status, "uploaded-no-sheet");
+    assert.equal(directRun.storedAfterSuccess, null);
     assert.equal(directRun.pornhubPrepared.platforms[0].status, "prepared");
     assert.deepEqual(directRun.pornhubResult, [
       {
@@ -930,18 +1022,30 @@ function send(message) {
     );
     assert.equal(directRun.correctionFirst[0].manyvidsId, "7783271");
     assert.equal(directRun.correctionRetry[0].status, "uploaded-no-sheet");
+    assert.equal(
+      directRun.uncertainResult[0].status,
+      "posted-link-unresolved",
+      JSON.stringify(directRun.uncertainResult[0]),
+    );
+    assert.match(directRun.uncertainRetryError, /manual link recovery/i);
+    assert.equal(
+      directRun.storedAfterUncertain.platforms.manyvids.submitAttempted,
+      true,
+    );
     assert.deepEqual(manyVidsStages, [
       "upload",
       "edit",
       "upload",
       "edit",
       "edit",
+      "upload",
+      "edit",
     ]);
     assert.equal(
       uploadExecutions.filter((name) => name === "invokeCreatorUploadAdapter")
         .length,
-      7,
-      "Retrying a completed direct upload must never post again.",
+      9,
+      "Completed retries and uncertain submissions must never invoke another adapter run.",
     );
   } finally {
     chrome.scripting.executeScript = originalExecuteScript;

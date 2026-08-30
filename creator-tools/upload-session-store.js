@@ -6,6 +6,7 @@
   const KEY_PREFIX = "creatorUploadSessionV1:";
   const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
   const PLATFORMS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
+  const writeChains = new Map();
   const DRAFT_STRINGS = Object.freeze({
     title: 500,
     description: 10_000,
@@ -203,16 +204,30 @@
     return stored[storageKey] ? sanitize(stored[storageKey]) : null;
   }
 
+  function enqueueWrite(id, operation) {
+    const previous = writeChains.get(id) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    writeChains.set(id, current);
+    return current.finally(() => {
+      if (writeChains.get(id) === current) writeChains.delete(id);
+    });
+  }
+
   async function save(record) {
     const next = sanitize(record);
-    const previous = await load(next.id);
-    const value = sanitize(merge(previous, next));
-    await chrome.storage.session.set({ [key(next.id)]: value });
-    return value;
+    return enqueueWrite(next.id, async () => {
+      const previous = await load(next.id);
+      const value = sanitize(merge(previous, next));
+      await chrome.storage.session.set({ [key(next.id)]: value });
+      return value;
+    });
   }
 
   async function remove(id) {
-    await chrome.storage.session.remove(key(id));
+    const normalized = clean(id, 64);
+    await enqueueWrite(normalized, () =>
+      chrome.storage.session.remove(key(normalized)),
+    );
   }
 
   async function list() {

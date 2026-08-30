@@ -10,6 +10,7 @@ const repositoryRoot = path.resolve(__dirname, "..");
 
 function loadStore() {
   const values = {};
+  let setInterceptor = null;
   const context = vm.createContext({
     chrome: {
       storage: {
@@ -28,6 +29,10 @@ function loadStore() {
             );
           },
           async set(next) {
+            if (setInterceptor) {
+              await setInterceptor(structuredClone(next), values);
+              return;
+            }
             Object.assign(values, structuredClone(next));
           },
           async remove(keys) {
@@ -48,7 +53,13 @@ function loadStore() {
     context,
     { filename: "creator-tools/upload-session-store.js" },
   );
-  return { store: context.CreatorUploadSessionStore, values };
+  return {
+    store: context.CreatorUploadSessionStore,
+    values,
+    interceptSet(interceptor) {
+      setInterceptor = interceptor;
+    },
+  };
 }
 
 function plain(value) {
@@ -150,6 +161,55 @@ test("upload session writes cannot clear attempted submits or captured IDs and U
     restored.platforms.manyvids.postUrl,
     "https://www.manyvids.com/Video/7783271",
   );
+});
+
+test("concurrent upload checkpoints cannot erase a sibling submit flag", async () => {
+  const { store, interceptSet } = loadStore();
+  const id = "upload-session-concurrent";
+  await store.save({
+    id,
+    platforms: {
+      onlyfans: { platform: "onlyfans", submitAttempted: false },
+      fansly: { platform: "fansly", submitAttempted: false },
+    },
+  });
+
+  let releaseFirstWrite;
+  let writeCount = 0;
+  interceptSet(async (next, values) => {
+    writeCount += 1;
+    if (writeCount === 1) {
+      await new Promise((resolve) => {
+        releaseFirstWrite = resolve;
+        setTimeout(resolve, 0);
+      });
+      Object.assign(values, next);
+      return;
+    }
+    Object.assign(values, next);
+    releaseFirstWrite();
+  });
+
+  await Promise.all([
+    store.save({
+      id,
+      platforms: {
+        onlyfans: { platform: "onlyfans", submitAttempted: true },
+        fansly: { platform: "fansly", submitAttempted: false },
+      },
+    }),
+    store.save({
+      id,
+      platforms: {
+        onlyfans: { platform: "onlyfans", submitAttempted: true },
+        fansly: { platform: "fansly", submitAttempted: true },
+      },
+    }),
+  ]);
+
+  const restored = plain(await store.load(id));
+  assert.equal(restored.platforms.onlyfans.submitAttempted, true);
+  assert.equal(restored.platforms.fansly.submitAttempted, true);
 });
 
 test("upload session list and remove operate only on the store prefix", async () => {

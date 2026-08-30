@@ -7,6 +7,11 @@ account identifiers, or screenshots containing customer data.
 Passing fixtures are required before this checklist. A live success never
 replaces an automated test.
 
+This release checklist is inspection-only. It must never click or exercise a
+real Save, Schedule, Post, Submit, or equivalent final control. The posting
+steps below describe a separately authorized creator acceptance run and are not
+part of the release smoke test.
+
 ## Before testing
 
 - Build and load the validated personal ZIP or its exact source revision.
@@ -26,6 +31,17 @@ action. Also verify that the options-page action log records a concise truthful
 outcome without page content or credentials.
 
 ## Upload console
+
+- Confirm the extension reports version `0.13.0` before testing. For the release
+  smoke pass, stop at the final preview on every site; do not click the global
+  Yes when it would reach a real final platform control.
+- Configure distinctive safe saved profiles and verify the Master Uploader
+  preview shows the same Fansly caption policy, ManyVids commercial metadata,
+  and Pornhub exact preset as their standalone panels.
+- After the preview is confirmed in an automated fixture, replace the source
+  input programmatically and verify the bridge still transfers only the frozen
+  confirmed file identity. Confirm the full, thumbnail, and Pornhub inputs are
+  disabled; a teaser missing at Yes may be supplied once and is then frozen.
 
 - With no sheet bridge configured, select a harmless full-video fixture and
   enter a description. Confirm **Yes, upload now** appears, the preview says
@@ -63,6 +79,14 @@ outcome without page content or credentials.
   unresolved link offers no automated repost.
 - Use an unfamiliar final response fixture and confirm the run stops at
   **Posted; link unresolved** without guessing a sheet link.
+- In an automated worker-restart fixture, confirm bounded textual state resumes,
+  an already captured ManyVids ID reopens only that editor, and an attempted
+  submission without a captured URL requires manual recovery. Inspect session
+  storage and confirm no `File`, bytes, local path, credential, cookie, header,
+  or request body was persisted.
+- Confirm simultaneous platform checkpoints retain every sibling
+  `submitAttempted` flag, terminal jobs are removed, and uncertain/manual-link
+  recovery jobs remain available until the browser session ends.
 
 ## Clips4Sale
 
@@ -82,6 +106,18 @@ outcome without page content or credentials.
 - Confirm Save/Submit remains manual.
 
 ## Pornhub uploader
+
+- In the Master Uploader, provide both a full video and a separate Pornhub
+  `(limited)` video and confirm the plan names the Pornhub file. Remove it and
+  confirm the full video becomes the fallback. A teaser must never become the
+  Pornhub file.
+- Confirm an exact Pornhub content preset is required. The master preparation
+  may apply only orientation, tags, and categories, then must report
+  **Manual submit required**. It must not assign a file, write a title or
+  description, schedule, query/click Submit, or claim a captured link.
+- In a fixture with a Season/Arc, confirm an exact preset selected at Yes is
+  saved as that deterministic future mapping without changing the profile
+  snapshot used by the active run.
 
 - Type a query that produces an exact suggestion plus fuzzy/promoted/wrapper
   rows. Confirm only the exact fresh suggestion is accepted.

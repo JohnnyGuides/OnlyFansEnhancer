@@ -2345,6 +2345,13 @@ const creatorUploadSessions = new Map();
 const creatorUploadConsolePorts = new Set();
 const creatorUploadFileRequests = new Map();
 let creatorUploadRequestCounter = 0;
+const CREATOR_UPLOAD_TERMINAL_STATUSES = new Set([
+  "catalogue-updated",
+  "uploaded-no-sheet",
+  "manual-submit-required",
+  "already-linked",
+  "idempotent",
+]);
 
 function creatorUploadSessionRecord(session) {
   return {
@@ -2380,7 +2387,18 @@ async function checkpointCreatorUploadSession(session) {
     if (!target.createdAt) target.createdAt = session.createdAt;
     target.updatedAt = session.updatedAt;
   }
-  return CREATOR_UPLOAD_SESSION_STORE.save(creatorUploadSessionRecord(session));
+  const saved = await CREATOR_UPLOAD_SESSION_STORE.save(
+    creatorUploadSessionRecord(session),
+  );
+  if (
+    session.platforms.size > 0 &&
+    [...session.platforms.values()].every((target) =>
+      CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status),
+    )
+  ) {
+    await CREATOR_UPLOAD_SESSION_STORE.remove(session.id);
+  }
+  return saved;
 }
 
 async function getCreatorUploadSession(sessionId) {
@@ -2406,14 +2424,43 @@ async function getCreatorUploadSession(sessionId) {
       target.status = "posted-link-unresolved";
       target.error =
         "The restored platform submission may already exist; recover its link manually.";
+    } else if (
+      new Set([
+        "uploading-full",
+        "upload-ready",
+        "edit-requested",
+        "configuring",
+        "waiting-for-teaser",
+        "waiting-for-thumbnail",
+      ]).has(target.status)
+    ) {
+      target.status = target.manyvidsId ? "edit-failed" : "failed";
+      target.error = target.manyvidsId
+        ? "The extension worker restarted. Resume this exact ManyVids editor after verifying the open draft."
+        : "The extension worker restarted before submission. Retry after verifying the open draft.";
     }
   }
   creatorUploadSessions.set(id, session);
+  await checkpointCreatorUploadSession(session);
   session.cleanupTimer = setTimeout(
     () => creatorUploadSessions.delete(id),
     2 * 60 * 60_000,
   );
   return session;
+}
+
+function creatorUploadSessionProofMatches(session, proof) {
+  if (!session?.draft || !proof || typeof proof !== "object") return false;
+  return (
+    creatorUploadClean(proof.fullFilename, 500) ===
+      session.draft.fullFilename &&
+    creatorUploadClean(proof.pornhubFilename, 500) ===
+      session.draft.pornhubFilename &&
+    (proof.manyvidsThumbnail === true) ===
+      (session.draft.manyvidsThumbnail === true) &&
+    creatorUploadClean(proof.profileSignature, 50_000) ===
+      session.draft.profileSignature
+  );
 }
 
 function creatorUploadClean(value, maximum) {
@@ -2641,6 +2688,16 @@ function creatorUploadHandlePortMessage(port, message) {
     void getCreatorUploadSession(sessionId)
       .then((session) => {
         if (!session) return;
+        if (!creatorUploadSessionProofMatches(session, message.proof)) {
+          port.creatorUploadSessionId = "";
+          port.postMessage({
+            type: "session-restore-rejected",
+            sessionId,
+            error:
+              "The open Master Uploader draft no longer matches the persisted upload plan.",
+          });
+          return;
+        }
         port.postMessage({
           type: "session-restored",
           sessionId,
@@ -3202,12 +3259,14 @@ async function runCreatorManyVidsPlatform(session, target) {
       platform,
       status: target.postUrl
         ? "catalogue-commit-failed"
-        : target.submitted
+        : target.submitAttempted || target.submitted
           ? "posted-link-unresolved"
           : target.manyvidsId
             ? "edit-failed"
             : "failed",
-      ...(target.submitted ? { submitted: true } : {}),
+      ...(target.submitAttempted || target.submitted
+        ? { submitted: true }
+        : {}),
       ...(target.postUrl ? { postUrl: target.postUrl } : {}),
       ...(target.manyvidsId ? { manyvidsId: target.manyvidsId } : {}),
       error: error.message,
@@ -3408,10 +3467,12 @@ async function runCreatorUploadPlatform(session, platform) {
       platform,
       status: target.postUrl
         ? "catalogue-commit-failed"
-        : target.submitted
+        : target.submitAttempted || target.submitted
           ? "posted-link-unresolved"
           : "failed",
-      ...(target.submitted ? { submitted: true } : {}),
+      ...(target.submitAttempted || target.submitted
+        ? { submitted: true }
+        : {}),
       ...(target.postUrl ? { postUrl: target.postUrl } : {}),
       error: error.message,
     };

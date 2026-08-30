@@ -45,6 +45,72 @@ test("upload console chooses the next Friday at 15:00 UTC", () => {
   );
 });
 
+test("Master Uploader authorization summary exposes exact saved recipes", () => {
+  const hooks = loadConsoleHooks();
+  const summary = plain(
+    hooks.profileAuthorizationSummary(
+      {
+        fanslyPrefill: {
+          toggles: { "Post to FYP": true, "Lock Replies": false },
+        },
+        manyvidsAutofill: {
+          coPerformer: "Distinct performer",
+          price: "23.45",
+          priceModeExpectedLabel: "Distinct price mode",
+          launchModeExpectedLabel: "Distinct launch mode",
+          launchTimeLabel: "07:00 PM",
+          launchTimeValue: "19:00",
+          membershipExpectedLabel: "Distinct bundle state",
+          premiumExpectedLabel: "Distinct premium state",
+          tags: ["TagOne", "TagTwo"],
+        },
+        phUploader: {
+          presets: {
+            Distinct: {
+              orientation: "Bisexual Male",
+              tags: ["ph-one", "ph-two"],
+              categories: ["ph-category"],
+            },
+          },
+        },
+      },
+      "Distinct",
+    ),
+  );
+
+  assert.match(summary.fansly, /Post to FYP: on/);
+  assert.match(summary.fansly, /Lock Replies: off/);
+  assert.match(summary.manyvids, /23\.45/);
+  assert.match(summary.manyvids, /Distinct performer/);
+  assert.match(summary.manyvids, /Distinct premium state/);
+  assert.match(summary.manyvids, /TagOne, TagTwo/);
+  assert.match(summary.pornhub, /Bisexual Male/);
+  assert.match(summary.pornhub, /ph-one, ph-two/);
+  assert.match(summary.pornhub, /ph-category/);
+});
+
+test("confirmed Pornhub preset learns one exact normalized Season or Arc mapping", () => {
+  const hooks = loadConsoleHooks();
+  const learned = plain(
+    hooks.learnSeriesPresetMap(
+      {
+        "Resident  Evil": "Straight",
+        Gooning: "Gay",
+      },
+      "resident evil",
+      "Transgender",
+    ),
+  );
+  assert.deepEqual(learned, {
+    Gooning: "Gay",
+    "resident evil": "Transgender",
+  });
+  assert.deepEqual(
+    plain(hooks.learnSeriesPresetMap(learned, "", "Straight")),
+    learned,
+  );
+});
+
 test("upload console validates one local video and allow-listed targets", () => {
   const hooks = loadConsoleHooks();
   const valid = plain(
@@ -102,6 +168,21 @@ test("upload console validates one local video and allow-listed targets", () => 
     source: "pornhub",
   });
   assert.equal(pornhub.contentPreset, "Straight");
+
+  const pornhubOnly = plain(
+    hooks.normalizeDraft({
+      pornhubFile: limitedFile,
+      title: "Episode limited",
+      scheduledIso: "2026-08-28T15:00:00.000Z",
+      targets: ["pornhub"],
+      contentPreset: "Straight",
+    }),
+  );
+  assert.equal(pornhubOnly.valid, true);
+  assert.deepEqual(pornhubOnly.media.pornhub, {
+    file: "episode (limited).mp4",
+    source: "pornhub",
+  });
 
   const pornhubFallback = plain(
     hooks.normalizeDraft({

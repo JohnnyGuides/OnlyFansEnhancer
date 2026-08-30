@@ -34,13 +34,20 @@ replacement. All masked avatars are forced into the same circular frame.
 Each helper has its own opt-in toggle and versioned profile in extension
 settings. State-changing helpers are disabled by default. Enabling one requests
 only that site's optional permission and adds a manual **preview → confirm →
-verified result** panel. The upload console is the deliberate exception: after
+verified result** panel. The Master Uploader is the deliberate exception: after
 one exact Yes confirmation, it may drive the observed OnlyFans, Fansly, and
-ManyVids upload/schedule controls and reconcile the resulting links.
+ManyVids upload/schedule controls and reconcile the resulting links. It calls
+the same saved-profile recipes as the standalone Fansly, ManyVids, and Pornhub
+helpers, so their metadata rules cannot drift into separate implementations.
+The Yes card spells out the exact saved Fansly toggles, ManyVids commercial
+recipe, and Pornhub orientation/tags/categories being authorized.
 
-- **Upload console** keeps the full video, shared Fansly/ManyVids teaser, and
-  optional ManyVids thumbnail only in its open tab and shows one exact Yes/No
-  plan. Sheet setup is optional: without a
+- **Master Uploader** keeps the full video, shared Fansly/ManyVids teaser,
+  optional ManyVids thumbnail, and optional Pornhub video only in its open tab
+  and shows one exact Yes/No plan. When Pornhub is selected, its optional video
+  is preferred (normally the `(limited)` edition); otherwise the full video is
+  the fallback. The teaser is never used as a Pornhub fallback. Sheet setup is
+  optional: without a
   bridge, **Yes, upload now** opens or reuses the selected platform tabs without
   reading or writing the sheet. A configured but failing bridge offers an
   explicit **Continue without sheet** choice. Upload-only mode shows captured
@@ -52,10 +59,14 @@ ManyVids upload/schedule controls and reconcile the resulting links.
   text to an AI service. A strong unique result becomes one Yes/No proposal.
   No, an ambiguous result, or a weak result opens a searchable native picker
   with an explicit **Add new catalogue entry** choice. Empty link cells infer
-  the missing platforms; Pornhub may be recommended but is not yet executable
-  from this console. Smart Yes remains disabled when authenticated platform
-  queue evidence is unavailable or stale, and the console offers the explicit
-  **Continue without sheet** route instead. Immediately before a smart Yes, it
+  the missing platforms. Pornhub can be selected as an honest, trace-gated
+  preparation target: it opens or reuses the authenticated uploader and applies
+  only the verified exact orientation/tag/category preset. Its file assignment,
+  scheduling, title/description, final Submit, and link capture remain manual
+  until a complete trace proves those controls. Smart Yes remains disabled when
+  authenticated platform queue evidence is unavailable or stale, and the
+  console offers the explicit **Continue without sheet** route instead.
+  Immediately before a smart Yes, it
   rereads the chosen row and stops if its fingerprint, inferred targets, or
   verified Friday plan changed. Yes starts the full upload on all selected
   authenticated sites,
@@ -68,12 +79,22 @@ ManyVids upload/schedule controls and reconcile the resulting links.
   clicks Save once. It observes only the OnlyFans/Fansly final create-post XHRs;
   ManyVids is resolved from its exact numeric edit route after the success
   navigation. Empty catalogue J/K/L cells are filled immediately and
-  independently when connected. A conflict is never overwritten. Only
-  pre-submission platform failures can retry the
-  upload; after submission, a known post URL retries the sheet write only and
-  an unresolved link requires manual recovery so the extension cannot create a
-  duplicate post. A ManyVids correction after its numeric ID is known resumes
-  that exact editor and never uploads the full video again.
+  independently when connected. A conflict is never overwritten.
+  Immediately before each automated final click, the worker writes and reads
+  back a monotonic submission checkpoint. Bounded textual job state and
+  filenames survive a Manifest V3 worker restart in session storage; video
+  objects, bytes, local paths, credentials, cookies, headers, and request bodies
+  never enter storage. A restored uncertain submission stops for manual link
+  recovery instead of risking a duplicate. Only pre-submission platform
+  failures can retry the upload; after submission, a known post URL retries the
+  sheet write only and an unresolved link requires manual recovery so the
+  extension cannot create a duplicate post. A ManyVids correction after its
+  numeric ID is known resumes that exact editor and never uploads the full video
+  again. A worker restart proves the still-open filenames and profile signature,
+  then turns interrupted pre-submit work into a safe exact retry. Confirmed file
+  objects are frozen for the run; only a teaser that was missing at Yes may be
+  supplied later. Fully terminal jobs are removed from session storage, while
+  recoverable sheet/link states remain available for the browser session.
 - **Upload trace recorder** is a read-only development helper enabled by
   default. Its small panel remains idle until **Start trace** is clicked, then
   records bounded, sanitized upload evidence across same-site refreshes for
@@ -87,7 +108,10 @@ ManyVids upload/schedule controls and reconcile the resulting links.
   legacy 1,116-entry random taxonomy was removed; category changes require an
   approved profile value.
 - **Pornhub uploader presets** preserve existing metadata and append only fresh
-  exact autocomplete matches. Missing or ambiguous values stop the preset.
+  exact autocomplete matches. Missing or ambiguous values stop the preset. The
+  standalone panel and Master Uploader use the same saved preset and exact
+  Season/Arc mapping resolver. After Yes validates a Pornhub plan, the exact
+  confirmed Season/Arc-to-preset pair is remembered for future proposals.
 - **Fansly composer assistant** operates on one visible composer after preview,
   preserves existing text by default, applies posting toggles independently,
   and never focuses or clicks Post.
@@ -109,7 +133,10 @@ ManyVids upload/schedule controls and reconcile the resulting links.
 The tools share one route-aware lifecycle, abortable action runner, accessible
 Shadow DOM panel system, and local action log. Disabling a tool aborts it in
 already-open tabs. Workflow profiles and the last 100 concise outcomes stay in
-Chrome local extension storage and are never sent anywhere.
+Chrome local extension storage and are never sent anywhere. Active and
+recoverable Master Uploader checkpoints use memory-backed Chrome session
+storage; completed jobs are removed immediately and the remainder disappears
+with the browser session.
 
 The third-party **Bypass All Shortlinks Debloated** userscript is deliberately
 not included.

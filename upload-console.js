@@ -74,6 +74,57 @@
       : "";
   }
 
+  function profileAuthorizationSummary(profiles = {}, contentPreset = "") {
+    const fansly = profiles.fanslyPrefill || {};
+    const manyvids = profiles.manyvidsAutofill || {};
+    const preset = profiles.phUploader?.presets?.[contentPreset] || {};
+    const toggleSummary = Object.entries(fansly.toggles || {})
+      .map(([label, enabled]) => `${label}: ${enabled ? "on" : "off"}`)
+      .join(" · ");
+    return {
+      fansly: toggleSummary || "No saved toggle changes",
+      manyvids: [
+        `co-performer ${manyvids.coPerformer || "unset"}`,
+        `price mode ${manyvids.priceModeExpectedLabel || "unset"}`,
+        `$${manyvids.price || "unset"}`,
+        `launch mode ${manyvids.launchModeExpectedLabel || "unset"}`,
+        `time ${manyvids.launchTimeLabel || manyvids.launchTimeValue || "unset"}`,
+        `bundle ${manyvids.membershipExpectedLabel || "unset"}`,
+        `Premium ${manyvids.premiumExpectedLabel || "unset"}`,
+        `tags ${(manyvids.tags || []).join(", ") || "none"}`,
+      ].join(" · "),
+      pornhub: [
+        `orientation ${preset.orientation || "unset"}`,
+        `tags ${(preset.tags || []).join(", ") || "none"}`,
+        `categories ${(preset.categories || []).join(", ") || "none"}`,
+      ].join(" · "),
+    };
+  }
+
+  function normalizedSeries(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLocaleLowerCase("en-US");
+  }
+
+  function learnSeriesPresetMap(current, seasonArc, preset) {
+    const series = String(seasonArc || "")
+      .trim()
+      .slice(0, 200);
+    const presetName = String(preset || "")
+      .trim()
+      .slice(0, 100);
+    const entries = Object.entries(current || {}).filter(
+      ([name]) => normalizedSeries(name) !== normalizedSeries(series),
+    );
+    if (!series || !presetName) {
+      return Object.fromEntries(entries.slice(-100));
+    }
+    return Object.fromEntries([...entries.slice(-99), [series, presetName]]);
+  }
+
   function normalizeDraft({
     fullFile,
     teaserFile = null,
@@ -86,7 +137,16 @@
     contentPreset = "",
   } = {}) {
     const errors = [];
-    if (!isVideoFile(fullFile)) errors.push("Choose a non-empty full video.");
+    const selectedTargets = Array.isArray(targets)
+      ? [...new Set(targets)].filter((target) => TARGETS.has(target))
+      : [];
+    const separatePornhubFileIsEnough =
+      selectedTargets.length === 1 &&
+      selectedTargets[0] === "pornhub" &&
+      isVideoFile(pornhubFile);
+    if (!separatePornhubFileIsEnough && !isVideoFile(fullFile)) {
+      errors.push("Choose a non-empty full video.");
+    }
     if (teaserFile && !isVideoFile(teaserFile)) {
       errors.push("Choose a non-empty teaser video or leave it blank.");
     }
@@ -107,9 +167,6 @@
     ) {
       errors.push("Choose a Friday; publication time is fixed at 15:00 UTC.");
     }
-    const selectedTargets = Array.isArray(targets)
-      ? [...new Set(targets)].filter((target) => TARGETS.has(target))
-      : [];
     if (!selectedTargets.length || selectedTargets.length !== targets?.length) {
       errors.push(
         "Choose OnlyFans, Fansly, ManyVids, Pornhub, or a combination.",
@@ -644,6 +701,11 @@
           ? "No, use a new row"
           : "No, edit details";
       uploadSummary.replaceChildren();
+      const value = draft();
+      const authorization = profileAuthorizationSummary(
+        value.profiles,
+        value.contentPreset,
+      );
       summaryRow(
         "Catalogue",
         uploadOnly
@@ -654,7 +716,10 @@
         "Release",
         `${currentProposal ? releaseDate.value : candidate.releaseDate} · 15:00 UTC`,
       );
-      summaryRow("Full video", fullFile.name);
+      summaryRow(
+        "Full video",
+        fullFile?.name || "Not selected · separate Pornhub video only",
+      );
       if (selectedTargets().includes("fansly")) {
         const existing = catalogueLink(candidate, "fansly");
         if (existing) summaryRow("Fansly", `Already linked · ${existing}`);
@@ -667,7 +732,8 @@
             "Fansly access",
             "Full locked with preset defaulT · teaser attached as Free Preview",
           );
-          summaryRow("Fansly caption", draft().fanslyCaption || "Empty");
+          summaryRow("Fansly caption", value.fanslyCaption || "Empty");
+          summaryRow("Fansly saved toggles", authorization.fansly);
         }
       }
       if (selectedTargets().includes("onlyfans")) {
@@ -685,8 +751,11 @@
           "ManyVids",
           existing
             ? `Already linked · ${existing}`
-            : `Full + ${teaserFile?.name || "teaser required"} preview · $19.99 · ${thumbnailFile?.name || "site-generated thumbnail"}`,
+            : `Full + ${teaserFile?.name || "teaser required"} preview · $${value.profiles.manyvidsAutofill.price} · ${thumbnailFile?.name || "site-generated thumbnail"}`,
         );
+        if (!existing) {
+          summaryRow("ManyVids saved recipe", authorization.manyvids);
+        }
       }
       if (selectedTargets().includes("pornhub")) {
         const existing = catalogueLink(candidate, "pornhub");
@@ -696,6 +765,9 @@
             ? `Already linked · ${existing}`
             : `${pornhubFile?.name || fullFile.name} · ${contentPreset.value || "preset required"} · metadata only; file and final Submit remain manual`,
         );
+        if (!existing) {
+          summaryRow("Pornhub saved preset", authorization.pornhub);
+        }
       }
       summaryRow("Description", description.value.trim() || "Empty");
       summaryRow(
@@ -726,7 +798,6 @@
         ? "Yes opens or reuses your selected platform tabs, uploads the files, and schedules real posts using your signed-in sessions. No sheet data will be read or written. Existing posts are not checked against the sheet, so confirm this is not a duplicate upload."
         : "Yes opens or reuses your selected platform tabs, uploads and schedules real posts, and fills only the confirmed catalogue row's empty platform link cells.";
       confirmation.hidden = false;
-      const value = draft();
       const nothingMissing = value.valid
         ? pendingTargets(value, match).length === 0
         : false;
@@ -932,13 +1003,40 @@
       return session.channel;
     }
 
+    async function rememberPornhubSeriesPreset(value) {
+      if (!value.targets.includes("pornhub")) return;
+      const seasonArc = String(currentMatch?.candidate?.seasonArc || "").trim();
+      if (!seasonArc || !value.contentPreset) return;
+      const settings = await globalThis.CreatorToolkit.loadSettings();
+      settings.profiles.phUploader.seriesPresets = learnSeriesPresetMap(
+        settings.profiles.phUploader.seriesPresets,
+        seasonArc,
+        value.contentPreset,
+      );
+      await globalThis.CreatorToolkit.saveSettings(settings);
+    }
+
+    function fileIdentity(file) {
+      return file
+        ? {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            lastModified: file.lastModified,
+          }
+        : null;
+    }
+
+    function sessionFile(session, role) {
+      const file = session.files[role] || null;
+      const expected = session.fileProof[role] || null;
+      if (!file || !expected) return null;
+      const actual = fileIdentity(file);
+      return JSON.stringify(actual) === JSON.stringify(expected) ? file : null;
+    }
+
     function deliverFile(session, request) {
-      const file =
-        request.role === "full"
-          ? fullFile
-          : request.role === "thumbnail"
-            ? thumbnailFile
-            : teaserFile;
+      const file = sessionFile(session, request.role);
       if (!file) {
         session.pendingFiles.set(request.requestId, request);
         setPlatformState(request.platform, {
@@ -994,7 +1092,7 @@
 
     function flushPendingTeaser() {
       const session = activeSession;
-      if (!session || !teaserFile) return;
+      if (!session || !sessionFile(session, "teaser")) return;
       for (const [requestId, request] of [...session.pendingFiles]) {
         if (request.role !== "teaser") continue;
         session.pendingFiles.delete(requestId);
@@ -1002,9 +1100,17 @@
       }
     }
 
-    function connectSession(sessionId) {
+    function connectSession(sessionId, confirmed) {
       const session = {
         id: sessionId,
+        files: { ...confirmed.files },
+        fileProof: Object.fromEntries(
+          Object.entries(confirmed.files).map(([role, file]) => [
+            role,
+            fileIdentity(file),
+          ]),
+        ),
+        proof: { ...confirmed.proof },
         port: null,
         channel: null,
         pendingFiles: new Map(),
@@ -1032,6 +1138,11 @@
             for (const platform of message.platforms || []) {
               setPlatformState(platform.platform, platform);
             }
+            return;
+          }
+          if (message.type === "session-restore-rejected") {
+            session.closed = true;
+            matchStatus.textContent = message.error;
           }
         });
         port.onDisconnect.addListener(() => {
@@ -1040,7 +1151,11 @@
           session.channel = null;
           setTimeout(connectPort, 250);
         });
-        port.postMessage({ type: "bind-session", sessionId });
+        port.postMessage({
+          type: "bind-session",
+          sessionId,
+          proof: session.proof,
+        });
       }
       connectPort();
       return session;
@@ -1134,7 +1249,25 @@
           await sendMessage({ type: "SYNC_CREATOR_TOOLS" });
         }
         const sessionId = randomSessionId();
-        activeSession = connectSession(sessionId);
+        const confirmedFiles = {
+          full: fullFile,
+          teaser: teaserFile,
+          thumbnail: thumbnailFile,
+          pornhub: pornhubFile,
+        };
+        activeSession = connectSession(sessionId, {
+          files: confirmedFiles,
+          proof: {
+            fullFilename: fullFile?.name || "",
+            pornhubFilename: pornhubFile?.name || fullFile?.name || "",
+            manyvidsThumbnail: Boolean(thumbnailFile),
+            profileSignature: value.profileSignature,
+          },
+        });
+        fullInput.disabled = true;
+        thumbnailInput.disabled = true;
+        pornhubInput.disabled = true;
+        teaserInput.disabled = Boolean(teaserFile);
         platformStates.clear();
         for (const platform of value.targets) {
           const postUrl = catalogueLink(currentMatch.candidate, platform);
@@ -1155,13 +1288,13 @@
           draft: {
             title: value.title,
             description: value.description,
-            fullFilename: fullFile.name,
+            fullFilename: fullFile?.name || "",
             releaseDate: value.releaseDate,
             scheduledIso: value.scheduledIso,
             timeZone,
             fanslyPreset: "defaulT",
             manyvidsThumbnail: Boolean(thumbnailFile),
-            pornhubFilename: pornhubFile?.name || fullFile.name,
+            pornhubFilename: pornhubFile?.name || fullFile?.name || "",
             contentPreset: value.contentPreset,
             fanslyCaption: value.fanslyCaption,
             profiles: value.profiles,
@@ -1188,6 +1321,14 @@
         });
         for (const platform of response.uploadSession.platforms || []) {
           setPlatformState(platform.platform, platform);
+        }
+        try {
+          await rememberPornhubSeriesPreset(value);
+        } catch (error) {
+          console.warn(
+            "Could not remember the Pornhub Season/Arc preset.",
+            error,
+          );
         }
         matchStatus.textContent =
           "Uploading through the real authenticated pages…";
@@ -1233,7 +1374,14 @@
       scheduleMatch();
     });
     teaserInput.addEventListener("change", () => {
-      teaserFile = teaserInput.files?.[0] || null;
+      const selected = teaserInput.files?.[0] || null;
+      if (activeSession?.files.teaser) return;
+      teaserFile = selected;
+      if (activeSession && teaserFile) {
+        activeSession.files.teaser = teaserFile;
+        activeSession.fileProof.teaser = fileIdentity(teaserFile);
+        teaserInput.disabled = true;
+      }
       get("#teaserFileSummary").textContent = fileSummary(
         teaserFile,
         "Optional now. Fansly can upload the full video first and wait here for the teaser before posting.",
@@ -1354,7 +1502,9 @@
   globalThis.CreatorUploadConsole = Object.freeze({
     nextFridayUtc,
     nextFridayLocalValue,
+    learnSeriesPresetMap,
     normalizeDraft,
+    profileAuthorizationSummary,
     proposalSignature,
     scheduledIsoForReleaseDate,
     titleFromFilename,

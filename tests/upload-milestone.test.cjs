@@ -1747,6 +1747,10 @@ test("upload console performs no platform mutation before the single Yes confirm
     );
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
     assert.equal(await page.locator("#targetFansly").isChecked(), true);
+    assert.match(
+      await page.locator("#uploadSummary").textContent(),
+      /Fansly saved toggles.*Post to FYP: off.*Post to Walls: on.*Lock Replies: off/s,
+    );
 
     await page.locator("#confirmUpload").click();
     await page
@@ -1798,6 +1802,17 @@ test("upload console performs no platform mutation before the single Yes confirm
       "Episode 42 (full).mp4",
     );
     assert.equal(mutationMessages[0].draft.manyvidsThumbnail, false);
+    const bindMessage = await page.evaluate(() =>
+      globalThis.consolePortMessages.find(
+        (message) => message.type === "bind-session",
+      ),
+    );
+    assert.equal(bindMessage.proof.fullFilename, "Episode 42 (full).mp4");
+    assert.equal(
+      bindMessage.proof.profileSignature,
+      mutationMessages[0].draft.profileSignature,
+    );
+    assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
   } finally {
     await browser.close();
   }

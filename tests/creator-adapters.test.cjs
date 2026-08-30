@@ -408,6 +408,7 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
       url: "https://pornhub.mainhub.com/upload/uploader",
       html: `
         <style>input,ul,li,.chip { display:block; width:200px; min-height:24px }</style>
+        <input id="solo" type="radio" value="solo">
         <div class="field">
           <input name="tags">
           <div class="selected"></div>
@@ -443,6 +444,18 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
         signal: controller.signal,
         budget: { step() {} },
       });
+      const plan = CreatorToolkitAdapters.phUploader.inspectPreset("Straight", {
+        orientation: "Straight",
+        tags: [],
+        categories: [],
+      });
+      await CreatorToolkitAdapters.phUploader.applyPreset(
+        plan,
+        controller.signal,
+        {
+          step() {},
+        },
+      );
       return {
         result,
         wrongClicked:
@@ -468,6 +481,7 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
           "",
         ),
         applyExport: typeof CreatorToolkitAdapters.phUploader.applyPreset,
+        soloChecked: document.querySelector("#solo").checked,
       };
     });
     assert.equal(phResult.result.status, "changed");
@@ -477,6 +491,7 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
     assert.equal(phResult.resolved.source, "series");
     assert.equal(phResult.unresolved, null);
     assert.equal(phResult.applyExport, "function");
+    assert.equal(phResult.soloChecked, false);
     await ph.context.close();
 
     const mv = await preparePage(browser, {

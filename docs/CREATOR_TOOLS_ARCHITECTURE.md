@@ -18,7 +18,10 @@ Every state-changing adapter must satisfy all of these invariants:
 7. Stop, disable, route exit, and form replacement prevent the next mutation.
 8. A postcondition verifies the exact value or account state after every
    mutation.
-9. Save, Submit, Post, and the final OnlyFans Add remain manual.
+9. Standalone helper panels leave Save, Submit, Post, and the final OnlyFans Add
+   manual. The Master Uploader may perform only the final controls covered by
+   its one exact confirmed plan and a durable pre-click submission checkpoint.
+   Pornhub final submission remains manual.
 10. A concise structured result is shown and stored only in the local action
     log.
 
@@ -44,12 +47,54 @@ or failure can never block an adapter.
 - `creator-tools/upload-trace-recorder.js` owns the bounded local observation
   panel used to gather evidence for future adapters. It is registered per site
   and does not use the mutation runtime.
+- `upload-console.js` owns the editable Master Uploader draft and every `File`
+  object. It loads one normalized saved-profile snapshot, displays one exact
+  cross-site plan, and sends it only after the creator confirms Yes.
+- `creator-tools/upload-session-store.js` stores only bounded allow-listed job
+  metadata in `chrome.storage.session`. Monotonic submission flags, numeric
+  ManyVids IDs, and captured canonical URLs cannot be cleared by a later write.
+  Per-session writes are serialized so simultaneous platform checkpoints cannot
+  erase one another. Fully terminal jobs are removed; only recoverable or
+  uncertain work remains for the browser session.
+  It never stores files, bytes, local paths, credentials, cookies, headers, or
+  request bodies.
+- The Fansly, ManyVids, and Pornhub adapters export narrow inspectors and
+  applicators used by both their standalone panels and the Master Uploader.
+  Master runs suppress the nested helper confirmations but not their exact
+  control verification or fail-closed behavior.
 - Each remaining file is one platform adapter. It may know site selectors but
   must not duplicate storage, lifecycle, panel, logging, or action-budget
   logic.
 - `background.js` dynamically registers only enabled adapters. Creator origins
   are optional permissions; OnlyFans remains a required origin for the
-  identity-mask product.
+  identity-mask product. It also coordinates authenticated Master Uploader tabs,
+  checkpoints every stage, and refuses to repeat an uncertain final submission.
+
+## Master Uploader boundaries
+
+OnlyFans, Fansly, and ManyVids may use their traced file, metadata, scheduling,
+and final controls after the global Yes. Immediately before a final site click,
+the page adapter asks the worker to persist and read back `submitAttempted` for
+that exact session, platform, and tab. No acknowledgement means no click. If the
+worker later restores a session whose submit was attempted but whose link is
+unknown, it requires manual link recovery instead of reposting.
+On a worker restart, the console must prove the confirmed full/Pornhub filenames,
+thumbnail choice, and profile signature before the restored job is displayed.
+Interrupted pre-submit stages are reclassified as safe exact retries. The
+console retains the original confirmed `File` objects and rejects an identity
+mismatch; only a teaser missing at confirmation may be supplied later.
+
+Pornhub is intentionally narrower. The confirmed plan chooses the optional
+Pornhub video or falls back to the full video and records that effective
+filename, but version 0.13.0 applies only the verified exact preset metadata.
+File assignment, title/description, scheduling, final Submit, and canonical link
+capture remain manual. The catalogue contract already validates canonical
+`viewkey` links and column H without inventing or scraping one.
+
+The confirmation card renders the exact saved recipe fields it authorizes. Once
+Yes has validated a Pornhub plan, the console may save that exact confirmed
+Season/Arc-to-preset mapping for future proposals, but it does not mutate the
+profile snapshot already in flight.
 
 ## Settings lifecycle
 
