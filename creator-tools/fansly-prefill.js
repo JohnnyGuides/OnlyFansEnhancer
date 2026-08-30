@@ -90,13 +90,26 @@
     return JSON.stringify({ text: textarea?.value || "", toggles });
   }
 
-  function inspectComposer(composer, profile) {
+  function composeMasterCaption(description, message) {
+    const base = String(description || "").trim();
+    const block = String(message || "").trim();
+    if (!base) return block;
+    if (!block || base === block || base.endsWith(`\n\n${block}`)) return base;
+    return `${base}\n\n${block}`;
+  }
+
+  function inspectComposer(composer, profile, options = {}) {
     const textarea = toolkit.queryUnique("textarea", composer, {
       description: "visible Fansly composer textarea",
     });
     const currentText = textarea.value || "";
+    const desiredText = Object.hasOwn(options, "desiredText")
+      ? String(options.desiredText || "")
+      : profile.message;
     const shouldWrite =
-      profile.fillMode === "replace" || currentText.trim().length === 0;
+      options.forceWrite === true ||
+      profile.fillMode === "replace" ||
+      currentText.trim().length === 0;
     const toggles = Object.entries(profile.toggles).map(([label, desired]) => {
       const row = toggleRow(composer, label);
       return {
@@ -110,7 +123,7 @@
       composer,
       textarea,
       currentText,
-      desiredText: profile.message,
+      desiredText,
       shouldWrite,
       toggles,
       signature: composerSignature(composer, profile),
@@ -124,7 +137,7 @@
               toggle.desired ? "on" : "off"
             }`,
         ),
-        "Post will never be focused or activated.",
+        options.finalAction || "Post will never be focused or activated.",
       ],
     };
   }
@@ -251,7 +264,9 @@
     activeComposer,
     toggleRow,
     toggleState,
+    composeMasterCaption,
     inspectComposer,
+    applyPlan,
   });
 
   toolkit.mountTool({

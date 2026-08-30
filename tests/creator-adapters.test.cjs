@@ -243,6 +243,45 @@ test("Fansly preserves existing text, applies independent toggles, and never foc
       replies: false,
       postFocused: false,
     });
+    const master = await page.evaluate(async () => {
+      const api = CreatorToolkitAdapters.fanslyPrefill;
+      const profile = {
+        message: "#one #two",
+        fillMode: "empty-only",
+        toggles: {
+          "Post to FYP": false,
+          "Post to Walls": true,
+          "Lock Replies": false,
+        },
+      };
+      const composer = document.querySelector("app-post-creation");
+      const plan = api.inspectComposer(composer, profile, {
+        desiredText: "Master caption",
+        forceWrite: true,
+        finalAction: "Master confirmation owns Post.",
+      });
+      const result = await api.applyPlan(
+        plan,
+        profile,
+        new AbortController().signal,
+        { step() {} },
+      );
+      return {
+        composed: api.composeMasterCaption("Episode description", "#one #two"),
+        deduplicated: api.composeMasterCaption(
+          "Episode description\n\n#one #two",
+          "#one #two",
+        ),
+        caption: composer.querySelector("textarea").value,
+        status: result.status,
+      };
+    });
+    assert.deepEqual(master, {
+      composed: "Episode description\n\n#one #two",
+      deduplicated: "Episode description\n\n#one #two",
+      caption: "Master caption",
+      status: "success",
+    });
     await context.close();
   } finally {
     await browser.close();
