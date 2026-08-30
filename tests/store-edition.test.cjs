@@ -77,7 +77,7 @@ test("store package is remote-free and minimally scoped", () => {
   assert.doesNotMatch(searchable, /\bfetch\s*\(|XMLHttpRequest|WebSocket/i);
   assert.doesNotMatch(
     searchable,
-    /upload-console|upload-capability-probe|file-bridge|catalogue-bridge|upload-platform-adapters/i,
+    /upload-console|upload-capability-probe|file-bridge|catalogue-bridge|catalogue-proposal|upload-platform-adapters/i,
   );
 });
 
