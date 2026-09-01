@@ -164,6 +164,7 @@ internal sealed class TeaserHost
         {
             RejectReparsePath(receiptPath);
             ReceiptRecord existing = ReadReceipt(receiptPath);
+            VerifyReceiptToken(existing);
             RequireMatchingReceipt(existing, expectedReceipt);
             VerifyReceiptFrames(existing);
             VerifyReceiptAggregates(existing);
@@ -236,11 +237,7 @@ internal sealed class TeaserHost
         expectedReceipt.AuditEntrySha256 = Sha256(
             Encoding.UTF8.GetBytes(auditEntry.ToJsonString(JsonOptions))
         );
-        expectedReceipt.Receipt = Sha256(
-            Encoding.UTF8.GetBytes(
-                expectedReceipt.Receipt + "\u001f" + expectedReceipt.AuditEntrySha256
-            )
-        );
+        expectedReceipt.Receipt = ReceiptToken(expectedReceipt);
         WriteNewOrVerify(
             receiptPath,
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(expectedReceipt, JsonOptions)),
@@ -271,6 +268,7 @@ internal sealed class TeaserHost
             throw new InvalidOperationException("A durable audit receipt is required before moving.");
         RejectReparsePath(receiptPath);
         ReceiptRecord receipt = ReadReceipt(receiptPath);
+        VerifyReceiptToken(receipt);
         if (
             string.IsNullOrWhiteSpace(request.Receipt)
             || receipt.Receipt != request.Receipt
@@ -446,21 +444,9 @@ internal sealed class TeaserHost
         string[] frameHashes
     )
     {
-        string token = Sha256(
-            Encoding.UTF8.GetBytes(
-                string.Join(
-                    "\u001f",
-                    status.StatusId,
-                    proof.Sha256,
-                    catalogue.Row,
-                    catalogue.Id,
-                    string.Join(",", frameHashes)
-                )
-            )
-        );
         return new ReceiptRecord
         {
-            Receipt = token,
+            Receipt = "",
             StatusId = status.StatusId,
             StatusUrl = status.StatusUrl,
             Basename = proof.Basename,
@@ -470,6 +456,31 @@ internal sealed class TeaserHost
             FrameFiles = frameFiles,
             FrameSha256 = frameHashes,
         };
+    }
+
+    private static string ReceiptToken(ReceiptRecord receipt) =>
+        Sha256(
+            Encoding.UTF8.GetBytes(
+                string.Join(
+                    "\u001f",
+                    receipt.StatusId,
+                    receipt.StatusUrl,
+                    receipt.Basename,
+                    receipt.FileSha256,
+                    receipt.Row,
+                    receipt.CatalogueId,
+                    string.Join(",", receipt.FrameFiles),
+                    string.Join(",", receipt.FrameSha256),
+                    string.Join(",", receipt.AggregateFiles),
+                    receipt.AuditEntrySha256
+                )
+            )
+        );
+
+    private static void VerifyReceiptToken(ReceiptRecord receipt)
+    {
+        if (receipt.Receipt != ReceiptToken(receipt))
+            throw new InvalidOperationException("Audit receipt token does not match its durable proof.");
     }
 
     private void VerifyReceiptFrames(ReceiptRecord receipt)

@@ -98,6 +98,7 @@ $requiredArchiveEntries = @(
   "creator-tools/x-teaser-contract.js",
   "creator-tools/x-teaser-session-store.js",
   "creator-tools/x-teaser-reconcile.js",
+  "creator-tools/x-teaser-tab-binding.js",
   "creator-tools/x-teaser-observer.js",
   "creator-tools/c4s-upload.js",
   "creator-tools/ph-uploader.js",

@@ -296,6 +296,35 @@ test("native host refuses move when aggregate audit proof is corrupted", () => {
   }
 });
 
+test("native host recomputes the receipt token instead of trusting an edited field", () => {
+  const value = fixture();
+  try {
+    const request = auditRequest(value);
+    const audited = invoke(value, request);
+    assert.equal(audited.ok, true, audited.error);
+    const receiptPath = path.join(
+      value.auditRoot,
+      ".creator-x-teaser-receipts",
+      `${request.status.statusId}.json`,
+    );
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+    receipt.receipt = "a".repeat(64);
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+    const moved = invoke(value, {
+      operation: "move",
+      basename: value.basename,
+      fileProof: value.proof,
+      statusId: request.status.statusId,
+      receipt: receipt.receipt,
+    });
+    assert.equal(moved.ok, false);
+    assert.match(moved.error, /token|receipt|proof/i);
+    assert.equal(fs.existsSync(value.source), true);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
 test("an older receipt remains valid after a later audit extends aggregate files", () => {
   const value = fixture();
   try {

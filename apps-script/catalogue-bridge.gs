@@ -297,15 +297,6 @@ function creatorUploadPlanCommit(row, request) {
 }
 
 function creatorUploadPlanTwitterAppend(row, request) {
-  if (
-    creatorUploadFingerprint(row) !== creatorUploadClean(request.fingerprint)
-  ) {
-    return {
-      status: "stale",
-      row: row,
-      fingerprint: creatorUploadFingerprint(row),
-    };
-  }
   if (creatorUploadClean(row.id) !== creatorUploadClean(request.id)) {
     return {
       status: "conflict",
@@ -320,6 +311,15 @@ function creatorUploadPlanTwitterAppend(row, request) {
   if (links.indexOf(statusUrl) !== -1) {
     return {
       status: "idempotent",
+      row: row,
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  if (
+    creatorUploadFingerprint(row) !== creatorUploadClean(request.fingerprint)
+  ) {
+    return {
+      status: "stale",
       row: row,
       fingerprint: creatorUploadFingerprint(row),
     };

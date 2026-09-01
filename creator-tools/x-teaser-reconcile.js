@@ -42,8 +42,7 @@
       const row = snapshot.rows.find(
         (candidate) =>
           candidate.row === session.pairing.catalogue.row &&
-          candidate.id === session.pairing.catalogue.id &&
-          candidate.fingerprint === session.pairing.catalogue.fingerprint,
+          candidate.id === session.pairing.catalogue.id,
       );
       if (!row)
         throw new Error(
@@ -52,7 +51,7 @@
       const sheet = await catalogueClient.appendTwitterTeaser({
         row: row.row,
         id: row.id,
-        fingerprint: row.fingerprint,
+        fingerprint: session.pairing.catalogue.fingerprint,
         statusUrl: session.capture.statusUrl,
       });
       if (!new Set(["updated", "idempotent"]).has(sheet?.status)) {

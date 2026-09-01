@@ -6,6 +6,7 @@ importScripts(
   "creator-tools/x-teaser-contract.js",
   "creator-tools/x-teaser-session-store.js",
   "creator-tools/x-teaser-reconcile.js",
+  "creator-tools/x-teaser-tab-binding.js",
 );
 
 ("use strict");
@@ -193,13 +194,10 @@ async function rebindXTeaserObservation(recorderTabId) {
   }
   if (!xTab) {
     const xTabs = await chrome.tabs.query({ url: "https://x.com/*" });
-    xTab =
-      xTabs.find((tab) => tab.active) ||
-      xTabs[0] ||
-      (await chrome.tabs.create({
-        url: "https://x.com/compose/post",
-        active: true,
-      }));
+    const decision = globalThis.CreatorXTeaserTabBinding.choose(xTabs, X_TEASER_CONTRACT.canonicalStatusUrl);
+    if (decision.action === "ambiguous") return { action: "ambiguous", id: paired.id };
+    if (decision.action === "confirm-status") return { ...decision, id: paired.id };
+    xTab = decision.action === "bind" ? xTabs[0] : await chrome.tabs.create({ url: "https://x.com/compose/post", active: true });
   }
   await chrome.storage.local.set({
     [X_TEASER_BINDING_KEY]: { id: paired.id, xTabId: xTab.id, recorderTabId },
@@ -208,6 +206,22 @@ async function rebindXTeaserObservation(recorderTabId) {
     await captureBoundXStatus({ frameId: 0, tabId: xTab.id, url: xTab.url });
   }
   return { id: paired.id, xTabId: xTab.id };
+}
+
+async function confirmXTeaserRebind(message, recorderTabId) {
+  const session = await X_TEASER_SESSION_STORE.load(message.id);
+  if (!session || session.stage !== "paired" || session.capture) throw new Error("The paired X teaser session is no longer awaiting capture.");
+  const tab = await chrome.tabs.get(Number(message.tabId));
+  const statusUrl = X_TEASER_CONTRACT.canonicalStatusUrl(tab?.url);
+  if (!statusUrl || statusUrl !== message.statusUrl) throw new Error("The proposed X status tab changed; nothing was captured.");
+  await chrome.storage.local.set({ [X_TEASER_BINDING_KEY]: { id: session.id, xTabId: tab.id, recorderTabId } });
+  await captureBoundXStatus({ frameId: 0, tabId: tab.id, url: statusUrl });
+  return {
+    id: session.id,
+    xTabId: tab.id,
+    statusUrl,
+    session: await X_TEASER_SESSION_STORE.load(session.id),
+  };
 }
 chrome.webNavigation.onCompleted?.addListener?.(
   onXTeaserNavigation,
@@ -3943,8 +3957,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };
       case "GET_X_TEASER_SESSIONS":
-        await rebindXTeaserObservation(sender.tab?.id);
-        return { sessions: await X_TEASER_SESSION_STORE.list() };
+        return { sessions: await X_TEASER_SESSION_STORE.list(), rebind: await rebindXTeaserObservation(sender.tab?.id) };
+      case "CONFIRM_X_TEASER_REBIND":
+        return { rebind: await confirmXTeaserRebind(message, sender.tab?.id) };
       case "PAIR_X_TEASER":
         return { xTeaser: await pairXTeaser(message.pairing, sender.tab?.id) };
       case "RECONCILE_X_TEASER":

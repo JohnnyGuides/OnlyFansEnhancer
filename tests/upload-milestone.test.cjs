@@ -1562,6 +1562,11 @@ test("catalogue bridge appends one canonical Twitter teaser without touching exi
     "idempotent",
   );
   assert.equal(
+    plain(bridge.planTwitterAppend(updated.row, request)).status,
+    "idempotent",
+    "checkpoint-loss recovery must recognize the exact URL before rejecting the old fingerprint",
+  );
+  assert.equal(
     plain(bridge.planTwitterAppend({ ...row, title: "Drift" }, request)).status,
     "stale",
   );

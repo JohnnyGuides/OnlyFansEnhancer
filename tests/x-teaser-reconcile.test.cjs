@@ -137,3 +137,24 @@ test("locked Sheet conflict never advances to move", async () => {
   assert.equal(value.events.includes("native:move"), false);
   assert.equal(value.events.includes("save:sheet-complete"), false);
 });
+
+test("recovery recognizes an already-appended URL after checkpoint loss", async () => {
+  const context = { globalThis: {} };
+  vm.runInNewContext(fs.readFileSync(source, "utf8"), context);
+  const value = fixture("audit-complete");
+  value.catalogueClient.getCatalogueSnapshot = async () => ({
+    rows: [{ row: 9, id: "claire", fingerprint: "changed-by-column-o" }],
+  });
+  value.catalogueClient.appendTwitterTeaser = async (payload) => {
+    assert.equal(payload.fingerprint, "1234abcd");
+    value.events.push("sheet:idempotent");
+    return { status: "idempotent" };
+  };
+  const result = await context.globalThis.CreatorXTeaserReconcile.run({
+    sessionId: "session123",
+    frames: [],
+    ...value,
+  });
+  assert.equal(result.stage, "moved");
+  assert.equal(value.events.includes("sheet:idempotent"), true);
+});
