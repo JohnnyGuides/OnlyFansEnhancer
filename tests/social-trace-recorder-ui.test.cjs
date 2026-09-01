@@ -78,6 +78,7 @@ const fixtures = [
     const options = await context.newPage();
     await options.goto(`chrome-extension://${extensionId}/options.html`);
     await options.locator("#toolUploadTraceRecorder").waitFor();
+    await options.locator("#toolRedditBannerCensor").uncheck();
     await options.locator("#saveWorkflow").click();
     await options
       .locator("#workflowStatus")

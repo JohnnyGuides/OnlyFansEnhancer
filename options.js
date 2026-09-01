@@ -62,6 +62,11 @@ const TOOL_PERMISSION_ORIGINS = Object.freeze({
     "https://fansly.com/*",
     "https://www.manyvids.com/*",
     "https://pornhub.mainhub.com/*",
+    "https://www.reddit.com/*",
+    "https://sh.reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://www.redgifs.com/*",
+    "https://x.com/*",
   ],
   c4sUpload: ["https://workspace.clips4sale.com/*"],
   phUploader: ["https://pornhub.mainhub.com/*"],
@@ -74,8 +79,6 @@ const TOOL_PERMISSION_ORIGINS = Object.freeze({
     "https://www.reddit.com/*",
     "https://sh.reddit.com/*",
     "https://old.reddit.com/*",
-    "https://www.redgifs.com/*",
-    "https://x.com/*",
   ],
 });
 
