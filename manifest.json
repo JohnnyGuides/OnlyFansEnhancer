@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Creator Workflow Toolkit",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "minimum_chrome_version": "116",
   "description": "Local identity masking and workflow helpers for adult creators across supported publishing and community sites.",
   "permissions": [
     "storage",
     "scripting",
     "webNavigation",
+    "nativeMessaging",
     "offscreen",
     "declarativeNetRequestWithHostAccess"
   ],
@@ -24,7 +25,8 @@
     "https://sh.reddit.com/*",
     "https://old.reddit.com/*",
     "https://script.google.com/*",
-    "https://script.googleusercontent.com/*"
+    "https://script.googleusercontent.com/*",
+    "https://x.com/*"
   ],
   "host_permissions": ["https://onlyfans.com/*"],
   "background": {

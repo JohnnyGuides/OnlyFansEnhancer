@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>X teaser recorder</title>
+    <link rel="stylesheet" href="x-teaser.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>X teaser recorder</h1>
+        <p>
+          Select the teaser and its exact catalogue row. Nothing is written or
+          moved until you confirm.
+        </p>
+      </header>
+      <section>
+        <h2>Select the local teaser</h2>
+        <label for="teaserFile">Teaser video</label
+        ><input id="teaserFile" type="file" accept="video/*" />
+        <p id="fileStatus" class="status">No file selected.</p>
+      </section>
+      <section>
+        <h2>Choose the catalogue entry</h2>
+        <label for="catalogueRow">Exact video</label
+        ><select id="catalogueRow" disabled>
+          <option value="">Select a teaser first</option>
+        </select>
+        <p class="status">
+          Suggestions are filename-ranked only. The extension never chooses the
+          row for you.
+        </p>
+      </section>
+      <section>
+        <h2>Confirm and observe</h2>
+        <p id="summary" class="summary">
+          Choose a file and catalogue row to continue.
+        </p>
+        <button id="confirm" type="button" disabled>
+          Yes — pair and open X
+        </button>
+        <p id="result" class="status" role="status" aria-live="polite"></p>
+      </section>
+      <aside>
+        Safety: Chrome observes the bound X tab. It does not click the final
+        Post button.
+      </aside>
+    </main>
+    <script src="creator-tools/catalogue-contract.js"></script>
+    <script src="creator-tools/catalogue-client.js"></script>
+    <script src="creator-tools/x-teaser-contract.js"></script>
+    <script src="x-teaser.js"></script>
+  </body>
+</html>

@@ -3,6 +3,8 @@ importScripts(
   "creator-tools/catalogue-contract.js",
   "creator-tools/catalogue-client.js",
   "creator-tools/upload-session-store.js",
+  "creator-tools/x-teaser-contract.js",
+  "creator-tools/x-teaser-session-store.js",
 );
 
 ("use strict");
@@ -24,6 +26,87 @@ const CREATOR_REGISTRY = globalThis.CreatorToolkitRegistry;
 const CREATOR_CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
 const CREATOR_CATALOGUE_CONTRACT = globalThis.CreatorCatalogueContract;
 const CREATOR_UPLOAD_SESSION_STORE = globalThis.CreatorUploadSessionStore;
+const X_TEASER_CONTRACT = globalThis.CreatorXTeaserContract;
+const X_TEASER_SESSION_STORE = globalThis.CreatorXTeaserSessionStore;
+const X_TEASER_BINDING_KEY = "creatorXTeaserChromeBindingV1";
+
+async function openXTeaserRecorder() {
+  const url = chrome.runtime.getURL("x-teaser.html");
+  const existing = await chrome.tabs.query({ url });
+  if (existing[0]?.id) {
+    await chrome.tabs.update(existing[0].id, { active: true });
+    return existing[0].id;
+  }
+  return (await chrome.tabs.create({ url, active: true })).id;
+}
+
+async function pairXTeaser(pairing, recorderTabId) {
+  const id = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
+  await X_TEASER_SESSION_STORE.save({
+    id,
+    stage: "paired",
+    pairing: X_TEASER_CONTRACT.freezePairing(pairing?.file, pairing?.catalogue),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  const xTabs = await chrome.tabs.query({ url: "https://x.com/*" });
+  const xTab =
+    xTabs.find((tab) => tab.active) ||
+    xTabs[0] ||
+    (await chrome.tabs.create({
+      url: "https://x.com/compose/post",
+      active: true,
+    }));
+  await chrome.storage.local.set({
+    [X_TEASER_BINDING_KEY]: { id, xTabId: xTab.id, recorderTabId },
+  });
+  return { id, xTabId: xTab.id };
+}
+
+async function captureBoundXStatus(details) {
+  if (
+    details.frameId !== 0 ||
+    !X_TEASER_CONTRACT.canonicalStatusUrl(details.url)
+  )
+    return;
+  const stored = await chrome.storage.local.get(X_TEASER_BINDING_KEY);
+  const binding = stored[X_TEASER_BINDING_KEY];
+  if (!binding || binding.xTabId !== details.tabId) return;
+  await chrome.scripting.executeScript({
+    target: { tabId: details.tabId },
+    files: ["creator-tools/x-teaser-observer.js"],
+  });
+  const [execution] = await chrome.scripting.executeScript({
+    target: { tabId: details.tabId },
+    func: () =>
+      globalThis.CreatorXTeaserObserver.capture(document, location.href),
+  });
+  const capture = X_TEASER_CONTRACT.validateCapture(execution?.result);
+  await X_TEASER_SESSION_STORE.save({
+    id: binding.id,
+    stage: "status-captured",
+    capture,
+    updatedAt: Date.now(),
+  });
+  if (binding.recorderTabId) {
+    await chrome.tabs
+      .sendMessage(binding.recorderTabId, {
+        type: "X_TEASER_CAPTURED",
+        id: binding.id,
+        capture,
+      })
+      .catch(() => {});
+  }
+}
+
+chrome.webNavigation.onCompleted?.addListener?.(
+  (details) => {
+    captureBoundXStatus(details).catch((error) =>
+      console.error("X teaser capture failed.", error),
+    );
+  },
+  { url: [{ hostEquals: "x.com", pathContains: "/status/" }] },
+);
 const GELBOORU_FORBIDDEN_TAG_PARTS = /(^|_)(trans)(_|$)/i;
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -3747,6 +3830,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { creatorSettings: await getCreatorSettings() };
       case "OPEN_UPLOAD_CONSOLE":
         return { uploadConsole: await openUploadConsole() };
+      case "OPEN_X_TEASER_RECORDER":
+        return { recorderTabId: await openXTeaserRecorder() };
+      case "PAIR_X_TEASER":
+        return { xTeaser: await pairXTeaser(message.pairing, sender.tab?.id) };
       case "PROBE_CREATOR_UPLOAD_TARGETS":
         return {
           results: await probeCreatorUploadTargets(message.targets),

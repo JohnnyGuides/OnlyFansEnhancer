@@ -57,7 +57,7 @@ async function requestSourcePermissions(percentage) {
 async function load() {
   const [{ settings }, { stats }] = await Promise.all([
     sendMessage({ type: "GET_SETTINGS" }),
-    sendMessage({ type: "GET_STATS" })
+    sendMessage({ type: "GET_STATS" }),
   ]);
 
   $("#enabled").checked = settings.enabled;
@@ -71,7 +71,7 @@ async function load() {
 $("#enabled").addEventListener("change", async (event) => {
   await sendMessage({
     type: "SET_SETTINGS",
-    patch: { enabled: event.target.checked }
+    patch: { enabled: event.target.checked },
   });
   $("#note").textContent = "Identity-mask setting saved—reload OnlyFans.";
 });
@@ -85,13 +85,14 @@ $("#sourceMix").addEventListener("change", async (event) => {
   $("#note").textContent = "Requesting source permissions…";
   try {
     const granted = await requestSourcePermissions(percentage);
-    if (!granted) throw new Error("Required source permission was not granted.");
+    if (!granted)
+      throw new Error("Required source permission was not granted.");
     await sendMessage({
       type: "SET_SETTINGS",
       patch: {
         avatarMode: modeForPercentage(percentage),
-        realbooruPercentage: percentage
-      }
+        realbooruPercentage: percentage,
+      },
     });
     $("#note").textContent =
       "Source mix saved. Existing pictures stay; new requests use this mix.";
@@ -106,7 +107,7 @@ async function resetDimension(type) {
   const confirmed = confirm(
     isNames
       ? "Replace every masked name while keeping all current pictures?"
-      : "Replace every masked picture while keeping names and permanently retiring the old pictures?"
+      : "Replace every masked picture while keeping names and permanently retiring the old pictures?",
   );
   if (!confirmed) return;
 
@@ -114,7 +115,7 @@ async function resetDimension(type) {
   button.disabled = true;
   try {
     const response = await sendMessage({
-      type: isNames ? "RESET_NAMES" : "RESET_PICTURES"
+      type: isNames ? "RESET_NAMES" : "RESET_PICTURES",
     });
     $("#note").textContent = isNames
       ? `${response.resetAccounts} names reset; pictures and account mappings preserved.`
@@ -142,6 +143,12 @@ $("#options").addEventListener("click", () => {
 
 $("#uploadConsole").addEventListener("click", () => {
   sendMessage({ type: "OPEN_UPLOAD_CONSOLE" }).catch((error) => {
+    $("#note").textContent = error.message;
+  });
+});
+
+$("#xTeaserRecorder").addEventListener("click", () => {
+  sendMessage({ type: "OPEN_X_TEASER_RECORDER" }).catch((error) => {
     $("#note").textContent = error.message;
   });
 });

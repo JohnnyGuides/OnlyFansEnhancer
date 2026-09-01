@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Creator Workflow Toolkit</title>
-    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main>
@@ -19,7 +19,7 @@
       <label class="toggle">
         <span>Identity mask enabled</span>
         <span class="switch">
-          <input id="enabled" type="checkbox">
+          <input id="enabled" type="checkbox" />
           <span class="switch-track"></span>
         </span>
       </label>
@@ -38,14 +38,12 @@
           step="10"
           value="50"
           aria-label="Realbooru probability"
-        >
+        />
         <div class="mix-percent">
           <span id="gelbooruChance">50% anime</span>
           <span id="realbooruChance">50% real</span>
         </div>
-        <p id="mixSummary">
-          Each new picture independently chooses a source.
-        </p>
+        <p id="mixSummary">Each new picture independently chooses a source.</p>
       </section>
 
       <div class="reset-actions">
@@ -57,6 +55,7 @@
       <button id="uploadConsole" class="primary" type="button">
         Open upload console
       </button>
+      <button id="xTeaserRecorder" type="button">Open X teaser recorder</button>
       <button id="options" type="button">Open toolkit settings</button>
     </main>
     <script src="popup.js"></script>
