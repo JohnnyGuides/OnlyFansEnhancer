@@ -68,6 +68,38 @@ test("recorder is integrated into the personal toolkit and excluded from store",
 test("recorder sanitizers remove private data and bound duplicate events", () => {
   const hooks = loadRecorderHooks();
 
+  assert.equal(hooks.platformFor("x.com"), "X");
+  assert.equal(hooks.platformFor("www.redgifs.com"), "Redgifs");
+  assert.equal(hooks.platformFor("www.reddit.com"), "Reddit");
+  assert.equal(
+    hooks.candidatePostUrl(
+      "https://x.com/johnny_guides/status/123456789?utm_source=private",
+      "x.com",
+    ),
+    "https://x.com/johnny_guides/status/123456789",
+  );
+  assert.equal(
+    hooks.candidatePostUrl(
+      "https://www.redgifs.com/watch/safeslug?secret=private",
+      "www.redgifs.com",
+    ),
+    "https://www.redgifs.com/watch/safeslug",
+  );
+  assert.equal(
+    hooks.candidatePostUrl(
+      "https://www.reddit.com/r/example/comments/abc123/a_title/?utm_source=private",
+      "www.reddit.com",
+    ),
+    "https://www.reddit.com/r/example/comments/abc123/a_title",
+  );
+  assert.equal(
+    hooks.candidatePostUrl(
+      "https://www.reddit.com/r/example/submit?url=private",
+      "www.reddit.com",
+    ),
+    "",
+  );
+
   assert.equal(
     hooks.sanitizeUrl(
       "https://fansly.com/post/123?token=secret&caption=private#comments",

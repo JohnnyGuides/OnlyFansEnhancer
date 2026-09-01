@@ -74,6 +74,8 @@ const TOOL_PERMISSION_ORIGINS = Object.freeze({
     "https://www.reddit.com/*",
     "https://sh.reddit.com/*",
     "https://old.reddit.com/*",
+    "https://www.redgifs.com/*",
+    "https://x.com/*",
   ],
 });
 

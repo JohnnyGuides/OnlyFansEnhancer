@@ -1271,6 +1271,8 @@ function send(message) {
     ["creator-toolkit-upload-trace-fansly", "https://fansly.com/*"],
     ["creator-toolkit-upload-trace-manyvids", "https://www.manyvids.com/*"],
     ["creator-toolkit-upload-trace-pornhub", "https://pornhub.mainhub.com/*"],
+    ["creator-toolkit-upload-trace-x", "https://x.com/*"],
+    ["creator-toolkit-upload-trace-redgifs", "https://www.redgifs.com/*"],
   ]) {
     const registration = registeredContentScripts.get(id);
     assert.ok(registration, `${id} should register independently.`);
@@ -1280,6 +1282,14 @@ function send(message) {
     ]);
     assert.equal(registration.runAt, "document_start");
   }
+  const redditTrace = registeredContentScripts.get(
+    "creator-toolkit-upload-trace-reddit",
+  );
+  assert.deepEqual(redditTrace.matches, [
+    "https://www.reddit.com/*",
+    "https://sh.reddit.com/*",
+    "https://old.reddit.com/*",
+  ]);
 
   const uploadProbe = await send({
     type: "PROBE_CREATOR_UPLOAD_TARGETS",

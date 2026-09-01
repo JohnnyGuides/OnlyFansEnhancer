@@ -317,6 +317,13 @@
       return "ManyVids";
     }
     if (host === "pornhub.mainhub.com") return "Pornhub";
+    if (host === "x.com" || host.endsWith(".x.com")) return "X";
+    if (host === "redgifs.com" || host.endsWith(".redgifs.com")) {
+      return "Redgifs";
+    }
+    if (host === "reddit.com" || host.endsWith(".reddit.com")) {
+      return "Reddit";
+    }
     return "Unsupported";
   }
 
@@ -589,11 +596,39 @@
     return appendEvent(`toolkit-${kind}`, sanitized);
   }
 
-  function candidatePostUrl(value) {
-    const sanitized = sanitizeUrl(value, location.href);
+  function candidatePostUrl(
+    value,
+    sourceHostname = globalThis.location?.hostname,
+  ) {
+    const sanitized = sanitizeUrl(value, globalThis.location?.href);
     if (!sanitized) return "";
     const url = new URL(sanitized);
-    const platform = platformFor(location.hostname);
+    const platform = platformFor(sourceHostname);
+
+    if (platform === "X") {
+      const match = url.pathname.match(
+        /^\/([a-z0-9_]{1,15})\/status\/(\d+)\/?$/i,
+      );
+      return url.hostname === "x.com" && match
+        ? `https://x.com/${match[1]}/status/${match[2]}`
+        : "";
+    }
+
+    if (platform === "Redgifs") {
+      const match = url.pathname.match(/^\/watch\/([a-z0-9-]+)\/?$/i);
+      return platformFor(url.hostname) === platform && match
+        ? `https://www.redgifs.com/watch/${match[1]}`
+        : "";
+    }
+
+    if (platform === "Reddit") {
+      const match = url.pathname.match(
+        /^\/r\/([a-z0-9_]+)\/comments\/([a-z0-9]+)\/([a-z0-9_-]+)\/?$/i,
+      );
+      return platformFor(url.hostname) === platform && match
+        ? `https://www.reddit.com/r/${match[1]}/comments/${match[2]}/${match[3]}`
+        : "";
+    }
 
     if (
       platform === "Pornhub" &&
@@ -1060,6 +1095,8 @@
     sanitizeText,
     elementSignature,
     appendBoundedEvent,
+    platformFor,
+    candidatePostUrl,
     recordToolkitEvent,
   });
 

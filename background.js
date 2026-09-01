@@ -194,10 +194,21 @@ async function rebindXTeaserObservation(recorderTabId) {
   }
   if (!xTab) {
     const xTabs = await chrome.tabs.query({ url: "https://x.com/*" });
-    const decision = globalThis.CreatorXTeaserTabBinding.choose(xTabs, X_TEASER_CONTRACT.canonicalStatusUrl);
-    if (decision.action === "ambiguous") return { action: "ambiguous", id: paired.id };
-    if (decision.action === "confirm-status") return { ...decision, id: paired.id };
-    xTab = decision.action === "bind" ? xTabs[0] : await chrome.tabs.create({ url: "https://x.com/compose/post", active: true });
+    const decision = globalThis.CreatorXTeaserTabBinding.choose(
+      xTabs,
+      X_TEASER_CONTRACT.canonicalStatusUrl,
+    );
+    if (decision.action === "ambiguous")
+      return { action: "ambiguous", id: paired.id };
+    if (decision.action === "confirm-status")
+      return { ...decision, id: paired.id };
+    xTab =
+      decision.action === "bind"
+        ? xTabs[0]
+        : await chrome.tabs.create({
+            url: "https://x.com/compose/post",
+            active: true,
+          });
   }
   await chrome.storage.local.set({
     [X_TEASER_BINDING_KEY]: { id: paired.id, xTabId: xTab.id, recorderTabId },
@@ -210,11 +221,17 @@ async function rebindXTeaserObservation(recorderTabId) {
 
 async function confirmXTeaserRebind(message, recorderTabId) {
   const session = await X_TEASER_SESSION_STORE.load(message.id);
-  if (!session || session.stage !== "paired" || session.capture) throw new Error("The paired X teaser session is no longer awaiting capture.");
+  if (!session || session.stage !== "paired" || session.capture)
+    throw new Error(
+      "The paired X teaser session is no longer awaiting capture.",
+    );
   const tab = await chrome.tabs.get(Number(message.tabId));
   const statusUrl = X_TEASER_CONTRACT.canonicalStatusUrl(tab?.url);
-  if (!statusUrl || statusUrl !== message.statusUrl) throw new Error("The proposed X status tab changed; nothing was captured.");
-  await chrome.storage.local.set({ [X_TEASER_BINDING_KEY]: { id: session.id, xTabId: tab.id, recorderTabId } });
+  if (!statusUrl || statusUrl !== message.statusUrl)
+    throw new Error("The proposed X status tab changed; nothing was captured.");
+  await chrome.storage.local.set({
+    [X_TEASER_BINDING_KEY]: { id: session.id, xTabId: tab.id, recorderTabId },
+  });
   await captureBoundXStatus({ frameId: 0, tabId: tab.id, url: statusUrl });
   return {
     id: session.id,
@@ -2149,6 +2166,38 @@ const CREATOR_SCRIPT_DEFINITIONS = Object.freeze([
     runAt: "document_start",
   },
   {
+    id: "creator-toolkit-upload-trace-x",
+    toolIds: ["uploadTraceRecorder"],
+    origins: ["https://x.com/*"],
+    matches: ["https://x.com/*"],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
+    id: "creator-toolkit-upload-trace-redgifs",
+    toolIds: ["uploadTraceRecorder"],
+    origins: ["https://www.redgifs.com/*"],
+    matches: ["https://www.redgifs.com/*"],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
+    id: "creator-toolkit-upload-trace-reddit",
+    toolIds: ["uploadTraceRecorder"],
+    origins: [
+      "https://www.reddit.com/*",
+      "https://sh.reddit.com/*",
+      "https://old.reddit.com/*",
+    ],
+    matches: [
+      "https://www.reddit.com/*",
+      "https://sh.reddit.com/*",
+      "https://old.reddit.com/*",
+    ],
+    js: ["creator-tools/upload-trace-recorder.js"],
+    runAt: "document_start",
+  },
+  {
     id: "creator-toolkit-c4s",
     toolIds: ["c4sUpload"],
     origins: ["https://workspace.clips4sale.com/*"],
@@ -3957,7 +4006,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };
       case "GET_X_TEASER_SESSIONS":
-        return { sessions: await X_TEASER_SESSION_STORE.list(), rebind: await rebindXTeaserObservation(sender.tab?.id) };
+        return {
+          sessions: await X_TEASER_SESSION_STORE.list(),
+          rebind: await rebindXTeaserObservation(sender.tab?.id),
+        };
       case "CONFIRM_X_TEASER_REBIND":
         return { rebind: await confirmXTeaserRebind(message, sender.tab?.id) };
       case "PAIR_X_TEASER":
