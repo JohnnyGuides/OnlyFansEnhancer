@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "platform": "X",
+  "active": false,
+  "stopReason": "manual",
+  "events": [
+    {
+      "ms": 0,
+      "type": "session-start",
+      "data": { "platform": "X", "route": "https://x.com/home" }
+    },
+    {
+      "ms": 1000,
+      "type": "route",
+      "data": { "route": "https://x.com/compose/post" }
+    },
+    {
+      "ms": 2000,
+      "type": "control-change",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "div",
+          "role": "textbox",
+          "testId": "tweetTextarea_0"
+        },
+        "valueState": "nonempty"
+      }
+    },
+    {
+      "ms": 3000,
+      "type": "file-selected",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "input",
+          "type": "file",
+          "testId": "fileInput"
+        },
+        "files": [
+          { "name": "[redacted].mp4", "size": 128466008, "type": "video/mp4" }
+        ]
+      }
+    },
+    {
+      "ms": 4000,
+      "type": "semantic-snapshot",
+      "data": {
+        "route": "https://x.com/compose/post",
+        "statuses": [
+          {
+            "control": { "tag": "div", "role": "progressbar" },
+            "progress": "100"
+          },
+          {
+            "control": { "tag": "div", "role": "status" },
+            "states": ["ready"]
+          }
+        ],
+        "actions": [],
+        "fileInputs": [],
+        "links": []
+      }
+    },
+    {
+      "ms": 5000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "button",
+          "role": "button",
+          "type": "button",
+          "label": "Post",
+          "testId": "tweetButton"
+        }
+      }
+    },
+    {
+      "ms": 6000,
+      "type": "route",
+      "data": {
+        "route": "https://x.com/RecordedCreator/status/9000000000000000001"
+      }
+    },
+    {
+      "ms": 7000,
+      "type": "control-key",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "div",
+          "role": "textbox",
+          "testId": "tweetTextarea_0"
+        },
+        "key": "Enter"
+      }
+    },
+    {
+      "ms": 8000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": { "tag": "button", "role": "button", "type": "button" }
+      }
+    },
+    {
+      "ms": 9000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "button",
+          "role": "button",
+          "type": "button",
+          "testId": "tweetButtonInline"
+        }
+      }
+    },
+    {
+      "ms": 10000,
+      "type": "semantic-snapshot",
+      "data": {
+        "route": "https://x.com/RecordedCreator/status/9000000000000000001",
+        "statuses": [
+          {
+            "control": { "tag": "div", "role": "alert", "testId": "toast" },
+            "states": ["post"]
+          }
+        ],
+        "actions": [],
+        "fileInputs": [],
+        "links": [
+          "https://x.com/RecordedCreator/status/9000000000000000002",
+          "https://x.com/RecordedCreator/status/9000000000000000001"
+        ]
+      }
+    },
+    {
+      "ms": 11000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": { "tag": "button", "role": "button", "testId": "caret" }
+      }
+    },
+    {
+      "ms": 12000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": { "tag": "div", "role": "menuitem", "label": "Delete" }
+      }
+    },
+    {
+      "ms": 13000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "button",
+          "role": "button",
+          "label": "Delete",
+          "testId": "confirmationSheetConfirm"
+        }
+      }
+    },
+    {
+      "ms": 14000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": { "tag": "button", "role": "button", "testId": "caret" }
+      }
+    },
+    {
+      "ms": 15000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": { "tag": "div", "role": "menuitem", "label": "Delete" }
+      }
+    },
+    {
+      "ms": 16000,
+      "type": "click",
+      "data": {
+        "actor": "user",
+        "surface": "platform",
+        "control": {
+          "tag": "button",
+          "role": "button",
+          "label": "Delete",
+          "testId": "confirmationSheetConfirm"
+        }
+      }
+    },
+    {
+      "ms": 17000,
+      "type": "session-stop",
+      "data": { "reason": "manual" }
+    }
+  ]
+}

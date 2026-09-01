@@ -181,6 +181,79 @@ test("captured canonical result identity is immutable", async () => {
   );
 });
 
+test("X keeps an immutable main result while arming and capturing its first reply", async () => {
+  const { store } = loadStore();
+  const id = plan().id;
+  await store.create(plan());
+  await store.checkpoint(id, "x", {
+    stage: "submit-attempted",
+    resultId: "2094523397057237306",
+    resultUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+    replySubmitAttempted: true,
+  });
+  await store.checkpoint(id, "x", {
+    stage: "result-captured",
+    replyResultId: "2094523397057237307",
+    replyResultUrl: "https://x.com/Johnny_Guides/status/2094523397057237307",
+  });
+  const restored = plain(await store.load(id));
+  assert.equal(restored.jobs.x.replySubmitAttempted, true);
+  assert.equal(restored.jobs.x.replyResultId, "2094523397057237307");
+  await assert.rejects(
+    store.checkpoint(id, "x", {
+      replyResultId: "2094523397057237308",
+      replyResultUrl: "https://x.com/Johnny_Guides/status/2094523397057237308",
+    }),
+    /reply.*identity/i,
+  );
+});
+
+test("X rejects a malformed first-reply identity even when its main result was saved earlier", async () => {
+  const { store } = loadStore();
+  const id = plan().id;
+  await store.create(plan());
+  await store.checkpoint(id, "x", {
+    stage: "submit-attempted",
+    resultId: "2094523397057237306",
+    resultUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+  });
+  await assert.rejects(
+    store.checkpoint(id, "x", {
+      stage: "result-captured",
+      replyResultId: "2094523397057237307",
+      replyResultUrl: "https://example.com/status/2094523397057237307",
+    }),
+    /reply identity/i,
+  );
+});
+
+test("X first reply must belong to the same account and differ from the main status", async () => {
+  const { store } = loadStore();
+  const id = plan().id;
+  await store.create(plan());
+  await store.checkpoint(id, "x", {
+    stage: "submit-attempted",
+    resultId: "2094523397057237306",
+    resultUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+  });
+  await assert.rejects(
+    store.checkpoint(id, "x", {
+      stage: "result-captured",
+      replyResultId: "2094523397057237307",
+      replyResultUrl: "https://x.com/AnotherAccount/status/2094523397057237307",
+    }),
+    /same X account/i,
+  );
+  await assert.rejects(
+    store.checkpoint(id, "x", {
+      stage: "result-captured",
+      replyResultId: "2094523397057237306",
+      replyResultUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+    }),
+    /different X status/i,
+  );
+});
+
 test("captured result URL must belong to the exact destination job", async () => {
   const { store } = loadStore();
   const id = plan().id;

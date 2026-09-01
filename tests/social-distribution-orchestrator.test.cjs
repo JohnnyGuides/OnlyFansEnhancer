@@ -51,6 +51,8 @@ function loadRuntime(options = {}) {
     x: {
       resultId: "2094523397057237306",
       resultUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+      replyResultId: "2094523397057237307",
+      replyResultUrl: "https://x.com/Johnny_Guides/status/2094523397057237307",
     },
     redgifs: {
       resultId: "ashley-cosplay-teaser",
@@ -75,18 +77,29 @@ function loadRuntime(options = {}) {
         }
         return { status: "prepared" };
       },
-      async submit() {
+      async submit(input) {
         calls.push(`submit:${jobId}`);
+        if (input.beforeCommit) await input.beforeCommit();
         if (behavior[`submit:${jobId}`] === "fail") {
           throw new Error(`submit uncertain for ${jobId}`);
         }
         return { status: "submitted" };
       },
-      async captureResult() {
-        calls.push(`capture:${jobId}`);
+      async captureResult(input) {
+        calls.push(
+          `capture:${jobId}:${input.allowReplySubmit !== false ? "armed" : "capture-only"}`,
+        );
         if (behavior[`capture:${jobId}`] === "missing") return null;
         if (behavior[`capture:${jobId}`] === "fail") {
           throw new Error(`capture failed for ${jobId}`);
+        }
+        if (jobId === "x" && behavior["capture:x"] === "reply-crash") {
+          await input.beforeReplyCommit({
+            resultId: results.x.resultId,
+            resultUrl: results.x.resultUrl,
+          });
+          calls.push("reply-click:x");
+          throw new Error("reply result not visible yet");
         }
         return results[jobId];
       },
@@ -258,7 +271,7 @@ test("restart after an attempted submit captures the result without reposting", 
   );
   assert.equal(result.jobs.x.stage, "sheet-complete");
   assert.equal(runtime.calls.includes("submit:x"), false);
-  assert.equal(runtime.calls.includes("capture:x"), true);
+  assert.equal(runtime.calls.includes("capture:x:armed"), true);
 });
 
 test("missing result after submit becomes unresolved and never auto-reposts", async () => {
@@ -412,5 +425,52 @@ test("a mismatched paid-upload result never reaches the X adapter", async () => 
   assert.equal(
     runtime.calls.some((call) => call.startsWith("prepare:x")),
     false,
+  );
+});
+
+test("X checkpoints its main result before the reply click and never repeats an uncertain reply", async () => {
+  const behavior = { "capture:x": "reply-crash" };
+  const runtime = loadRuntime({ behavior });
+  await runtime.store.create(
+    plan({ targets: { x: true, reddit: [] }, evidence: { x: "f".repeat(64) } }),
+  );
+  const uncertain = plain(
+    await runtime.orchestrator.startSocialDistribution(plan().id),
+  );
+  assert.equal(uncertain.jobs.x.stage, "posted-link-unresolved");
+  assert.equal(uncertain.jobs.x.resultId, runtime.results.x.resultId);
+  assert.equal(uncertain.jobs.x.replySubmitAttempted, true);
+
+  delete behavior["capture:x"];
+  const recovered = plain(
+    await runtime.orchestrator.resumeSocialDistribution(plan().id),
+  );
+  assert.equal(recovered.jobs.x.stage, "sheet-complete");
+  assert.equal(
+    runtime.calls.filter((call) => call === "reply-click:x").length,
+    1,
+  );
+  assert.equal(runtime.calls.includes("capture:x:capture-only"), true);
+});
+
+test("X writes separate immutable ledger rows for the main post and first reply", async () => {
+  const runtime = loadRuntime();
+  await runtime.store.create(
+    plan({ targets: { x: true, reddit: [] }, evidence: { x: "f".repeat(64) } }),
+  );
+  await runtime.orchestrator.startSocialDistribution(plan().id);
+  const ledger = runtime.sheetCalls
+    .filter(([kind]) => kind === "ledger")
+    .map(([, payload]) => payload);
+  assert.deepEqual(
+    ledger.map(({ jobId, resultId }) => [jobId, resultId]),
+    [
+      ["x", runtime.results.x.resultId],
+      ["x:reply", runtime.results.x.replyResultId],
+    ],
+  );
+  assert.equal(
+    runtime.sheetCalls.find(([kind]) => kind === "x")[1].statusUrl,
+    runtime.results.x.resultUrl,
   );
 });

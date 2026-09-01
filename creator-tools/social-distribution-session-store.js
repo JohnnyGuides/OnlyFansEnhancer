@@ -68,34 +68,53 @@
   }
 
   function validateResultIdentity(jobId, patch) {
-    if (!patch.resultId && !patch.resultUrl) return;
-    if (!patch.resultId || !patch.resultUrl) {
+    const hasMain = Boolean(patch.resultId || patch.resultUrl);
+    if (hasMain && (!patch.resultId || !patch.resultUrl)) {
       throw new Error("A canonical result requires both ID and URL.");
     }
-    const url = new URL(patch.resultUrl);
-    let pathIdentity = "";
-    if (jobId === "x") {
-      const match = url.pathname.match(
-        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})\/?$/,
-      );
-      if (url.hostname === "x.com" && match) pathIdentity = match[2];
-    } else if (jobId === "redgifs") {
-      const match = url.pathname.match(/^\/watch\/([A-Za-z0-9-]{2,100})\/?$/);
-      if (url.hostname === "www.redgifs.com" && match) pathIdentity = match[1];
-    } else if (jobId.startsWith("reddit:")) {
-      const match = url.pathname.match(
-        /^\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})\/[A-Za-z0-9_-]+\/?$/i,
-      );
-      if (
-        url.hostname === "www.reddit.com" &&
-        match &&
-        match[1].toLowerCase() === jobId.slice(7)
-      ) {
-        pathIdentity = match[2].toLowerCase();
+    if (hasMain) {
+      const url = new URL(patch.resultUrl);
+      let pathIdentity = "";
+      if (jobId === "x") {
+        const match = url.pathname.match(
+          /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})\/?$/,
+        );
+        if (url.hostname === "x.com" && match) pathIdentity = match[2];
+      } else if (jobId === "redgifs") {
+        const match = url.pathname.match(/^\/watch\/([A-Za-z0-9-]{2,100})\/?$/);
+        if (url.hostname === "www.redgifs.com" && match)
+          pathIdentity = match[1];
+      } else if (jobId.startsWith("reddit:")) {
+        const match = url.pathname.match(
+          /^\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})\/[A-Za-z0-9_-]+\/?$/i,
+        );
+        if (
+          url.hostname === "www.reddit.com" &&
+          match &&
+          match[1].toLowerCase() === jobId.slice(7)
+        ) {
+          pathIdentity = match[2].toLowerCase();
+        }
+      }
+      if (!pathIdentity || pathIdentity !== patch.resultId) {
+        throw new Error("Invalid canonical result for this distribution job.");
       }
     }
-    if (!pathIdentity || pathIdentity !== patch.resultId) {
-      throw new Error("Invalid canonical result for this distribution job.");
+
+    if (!patch.replyResultId && !patch.replyResultUrl) return;
+    if (jobId !== "x" || !patch.replyResultId || !patch.replyResultUrl) {
+      throw new Error("A canonical X reply requires both ID and URL.");
+    }
+    const replyUrl = new URL(patch.replyResultUrl);
+    const replyMatch = replyUrl.pathname.match(
+      /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})\/?$/,
+    );
+    if (
+      replyUrl.hostname !== "x.com" ||
+      !replyMatch ||
+      replyMatch[2] !== patch.replyResultId
+    ) {
+      throw new Error("Invalid canonical X reply identity.");
     }
   }
 
@@ -125,6 +144,9 @@
     if (Object.hasOwn(value, "submitAttempted")) {
       output.submitAttempted = value.submitAttempted === true;
     }
+    if (Object.hasOwn(value, "replySubmitAttempted")) {
+      output.replySubmitAttempted = value.replySubmitAttempted === true;
+    }
     if (Object.hasOwn(value, "resultId")) {
       const resultId = clean(value.resultId, 200);
       if (!resultId) throw new Error("Invalid distribution result identity.");
@@ -134,6 +156,16 @@
       const resultUrl = canonicalResultUrl(value.resultUrl);
       if (!resultUrl) throw new Error("Invalid distribution result URL.");
       output.resultUrl = resultUrl;
+    }
+    if (Object.hasOwn(value, "replyResultId")) {
+      const replyResultId = clean(value.replyResultId, 200);
+      if (!replyResultId) throw new Error("Invalid X reply result identity.");
+      output.replyResultId = replyResultId;
+    }
+    if (Object.hasOwn(value, "replyResultUrl")) {
+      const replyResultUrl = canonicalResultUrl(value.replyResultUrl);
+      if (!replyResultUrl) throw new Error("Invalid X reply result URL.");
+      output.replyResultUrl = replyResultUrl;
     }
     if (Object.hasOwn(value, "error")) output.error = clean(value.error, 500);
     if (Object.hasOwn(value, "updatedAt")) {
@@ -158,10 +190,13 @@
     ];
   }
 
-  function mergeJob(previous, patch) {
+  function mergeJob(jobId, previous, patch) {
     const output = { ...previous, ...patch };
     output.stage = mergeStage(previous.stage, patch.stage);
     if (previous.submitAttempted === true) output.submitAttempted = true;
+    if (previous.replySubmitAttempted === true) {
+      output.replySubmitAttempted = true;
+    }
     if (
       LINEAR_STAGES.indexOf(output.stage) >=
         LINEAR_STAGES.indexOf("submit-attempted") ||
@@ -169,9 +204,18 @@
     ) {
       output.submitAttempted = true;
     }
-    for (const field of ["resultId", "resultUrl"]) {
+    for (const field of [
+      "resultId",
+      "resultUrl",
+      "replyResultId",
+      "replyResultUrl",
+    ]) {
       if (previous[field] && patch[field] && previous[field] !== patch[field]) {
-        throw new Error("Captured distribution result identity cannot change.");
+        throw new Error(
+          field.startsWith("reply")
+            ? "Captured X reply identity cannot change."
+            : "Captured distribution result identity cannot change.",
+        );
       }
       if (previous[field]) output[field] = previous[field];
     }
@@ -181,6 +225,23 @@
       (!output.resultId || !output.resultUrl)
     ) {
       throw new Error("Captured result identity is required at this stage.");
+    }
+    if (jobId === "x" && output.replyResultId && output.replyResultUrl) {
+      if (!output.resultId || !output.resultUrl) {
+        throw new Error("The main X result is required before its reply.");
+      }
+      const mainMatch = new URL(output.resultUrl).pathname.match(
+        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})\/?$/,
+      );
+      const replyMatch = new URL(output.replyResultUrl).pathname.match(
+        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})\/?$/,
+      );
+      if (mainMatch?.[1].toLowerCase() !== replyMatch?.[1].toLowerCase()) {
+        throw new Error("The first reply must belong to the same X account.");
+      }
+      if (output.resultId === output.replyResultId) {
+        throw new Error("The first reply must be a different X status.");
+      }
     }
     return output;
   }
@@ -224,12 +285,24 @@
       if (!Object.hasOwn(previous.jobs, normalizedJobId)) {
         throw new Error("Unknown distribution job.");
       }
+      if (
+        normalizedJobId !== "x" &&
+        (Object.hasOwn(patch, "replySubmitAttempted") ||
+          Object.hasOwn(patch, "replyResultId") ||
+          Object.hasOwn(patch, "replyResultUrl"))
+      ) {
+        throw new Error("Only X can store a first-reply checkpoint.");
+      }
       validateResultIdentity(normalizedJobId, patch);
       const next = {
         ...previous,
         jobs: {
           ...previous.jobs,
-          [normalizedJobId]: mergeJob(previous.jobs[normalizedJobId], patch),
+          [normalizedJobId]: mergeJob(
+            normalizedJobId,
+            previous.jobs[normalizedJobId],
+            patch,
+          ),
         },
         updatedAt: patch.updatedAt || previous.updatedAt,
       };

@@ -95,16 +95,48 @@
       const adapter = adapterFor(jobId);
       const result = await adapter.captureResult({
         dependencyUrl,
+        paidUrl: dependencyUrl,
         jobId,
         mode: session.plan.mode,
         plan: session.plan,
         target: targetFor(session.plan, jobId),
+        allowReplySubmit:
+          jobId !== "x" || session.jobs[jobId].replySubmitAttempted !== true,
+        async beforeReplyCommit(main) {
+          if (jobId !== "x") {
+            throw new Error("Only X can arm a first reply.");
+          }
+          const next = await store.checkpoint(session.id, jobId, {
+            stage: "submit-attempted",
+            resultId: main.resultId,
+            resultUrl: main.resultUrl,
+            replySubmitAttempted: true,
+            updatedAt: now(),
+          });
+          return {
+            armed: next.jobs[jobId].replySubmitAttempted === true,
+          };
+        },
       });
       if (!result) return null;
+      if (result.status === "reply-prepared") {
+        return store.checkpoint(session.id, jobId, {
+          resultId: result.resultId,
+          resultUrl: result.resultUrl,
+          updatedAt: now(),
+          error: "",
+        });
+      }
       return store.checkpoint(session.id, jobId, {
         stage: "result-captured",
         resultId: result.resultId,
         resultUrl: result.resultUrl,
+        ...(jobId === "x"
+          ? {
+              replyResultId: result.replyResultId,
+              replyResultUrl: result.replyResultUrl,
+            }
+          : {}),
         updatedAt: now(),
         error: "",
       });
@@ -126,6 +158,23 @@
         recordedAt: job.updatedAt || session.plan.authorization.at,
       });
       assertSheetResult(ledger, "Distribution ledger append");
+
+      if (jobId === "x" && job.replyResultId && job.replyResultUrl) {
+        const replyLedger = await catalogueClient.appendDistributionLedger({
+          eventId: "published",
+          runId: session.id,
+          jobId: "x:reply",
+          platform: "x",
+          catalogueRow: session.plan.catalogue.row,
+          catalogueId: session.plan.catalogue.id,
+          resultId: job.replyResultId,
+          resultUrl: job.replyResultUrl,
+          parentResultId: job.resultId,
+          status: "published",
+          recordedAt: job.updatedAt || session.plan.authorization.at,
+        });
+        assertSheetResult(replyLedger, "X reply ledger append");
+      }
 
       let compact = null;
       if (jobId === "x") {
@@ -271,6 +320,14 @@
               mode: session.plan.mode,
               plan: session.plan,
               target: targetFor(session.plan, jobId),
+              async beforeCommit() {
+                const armed = await store.load(sessionId);
+                return {
+                  armed:
+                    armed?.jobs?.[jobId]?.stage === "submit-attempted" &&
+                    armed.jobs[jobId].submitAttempted === true,
+                };
+              },
             });
           } catch (error) {
             return {

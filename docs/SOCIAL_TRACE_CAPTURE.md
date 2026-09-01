@@ -1,6 +1,6 @@
 # Social publishing trace capture
 
-Version 0.16.1 includes an on-demand sanitized trace recorder for X, Redgifs,
+Version 0.16.2 includes an on-demand sanitized trace recorder for X, Redgifs,
 and Reddit.
 These traces are mandatory evidence for the publishing adapters; the recorder
 does not fill fields, upload media, or click platform controls.
@@ -26,8 +26,14 @@ does not fill fields, upload media, or click platform controls.
 3. Select the social teaser and enter the caption.
 4. Publish the main post and wait for its canonical `/status/<id>` page.
 5. Create the first reply with the paid-video URL.
-6. Wait until the reply is visibly published beneath the main status.
-7. Select **Stop and download**.
+6. When X renders the OnlyFans preview card, close that card before publishing
+   the reply.
+7. Wait until the reply is visibly published beneath the main status.
+8. Select **Stop and download**.
+
+The recorded X schedule menu is retained as evidence, but its six select
+controls are not semantically labelled in the trace. Scheduling therefore
+remains manual until those controls can be identified without guessing.
 
 The required result is named `creator-upload-trace-x-<timestamp>.json`.
 

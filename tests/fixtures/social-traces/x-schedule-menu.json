@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "platform": "X",
+  "active": false,
+  "stopReason": "manual",
+  "events": [
+    {
+      "ms": 0,
+      "type": "session-start",
+      "data": { "platform": "X", "route": "https://x.com/home" }
+    },
+    {
+      "ms": 1000,
+      "type": "click",
+      "data": {
+        "control": {
+          "tag": "button",
+          "role": "button",
+          "label": "Schedule post",
+          "testId": "scheduleOption"
+        }
+      }
+    },
+    {
+      "ms": 1100,
+      "type": "route",
+      "data": { "route": "https://x.com/compose/post/schedule" }
+    },
+    { "ms": 2000, "type": "control-change", "data": { "control": { "tag": "select" } } },
+    { "ms": 3000, "type": "control-change", "data": { "control": { "tag": "select" } } },
+    { "ms": 4000, "type": "control-change", "data": { "control": { "tag": "select" } } },
+    { "ms": 5000, "type": "control-change", "data": { "control": { "tag": "select" } } },
+    { "ms": 6000, "type": "control-change", "data": { "control": { "tag": "select" } } },
+    { "ms": 7000, "type": "control-change", "data": { "control": { "tag": "select" } } },
+    {
+      "ms": 8000,
+      "type": "click",
+      "data": {
+        "control": {
+          "tag": "button",
+          "role": "button",
+          "label": "Confirm",
+          "testId": "scheduledConfirmationPrimaryAction"
+        }
+      }
+    },
+    {
+      "ms": 9000,
+      "type": "route",
+      "data": { "route": "https://x.com/compose/post" }
+    },
+    {
+      "ms": 10000,
+      "type": "session-stop",
+      "data": { "reason": "manual" }
+    }
+  ]
+}
