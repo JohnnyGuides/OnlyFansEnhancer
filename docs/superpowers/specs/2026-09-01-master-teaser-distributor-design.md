@@ -64,6 +64,32 @@ CAPTCHA, verification gates, expired login, missing required controls, changed
 flair, ambiguous success, or rate limiting pauses only the affected destination
 and brings it to the user's attention.
 
+## Mandatory trace-evidence gate
+
+No autonomous X, Redgifs, or Reddit publishing adapter may be designed from
+memory, public screenshots, guessed selectors, or synthetic fixtures alone.
+Before an adapter is implemented or enabled, the existing sanitized Record
+Steps system must capture one successful authenticated manual flow on that
+platform:
+
+- X: select the social teaser, enter the caption, publish, observe the canonical
+  status, create the first reply with the paid URL, and observe that reply;
+- Redgifs: select the teaser, complete every required metadata/control step,
+  wait through processing, publish, and observe the canonical public URL; and
+- Reddit: create a Redgifs link post, select the subreddit, enter title and any
+  body, select flair/NSFW controls, publish, and observe the canonical post.
+
+The recorder may retain semantic control roles, bounded element signatures,
+navigation, sanitized request/response shapes, upload/processing state,
+platform IDs, and canonical public URLs. It must exclude field values, caption
+or body text, local paths, video bytes, cookies, credentials, authorization
+headers, and private request bodies.
+
+Deletion/replacement automation has a separate evidence gate. It remains a
+manual, explicitly authorized action until a sanitized delete and replacement
+trace exists for that platform. Fixture tests derived from traces must preserve
+only the minimal semantic evidence needed by the adapter.
+
 ## Destination behavior
 
 ### Official platforms
@@ -214,6 +240,8 @@ Implementation must include:
 - Apps Script fixture tests proving append-only X/Reddit changes, exact-row
   fingerprints, idempotency, and conflict refusal;
 - fixture-driven Chrome adapter tests for X, Redgifs, and Reddit;
+- successful sanitized trace fixtures for every automated platform flow, with
+  tests proving secrets, entered text, local paths, and media bytes are absent;
 - rendered desktop, compact, and mobile tests for the complete review flow;
 - rate-limit, deletion, moderator-removal, and stale-preset tests;
 - native-host path, receipt, and recovery tests; and
