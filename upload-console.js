@@ -4,6 +4,13 @@
   const VIDEO_EXTENSIONS = /\.(?:mp4|m4v|mov|webm|avi|mkv)$/i;
   const IMAGE_EXTENSIONS = /\.(?:jpe?g|png)$/i;
   const TARGETS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
+  const SOCIAL_TARGETS = new Set(["x", "reddit"]);
+  const PAID_LINK_SOURCES = new Set(["onlyfans", "fansly", "manyvids"]);
+  const TRACE_HASH = /^[a-f0-9]{64}$/i;
+  const PRESET_ID = /^[A-Za-z0-9_-]{2,100}$/;
+  const PRESET_REVISION = /^[a-f0-9]{8,64}$/i;
+  const X_CAPTION_MAX = 280;
+  const REDDIT_TITLE_MAX = 300;
 
   function localDateTimeValue(date, timeZone) {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -225,6 +232,181 @@
     };
   }
 
+  function canonicalPaidUrl(value) {
+    try {
+      const url = new URL(String(value || "").trim());
+      return url.protocol === "https:" &&
+        !url.username &&
+        !url.password &&
+        !url.port &&
+        new Set(["onlyfans.com", "fansly.com", "www.manyvids.com"]).has(
+          url.hostname,
+        )
+        ? url.href
+        : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function normalizeSocialDraft({
+    file = null,
+    caption = "",
+    paidUrl = "",
+    paidLinkSource = "",
+    mode = "manual",
+    targets = [],
+    subreddits = [],
+    catalogue = null,
+    evidence = {},
+  } = {}) {
+    const selectedTargets = Array.isArray(targets)
+      ? [...new Set(targets)].filter((target) => SOCIAL_TARGETS.has(target))
+      : [];
+    const enabled = Boolean(file) || selectedTargets.length > 0;
+    if (!enabled) {
+      return {
+        enabled: false,
+        valid: true,
+        errors: [],
+        caption: "",
+        mode: "manual",
+        targets: [],
+        paidLink: null,
+        subreddits: [],
+      };
+    }
+
+    const errors = [];
+    if (!isVideoFile(file))
+      errors.push("Choose a non-empty social teaser video.");
+    if (!selectedTargets.length || selectedTargets.length !== targets.length) {
+      errors.push("Choose X, Reddit, or both for the social teaser.");
+    }
+    const cleanCaption = String(caption || "")
+      .trim()
+      .slice(0, 5001);
+    if (!cleanCaption) errors.push("Enter the social caption.");
+    if (selectedTargets.includes("x") && cleanCaption.length > X_CAPTION_MAX) {
+      errors.push(`Keep the X caption at ${X_CAPTION_MAX} characters or less.`);
+    }
+    const normalizedMode = new Set(["manual", "autonomous"]).has(mode)
+      ? mode
+      : "manual";
+    if (normalizedMode !== mode)
+      errors.push("Choose a social publishing mode.");
+    if (
+      !Number.isInteger(Number(catalogue?.row)) ||
+      Number(catalogue?.row) < 2 ||
+      !String(catalogue?.id || "").trim() ||
+      !String(catalogue?.title || "").trim() ||
+      !/^[a-f0-9]{8,64}$/i.test(String(catalogue?.fingerprint || ""))
+    ) {
+      errors.push("Confirm one exact catalogue episode first.");
+    }
+
+    let paidLink = null;
+    if (selectedTargets.includes("x")) {
+      const source = String(paidLinkSource || "").trim();
+      const url = canonicalPaidUrl(paidUrl);
+      if (PAID_LINK_SOURCES.has(source)) {
+        paidLink = { kind: "upload-result", platform: source };
+      } else if (url) {
+        paidLink = { kind: "url", url };
+      } else {
+        errors.push("Choose the paid-video link for the first X reply.");
+      }
+    }
+
+    const normalizedSubreddits = (Array.isArray(subreddits) ? subreddits : [])
+      .map((item) => ({
+        subreddit: String(item?.subreddit || "")
+          .trim()
+          .replace(/^r\//i, "")
+          .slice(0, 21),
+        presetId: String(item?.presetId || "")
+          .trim()
+          .slice(0, 101),
+        presetRevision: String(item?.presetRevision || "")
+          .trim()
+          .toLowerCase()
+          .slice(0, 65),
+        status: String(item?.status || "Needs review").slice(0, 30),
+        title: String(item?.title || "")
+          .trim()
+          .slice(0, REDDIT_TITLE_MAX + 1),
+        body: String(item?.body || "")
+          .trim()
+          .slice(0, 10_001),
+        flair: String(item?.flair || "")
+          .trim()
+          .slice(0, 101),
+        nsfw: item?.nsfw === true,
+      }))
+      .filter((item) => /^[A-Za-z0-9_]{2,21}$/.test(item.subreddit));
+    for (const item of normalizedSubreddits) {
+      if (
+        !PRESET_ID.test(item.presetId) ||
+        !PRESET_REVISION.test(item.presetRevision)
+      ) {
+        errors.push(`Refresh the preset for r/${item.subreddit}.`);
+      }
+      if ((item.title || cleanCaption).length > REDDIT_TITLE_MAX) {
+        errors.push(
+          `Keep the Reddit title for r/${item.subreddit} at ${REDDIT_TITLE_MAX} characters or less.`,
+        );
+      }
+      if (item.body.length > 10_000) {
+        errors.push(
+          `Keep the Reddit body for r/${item.subreddit} at 10000 characters or less.`,
+        );
+      }
+      if (item.flair.length > 100) {
+        errors.push(
+          `Keep the Reddit flair for r/${item.subreddit} at 100 characters or less.`,
+        );
+      }
+    }
+    if (selectedTargets.includes("reddit") && !normalizedSubreddits.length) {
+      errors.push("Choose at least one subreddit.");
+    }
+    if (
+      normalizedMode === "autonomous" &&
+      normalizedSubreddits.some((item) => item.status !== "Approved")
+    ) {
+      errors.push("Only Approved subreddit presets can run autonomously.");
+    }
+
+    const missingEvidence = [];
+    if (selectedTargets.includes("x") && !TRACE_HASH.test(evidence?.x || "")) {
+      missingEvidence.push("X");
+    }
+    if (selectedTargets.includes("reddit")) {
+      if (!TRACE_HASH.test(evidence?.redgifs || "")) {
+        missingEvidence.push("Redgifs");
+      }
+      if (!TRACE_HASH.test(evidence?.reddit || "")) {
+        missingEvidence.push("Reddit");
+      }
+    }
+    if (missingEvidence.length) {
+      errors.push(
+        `Record successful ${missingEvidence.join(", ")} flows before authorizing social publishing.`,
+      );
+    }
+
+    return {
+      enabled,
+      valid: errors.length === 0,
+      errors,
+      caption: cleanCaption,
+      mode: normalizedMode,
+      targets: selectedTargets,
+      paidLink,
+      subreddits: normalizedSubreddits,
+    };
+  }
+
   function validateDraft({
     file,
     teaserFile = null,
@@ -334,6 +516,21 @@
     const refreshCatalogue = get("#refreshCatalogue");
     const selectedCatalogueReason = get("#selectedCatalogueReason");
     const pornhubRecommendation = get("#pornhubRecommendation");
+    const socialInput = get("#uploadSocialTeaser");
+    const socialCaption = get("#socialCaption");
+    const socialX = get("#targetSocialX");
+    const socialReddit = get("#targetSocialReddit");
+    const socialPaidLinkFields = get("#socialPaidLinkFields");
+    const socialPaidLink = get("#socialPaidLink");
+    const socialCustomPaidLinkField = get("#socialCustomPaidLinkField");
+    const socialCustomPaidLink = get("#socialCustomPaidLink");
+    const subredditFields = get("#subredditFields");
+    const subredditStatus = get("#subredditStatus");
+    const subredditList = get("#subredditList");
+    const subredditSearch = get("#subredditSearch");
+    const refreshSubreddits = get("#refreshSubreddits");
+    const socialErrors = get("#socialErrors");
+    const socialTraceStatus = get("#socialTraceStatus");
     const confirmation = get("#confirmation");
     const confirmationNotice = get("#confirmationNotice");
     const matchBadge = get("#matchBadge");
@@ -348,6 +545,7 @@
     let teaserFile = null;
     let thumbnailFile = null;
     let pornhubFile = null;
+    let socialFile = null;
     let matchTimer = null;
     let matchRevision = 0;
     let currentMatch = null;
@@ -360,6 +558,20 @@
     let activeSession = null;
     let workflowProfiles = null;
     let profilesLoaded = false;
+    let subredditSnapshot = null;
+    let subredditLoadPromise = null;
+    let lastSubredditSelection = [];
+    const subredditSelectionPromise = chrome.storage.local
+      .get("creatorSocialSubredditSelectionV1")
+      .then((stored) => {
+        lastSubredditSelection = Array.isArray(
+          stored.creatorSocialSubredditSelectionV1,
+        )
+          ? stored.creatorSocialSubredditSelectionV1
+              .map((name) => String(name).toLowerCase())
+              .slice(0, 100)
+          : [];
+      });
     const platformStates = new Map();
 
     releaseDate.value = initialSchedule.releaseDate;
@@ -371,6 +583,289 @@
         manyvids.checked ? "manyvids" : "",
         pornhub.checked ? "pornhub" : "",
       ].filter(Boolean);
+    }
+
+    function selectedSocialTargets() {
+      return [
+        socialX.checked ? "x" : "",
+        socialReddit.checked ? "reddit" : "",
+      ].filter(Boolean);
+    }
+
+    function selectedSocialMode() {
+      return get('input[name="socialMode"]:checked')?.value || "manual";
+    }
+
+    function socialEvidence() {
+      const value = globalThis.CreatorSocialTraceEvidence || {};
+      return {
+        x: String(value.x || ""),
+        redgifs: String(value.redgifs || ""),
+        reddit: String(value.reddit || ""),
+      };
+    }
+
+    function currentPaidLink() {
+      const selected = socialPaidLink.value;
+      if (selected.startsWith("run:")) {
+        return { paidUrl: "", paidLinkSource: selected.slice(4) };
+      }
+      if (selected === "custom") {
+        return { paidUrl: socialCustomPaidLink.value, paidLinkSource: "" };
+      }
+      return { paidUrl: selected, paidLinkSource: "" };
+    }
+
+    function selectedSubreddits() {
+      return [...subredditList.querySelectorAll(".subreddit-preset")]
+        .filter((row) => row.querySelector('input[type="checkbox"]').checked)
+        .map((row) => ({
+          subreddit: row.dataset.name,
+          presetId: row.dataset.presetId,
+          presetRevision: row.dataset.presetRevision,
+          status: row.dataset.status,
+          title: row.querySelector('[data-field="title"]').value,
+          body: row.querySelector('[data-field="body"]').value,
+          flair: row.querySelector('[data-field="flair"]').value,
+          nsfw: row.querySelector('[data-field="nsfw"]').checked,
+        }));
+    }
+
+    function socialDraft(candidate = currentMatch?.candidate || null) {
+      const paid = currentPaidLink();
+      const value = normalizeSocialDraft({
+        file: socialFile,
+        caption: socialCaption.value,
+        paidUrl: paid.paidUrl,
+        paidLinkSource: paid.paidLinkSource,
+        mode: selectedSocialMode(),
+        targets: selectedSocialTargets(),
+        subreddits: selectedSubreddits(),
+        catalogue: candidate,
+        evidence: socialEvidence(),
+      });
+      if (
+        value.enabled &&
+        globalThis.CreatorSocialDistributionRuntimeReady !== true
+      ) {
+        value.errors.push(
+          "Trace-derived social publishing adapters are not installed yet.",
+        );
+        value.valid = false;
+      }
+      return value;
+    }
+
+    function addPaidLinkOption(value, label) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      socialPaidLink.append(option);
+    }
+
+    function renderPaidLinkOptions(candidate = currentMatch?.candidate || {}) {
+      const previous = socialPaidLink.value;
+      socialPaidLink.replaceChildren();
+      addPaidLinkOption("", "Choose the paid-video link");
+      for (const [platform, label] of [
+        ["onlyfans", "OnlyFans"],
+        ["fansly", "Fansly"],
+        ["manyvids", "ManyVids"],
+      ]) {
+        const url = catalogueLink(candidate, platform);
+        if (url) addPaidLinkOption(url, `${label} · existing catalogue link`);
+        else if (selectedTargets().includes(platform)) {
+          addPaidLinkOption(
+            `run:${platform}`,
+            `${label} · use the new link from this upload`,
+          );
+        }
+      }
+      addPaidLinkOption("custom", "Use a custom paid-video URL");
+      const available = [...socialPaidLink.options].map(
+        (option) => option.value,
+      );
+      if (available.includes(previous)) socialPaidLink.value = previous;
+      else {
+        socialPaidLink.value = available.find((value) => value) || "";
+      }
+      socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
+    }
+
+    function presetRow(preset) {
+      const row = document.createElement("div");
+      row.className = "subreddit-preset";
+      row.dataset.name = preset.subreddit;
+      row.dataset.presetId = preset.id;
+      row.dataset.presetRevision = preset.revision;
+      row.dataset.status = preset.status;
+      row.dataset.search = [preset.subreddit, preset.status, preset.notes]
+        .join(" ")
+        .toLowerCase();
+
+      const choice = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "socialSubreddits";
+      checkbox.dataset.subreddit = preset.subreddit.toLowerCase();
+      checkbox.checked = lastSubredditSelection.includes(
+        preset.subreddit.toLowerCase(),
+      );
+      const summary = document.createElement("span");
+      summary.className = "subreddit-preset-summary";
+      const name = document.createElement("strong");
+      name.textContent = preset.subreddit;
+      const details = document.createElement("small");
+      details.textContent = [preset.status, preset.notes]
+        .filter(Boolean)
+        .join(" · ");
+      summary.append(name, details);
+      choice.append(checkbox, summary);
+
+      const overrides = document.createElement("div");
+      overrides.className = "subreddit-overrides";
+      overrides.hidden = !checkbox.checked;
+      const fieldPrefix = `subreddit-${preset.subreddit.toLowerCase()}`;
+      overrides.innerHTML = `
+        <label>Title override<input data-field="title" name="${fieldPrefix}-title" type="text" maxlength="300" autocomplete="off" placeholder="Use the social caption…" /></label>
+        <label>Flair<input data-field="flair" name="${fieldPrefix}-flair" type="text" maxlength="100" autocomplete="off" placeholder="Optional flair…" /></label>
+        <label class="body-field">Body<textarea data-field="body" name="${fieldPrefix}-body" rows="3" maxlength="10000" autocomplete="off" placeholder="Optional body text…"></textarea></label>
+        <label class="nsfw-toggle"><input data-field="nsfw" name="${fieldPrefix}-nsfw" type="checkbox" checked /> Mark NSFW</label>
+      `;
+      checkbox.addEventListener("change", async () => {
+        overrides.hidden = !checkbox.checked;
+        lastSubredditSelection = [
+          ...subredditList.querySelectorAll(
+            '.subreddit-preset input[type="checkbox"]:checked',
+          ),
+        ].map((input) => input.dataset.subreddit);
+        await chrome.storage.local.set({
+          creatorSocialSubredditSelectionV1: lastSubredditSelection,
+        });
+        refreshSocialReview();
+      });
+      for (const control of overrides.querySelectorAll("input, textarea")) {
+        control.addEventListener("input", refreshSocialReview);
+        control.addEventListener("change", refreshSocialReview);
+      }
+      row.append(choice, overrides);
+      return row;
+    }
+
+    function renderSubredditPresets() {
+      subredditList.replaceChildren();
+      const presets = subredditSnapshot?.presets || [];
+      if (!presets.length) {
+        subredditStatus.textContent =
+          "No subreddit presets are available in 2026 uploads Y:AA.";
+        return;
+      }
+      for (const preset of presets) {
+        const row = presetRow(preset);
+        subredditList.append(row);
+      }
+      applyPresetMode();
+    }
+
+    function applyPresetMode() {
+      const autonomous = selectedSocialMode() === "autonomous";
+      for (const row of subredditList.querySelectorAll(".subreddit-preset")) {
+        row.querySelector('input[type="checkbox"]').disabled =
+          autonomous && row.dataset.status !== "Approved";
+      }
+      filterSubredditPresets();
+    }
+
+    function filterSubredditPresets() {
+      const query = subredditSearch.value.trim().toLowerCase();
+      const rows = [...subredditList.querySelectorAll(".subreddit-preset")];
+      let shown = 0;
+      for (const row of rows) {
+        row.hidden = Boolean(query) && !row.dataset.search.includes(query);
+        if (!row.hidden) shown += 1;
+      }
+      if (!rows.length) return;
+      const autonomous = selectedSocialMode() === "autonomous";
+      subredditStatus.textContent = `${query ? `${shown} of ` : ""}${rows.length} preset${rows.length === 1 ? "" : "s"} ${query ? "shown" : "loaded"}. ${autonomous ? "Only Approved presets are selectable." : "Review-only presets remain available for manual confirmation."}`;
+    }
+
+    async function loadSubredditPresets({ refresh = false } = {}) {
+      if (refresh) subredditLoadPromise = null;
+      subredditStatus.textContent = "Loading subreddit presets…";
+      try {
+        const client = globalThis.CreatorCatalogueClient;
+        if (!client?.getSubredditPresetSnapshot) {
+          throw new Error("The subreddit preset bridge is unavailable.");
+        }
+        await subredditSelectionPromise;
+        subredditLoadPromise ||= client.getSubredditPresetSnapshot();
+        const response = await subredditLoadPromise;
+        subredditSnapshot =
+          globalThis.CreatorSubredditPresets.normalizeSnapshot(response.rows);
+        renderSubredditPresets();
+        refreshSocialReview();
+      } catch (error) {
+        subredditStatus.textContent = `${error.message} Use Refresh list after reconnecting the catalogue bridge.`;
+      }
+    }
+
+    async function recheckSubredditPresets(social) {
+      if (!social.targets.includes("reddit")) return;
+      const client = globalThis.CreatorCatalogueClient;
+      if (!client?.getSubredditPresetSnapshot) {
+        throw new Error("The subreddit preset bridge is unavailable.");
+      }
+      const response = await client.getSubredditPresetSnapshot();
+      const refreshed = globalThis.CreatorSubredditPresets.normalizeSnapshot(
+        response.rows,
+      );
+      const byName = new Map(
+        refreshed.presets.map((preset) => [
+          preset.subreddit.toLowerCase(),
+          preset,
+        ]),
+      );
+      const changed = social.subreddits.some((selected) => {
+        const current = byName.get(selected.subreddit.toLowerCase());
+        return (
+          !current ||
+          current.id !== selected.presetId ||
+          current.revision !== selected.presetRevision ||
+          current.status !== selected.status ||
+          (social.mode === "autonomous" && current.status !== "Approved")
+        );
+      });
+      if (!changed) return;
+      subredditSnapshot = refreshed;
+      subredditLoadPromise = Promise.resolve(response);
+      renderSubredditPresets();
+      refreshSocialReview();
+      throw new Error(
+        "Subreddit presets changed. Review the refreshed settings and click Yes again.",
+      );
+    }
+
+    function refreshSocialReview() {
+      socialPaidLinkFields.hidden = !socialX.checked;
+      subredditFields.hidden = !socialReddit.checked;
+      renderPaidLinkOptions();
+      if (socialReddit.checked && !subredditSnapshot && !subredditLoadPromise) {
+        void loadSubredditPresets();
+      }
+      const value = socialDraft();
+      socialErrors.textContent = value.enabled ? value.errors.join(" ") : "";
+      const missingTrace = value.errors.find((error) =>
+        error.startsWith("Record successful"),
+      );
+      const missingRuntime = value.errors.find((error) =>
+        error.startsWith("Trace-derived"),
+      );
+      socialTraceStatus.textContent = !value.enabled
+        ? "Select X or Reddit to check recorded-flow evidence."
+        : missingTrace ||
+          missingRuntime ||
+          "Recorded-flow evidence is ready. The final plan still waits for the one Yes confirmation.";
+      if (currentMatch) renderMatch(currentMatch);
     }
 
     function catalogueLink(candidate, platform) {
@@ -680,6 +1175,11 @@
 
     function renderMatch(match) {
       const candidate = match.candidate;
+      if (!socialCaption.value.trim() && candidate.title) {
+        socialCaption.value = candidate.title;
+      }
+      renderPaidLinkOptions(candidate);
+      const social = socialDraft(candidate);
       const uploadOnly = match.status === "upload-only";
       matchBadge.textContent = uploadOnly
         ? "Upload without sheet"
@@ -769,6 +1269,43 @@
           summaryRow("Pornhub saved preset", authorization.pornhub);
         }
       }
+      if (social.enabled) {
+        summaryRow(
+          "Social teaser",
+          socialFile?.name || "Social teaser required",
+        );
+        summaryRow(
+          "Social mode",
+          social.mode === "autonomous"
+            ? "Autonomous after this Yes"
+            : "Fill and upload, then stop before final publish",
+        );
+        summaryRow("Social caption", social.caption);
+        if (social.targets.includes("x")) {
+          summaryRow(
+            "X",
+            social.paidLink?.kind === "upload-result"
+              ? `Caption + teaser · first reply uses the new ${social.paidLink.platform} link from this run`
+              : `Caption + teaser · first reply ${social.paidLink?.url || "needs a paid link"}`,
+          );
+        }
+        if (social.targets.includes("reddit")) {
+          if (!social.subreddits.length) {
+            summaryRow("Reddit", "Choose at least one subreddit");
+          }
+          for (const target of social.subreddits) {
+            summaryRow(
+              `Reddit · r/${target.subreddit}`,
+              [
+                `Title: ${target.title || social.caption}`,
+                `Body: ${target.body || "Empty"}`,
+                `Flair: ${target.flair || "None"}`,
+                `NSFW: ${target.nsfw ? "Yes" : "No"}`,
+              ].join(" · "),
+            );
+          }
+        }
+      }
       summaryRow("Description", description.value.trim() || "Empty");
       summaryRow(
         "Sheet cells",
@@ -796,12 +1333,14 @@
       );
       confirmationNotice.textContent = uploadOnly
         ? "Yes opens or reuses your selected platform tabs, uploads the files, and schedules real posts using your signed-in sessions. No sheet data will be read or written. Existing posts are not checked against the sheet, so confirm this is not a duplicate upload."
-        : "Yes opens or reuses your selected platform tabs, uploads and schedules real posts, and fills only the confirmed catalogue row's empty platform link cells.";
+        : social.enabled
+          ? "One Yes freezes the paid upload and social distribution plan. Manual mode stops before final social publishing; Autonomous mode may click only trace-verified final controls."
+          : "Yes opens or reuses your selected platform tabs, uploads and schedules real posts, and fills only the confirmed catalogue row's empty platform link cells.";
       confirmation.hidden = false;
       const nothingMissing = value.valid
-        ? pendingTargets(value, match).length === 0
+        ? pendingTargets(value, match).length === 0 && !social.enabled
         : false;
-      confirmUpload.disabled = !value.valid || nothingMissing;
+      confirmUpload.disabled = !value.valid || !social.valid || nothingMissing;
       if (nothingMissing) {
         matchQuestion.textContent =
           "Every selected platform already has a catalogue link. Nothing will be uploaded.";
@@ -1214,12 +1753,19 @@
 
     async function startUpload() {
       let value = validate(true);
-      if (!value.valid || !currentMatch || activeSession) return;
+      let social = socialDraft();
+      if (!value.valid || !social.valid || !currentMatch || activeSession)
+        return;
       let targets = [];
       confirmUpload.disabled = true;
       rejectMatch.disabled = true;
       try {
         await recheckProposalBeforeUpload();
+        social = socialDraft(currentMatch.candidate);
+        if (!social.valid) {
+          throw new Error(social.errors.join(" "));
+        }
+        await recheckSubredditPresets(social);
         value = validate(true);
         targets = pendingTargets(value);
         if (!targets.length) {
@@ -1371,6 +1917,9 @@
       );
       if (fullFile && !title.value.trim())
         title.value = titleFromFilename(fullFile.name);
+      if (fullFile && !socialCaption.value.trim()) {
+        socialCaption.value = title.value;
+      }
       scheduleMatch();
     });
     teaserInput.addEventListener("change", () => {
@@ -1405,6 +1954,42 @@
       );
       if (!activeSession) scheduleMatch();
     });
+    socialInput.addEventListener("change", () => {
+      socialFile = socialInput.files?.[0] || null;
+      get("#socialFileSummary").textContent = fileSummary(
+        socialFile,
+        "Optional until X or Reddit is selected. Kept only in this tab.",
+      );
+      refreshSocialReview();
+    });
+    socialCaption.addEventListener("input", refreshSocialReview);
+    for (const control of [socialX, socialReddit]) {
+      control.addEventListener("change", () => {
+        if (socialReddit.checked && !subredditSnapshot) {
+          void loadSubredditPresets();
+        }
+        refreshSocialReview();
+      });
+    }
+    socialPaidLink.addEventListener("change", () => {
+      socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
+      refreshSocialReview();
+    });
+    socialCustomPaidLink.addEventListener("input", refreshSocialReview);
+    for (const control of document.querySelectorAll(
+      'input[name="socialMode"]',
+    )) {
+      control.addEventListener("change", () => {
+        applyPresetMode();
+        refreshSocialReview();
+      });
+    }
+    refreshSubreddits.addEventListener("click", async () => {
+      refreshSubreddits.disabled = true;
+      await loadSubredditPresets({ refresh: true });
+      refreshSubreddits.disabled = false;
+    });
+    subredditSearch.addEventListener("input", filterSubredditPresets);
     for (const control of [title, description, releaseDate, contentPreset]) {
       control.addEventListener("input", scheduleMatch);
     }
@@ -1484,13 +2069,26 @@
         title.focus();
       }
     });
-    globalThis.addEventListener("beforeunload", () => {
+    globalThis.addEventListener("beforeunload", (event) => {
+      if (
+        fullFile ||
+        teaserFile ||
+        thumbnailFile ||
+        pornhubFile ||
+        socialFile
+      ) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    });
+    globalThis.addEventListener("pagehide", () => {
       if (activeSession) activeSession.closed = true;
       activeSession?.port?.disconnect();
       activeSession?.channel?.close();
     });
 
     refreshReleaseSummary();
+    refreshSocialReview();
     refreshProfiles()
       .then(() => scheduleMatch())
       .catch((error) => {
@@ -1504,6 +2102,7 @@
     nextFridayLocalValue,
     learnSeriesPresetMap,
     normalizeDraft,
+    normalizeSocialDraft,
     profileAuthorizationSummary,
     proposalSignature,
     scheduledIsoForReleaseDate,

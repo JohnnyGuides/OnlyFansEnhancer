@@ -6,6 +6,13 @@
   const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
   const HASH_PATTERN = /^[a-f0-9]{64}$/;
   const SUBREDDIT_PATTERN = /^[A-Za-z0-9_]{2,21}$/;
+  const PRESET_ID_PATTERN = /^[A-Za-z0-9_-]{2,100}$/;
+  const PRESET_REVISION_PATTERN = /^[a-f0-9]{8,64}$/;
+  const PAID_HOSTS = new Set([
+    "onlyfans.com",
+    "fansly.com",
+    "www.manyvids.com",
+  ]);
 
   function clean(value, maximum = 5000) {
     return String(value == null ? "" : value)
@@ -84,8 +91,9 @@
         url.protocol !== "https:" ||
         url.username ||
         url.password ||
+        url.port ||
         !url.hostname ||
-        url.hostname === "localhost"
+        !PAID_HOSTS.has(url.hostname)
       ) {
         return null;
       }
@@ -101,12 +109,16 @@
       throw new Error("Invalid subreddit.");
     }
     const presetId = clean(value?.presetId, 100);
-    if (!ID_PATTERN.test(presetId))
+    if (!PRESET_ID_PATTERN.test(presetId))
       throw new Error("Invalid Reddit preset ID.");
+    const presetRevision = clean(value?.presetRevision, 64).toLowerCase();
+    if (!PRESET_REVISION_PATTERN.test(presetRevision)) {
+      throw new Error("Invalid Reddit preset revision.");
+    }
     const output = {
       subreddit: rawSubreddit,
       presetId,
-      presetRevision: hash(value?.presetRevision, "Reddit preset revision"),
+      presetRevision,
       title: copyProof(value?.title, "Reddit title"),
       body: copyProof(value?.body, "Reddit body"),
     };
@@ -156,8 +168,28 @@
       throw new Error("Choose at least one social target.");
     }
     const targets = { x, reddit };
-    const paidUrl = publicHttpsUrl(value.paidUrl);
-    if (!paidUrl) throw new Error("Invalid paid URL.");
+    const paidLinkSource = clean(value.paidLinkSource, 20);
+    if (
+      paidLinkSource &&
+      (!x || !new Set(["onlyfans", "fansly", "manyvids"]).has(paidLinkSource))
+    ) {
+      throw new Error("Invalid paid-link source.");
+    }
+    const paidUrl = paidLinkSource ? "" : publicHttpsUrl(value.paidUrl) || "";
+    if (x && !paidUrl && !paidLinkSource) {
+      throw new Error("Invalid paid URL.");
+    }
+    let paidLinkDependency = null;
+    if (paidLinkSource) {
+      const uploadSessionId = clean(value.paidUploadSessionId, 64);
+      if (!ID_PATTERN.test(uploadSessionId)) {
+        throw new Error("Invalid paid upload session.");
+      }
+      paidLinkDependency = {
+        platform: paidLinkSource,
+        uploadSessionId,
+      };
+    }
     const authorizationAt = finiteNumber(
       value.authorization?.at,
       1,
@@ -173,6 +205,7 @@
       socialFile: fileProof(value.socialFile),
       caption: copyProof(value.caption, "caption"),
       paidUrl,
+      ...(paidLinkDependency ? { paidLinkDependency } : {}),
       targets,
       evidence: evidence(value.evidence, targets),
       authorization: {

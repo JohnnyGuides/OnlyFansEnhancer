@@ -130,6 +130,7 @@ function loadRuntime(options = {}) {
     store: context.CreatorSocialDistributionSessionStore,
     catalogueClient,
     adapterFor: adapter,
+    resolvePaidLink: options.resolvePaidLink,
     now: () => 1_788_280_100_000,
   });
   return {
@@ -336,4 +337,80 @@ test("retry creates a newly authorized session instead of reopening the old job"
   );
   assert.equal(result.id, retryPlan.id);
   assert.equal((await runtime.store.load(plan().id)).jobs.x.stage, "failed");
+});
+
+test("X waits for the exact paid-upload result while Redgifs and Reddit continue", async () => {
+  let paidResult = null;
+  const resolutions = [];
+  const runtime = loadRuntime({
+    async resolvePaidLink(dependency) {
+      resolutions.push(structuredClone(dependency));
+      return paidResult;
+    },
+  });
+  const dependentPlan = plan({
+    paidUrl: "",
+    paidLinkSource: "onlyfans",
+    paidUploadSessionId: "creator-upload-0001",
+  });
+  await runtime.store.create(dependentPlan);
+  const waiting = plain(
+    await runtime.orchestrator.startSocialDistribution(dependentPlan.id),
+  );
+  assert.equal(waiting.jobs.x.stage, "blocked");
+  assert.equal(waiting.jobs.redgifs.stage, "sheet-complete");
+  assert.equal(waiting.jobs["reddit:gamesgonewild"].stage, "sheet-complete");
+  assert.equal(
+    runtime.calls.some((call) => call.startsWith("prepare:x")),
+    false,
+  );
+  assert.deepEqual(resolutions, [
+    {
+      platform: "onlyfans",
+      uploadSessionId: "creator-upload-0001",
+    },
+  ]);
+
+  paidResult = {
+    platform: "onlyfans",
+    uploadSessionId: "creator-upload-0001",
+    postUrl: "https://onlyfans.com/123/johnny_guides",
+  };
+  const completed = plain(
+    await runtime.orchestrator.resumeSocialDistribution(dependentPlan.id),
+  );
+  assert.equal(completed.jobs.x.stage, "sheet-complete");
+  assert.equal(
+    runtime.calls.includes("prepare:x:https://onlyfans.com/123/johnny_guides"),
+    true,
+  );
+});
+
+test("a mismatched paid-upload result never reaches the X adapter", async () => {
+  const runtime = loadRuntime({
+    async resolvePaidLink() {
+      return {
+        platform: "fansly",
+        uploadSessionId: "other-upload-0001",
+        postUrl: "https://fansly.com/post/123",
+      };
+    },
+  });
+  const dependentPlan = plan({
+    paidUrl: "",
+    paidLinkSource: "onlyfans",
+    paidUploadSessionId: "creator-upload-0001",
+    targets: { x: true, reddit: [] },
+    evidence: { x: "f".repeat(64) },
+  });
+  await runtime.store.create(dependentPlan);
+  const result = plain(
+    await runtime.orchestrator.startSocialDistribution(dependentPlan.id),
+  );
+  assert.equal(result.jobs.x.stage, "blocked");
+  assert.match(result.jobs.x.error, /does not match/i);
+  assert.equal(
+    runtime.calls.some((call) => call.startsWith("prepare:x")),
+    false,
+  );
 });

@@ -6,6 +6,35 @@
   const COMPLETE = "sheet-complete";
   const TERMINAL = new Set(["failed", "blocked"]);
 
+  function canonicalPaidResult(platform, value) {
+    try {
+      const url = new URL(String(value || "").trim());
+      if (url.username || url.password || url.port || url.search || url.hash) {
+        return "";
+      }
+      if (platform === "onlyfans") {
+        const match = url.pathname.match(/^\/(\d+)(?:\/johnny_guides)?\/?$/);
+        return url.origin === "https://onlyfans.com" && match
+          ? `https://onlyfans.com/${match[1]}/johnny_guides`
+          : "";
+      }
+      if (platform === "fansly") {
+        const match = url.pathname.match(/^\/post\/(\d+)\/?$/);
+        return url.origin === "https://fansly.com" && match
+          ? `https://fansly.com/post/${match[1]}`
+          : "";
+      }
+      const match = url.pathname.match(/^\/Video\/(\d+)\/?$/i);
+      return platform === "manyvids" &&
+        url.origin === "https://www.manyvids.com" &&
+        match
+        ? `https://www.manyvids.com/Video/${match[1]}`
+        : "";
+    } catch {
+      return "";
+    }
+  }
+
   function cleanError(error) {
     return String(error?.message || error || "Distribution step failed.")
       .trim()
@@ -34,9 +63,32 @@
     return result;
   }
 
-  function create({ store, catalogueClient, adapterFor, now = Date.now }) {
+  function create({
+    store,
+    catalogueClient,
+    adapterFor,
+    resolvePaidLink = null,
+    now = Date.now,
+  }) {
     if (!store || !catalogueClient || typeof adapterFor !== "function") {
       throw new Error("Social distribution dependencies are unavailable.");
+    }
+
+    async function paidDependencyUrl(plan) {
+      const dependency = plan.paidLinkDependency;
+      if (!dependency) return plan.paidUrl || "";
+      if (typeof resolvePaidLink !== "function") return "";
+      const result = await resolvePaidLink(dependency);
+      if (!result) return "";
+      if (
+        result.platform !== dependency.platform ||
+        result.uploadSessionId !== dependency.uploadSessionId
+      ) {
+        throw new Error("The paid upload result does not match this plan.");
+      }
+      const url = canonicalPaidResult(dependency.platform, result.postUrl);
+      if (!url) throw new Error("The paid upload result URL is invalid.");
+      return url;
     }
 
     async function capture(session, jobId, dependencyUrl) {
@@ -272,9 +324,36 @@
       let fingerprint = await recoverFingerprint(session);
 
       if (session.jobs.x) {
-        const result = await runJob(sessionId, "x", "", fingerprint);
-        session = result.session;
-        fingerprint = result.fingerprint;
+        let dependencyUrl = "";
+        let dependencyError = "";
+        try {
+          dependencyUrl = await paidDependencyUrl(session.plan);
+        } catch (error) {
+          dependencyError = cleanError(error);
+        }
+        if (!dependencyUrl) {
+          if (session.jobs.x.stage === "planned") {
+            session = await store.checkpoint(sessionId, "x", {
+              stage: "blocked",
+              error:
+                dependencyError ||
+                "Waiting for the confirmed paid upload result.",
+              updatedAt: now(),
+            });
+          }
+        } else {
+          if (session.jobs.x.stage === "blocked") {
+            await store.unblock(sessionId, "x");
+          }
+          const result = await runJob(
+            sessionId,
+            "x",
+            dependencyUrl,
+            fingerprint,
+          );
+          session = result.session;
+          fingerprint = result.fingerprint;
+        }
       }
       if (session.jobs.redgifs) {
         const result = await runJob(sessionId, "redgifs", "", fingerprint);

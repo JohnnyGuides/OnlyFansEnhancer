@@ -192,3 +192,37 @@ test("accepts X-only and Reddit-only plans and normalizes public identifiers", (
   });
   assert.equal(redditOnly.targets.reddit[0].subreddit, "GamesGoneWild");
 });
+
+test("can freeze a paid-link dependency on the authorized platform upload", () => {
+  const contract = loadContract();
+  const plan = contract.freezeDistributionPlan({
+    ...input(),
+    paidUrl: "",
+    paidLinkSource: "onlyfans",
+    paidUploadSessionId: "creator-upload-0001",
+  });
+  assert.equal(plan.paidUrl, "");
+  assert.deepEqual(plain(plan.paidLinkDependency), {
+    platform: "onlyfans",
+    uploadSessionId: "creator-upload-0001",
+  });
+  assert.throws(
+    () =>
+      contract.freezeDistributionPlan({
+        ...input(),
+        paidUrl: "",
+        paidLinkSource: "onlyfans",
+      }),
+    /upload session/i,
+  );
+  assert.throws(
+    () =>
+      contract.freezeDistributionPlan({
+        ...input(),
+        paidUrl: "",
+        paidLinkSource: "pornhub",
+        paidUploadSessionId: "creator-upload-0001",
+      }),
+    /paid URL|paid-link source/i,
+  );
+});

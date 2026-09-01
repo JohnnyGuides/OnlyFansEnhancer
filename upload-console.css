@@ -28,6 +28,23 @@ body {
     #090b10;
 }
 
+.skip-link {
+  position: fixed;
+  inset-block-start: 10px;
+  inset-inline-start: 10px;
+  z-index: 20;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f4f5f7;
+  color: #090b10;
+  font-weight: 800;
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 main {
   width: min(880px, calc(100% - 32px));
   margin: 0 auto;
@@ -50,8 +67,15 @@ header {
 
 h1,
 h2,
+h3,
 p {
   margin-top: 0;
+}
+
+h1,
+h2,
+h3 {
+  scroll-margin-top: 24px;
 }
 
 h1 {
@@ -59,11 +83,13 @@ h1 {
   font-size: clamp(2.25rem, 7vw, 4.5rem);
   letter-spacing: -0.055em;
   line-height: 0.95;
+  text-wrap: balance;
 }
 
 h2 {
   margin-bottom: 0;
   font-size: 1.25rem;
+  text-wrap: balance;
 }
 
 .lede,
@@ -116,6 +142,7 @@ label {
 }
 
 input[type="text"],
+input[type="url"],
 input[type="date"],
 input[type="file"],
 input[type="search"],
@@ -130,6 +157,7 @@ textarea {
 }
 
 input[type="text"],
+input[type="url"],
 input[type="date"],
 input[type="search"],
 select,
@@ -151,10 +179,170 @@ button:focus-visible {
 
 .field-grid,
 .target-grid,
+.social-targets,
 .capability-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.section-copy {
+  max-width: 70ch;
+  color: #c2c9d3;
+  line-height: 1.6;
+}
+
+.social-targets {
+  margin-top: 18px;
+}
+
+.mode-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 22px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.mode-choice legend {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+
+.mode-choice label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #303744;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.mode-choice label:has(input:checked) {
+  border-color: #54c8fb;
+  background: rgba(0, 175, 240, 0.08);
+}
+
+.mode-choice span,
+.mode-choice strong,
+.mode-choice small {
+  display: block;
+  min-width: 0;
+}
+
+.mode-choice small {
+  margin-top: 4px;
+  color: #aeb6c3;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.subreddit-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.subreddit-heading h3,
+.subreddit-heading p {
+  margin-bottom: 0;
+}
+
+.subreddit-filter {
+  margin-top: 14px;
+}
+
+.subreddit-list {
+  margin-top: 10px;
+  border-block: 1px solid #303744;
+}
+
+.subreddit-preset {
+  padding-block: 16px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
+.subreddit-preset + .subreddit-preset {
+  border-top: 1px solid #303744;
+}
+
+.subreddit-preset > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+}
+
+.subreddit-preset-summary {
+  min-width: 0;
+}
+
+.subreddit-preset-summary strong,
+.subreddit-preset-summary small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.subreddit-preset-summary small {
+  margin-top: 3px;
+  color: #aeb6c3;
+  font-weight: 500;
+}
+
+.subreddit-overrides {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.35fr);
+  gap: 10px;
+  margin: 12px 0 0 26px;
+}
+
+.subreddit-overrides[hidden] {
+  display: none;
+}
+
+.subreddit-overrides .body-field {
+  grid-column: 1 / -1;
+}
+
+.subreddit-overrides label {
+  margin-top: 0;
+}
+
+.nsfw-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: end;
+  min-height: 44px;
+  margin: 0;
+}
+
+.trace-status {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #4a4020;
+  border-radius: 12px;
+  background: rgba(73, 58, 16, 0.3);
+  color: #e7dca9;
+  line-height: 1.5;
+}
+
+::selection {
+  background: #00aff0;
+  color: #041118;
+}
+
+input,
+textarea {
+  caret-color: #65cfff;
 }
 
 .target-option {
@@ -192,6 +380,18 @@ button {
   font: inherit;
   font-weight: 800;
   cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:not(:disabled):hover,
+.target-option:hover,
+.mode-choice label:hover {
+  border-color: #637083;
+  filter: brightness(1.08);
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px);
 }
 
 button.primary {
@@ -342,6 +542,8 @@ button:disabled {
 
   .field-grid,
   .target-grid,
+  .social-targets,
+  .mode-choice,
   .capability-grid,
   .upload-summary {
     grid-template-columns: 1fr;
@@ -355,5 +557,19 @@ button:disabled {
 
   .safety-note {
     flex-direction: column;
+  }
+
+  .subreddit-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .subreddit-overrides {
+    grid-template-columns: 1fr;
+    margin-left: 0;
+  }
+
+  .subreddit-overrides .body-field {
+    grid-column: auto;
   }
 }

@@ -36,7 +36,7 @@ test("personal manifest uses least-privilege dynamic creator registrations", () 
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.15.2");
+  assert.equal(manifest.version, "0.15.3");
   assert.equal(
     fs.existsSync(path.join(toolsRoot, "catalogue-proposal.js")),
     true,
