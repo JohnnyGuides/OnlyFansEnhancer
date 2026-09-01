@@ -1,6 +1,6 @@
 # Creator Workflow Toolkit
 
-The personal Chrome edition includes an explicit-pairing X teaser recorder. See [Chrome X teaser setup](docs/X_TEASER_CHROME_SETUP.md) and the [authenticated no-post smoke test](docs/X_TEASER_AUTHENTICATED_SMOKE.md).
+The personal Chrome edition includes an explicit-pairing X teaser recorder. See [Chrome X teaser setup](docs/X_TEASER_CHROME_SETUP.md), the [authenticated no-post smoke test](docs/X_TEASER_AUTHENTICATED_SMOKE.md), and the [X/Redgifs/Reddit trace-capture guide](docs/SOCIAL_TRACE_CAPTURE.md).
 
 Creator Workflow Toolkit is the personal Manifest V3 extension for the
 JohnnyGuides creator workflow. It combines the original Fan Identity Mask with
