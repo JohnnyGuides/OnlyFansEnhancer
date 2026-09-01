@@ -117,3 +117,23 @@ test("Sheet drift stops before append and move", async () => {
     false,
   );
 });
+
+test("locked Sheet conflict never advances to move", async () => {
+  const context = { globalThis: {} };
+  vm.runInNewContext(fs.readFileSync(source, "utf8"), context);
+  const value = fixture("audit-complete");
+  value.catalogueClient.appendTwitterTeaser = async () => ({
+    status: "conflict",
+  });
+  await assert.rejects(
+    () =>
+      context.globalThis.CreatorXTeaserReconcile.run({
+        sessionId: "session123",
+        frames: [],
+        ...value,
+      }),
+    /did not durably append/i,
+  );
+  assert.equal(value.events.includes("native:move"), false);
+  assert.equal(value.events.includes("save:sheet-complete"), false);
+});

@@ -455,6 +455,23 @@ function creatorUploadHandle(action, payload) {
       var twitterVerified = creatorUploadReadRows(sheet).find(function (row) {
         return row.row === rowNumber;
       });
+      var canonicalTwitter = creatorUploadCanonicalTwitterStatus(
+        payload.statusUrl,
+      );
+      var verifiedTwitterLinks = twitterVerified
+        ? creatorUploadClean(twitterVerified.twitterTeasers)
+            .split(/\s+/)
+            .map(creatorUploadClean)
+            .filter(Boolean)
+        : [];
+      if (
+        !twitterVerified ||
+        verifiedTwitterLinks.indexOf(canonicalTwitter) === -1
+      ) {
+        throw new Error(
+          "The Twitter teaser append could not be verified as durable.",
+        );
+      }
       return {
         status: "updated",
         row: twitterVerified,

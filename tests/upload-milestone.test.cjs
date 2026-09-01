@@ -1602,6 +1602,7 @@ test("Twitter teaser bridge writes column O only and verifies the updated row", 
     "",
   ];
   const writes = [];
+  let eraseTwitterAfterFlush = false;
   const sheet = {
     getLastRow: () => 125,
     getMaxRows: () => 500,
@@ -1621,7 +1622,9 @@ test("Twitter teaser bridge writes column O only and verifies the updated row", 
   };
   context.SpreadsheetApp = {
     openById: () => ({ getSheetByName: () => sheet }),
-    flush() {},
+    flush() {
+      if (eraseTwitterAfterFlush) values[123][14] = "";
+    },
   };
   context.LockService = {
     getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }),
@@ -1642,6 +1645,21 @@ test("Twitter teaser bridge writes column O only and verifies the updated row", 
   assert.equal(result.status, "updated");
   assert.deepEqual(writes, [[125, 15, statusUrl]]);
   assert.equal(values[123][13], "=COUNTA(SPLIT(O125,CHAR(10)))");
+  assert.equal(result.row.twitterTeasers, statusUrl);
+
+  values[123][14] = "";
+  eraseTwitterAfterFlush = true;
+  const retryRow = plain(bridge.readRows(sheet)).find((row) => row.row === 125);
+  assert.throws(
+    () =>
+      bridge.handle("appendTwitterTeaser", {
+        row: 125,
+        id: retryRow.id,
+        fingerprint: bridge.fingerprint(retryRow),
+        statusUrl,
+      }),
+    /verify|durable/i,
+  );
 });
 
 test("catalogue client sends bounded metadata only in a no-referrer POST body", async () => {

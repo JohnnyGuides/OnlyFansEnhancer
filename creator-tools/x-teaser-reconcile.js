@@ -55,6 +55,11 @@
         fingerprint: row.fingerprint,
         statusUrl: session.capture.statusUrl,
       });
+      if (!new Set(["updated", "idempotent"]).has(sheet?.status)) {
+        throw new Error(
+          `The Sheet did not durably append the X status (${sheet?.status || "unknown"}).`,
+        );
+      }
       session = await store.save({
         id: session.id,
         stage: "sheet-complete",

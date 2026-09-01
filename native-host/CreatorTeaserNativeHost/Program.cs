@@ -73,6 +73,8 @@ internal sealed class ReceiptRecord
     public string CatalogueId { get; set; } = "";
     public string[] FrameFiles { get; set; } = [];
     public string[] FrameSha256 { get; set; } = [];
+    public string[] AggregateFiles { get; set; } = [];
+    public string AuditEntrySha256 { get; set; } = "";
 }
 
 internal sealed class TeaserHost
@@ -160,9 +162,11 @@ internal sealed class TeaserHost
         );
         if (File.Exists(receiptPath))
         {
+            RejectReparsePath(receiptPath);
             ReceiptRecord existing = ReadReceipt(receiptPath);
             RequireMatchingReceipt(existing, expectedReceipt);
             VerifyReceiptFrames(existing);
+            VerifyReceiptAggregates(existing);
             return new HostResponse
             {
                 Ok = true,
@@ -197,6 +201,7 @@ internal sealed class TeaserHost
         JsonObject? existingEntry = entries
             .OfType<JsonObject>()
             .SingleOrDefault(entry => StringValue(entry, "url") == status.StatusUrl);
+        JsonObject auditEntry;
         if (existingEntry is not null)
         {
             if (
@@ -204,10 +209,12 @@ internal sealed class TeaserHost
                 || StringValue(existingEntry, "id") != catalogue.Id
             )
                 throw new InvalidOperationException("Existing audit entry conflicts with the confirmed catalogue row.");
+            auditEntry = existingEntry;
         }
         else
         {
-            entries.Add(BuildAuditEntry(catalogueRow, status, frameRelative));
+            auditEntry = BuildAuditEntry(catalogueRow, status, frameRelative);
+            entries.Add(auditEntry);
         }
 
         if (frameData["catalogue"] is JsonArray frameCatalogue)
@@ -225,6 +232,15 @@ internal sealed class TeaserHost
         WriteAtomic(cataloguePath, catalogueData.ToJsonString(JsonOptions));
         WriteAtomic(frameDataPath, frameJson);
         WriteAtomic(indexPath, generatedHtml);
+        expectedReceipt.AggregateFiles = ["catalogue.json", "frame-data.json", "index.html"];
+        expectedReceipt.AuditEntrySha256 = Sha256(
+            Encoding.UTF8.GetBytes(auditEntry.ToJsonString(JsonOptions))
+        );
+        expectedReceipt.Receipt = Sha256(
+            Encoding.UTF8.GetBytes(
+                expectedReceipt.Receipt + "\u001f" + expectedReceipt.AuditEntrySha256
+            )
+        );
         WriteNewOrVerify(
             receiptPath,
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(expectedReceipt, JsonOptions)),
@@ -250,8 +266,10 @@ internal sealed class TeaserHost
             ".creator-x-teaser-receipts",
             $"{request.StatusId}.json"
         );
+        RejectReparsePath(Path.GetDirectoryName(receiptPath)!);
         if (!File.Exists(receiptPath))
             throw new InvalidOperationException("A durable audit receipt is required before moving.");
+        RejectReparsePath(receiptPath);
         ReceiptRecord receipt = ReadReceipt(receiptPath);
         if (
             string.IsNullOrWhiteSpace(request.Receipt)
@@ -261,6 +279,7 @@ internal sealed class TeaserHost
         )
             throw new InvalidOperationException("The audit receipt does not match this source file.");
         VerifyReceiptFrames(receipt);
+        VerifyReceiptAggregates(receipt);
 
         string destination = Path.GetFullPath(Path.Combine(doneRoot, proof.Basename));
         EnsureInside(doneRoot, destination, "Done destination");
@@ -461,14 +480,48 @@ internal sealed class TeaserHost
         {
             string path = Path.GetFullPath(Path.Combine(auditRoot, receipt.FrameFiles[index]));
             EnsureInside(auditRoot, path, "Receipt frame");
+            RejectReparsePath(path);
             if (!File.Exists(path) || Sha256(File.ReadAllBytes(path)) != receipt.FrameSha256[index])
                 throw new InvalidOperationException("Audit receipt frame proof does not match disk.");
         }
     }
 
+    private void VerifyReceiptAggregates(ReceiptRecord receipt)
+    {
+        string[] expectedFiles = ["catalogue.json", "frame-data.json", "index.html"];
+        if (!receipt.AggregateFiles.SequenceEqual(expectedFiles) || !Regex.IsMatch(receipt.AuditEntrySha256, "^[a-f0-9]{64}$"))
+            throw new InvalidOperationException("Audit receipt aggregate proof is incomplete.");
+        string cataloguePath = AuditFile(expectedFiles[0]);
+        string frameDataPath = AuditFile(expectedFiles[1]);
+        string indexPath = AuditFile(expectedFiles[2]);
+        JsonObject catalogueData = ReadObject(cataloguePath);
+        JsonObject catalogueRow = FindCatalogueRow(catalogueData, receipt.Row, receipt.CatalogueId);
+        string[] urls = catalogueRow["urls"]?.AsArray().Select(value => value?.GetValue<string>() ?? "").ToArray() ?? [];
+        if (!urls.Contains(receipt.StatusUrl))
+            throw new InvalidOperationException("Audit receipt aggregate catalogue proof does not match disk.");
+        JsonArray entries = ReadObject(frameDataPath)["entries"]?.AsArray()
+            ?? throw new InvalidOperationException("Audit receipt aggregate entries are missing.");
+        JsonObject entry = entries.OfType<JsonObject>().SingleOrDefault(value => StringValue(value, "url") == receipt.StatusUrl)
+            ?? throw new InvalidOperationException("Audit receipt aggregate entry does not match disk.");
+        if (IntValue(entry, "row") != receipt.Row || StringValue(entry, "id") != receipt.CatalogueId || Sha256(Encoding.UTF8.GetBytes(entry.ToJsonString(JsonOptions))) != receipt.AuditEntrySha256)
+            throw new InvalidOperationException("Audit receipt aggregate entry proof does not match disk.");
+        string index = File.ReadAllText(indexPath, Encoding.UTF8);
+        if (!index.Contains(receipt.StatusUrl, StringComparison.Ordinal) || receipt.FrameFiles.Any(frame => !index.Contains(frame, StringComparison.Ordinal)))
+            throw new InvalidOperationException("Audit receipt aggregate index proof does not match disk.");
+    }
+
     private static void RequireMatchingReceipt(ReceiptRecord left, ReceiptRecord right)
     {
-        if (JsonSerializer.Serialize(left, JsonOptions) != JsonSerializer.Serialize(right, JsonOptions))
+        if (
+            left.StatusId != right.StatusId
+            || left.StatusUrl != right.StatusUrl
+            || left.Basename != right.Basename
+            || left.FileSha256 != right.FileSha256
+            || left.Row != right.Row
+            || left.CatalogueId != right.CatalogueId
+            || !left.FrameFiles.SequenceEqual(right.FrameFiles)
+            || !left.FrameSha256.SequenceEqual(right.FrameSha256)
+        )
             throw new InvalidOperationException("Existing audit receipt conflicts with this request.");
     }
 

@@ -207,11 +207,17 @@ confirmButton.addEventListener("click", async () => {
 
 message({ type: "GET_X_TEASER_SESSIONS" })
   .then(({ sessions }) => {
+    const paired = [...sessions]
+      .reverse()
+      .find((session) => session.stage === "paired" && !session.capture);
     resumeSession =
       [...sessions]
         .reverse()
         .find((session) => session.capture && session.stage !== "moved") ||
       null;
+    if (paired) {
+      result.textContent = `Observation resumed for ${paired.pairing.file.basename}. Continue in the bound X tab; Chrome will not repost.`;
+    }
     if (resumeSession) {
       fileStatus.textContent = `Unfinished ${resumeSession.stage} session found for ${resumeSession.pairing.file.basename}. Reselect that exact file to resume without reposting.`;
     }

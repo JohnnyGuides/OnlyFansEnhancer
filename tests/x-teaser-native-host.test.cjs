@@ -270,6 +270,105 @@ test("native host refuses a move before audit and never overwrites Done", () => 
   }
 });
 
+test("native host refuses move when aggregate audit proof is corrupted", () => {
+  const value = fixture();
+  try {
+    const request = auditRequest(value);
+    const audited = invoke(value, request);
+    assert.equal(audited.ok, true, audited.error);
+    fs.writeFileSync(
+      path.join(value.auditRoot, "frame-data.json"),
+      "{}",
+      "utf8",
+    );
+    const moved = invoke(value, {
+      operation: "move",
+      basename: value.basename,
+      fileProof: value.proof,
+      statusId: request.status.statusId,
+      receipt: audited.receipt,
+    });
+    assert.equal(moved.ok, false);
+    assert.match(moved.error, /aggregate|proof|audit/i);
+    assert.equal(fs.existsSync(value.source), true);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test("an older receipt remains valid after a later audit extends aggregate files", () => {
+  const value = fixture();
+  try {
+    const firstRequest = auditRequest(value);
+    const first = invoke(value, firstRequest);
+    assert.equal(first.ok, true, first.error);
+    const secondBasename = "second-teaser.mp4";
+    const secondSource = path.join(value.teaserRoot, secondBasename);
+    const secondBytes = Buffer.from("second confirmed teaser fixture");
+    fs.writeFileSync(secondSource, secondBytes);
+    const secondProof = {
+      basename: secondBasename,
+      size: secondBytes.length,
+      lastModified: fs.statSync(secondSource).mtimeMs,
+      duration: 12,
+      sha256: sha256(secondBytes),
+    };
+    const secondRequest = {
+      ...firstRequest,
+      basename: secondBasename,
+      fileProof: secondProof,
+      status: {
+        ...firstRequest.status,
+        statusId: "2094523397057237307",
+        statusUrl: "https://x.com/Johnny_Guides/status/2094523397057237307",
+      },
+    };
+    const second = invoke(value, secondRequest);
+    assert.equal(second.ok, true, second.error);
+    const moved = invoke(value, {
+      operation: "move",
+      basename: value.basename,
+      fileProof: value.proof,
+      statusId: firstRequest.status.statusId,
+      receipt: first.receipt,
+    });
+    assert.equal(moved.ok, true, moved.error);
+    assert.equal(moved.moveOutcome, "moved");
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test("native host rejects audit-frame junctions during recovery", (t) => {
+  const value = fixture();
+  try {
+    const request = auditRequest(value);
+    const audited = invoke(value, request);
+    assert.equal(audited.ok, true, audited.error);
+    const frames = path.join(value.auditRoot, "frames");
+    const outside = path.join(value.root, "outside-frames");
+    fs.renameSync(frames, outside);
+    try {
+      fs.symlinkSync(outside, frames, "junction");
+    } catch (error) {
+      t.skip(`Junction creation unavailable: ${error.message}`);
+      return;
+    }
+    const moved = invoke(value, {
+      operation: "move",
+      basename: value.basename,
+      fileProof: value.proof,
+      statusId: request.status.statusId,
+      receipt: audited.receipt,
+    });
+    assert.equal(moved.ok, false);
+    assert.match(moved.error, /reparse/i);
+    assert.equal(fs.existsSync(value.source), true);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
 test("native host rejects multiple matches and reparse-point escapes", (t) => {
   const value = fixture();
   try {

@@ -23,6 +23,7 @@ test("personal Chrome manifest exposes the recorder without Firefox metadata", (
   const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
   assert.match(background, /onCompleted/);
   assert.match(background, /onHistoryStateUpdated/);
+  assert.match(background, /rebindXTeaserObservation/);
 });
 
 test("X observer captures one unambiguous canonical video status", () => {
