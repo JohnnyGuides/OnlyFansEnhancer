@@ -2186,8 +2186,14 @@ const CREATOR_SCRIPT_DEFINITIONS = Object.freeze([
   {
     id: "creator-toolkit-upload-trace-redgifs",
     toolIds: ["uploadTraceRecorder"],
-    origins: ["https://www.redgifs.com/*"],
-    matches: ["https://www.redgifs.com/*"],
+    origins: [
+      "https://www.redgifs.com/*",
+      "https://studio.redgifs.com/*",
+    ],
+    matches: [
+      "https://www.redgifs.com/*",
+      "https://studio.redgifs.com/*",
+    ],
     js: ["creator-tools/upload-trace-recorder.js"],
     runAt: "document_start",
   },

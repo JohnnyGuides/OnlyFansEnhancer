@@ -26,7 +26,7 @@ const fixtures = [
   },
   {
     platform: "Redgifs",
-    url: "https://www.redgifs.com/upload",
+    url: "https://studio.redgifs.com/",
     result: "https://www.redgifs.com/watch/safeslug",
     viewport: { width: 800, height: 700 },
   },
@@ -56,7 +56,7 @@ const fixtures = [
       (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(worker.url()).host;
     await context.route(
-      /https:\/\/(?:x\.com|www\.redgifs\.com|www\.reddit\.com)\/.*/,
+      /https:\/\/(?:x\.com|studio\.redgifs\.com|www\.reddit\.com)\/.*/,
       (route) => {
         const fixture = fixtures.find((item) =>
           route.request().url().startsWith(new URL(item.url).origin),

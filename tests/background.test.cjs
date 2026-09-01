@@ -1293,7 +1293,6 @@ function send(message) {
     ["creator-toolkit-upload-trace-manyvids", "https://www.manyvids.com/*"],
     ["creator-toolkit-upload-trace-pornhub", "https://pornhub.mainhub.com/*"],
     ["creator-toolkit-upload-trace-x", "https://x.com/*"],
-    ["creator-toolkit-upload-trace-redgifs", "https://www.redgifs.com/*"],
   ]) {
     const registration = registeredContentScripts.get(id);
     assert.ok(registration, `${id} should register independently.`);
@@ -1303,6 +1302,15 @@ function send(message) {
     ]);
     assert.equal(registration.runAt, "document_start");
   }
+  const redgifsTrace = registeredContentScripts.get(
+    "creator-toolkit-upload-trace-redgifs",
+  );
+  assert.deepEqual(redgifsTrace.matches, [
+    "https://www.redgifs.com/*",
+    "https://studio.redgifs.com/*",
+  ]);
+  assert.deepEqual(redgifsTrace.js, ["creator-tools/upload-trace-recorder.js"]);
+  assert.equal(redgifsTrace.runAt, "document_start");
   const redditTrace = registeredContentScripts.get(
     "creator-toolkit-upload-trace-reddit",
   );

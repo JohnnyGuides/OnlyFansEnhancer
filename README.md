@@ -119,7 +119,7 @@ recipe, and Pornhub orientation/tags/categories being authorized.
   default. It stays hidden until **Show trace recorder on this tab** is selected
   from the extension popup, then records bounded, sanitized upload evidence
   after **Start trace** across same-site refreshes for
-  OnlyFans, Fansly, ManyVids, or Pornhub. It never captures captions, file
+  OnlyFans, Fansly, ManyVids, Pornhub, X, Redgifs Studio, or Reddit. It never captures captions, file
   names, file bytes, raw status text, cookies, headers, or request bodies and
   never publishes anything. It distinguishes trusted user choices, toolkit
   actions, and site reactions so a manual success can be compared with the

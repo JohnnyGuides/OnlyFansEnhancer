@@ -1,6 +1,6 @@
 # Social publishing trace capture
 
-Version 0.17.0 includes an on-demand sanitized trace recorder for X, Redgifs,
+Version 0.17.1 includes an on-demand sanitized trace recorder for X, Redgifs,
 and Reddit. The supplied successful X trace is accepted by the Master Uploader;
 Redgifs and Reddit remain trace-gated.
 These traces are mandatory evidence for the publishing adapters; the recorder
@@ -45,7 +45,7 @@ click; autonomous mode uses a separate durable checkpoint before each click.
 
 ## Redgifs trace
 
-1. Open the Redgifs uploader.
+1. Open the Redgifs uploader at `https://studio.redgifs.com/`.
 2. Open the recorder from the extension icon, then select **Start trace**.
 3. Select the social teaser and complete every required metadata/control step.
 4. Continue through upload and processing.

@@ -36,7 +36,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.17.0");
+  assert.equal(manifest.version, "0.17.1");
   assert.equal(
     fs.existsSync(path.join(toolsRoot, "catalogue-proposal.js")),
     true,
@@ -52,6 +52,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
     "https://sh.reddit.com/*",
     "https://old.reddit.com/*",
     "https://www.redgifs.com/*",
+    "https://studio.redgifs.com/*",
     "https://x.com/*",
   ];
   for (const origin of expectedCreatorOrigins) {

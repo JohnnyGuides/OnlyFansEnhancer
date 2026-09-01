@@ -71,6 +71,7 @@ test("recorder sanitizers remove private data and bound duplicate events", () =>
 
   assert.equal(hooks.platformFor("x.com"), "X");
   assert.equal(hooks.platformFor("www.redgifs.com"), "Redgifs");
+  assert.equal(hooks.platformFor("studio.redgifs.com"), "Redgifs");
   assert.equal(hooks.platformFor("www.reddit.com"), "Reddit");
   assert.equal(
     hooks.candidatePostUrl(
