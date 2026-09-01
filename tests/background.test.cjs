@@ -528,6 +528,19 @@ function send(message) {
     false,
   );
   assert.ok(manifest.permissions.includes("offscreen"));
+  assert.equal(
+    typeof context.CreatorSocialChromeRuntime?.create,
+    "function",
+    "The background worker must load the trace-approved social Chrome runtime.",
+  );
+  await assert.rejects(
+    send({
+      type: "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
+      plan: {},
+      caption: "",
+    }),
+    /invalid distribution plan ID/i,
+  );
   assert.ok(
     manifest.permissions.includes("webNavigation"),
     "Existing-tab recorder injection must pin the document it inspected.",

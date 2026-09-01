@@ -41,7 +41,9 @@
       1,
       Number.MAX_SAFE_INTEGER,
     );
-    const duration = finiteNumber(value?.duration, 0.001, 8 * 60 * 60);
+    const duration = Object.hasOwn(value || {}, "duration")
+      ? finiteNumber(value.duration, 0.001, 8 * 60 * 60)
+      : null;
     const sha256 = clean(value?.sha256, 64).toLowerCase();
     if (
       !basename ||
@@ -50,12 +52,18 @@
       basename === ".." ||
       size === null ||
       lastModified === null ||
-      duration === null ||
+      (Object.hasOwn(value || {}, "duration") && duration === null) ||
       !HASH_PATTERN.test(sha256)
     ) {
       throw new Error("Invalid social teaser file proof.");
     }
-    return { basename, size, lastModified, duration, sha256 };
+    return {
+      basename,
+      size,
+      lastModified,
+      ...(duration === null ? {} : { duration }),
+      sha256,
+    };
   }
 
   function catalogue(value) {

@@ -7,6 +7,7 @@ importScripts(
   "creator-tools/social-distribution-contract.js",
   "creator-tools/social-distribution-session-store.js",
   "creator-tools/social-distribution-orchestrator.js",
+  "creator-tools/social-chrome-runtime.js",
   "creator-tools/x-teaser-contract.js",
   "creator-tools/x-teaser-session-store.js",
   "creator-tools/x-teaser-reconcile.js",
@@ -32,6 +33,11 @@ const CREATOR_REGISTRY = globalThis.CreatorToolkitRegistry;
 const CREATOR_CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
 const CREATOR_CATALOGUE_CONTRACT = globalThis.CreatorCatalogueContract;
 const CREATOR_UPLOAD_SESSION_STORE = globalThis.CreatorUploadSessionStore;
+const CREATOR_SOCIAL_CONTRACT = globalThis.CreatorSocialDistributionContract;
+const CREATOR_SOCIAL_SESSION_STORE =
+  globalThis.CreatorSocialDistributionSessionStore;
+const CREATOR_SOCIAL_ORCHESTRATOR =
+  globalThis.CreatorSocialDistributionOrchestrator;
 const X_TEASER_CONTRACT = globalThis.CreatorXTeaserContract;
 const X_TEASER_SESSION_STORE = globalThis.CreatorXTeaserSessionStore;
 const X_TEASER_BINDING_KEY = "creatorXTeaserChromeBindingV1";
@@ -2958,6 +2964,14 @@ function creatorUploadPort(sessionId) {
   );
 }
 
+function creatorSocialPort(sessionId) {
+  return [...creatorUploadConsolePorts].find(
+    (port) =>
+      port.creatorSocialSessionId === sessionId ||
+      port.creatorUploadSessionId === sessionId,
+  );
+}
+
 function creatorUploadPost(sessionId, message) {
   const port = creatorUploadPort(sessionId);
   if (!port) throw new Error("The upload console is not connected.");
@@ -3001,7 +3015,77 @@ function creatorUploadRequestFile(session, platform, role) {
   });
 }
 
+function creatorSocialRequestFile({ sessionId, platform, role, token }) {
+  if (
+    platform !== "x" ||
+    role !== "social" ||
+    !/^[A-Za-z0-9_-]{16,128}$/.test(String(token || ""))
+  ) {
+    return Promise.reject(new Error("Invalid social teaser file request."));
+  }
+  const port = creatorSocialPort(sessionId);
+  if (!port) return Promise.reject(new Error("The upload console was closed."));
+  creatorUploadRequestCounter += 1;
+  const requestId = `${sessionId}:social:${creatorUploadRequestCounter}`;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      creatorUploadFileRequests.delete(requestId);
+      reject(new Error("Timed out waiting for the social teaser."));
+    }, 60 * 60_000);
+    creatorUploadFileRequests.set(requestId, {
+      port,
+      resolve,
+      reject,
+      timeout,
+    });
+    port.postMessage({
+      type: "file-request",
+      sessionId,
+      requestId,
+      platform,
+      role,
+      token,
+    });
+  });
+}
+
+async function resolveCreatorPaidUploadLink(dependency) {
+  const session = await getCreatorUploadSession(dependency.uploadSessionId);
+  const target = session?.platforms.get(dependency.platform);
+  return target?.postUrl
+    ? {
+        platform: dependency.platform,
+        uploadSessionId: dependency.uploadSessionId,
+        postUrl: target.postUrl,
+      }
+    : null;
+}
+
+let creatorSocialRuntime = null;
+
+function getCreatorSocialRuntime() {
+  creatorSocialRuntime ||= globalThis.CreatorSocialChromeRuntime.create({
+    chrome,
+    contract: CREATOR_SOCIAL_CONTRACT,
+    store: CREATOR_SOCIAL_SESSION_STORE,
+    orchestratorFactory: CREATOR_SOCIAL_ORCHESTRATOR,
+    catalogueClient: CREATOR_CATALOGUE_CLIENT,
+    fileRequest: creatorSocialRequestFile,
+    resolvePaidLink: resolveCreatorPaidUploadLink,
+  });
+  return creatorSocialRuntime;
+}
+
 function creatorUploadHandlePortMessage(port, message) {
+  if (message?.type === "bind-social-session") {
+    const sessionId = creatorUploadClean(message.sessionId, 64);
+    if (!CREATOR_UPLOAD_SESSION_PATTERN.test(sessionId)) {
+      port.disconnect();
+      return;
+    }
+    port.creatorSocialSessionId = sessionId;
+    return;
+  }
   if (message?.type === "bind-session") {
     const sessionId = creatorUploadClean(message.sessionId, 64);
     if (!CREATOR_UPLOAD_SESSION_PATTERN.test(sessionId)) {
@@ -4104,6 +4188,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "START_CREATOR_UPLOAD":
         return {
           results: await startCreatorUpload(message.sessionId, message.targets),
+        };
+      case "PREPARE_CREATOR_SOCIAL_DISTRIBUTION":
+        return {
+          socialDistribution: await getCreatorSocialRuntime().prepare({
+            plan: message.plan,
+            caption: message.caption,
+          }),
+        };
+      case "START_CREATOR_SOCIAL_DISTRIBUTION":
+        return {
+          socialDistribution: await getCreatorSocialRuntime().start(
+            message.sessionId,
+          ),
+        };
+      case "RESUME_CREATOR_SOCIAL_DISTRIBUTION":
+        return {
+          socialDistribution: await getCreatorSocialRuntime().resume(
+            message.sessionId,
+          ),
         };
       case "RETRY_CREATOR_UPLOAD_PLATFORM":
         return {

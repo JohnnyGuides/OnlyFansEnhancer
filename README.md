@@ -98,6 +98,23 @@ recipe, and Pornhub orientation/tags/categories being authorized.
   objects are frozen for the run; only a teaser that was missing at Yes may be
   supplied later. Fully terminal jobs are removed from session storage, while
   recoverable sheet/link states remain available for the browser session.
+
+- **X teaser distribution** is part of the same one-Yes Master Uploader run.
+  It keeps the separate social teaser and caption only in the open upload
+  console, freezes their SHA-256 proofs against the exact catalogue row, opens
+  or reuses the signed-in X composer, assigns the teaser through X's real file
+  input, and fills the caption. In **Confirm manually** mode it stops before
+  Post, watches the resulting status tab after you publish, prepares the first
+  reply with the selected paid-platform link, dismisses the recorded OnlyFans
+  preview card, and stops before Reply. In **Autonomous** mode the same two
+  final controls are clicked only after separate durable main/reply
+  checkpoints. The main tweet and first reply are separate append-only ledger
+  events; only the canonical main status URL is appended to the catalogue
+  Twitter cell. Restart recovery captures an already-attempted result and never
+  clicks either final control twice. X scheduling remains manual because the
+  supplied schedule trace did not identify its six select controls
+  semantically. Redgifs-to-Reddit remains disabled until successful traces for
+  both sites are supplied and validated.
 - **Upload trace recorder** is a read-only development helper enabled by
   default. It stays hidden until **Show trace recorder on this tab** is selected
   from the extension popup, then records bounded, sanitized upload evidence

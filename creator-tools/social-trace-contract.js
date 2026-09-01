@@ -271,6 +271,25 @@
         event.type === "click" &&
         eventControl(event).testId === "scheduledConfirmationPrimaryAction",
     );
+    const returnRouteIndex = findIndexAfter(
+      events,
+      confirmIndex,
+      (event) =>
+        event.type === "route" &&
+        event.data?.route === "https://x.com/compose/post",
+    );
+    const finalScheduleIndex = findIndexAfter(
+      events,
+      returnRouteIndex,
+      (event) =>
+        event.type === "semantic-snapshot" &&
+        event.data?.route === "https://x.com/compose/post" &&
+        event.data.actions?.some(
+          (control) =>
+            control.testId === "tweetButton" &&
+            String(control.label || "").toLowerCase() === "schedule",
+        ),
+    );
     const selectEvents = events.filter(
       (event, index) =>
         index > scheduleRoute &&
@@ -280,7 +299,8 @@
     );
     return Object.freeze({
       menuObserved: menuIndex >= 0 && scheduleRoute >= 0,
-      confirmed: confirmIndex >= 0,
+      confirmed: confirmIndex >= 0 && returnRouteIndex >= 0,
+      finalScheduleObserved: finalScheduleIndex >= 0,
       selectChanges: selectEvents.length,
       controlsIdentified: selectEvents.every((event) => {
         const control = eventControl(event);

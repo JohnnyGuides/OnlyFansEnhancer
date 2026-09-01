@@ -7,6 +7,13 @@
   const FILE_INPUT = "input[data-testid='fileInput'][type='file']";
   const MAIN_POST = '[data-testid="tweetButton"]';
   const REPLY_POST = '[data-testid="tweetButtonInline"]';
+  const replyBaselines = new Map();
+  const mainObservation = {
+    button: null,
+    clicked: false,
+    identity: null,
+    timer: null,
+  };
 
   function visible(element) {
     if (!element || element.hidden) return false;
@@ -83,7 +90,49 @@
     return identity;
   }
 
-  function replyFor(main) {
+  function captureObservedMain() {
+    if (mainObservation.identity) return true;
+    const identity = statusIdentity(location.href);
+    if (!identity) return false;
+    mainObservation.identity = identity;
+    if (mainObservation.timer) clearInterval(mainObservation.timer);
+    mainObservation.timer = null;
+    return true;
+  }
+
+  function observePreparedPost(button) {
+    if (mainObservation.button === button) return;
+    mainObservation.button = button;
+    button.addEventListener(
+      "click",
+      () => {
+        mainObservation.clicked = true;
+        if (captureObservedMain()) return;
+        mainObservation.timer = setInterval(captureObservedMain, 25);
+        setTimeout(() => {
+          if (mainObservation.timer) clearInterval(mainObservation.timer);
+          mainObservation.timer = null;
+        }, 30_000);
+      },
+      { once: true },
+    );
+  }
+
+  async function mainIdentity() {
+    if (!mainObservation.clicked) {
+      throw new Error("The prepared X Post was not clicked in this tab.");
+    }
+    const identity = await waitFor(
+      () => mainObservation.identity,
+      "The X status reached from the prepared Post",
+    );
+    if (currentMain().resultUrl !== identity.resultUrl) {
+      throw new Error("The current X status no longer matches this run.");
+    }
+    return identity;
+  }
+
+  function sameAuthorStatuses(main) {
     const matches = [...document.querySelectorAll('a[href*="/status/"]')]
       .filter(
         (anchor) => anchor instanceof HTMLAnchorElement && visible(anchor),
@@ -95,27 +144,45 @@
           identity.handle === main.handle &&
           identity.resultId !== main.resultId,
       );
-    const unique = [
-      ...new Map(matches.map((item) => [item.resultId, item])).values(),
-    ];
+    return [...new Map(matches.map((item) => [item.resultId, item])).values()];
+  }
+
+  function replyFor(main) {
+    const baseline = replyBaselines.get(main.resultId);
+    if (!baseline) return null;
+    const unique = sameAuthorStatuses(main).filter(
+      (identity) => !baseline.has(identity.resultId),
+    );
     if (unique.length > 1)
       throw new Error("The first X reply result is ambiguous.");
     return unique[0] || null;
   }
 
+  function rememberReplyBaseline(main) {
+    if (!replyBaselines.has(main.resultId)) {
+      replyBaselines.set(
+        main.resultId,
+        new Set(sameAuthorStatuses(main).map((item) => item.resultId)),
+      );
+    }
+  }
+
+  function visibleOnlyFansAnchors() {
+    return [...document.querySelectorAll("a[href]")].filter((anchor) => {
+      try {
+        return (
+          anchor instanceof HTMLAnchorElement &&
+          visible(anchor) &&
+          new URL(anchor.href).hostname === "onlyfans.com"
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+
   function onlyFansPreview() {
-    const cards = [...document.querySelectorAll("a[href]")]
-      .filter((anchor) => {
-        try {
-          return (
-            anchor instanceof HTMLAnchorElement &&
-            visible(anchor) &&
-            new URL(anchor.href).hostname === "onlyfans.com"
-          );
-        } catch {
-          return false;
-        }
-      })
+    const cards = visibleOnlyFansAnchors()
       .map((anchor) => anchor.parentElement)
       .filter(
         (card) =>
@@ -156,7 +223,7 @@
     one(FILE_INPUT, "The X media input", () => true);
     fillEditor(editor, caption);
     await attachFile("social", FILE_INPUT);
-    await waitFor(() => {
+    const postButton = await waitFor(() => {
       const progress = [
         ...document.querySelectorAll('[role="progressbar"]'),
       ].some(
@@ -166,6 +233,7 @@
       );
       return progress && one(MAIN_POST, "The X Post button", enabled);
     }, "The X upload-ready state");
+    observePreparedPost(postButton);
     return { platform: "x", status: "prepared", upload: "ready" };
   }
 
@@ -180,51 +248,52 @@
     return { platform: "x", status: "submitted" };
   }
 
-  async function captureResult({
-    mode,
-    paidUrl,
-    beforeReplyCommit,
-    allowReplySubmit = true,
-  }) {
+  function capturedReply(main) {
+    const reply = replyFor(main);
+    return reply
+      ? {
+          resultId: main.resultId,
+          resultUrl: main.resultUrl,
+          replyResultId: reply.resultId,
+          replyResultUrl: reply.resultUrl,
+        }
+      : null;
+  }
+
+  async function prepareReply({ paidUrl }) {
     const main = currentMain();
-    const existingReply = replyFor(main);
-    if (existingReply) {
-      return {
-        resultId: main.resultId,
-        resultUrl: main.resultUrl,
-        replyResultId: existingReply.resultId,
-        replyResultUrl: existingReply.resultUrl,
-      };
-    }
-    if (allowReplySubmit === false) {
-      throw new Error(
-        "The X reply was already attempted; recovery may capture it but cannot post it again.",
+    const captured = capturedReply(main);
+    if (captured) return captured;
+    rememberReplyBaseline(main);
+    const editor = one(MAIN_COMPOSER, "The X reply composer");
+    if (
+      editor.textContent.trim() !== String(paidUrl || "").trim() ||
+      visibleOnlyFansAnchors().length > 0
+    ) {
+      fillEditor(editor, paidUrl);
+      const preview = await waitFor(onlyFansPreview, "The OnlyFans preview");
+      preview.dismiss.click();
+      await waitFor(
+        () => !preview.card.isConnected || !visible(preview.card),
+        "OnlyFans preview removal",
       );
     }
+    return {
+      status: "reply-prepared",
+      resultId: main.resultId,
+      resultUrl: main.resultUrl,
+    };
+  }
 
-    const editor = one(MAIN_COMPOSER, "The X reply composer");
-    fillEditor(editor, paidUrl);
-    const preview = await waitFor(onlyFansPreview, "The OnlyFans preview");
-    preview.dismiss.click();
-    await waitFor(
-      () => !preview.card.isConnected || !visible(preview.card),
-      "OnlyFans preview removal",
-    );
-
-    if (mode === "manual") {
-      return {
-        status: "reply-prepared",
-        resultId: main.resultId,
-        resultUrl: main.resultUrl,
-      };
-    }
-    if (mode !== "autonomous")
-      throw new Error("The X execution mode is invalid.");
-    if (typeof beforeReplyCommit !== "function") {
+  async function submitReply({ beforeCommit }) {
+    const main = currentMain();
+    const captured = capturedReply(main);
+    if (captured) return captured;
+    if (typeof beforeCommit !== "function") {
       throw new Error("The durable X reply gate is unavailable.");
     }
     const button = one(REPLY_POST, "The X Reply button", enabled);
-    const authorization = await beforeReplyCommit({
+    const authorization = await beforeCommit({
       resultId: main.resultId,
       resultUrl: main.resultUrl,
     });
@@ -243,9 +312,34 @@
     };
   }
 
+  async function captureResult({
+    mode,
+    paidUrl,
+    beforeReplyCommit,
+    allowReplySubmit = true,
+  }) {
+    const main = currentMain();
+    const captured = capturedReply(main);
+    if (captured) return captured;
+    if (allowReplySubmit === false) {
+      throw new Error(
+        "The X reply was already attempted; recovery may capture it but cannot post it again.",
+      );
+    }
+
+    const prepared = await prepareReply({ paidUrl });
+    if (prepared.replyResultId || mode === "manual") return prepared;
+    if (mode !== "autonomous")
+      throw new Error("The X execution mode is invalid.");
+    return submitReply({ beforeCommit: beforeReplyCommit });
+  }
+
   globalThis.CreatorXPublisherAdapter = Object.freeze({
     prepare,
+    prepareReply,
     submit,
+    submitReply,
     captureResult,
+    mainIdentity,
   });
 })();

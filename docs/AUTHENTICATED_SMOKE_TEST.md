@@ -31,7 +31,7 @@ outcome without page content or credentials.
 
 ## Upload console
 
-- Confirm the extension reports version `0.16.0` before testing. For the release
+- Confirm the extension reports version `0.17.0` before testing. For the release
   smoke pass, stop at the final preview on every site; do not click the global
   Yes when it would reach a real final platform control.
 - Configure distinctive safe saved profiles and verify the Master Uploader
@@ -41,6 +41,11 @@ outcome without page content or credentials.
   input programmatically and verify the bridge still transfers only the frozen
   confirmed file identity. Confirm the full, thumbnail, and Pornhub inputs are
   disabled; a teaser missing at Yes may be supplied once and is then frozen.
+- For X, choose **Confirm manually**, one exact catalogue episode, an existing
+  paid-platform link, and a harmless teaser. Confirm the composer receives the
+  exact media and caption but does not click Post. Do not continue to a public
+  post during this inspection-only smoke test. Redgifs and Reddit must remain
+  unavailable until their successful traces are installed.
 
 - With no sheet bridge configured, select a harmless full-video fixture and
   enter a description. Confirm **Yes, upload now** appears, the preview says

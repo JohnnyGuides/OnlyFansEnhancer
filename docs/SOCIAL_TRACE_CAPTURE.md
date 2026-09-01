@@ -1,7 +1,8 @@
 # Social publishing trace capture
 
-Version 0.16.2 includes an on-demand sanitized trace recorder for X, Redgifs,
-and Reddit.
+Version 0.17.0 includes an on-demand sanitized trace recorder for X, Redgifs,
+and Reddit. The supplied successful X trace is accepted by the Master Uploader;
+Redgifs and Reddit remain trace-gated.
 These traces are mandatory evidence for the publishing adapters; the recorder
 does not fill fields, upload media, or click platform controls.
 
@@ -36,6 +37,11 @@ controls are not semantically labelled in the trace. Scheduling therefore
 remains manual until those controls can be identified without guessing.
 
 The required result is named `creator-upload-trace-x-<timestamp>.json`.
+
+The accepted X adapter reproduces the observed main composer, media-ready
+wait, main Post, canonical status capture, paid-link first reply, OnlyFans card
+dismissal, and Reply phases. Manual mode stops before each final publishing
+click; autonomous mode uses a separate durable checkpoint before each click.
 
 ## Redgifs trace
 

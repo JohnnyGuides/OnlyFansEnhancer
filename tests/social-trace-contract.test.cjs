@@ -79,6 +79,7 @@ test("preserves the recorded X schedule-menu evidence without claiming labelled 
   );
   assert.equal(result.menuObserved, true);
   assert.equal(result.confirmed, true);
+  assert.equal(result.finalScheduleObserved, true);
   assert.equal(result.selectChanges, 6);
   assert.equal(result.controlsIdentified, false);
 });

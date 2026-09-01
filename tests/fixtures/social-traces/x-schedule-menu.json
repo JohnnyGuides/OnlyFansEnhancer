@@ -50,6 +50,22 @@
       "data": { "route": "https://x.com/compose/post" }
     },
     {
+      "ms": 9100,
+      "type": "semantic-snapshot",
+      "data": {
+        "route": "https://x.com/compose/post",
+        "actions": [
+          {
+            "tag": "button",
+            "role": "button",
+            "label": "Schedule",
+            "testId": "tweetButton",
+            "type": "button"
+          }
+        ]
+      }
+    },
+    {
       "ms": 10000,
       "type": "session-stop",
       "data": { "reason": "manual" }

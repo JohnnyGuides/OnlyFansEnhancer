@@ -226,3 +226,16 @@ test("can freeze a paid-link dependency on the authorized platform upload", () =
     /paid URL|paid-link source/i,
   );
 });
+
+test("exact teaser SHA proof does not require decoding video duration", () => {
+  const contract = loadContract();
+  const value = input();
+  delete value.socialFile.duration;
+  const plan = contract.freezeDistributionPlan(value);
+  assert.deepEqual(plain(plan.socialFile), {
+    basename: "ashley-social-teaser.mp4",
+    size: 12345,
+    lastModified: 1_788_244_200_000,
+    sha256: "a".repeat(64),
+  });
+});

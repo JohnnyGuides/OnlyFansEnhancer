@@ -260,6 +260,90 @@
     }
   }
 
+  function hex(bytes) {
+    return [...new Uint8Array(bytes)]
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function sha256(value) {
+    const bytes =
+      typeof value === "string"
+        ? new TextEncoder().encode(value)
+        : new Uint8Array(await value.arrayBuffer());
+    return hex(await crypto.subtle.digest("SHA-256", bytes));
+  }
+
+  async function buildSocialDistributionPlan({
+    id,
+    file,
+    caption,
+    paidLink,
+    mode,
+    targets,
+    subreddits,
+    catalogue,
+    evidence,
+    authorizationAt,
+  }) {
+    const contract = globalThis.CreatorSocialDistributionContract;
+    if (!contract)
+      throw new Error("The social distribution contract is unavailable.");
+    const captionHash = await sha256(caption);
+    const socialFile = {
+      basename: String(file?.name || ""),
+      size: Number(file?.size),
+      lastModified: Number(file?.lastModified),
+      sha256: await sha256(file),
+    };
+    const reddit = [];
+    for (const item of subreddits || []) {
+      const title = item.title || caption;
+      reddit.push({
+        subreddit: item.subreddit,
+        presetId: item.presetId,
+        presetRevision: item.presetRevision,
+        title: {
+          state: title ? "nonempty" : "empty",
+          sha256: await sha256(title),
+        },
+        body: {
+          state: item.body ? "nonempty" : "empty",
+          sha256: await sha256(item.body || ""),
+        },
+        flair: item.flair,
+        nsfw: item.nsfw === true,
+      });
+    }
+    const plan = {
+      id,
+      mode,
+      catalogue,
+      socialFile,
+      caption: {
+        state: caption ? "nonempty" : "empty",
+        sha256: captionHash,
+      },
+      paidUrl: paidLink?.kind === "url" ? paidLink.url : "",
+      ...(paidLink?.kind === "upload-result"
+        ? {
+            paidLinkSource: paidLink.platform,
+            paidUploadSessionId: id,
+          }
+        : {}),
+      targets: {
+        x: targets.includes("x"),
+        reddit: targets.includes("reddit") ? reddit : [],
+      },
+      evidence,
+      authorization: { at: authorizationAt, sha256: "" },
+    };
+    plan.authorization.sha256 = await sha256(
+      JSON.stringify({ ...plan, authorization: { at: authorizationAt } }),
+    );
+    return contract.freezeDistributionPlan(plan);
+  }
+
   function normalizeSocialDraft({
     file = null,
     caption = "",
@@ -581,6 +665,7 @@
     let manualTargets = null;
     let uploadWithoutSheet = false;
     let activeSession = null;
+    let socialPollTimer = null;
     let workflowProfiles = null;
     let profilesLoaded = false;
     let subredditSnapshot = null;
@@ -789,6 +874,10 @@
       return get('input[name="socialMode"]:checked')?.value || "manual";
     }
 
+    function selectedRunTargets() {
+      return [...selectedTargets(), ...(socialX.checked ? ["x"] : [])];
+    }
+
     function socialEvidence() {
       const value = globalThis.CreatorSocialTraceEvidence || {};
       return {
@@ -837,10 +926,14 @@
         catalogue: candidate,
         evidence: socialEvidence(),
       });
-      if (
-        value.enabled &&
-        globalThis.CreatorSocialDistributionRuntimeReady !== true
-      ) {
+      const readiness = globalThis.CreatorSocialDistributionRuntimeReady;
+      const runtimeReady =
+        readiness === true ||
+        (Boolean(readiness) &&
+          (!value.targets.includes("x") || readiness.x === true) &&
+          (!value.targets.includes("reddit") ||
+            (readiness.redgifs === true && readiness.reddit === true)));
+      if (value.enabled && !runtimeReady) {
         value.errors.push(
           "Trace-derived social publishing adapters are not installed yet.",
         );
@@ -878,8 +971,9 @@
       const available = [...socialPaidLink.options].map(
         (option) => option.value,
       );
-      if (available.includes(previous)) socialPaidLink.value = previous;
-      else {
+      if (previous && available.includes(previous)) {
+        socialPaidLink.value = previous;
+      } else {
         socialPaidLink.value = available.find((value) => value) || "";
       }
       socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
@@ -1041,7 +1135,7 @@
     function refreshSocialReview() {
       socialPaidLinkFields.hidden = !socialX.checked;
       subredditFields.hidden = !socialReddit.checked;
-      renderPaidLinkOptions();
+      renderPaidLinkOptions(currentMatch?.candidate || {});
       if (socialReddit.checked && !subredditSnapshot && !subredditLoadPromise) {
         void loadSubredditPresets();
       }
@@ -1083,6 +1177,14 @@
         targets: selectedTargets(),
         contentPreset: contentPreset.value,
       });
+      if (!value.targets.length && selectedSocialTargets().length) {
+        value.errors = value.errors.filter(
+          (error) =>
+            error !==
+            "Choose OnlyFans, Fansly, ManyVids, Pornhub, or a combination.",
+        );
+        value.valid = value.errors.length === 0;
+      }
       if (!profilesLoaded || !workflowProfiles) {
         value.errors.push("Workflow profiles are still loading.");
         value.valid = false;
@@ -1651,7 +1753,7 @@
 
     function renderPlatformStates() {
       results.replaceChildren();
-      for (const platform of selectedTargets()) {
+      for (const platform of selectedRunTargets()) {
         const state = platformStates.get(platform) || { status: "prepared" };
         const card = document.createElement("article");
         card.className = "result-card";
@@ -1665,7 +1767,9 @@
               ? "Fansly"
               : platform === "manyvids"
                 ? "ManyVids"
-                : "Pornhub";
+                : platform === "pornhub"
+                  ? "Pornhub"
+                  : "X";
         const badge = document.createElement("span");
         badge.className = "result-status";
         badge.dataset.state = state.status || "";
@@ -1719,6 +1823,47 @@
         ...patch,
       });
       renderPlatformStates();
+    }
+
+    function applySocialJob(job) {
+      if (!job) return;
+      setPlatformState("x", {
+        status:
+          job.stage === "sheet-complete" ? "catalogue-updated" : job.stage,
+        postUrl: job.resultUrl || "",
+        error: job.error || "",
+      });
+    }
+
+    function scheduleSocialResume(sessionId, job) {
+      clearTimeout(socialPollTimer);
+      if (
+        !sessionId ||
+        !job ||
+        new Set(["sheet-complete", "failed", "blocked"]).has(job.stage)
+      ) {
+        return;
+      }
+      const configuredDelay = Number(globalThis.CreatorSocialPollDelayMs);
+      const delay = Number.isFinite(configuredDelay)
+        ? Math.max(10, Math.min(configuredDelay, 60_000))
+        : 5_000;
+      socialPollTimer = setTimeout(async () => {
+        try {
+          const response = await sendMessage({
+            type: "RESUME_CREATOR_SOCIAL_DISTRIBUTION",
+            sessionId,
+          });
+          const resumed = response.socialDistribution?.jobs?.x;
+          applySocialJob(resumed);
+          scheduleSocialResume(sessionId, resumed);
+        } catch (error) {
+          setPlatformState("x", {
+            status: "failed",
+            error: error.message,
+          });
+        }
+      }, delay);
     }
 
     function randomSessionId() {
@@ -1843,6 +1988,7 @@
           ]),
         ),
         proof: { ...confirmed.proof },
+        socialSessionId: confirmed.socialSessionId || "",
         port: null,
         channel: null,
         pendingFiles: new Map(),
@@ -1888,6 +2034,12 @@
           sessionId,
           proof: session.proof,
         });
+        if (session.socialSessionId) {
+          port.postMessage({
+            type: "bind-social-session",
+            sessionId: session.socialSessionId,
+          });
+        }
       }
       connectPort();
       return session;
@@ -1922,6 +2074,29 @@
         );
       }
       if (!currentProposal || currentMatch?.status === "upload-only") return;
+      const social = socialDraft(currentMatch.candidate);
+      if (
+        currentMatch.status === "matched" &&
+        social.enabled &&
+        social.valid &&
+        pendingTargets(draft(), currentMatch).length === 0
+      ) {
+        currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        const refreshed = currentSnapshot.rows.find(
+          (row) => Number(row.row) === Number(currentMatch.candidate.row),
+        );
+        if (
+          !refreshed ||
+          refreshed.id !== currentMatch.candidate.id ||
+          refreshed.fingerprint !== currentMatch.candidate.fingerprint
+        ) {
+          throw new Error(
+            "The matched catalogue row changed. Review it and click Yes again.",
+          );
+        }
+        currentMatch = { ...currentMatch, candidate: refreshed };
+        return;
+      }
       const previousSignature = proposalSignature(currentProposal);
       currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
       const selectedRow =
@@ -1961,7 +2136,7 @@
         await recheckSubredditPresets(social);
         value = validate(true);
         targets = pendingTargets(value);
-        if (!targets.length) {
+        if (!targets.length && !social.enabled) {
           matchStatus.textContent =
             "Every selected platform is already linked. Nothing was uploaded.";
           confirmUpload.disabled = false;
@@ -1969,14 +2144,35 @@
           return;
         }
         const sessionId = randomSessionId();
+        const socialPlan = social.enabled
+          ? await buildSocialDistributionPlan({
+              id: sessionId,
+              file: socialFile,
+              caption: social.caption,
+              paidLink: social.paidLink,
+              mode: social.mode,
+              targets: social.targets,
+              subreddits: social.subreddits,
+              catalogue: {
+                row: currentMatch.candidate.row,
+                id: currentMatch.candidate.id,
+                title: currentMatch.candidate.title,
+                fingerprint: currentMatch.candidate.fingerprint,
+              },
+              evidence: socialEvidence(),
+              authorizationAt: Date.now(),
+            })
+          : null;
         const confirmedFiles = {
           full: fullFile,
           teaser: teaserFile,
           thumbnail: thumbnailFile,
           pornhub: pornhubFile,
+          social: socialFile,
         };
         activeSession = connectSession(sessionId, {
           files: confirmedFiles,
+          socialSessionId: socialPlan?.id || "",
           proof: {
             fullFilename: fullFile?.name || "",
             pornhubFilename: pornhubFile?.name || fullFile?.name || "",
@@ -1988,6 +2184,7 @@
         thumbnailInput.disabled = true;
         pornhubInput.disabled = true;
         teaserInput.disabled = Boolean(teaserFile);
+        socialInput.disabled = Boolean(socialFile);
         platformStates.clear();
         for (const platform of value.targets) {
           const postUrl = catalogueLink(currentMatch.candidate, platform);
@@ -1998,67 +2195,88 @@
               : { status: "prepared" },
           );
         }
+        if (socialPlan?.targets.x) {
+          platformStates.set("x", { status: "prepared" });
+        }
         renderPlatformStates();
         confirmation.hidden = true;
         matchStatus.textContent = "Preparing authenticated platform composers…";
-        const response = await sendMessage({
-          type: "PREPARE_CREATOR_UPLOAD",
-          sessionId,
-          targets,
-          draft: {
-            title: value.title,
-            description: value.description,
-            fullFilename: fullFile?.name || "",
-            releaseDate: value.releaseDate,
-            scheduledIso: value.scheduledIso,
-            timeZone,
-            fanslyPreset: "defaulT",
-            manyvidsThumbnail: Boolean(thumbnailFile),
-            pornhubFilename: pornhubFile?.name || fullFile?.name || "",
-            contentPreset: value.contentPreset,
-            fanslyCaption: value.fanslyCaption,
-            profiles: value.profiles,
-            profileSignature: value.profileSignature,
-          },
-          catalogue:
-            currentMatch.status === "upload-only"
-              ? null
-              : {
-                  row: currentMatch.candidate.row,
-                  id: currentMatch.candidate.id,
-                  releaseDate: currentMatch.candidate.releaseDate,
-                  title: currentMatch.candidate.title,
-                  description: currentMatch.candidate.description,
-                  seasonArc: currentMatch.candidate.seasonArc || "",
-                  episode: currentMatch.candidate.episode || "",
-                  pornhubLink: currentMatch.candidate.pornhubLink || "",
-                  onlyfansLink: currentMatch.candidate.onlyfansLink || "",
-                  fanslyLink: currentMatch.candidate.fanslyLink || "",
-                  manyvidsLink: currentMatch.candidate.manyvidsLink || "",
-                  fingerprint: currentMatch.candidate.fingerprint,
-                  status: currentMatch.status,
-                },
-        });
-        for (const platform of response.uploadSession.platforms || []) {
-          setPlatformState(platform.platform, platform);
+        if (targets.length) {
+          const response = await sendMessage({
+            type: "PREPARE_CREATOR_UPLOAD",
+            sessionId,
+            targets,
+            draft: {
+              title: value.title,
+              description: value.description,
+              fullFilename: fullFile?.name || "",
+              releaseDate: value.releaseDate,
+              scheduledIso: value.scheduledIso,
+              timeZone,
+              fanslyPreset: "defaulT",
+              manyvidsThumbnail: Boolean(thumbnailFile),
+              pornhubFilename: pornhubFile?.name || fullFile?.name || "",
+              contentPreset: value.contentPreset,
+              fanslyCaption: value.fanslyCaption,
+              profiles: value.profiles,
+              profileSignature: value.profileSignature,
+            },
+            catalogue:
+              currentMatch.status === "upload-only"
+                ? null
+                : {
+                    row: currentMatch.candidate.row,
+                    id: currentMatch.candidate.id,
+                    releaseDate: currentMatch.candidate.releaseDate,
+                    title: currentMatch.candidate.title,
+                    description: currentMatch.candidate.description,
+                    seasonArc: currentMatch.candidate.seasonArc || "",
+                    episode: currentMatch.candidate.episode || "",
+                    pornhubLink: currentMatch.candidate.pornhubLink || "",
+                    onlyfansLink: currentMatch.candidate.onlyfansLink || "",
+                    fanslyLink: currentMatch.candidate.fanslyLink || "",
+                    manyvidsLink: currentMatch.candidate.manyvidsLink || "",
+                    fingerprint: currentMatch.candidate.fingerprint,
+                    status: currentMatch.status,
+                  },
+          });
+          for (const platform of response.uploadSession.platforms || []) {
+            setPlatformState(platform.platform, platform);
+          }
+          try {
+            await rememberPornhubSeriesPreset(value);
+          } catch (error) {
+            console.warn(
+              "Could not remember the Pornhub Season/Arc preset.",
+              error,
+            );
+          }
+          matchStatus.textContent =
+            "Uploading through the real authenticated pages…";
+          const started = await sendMessage({
+            type: "START_CREATOR_UPLOAD",
+            sessionId,
+            targets,
+          });
+          for (const result of started.results || [])
+            setPlatformState(result.platform, result);
         }
-        try {
-          await rememberPornhubSeriesPreset(value);
-        } catch (error) {
-          console.warn(
-            "Could not remember the Pornhub Season/Arc preset.",
-            error,
-          );
+        if (socialPlan) {
+          const preparedSocial = await sendMessage({
+            type: "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
+            plan: socialPlan,
+            caption: social.caption,
+          });
+          const xTarget = preparedSocial.socialDistribution?.targets?.x;
+          if (xTarget) setPlatformState("x", xTarget);
+          const startedSocial = await sendMessage({
+            type: "START_CREATOR_SOCIAL_DISTRIBUTION",
+            sessionId: socialPlan.id,
+          });
+          const xJob = startedSocial.socialDistribution?.jobs?.x;
+          applySocialJob(xJob);
+          scheduleSocialResume(socialPlan.id, xJob);
         }
-        matchStatus.textContent =
-          "Uploading through the real authenticated pages…";
-        const started = await sendMessage({
-          type: "START_CREATOR_UPLOAD",
-          sessionId,
-          targets,
-        });
-        for (const result of started.results || [])
-          setPlatformState(result.platform, result);
         matchStatus.textContent =
           "Upload run finished. Review each platform card.";
       } catch (error) {
@@ -2295,6 +2513,7 @@
   }
 
   globalThis.CreatorUploadConsole = Object.freeze({
+    buildSocialDistributionPlan,
     nextFridayUtc,
     nextFridayLocalValue,
     learnSeriesPresetMap,

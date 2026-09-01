@@ -80,6 +80,7 @@ function loadRuntime(options = {}) {
       async submit(input) {
         calls.push(`submit:${jobId}`);
         if (input.beforeCommit) await input.beforeCommit();
+        if (options.submitGate) await options.submitGate;
         if (behavior[`submit:${jobId}`] === "fail") {
           throw new Error(`submit uncertain for ${jobId}`);
         }
@@ -226,6 +227,37 @@ test("manual mode prepares independent roots and never clicks a submit control",
     runtime.calls.some((call) => call.startsWith("submit:")),
     false,
   );
+});
+
+test("concurrent resumes serialize one autonomous X submit", async () => {
+  let releaseSubmit;
+  const submitGate = new Promise((resolve) => {
+    releaseSubmit = resolve;
+  });
+  const runtime = loadRuntime({ submitGate });
+  const xOnly = plan({ targets: { x: true, reddit: [] } });
+  await runtime.store.create(xOnly);
+
+  const first = runtime.orchestrator.startSocialDistribution(xOnly.id);
+  const second = runtime.orchestrator.resumeSocialDistribution(xOnly.id);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  releaseSubmit();
+  await Promise.all([first, second]);
+
+  assert.equal(runtime.calls.filter((call) => call === "submit:x").length, 1);
+});
+
+test("prepare-only stages autonomous X media without clicking Post", async () => {
+  const runtime = loadRuntime();
+  const xOnly = plan({ targets: { x: true, reddit: [] } });
+  await runtime.store.create(xOnly);
+
+  const session = plain(
+    await runtime.orchestrator.prepareSocialDistribution(xOnly.id),
+  );
+
+  assert.equal(session.jobs.x.stage, "prepared");
+  assert.deepEqual(runtime.calls, ["prepare:x:none"]);
 });
 
 test("Redgifs failure blocks Reddit without cancelling successful X", async () => {

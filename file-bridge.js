@@ -8,8 +8,12 @@
   const parentOrigin = params.get("parentOrigin");
   if (
     !/^[A-Za-z0-9_-]{16,128}$/.test(sessionId || "") ||
-    !new Set(["onlyfans", "fansly"]).has(platform) ||
-    !new Set(["https://onlyfans.com", "https://fansly.com"]).has(parentOrigin)
+    !new Set(["onlyfans", "fansly", "x"]).has(platform) ||
+    !new Set([
+      "https://onlyfans.com",
+      "https://fansly.com",
+      "https://x.com",
+    ]).has(parentOrigin)
   ) {
     return;
   }
@@ -21,7 +25,9 @@
       data?.source !== "creator-upload-console" ||
       data.sessionId !== sessionId ||
       data.platform !== platform ||
-      !new Set(["full", "teaser"]).has(data.role) ||
+      !new Set(["full", "teaser", "social"]).has(data.role) ||
+      (platform === "x" && data.role !== "social") ||
+      (platform !== "x" && data.role === "social") ||
       !(data.file instanceof File)
     ) {
       return;

@@ -99,6 +99,8 @@ $requiredArchiveEntries = @(
   "creator-tools/social-distribution-contract.js",
   "creator-tools/social-distribution-session-store.js",
   "creator-tools/social-distribution-orchestrator.js",
+  "creator-tools/social-chrome-runtime.js",
+  "creator-tools/social-trace-evidence.js",
   "creator-tools/social-trace-contract.js",
   "creator-tools/x-publisher-adapter.js",
   "creator-tools/x-teaser-contract.js",

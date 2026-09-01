@@ -73,6 +73,16 @@
     if (!store || !catalogueClient || typeof adapterFor !== "function") {
       throw new Error("Social distribution dependencies are unavailable.");
     }
+    const executions = new Map();
+
+    function serialize(sessionId, run) {
+      const prior = executions.get(sessionId) || Promise.resolve();
+      const current = prior.catch(() => {}).then(run);
+      executions.set(sessionId, current);
+      return current.finally(() => {
+        if (executions.get(sessionId) === current) executions.delete(sessionId);
+      });
+    }
 
     async function paidDependencyUrl(plan) {
       const dependency = plan.paidLinkDependency;
@@ -241,7 +251,13 @@
       });
     }
 
-    async function runJob(sessionId, jobId, dependencyUrl, fingerprint) {
+    async function runJob(
+      sessionId,
+      jobId,
+      dependencyUrl,
+      fingerprint,
+      prepareOnly = false,
+    ) {
       let session = await store.load(sessionId);
       let job = session.jobs[jobId];
       if (!job || job.stage === COMPLETE || TERMINAL.has(job.stage)) {
@@ -296,6 +312,7 @@
           };
         }
         job = session.jobs[jobId];
+        if (prepareOnly) return { fingerprint, session };
       }
 
       if (job.stage === "prepared") {
@@ -375,7 +392,24 @@
       return { fingerprint, session };
     }
 
-    async function resumeSocialDistribution(sessionId) {
+    async function prepareUnlocked(sessionId) {
+      let session = await store.load(sessionId);
+      if (!session) throw new Error("Distribution session was not found.");
+      let fingerprint = await recoverFingerprint(session);
+      for (const jobId of ["x", "redgifs"]) {
+        if (session.jobs[jobId]?.stage !== "planned") continue;
+        const result = await runJob(sessionId, jobId, "", fingerprint, true);
+        session = result.session;
+        fingerprint = result.fingerprint;
+      }
+      return store.load(sessionId);
+    }
+
+    function prepareSocialDistribution(sessionId) {
+      return serialize(sessionId, () => prepareUnlocked(sessionId));
+    }
+
+    async function resumeUnlocked(sessionId) {
       let session = await store.load(sessionId);
       if (!session) throw new Error("Distribution session was not found.");
       let fingerprint = await recoverFingerprint(session);
@@ -454,6 +488,10 @@
       return store.load(sessionId);
     }
 
+    function resumeSocialDistribution(sessionId) {
+      return serialize(sessionId, () => resumeUnlocked(sessionId));
+    }
+
     async function retrySocialDestination(previousId, jobId, nextPlan) {
       const previous = await store.load(previousId);
       if (!previous || !previous.jobs[jobId]) {
@@ -477,10 +515,11 @@
         );
       }
       await store.create(nextPlan);
-      return resumeSocialDistribution(nextPlan.id);
+      return serialize(nextPlan.id, () => resumeUnlocked(nextPlan.id));
     }
 
     return Object.freeze({
+      prepareSocialDistribution,
       resumeSocialDistribution,
       retrySocialDestination,
       startSocialDistribution: resumeSocialDistribution,

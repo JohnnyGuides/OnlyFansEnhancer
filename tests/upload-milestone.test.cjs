@@ -507,6 +507,102 @@ test("file bridge accepts an authorized ManyVids thumbnail only for an image rol
   }
 });
 
+test("file bridge assigns one authorized social teaser to X", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<input data-testid="fileInput" type="file">');
+    await page.addScriptTag({
+      path: path.join(repositoryRoot, "creator-tools", "upload-file-bridge.js"),
+    });
+    await page.evaluate(() =>
+      CreatorUploadFileBridge.install({
+        sessionId: "social-session-123456789",
+        platform: "x",
+        bridgeUrl: "about:blank",
+        bridgeOrigin: "null",
+        roles: {
+          social: {
+            selector: "input[data-testid='fileInput'][type='file']",
+            token: "social-token-123456",
+          },
+        },
+      }),
+    );
+    const frame = page
+      .frames()
+      .find((candidate) => candidate !== page.mainFrame());
+    await frame.evaluate(() => {
+      const file = new File(["social-video"], "episode-social.mp4", {
+        type: "video/mp4",
+      });
+      parent.postMessage(
+        {
+          source: "creator-upload-file-bridge",
+          sessionId: "social-session-123456789",
+          platform: "x",
+          role: "social",
+          token: "social-token-123456",
+          file,
+        },
+        "*",
+      );
+    });
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="fileInput"]').files.length === 1,
+    );
+    assert.equal(
+      await page
+        .locator('[data-testid="fileInput"]')
+        .evaluate((input) => input.files[0].name),
+      "episode-social.mp4",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("bridge iframe opens an authenticated X social channel", () => {
+  const messages = [];
+  class Channel {
+    constructor(name) {
+      this.name = name;
+    }
+    addEventListener() {}
+    postMessage(message) {
+      messages.push(structuredClone(message));
+    }
+  }
+  const context = vm.createContext({
+    BroadcastChannel: Channel,
+    File: class File {},
+    URLSearchParams,
+    location: {
+      search:
+        "?session=social-session-123456789&platform=x&parentOrigin=https%3A%2F%2Fx.com",
+    },
+    parent: { postMessage() {} },
+    structuredClone,
+    globalThis: null,
+  });
+  context.globalThis = context;
+  context.addEventListener = () => {};
+  vm.runInContext(
+    fs.readFileSync(path.join(repositoryRoot, "file-bridge.js"), "utf8"),
+    context,
+    { filename: "file-bridge.js" },
+  );
+  assert.deepEqual(messages, [
+    {
+      source: "creator-upload-bridge",
+      direction: "ready",
+      sessionId: "social-session-123456789",
+      platform: "x",
+    },
+  ]);
+});
+
 test("ManyVids upload adapter clicks only the completed file card edit control", async () => {
   const adapterSource = fs.readFileSync(
     path.join(repositoryRoot, "creator-tools", "upload-platform-adapters.js"),

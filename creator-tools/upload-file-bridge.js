@@ -38,7 +38,7 @@
 
   function install({ sessionId, platform, bridgeUrl, bridgeOrigin, roles }) {
     assertToken(sessionId, "upload session");
-    if (!new Set(["onlyfans", "fansly", "manyvids"]).has(platform)) {
+    if (!new Set(["onlyfans", "fansly", "manyvids", "x"]).has(platform)) {
       throw new Error("Unsupported upload platform.");
     }
     if (!roles || typeof roles !== "object") {
@@ -48,7 +48,11 @@
 
     /** @type {Array<[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[]}]>} */
     const roleEntries = Object.entries(roles).map(([role, definition]) => {
-      if (!new Set(["full", "teaser", "thumbnail"]).has(role)) {
+      if (
+        !new Set(["full", "teaser", "thumbnail", "social"]).has(role) ||
+        (platform === "x" && role !== "social") ||
+        (platform !== "x" && role === "social")
+      ) {
         throw new Error("Unsupported upload file role.");
       }
       const kind = definition?.kind || "video";

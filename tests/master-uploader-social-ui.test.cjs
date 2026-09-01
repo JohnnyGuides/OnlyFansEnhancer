@@ -16,14 +16,20 @@ function loadConsoleContract() {
     Intl,
     URL,
     crypto,
+    TextEncoder,
     setTimeout,
     clearTimeout,
   });
-  vm.runInContext(
-    fs.readFileSync(path.join(repositoryRoot, "upload-console.js"), "utf8"),
-    context,
-    { filename: "upload-console.js" },
-  );
+  for (const relative of [
+    "creator-tools/social-distribution-contract.js",
+    "upload-console.js",
+  ]) {
+    vm.runInContext(
+      fs.readFileSync(path.join(repositoryRoot, relative), "utf8"),
+      context,
+      { filename: relative },
+    );
+  }
   return context.CreatorUploadConsole;
 }
 
@@ -69,6 +75,28 @@ function socialInput(overrides = {}) {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("production social evidence enables X while Redgifs and Reddit stay gated", () => {
+  const context = vm.createContext({});
+  vm.runInContext(
+    fs.readFileSync(
+      path.join(repositoryRoot, "creator-tools/social-trace-evidence.js"),
+      "utf8",
+    ),
+    context,
+    { filename: "creator-tools/social-trace-evidence.js" },
+  );
+  assert.deepEqual(plain(context.CreatorSocialTraceEvidence), {
+    x: "07b91df0ef1e7c2b99e3f2e9c77b3507d4b27809ec689f4945ec0246f51e2dab",
+    redgifs: "",
+    reddit: "",
+  });
+  assert.deepEqual(plain(context.CreatorSocialDistributionRuntimeReady), {
+    x: true,
+    redgifs: false,
+    reddit: false,
+  });
+});
 
 test("social draft is optional until a social file or destination is selected", () => {
   const contract = loadConsoleContract();
@@ -179,6 +207,54 @@ test("social draft rejects credentialed paid links and over-limit effective copy
   assert.match(longRedditDefault.errors.join(" "), /Reddit title.*300/i);
 });
 
+test("builds one frozen X plan from the exact teaser bytes without persisting caption text", async () => {
+  const contract = loadConsoleContract();
+  const plan = plain(
+    await contract.buildSocialDistributionPlan({
+      id: "0123456789abcdef0123456789abcdef0123456789abcdef",
+      file: {
+        name: "ashley-social-teaser.mp4",
+        size: 6,
+        lastModified: 1_788_244_200_000,
+        async arrayBuffer() {
+          return new TextEncoder().encode("social").buffer;
+        },
+      },
+      caption: "Caption",
+      paidLink: {
+        kind: "url",
+        url: "https://onlyfans.com/1/johnny_guides",
+      },
+      mode: "manual",
+      targets: ["x"],
+      subreddits: [],
+      catalogue: {
+        row: 125,
+        id: "resident-evil-ashley",
+        title: "gooning to Ashley",
+        fingerprint: "1234abcd",
+      },
+      evidence: { x: "f".repeat(64) },
+      authorizationAt: 1_788_280_000_000,
+    }),
+  );
+  assert.deepEqual(plan.socialFile, {
+    basename: "ashley-social-teaser.mp4",
+    size: 6,
+    lastModified: 1_788_244_200_000,
+    sha256: "3e860f41a5ea92c49803d6ec96d452693b6dcefb0e8c0bf0125b0e3debac5281",
+  });
+  assert.deepEqual(plan.caption, {
+    state: "nonempty",
+    sha256: "87d296ec94898c86baf805dbcc47af48e618ec25df0441f7471c60a7d6b05b4e",
+  });
+  assert.equal(plan.paidUrl, "https://onlyfans.com/1/johnny_guides");
+  assert.equal(plan.targets.x, true);
+  assert.deepEqual(plan.targets.reddit, []);
+  assert.match(plan.authorization.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(plan).includes("Caption"), false);
+});
+
 async function mountConsole(page, options = {}) {
   const defaultPresets = [
     {
@@ -195,11 +271,23 @@ async function mountConsole(page, options = {}) {
   const html = fs
     .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
     .replace(/<script[^>]+><\/script>/gi, "");
-  await page.setContent(html);
+  await page.route("http://localhost/**", (route) =>
+    route.request().url().endsWith("/upload-console.html")
+      ? route.fulfill({ status: 200, contentType: "text/html", body: html })
+      : route.fulfill({ status: 204 }),
+  );
+  await page.goto("http://localhost/upload-console.html");
   await page.evaluate(
-    ({ presetSnapshots, runtimeReady, traceEvidence }) => {
+    ({
+      presetSnapshots,
+      runtimeReady,
+      traceEvidence,
+      catalogueRows,
+      socialPollDelayMs,
+    }) => {
       let presetRequest = 0;
       globalThis.__socialUiMessages = [];
+      globalThis.__socialUiPortMessages = [];
       const stored = {
         creatorSocialSubredditSelectionV1: ["GamesGoneWild"],
       };
@@ -230,7 +318,11 @@ async function mountConsole(page, options = {}) {
             return {
               onMessage: { addListener() {} },
               onDisconnect: { addListener() {} },
-              postMessage() {},
+              postMessage(message) {
+                globalThis.__socialUiPortMessages.push(
+                  structuredClone(message),
+                );
+              },
               disconnect() {},
             };
           },
@@ -241,12 +333,50 @@ async function mountConsole(page, options = {}) {
                 ? { ok: true, uploadSession: { platforms: [] } }
                 : message.type === "START_CREATOR_UPLOAD"
                   ? { ok: true, results: [] }
-                  : message.type === "SYNC_CREATOR_TOOLS"
+                  : message.type === "PREPARE_CREATOR_SOCIAL_DISTRIBUTION"
                     ? {
                         ok: true,
-                        creatorTools: { registered: [], skipped: [] },
+                        socialDistribution: {
+                          sessionId: message.plan.id,
+                          targets: {
+                            x: { platform: "x", status: "ready", tabId: 77 },
+                          },
+                        },
                       }
-                    : { ok: true },
+                    : message.type === "START_CREATOR_SOCIAL_DISTRIBUTION"
+                      ? {
+                          ok: true,
+                          socialDistribution: {
+                            id: message.sessionId,
+                            jobs: {
+                              x: {
+                                stage: "prepared",
+                                submitAttempted: false,
+                              },
+                            },
+                          },
+                        }
+                      : message.type === "RESUME_CREATOR_SOCIAL_DISTRIBUTION"
+                        ? {
+                            ok: true,
+                            socialDistribution: {
+                              id: message.sessionId,
+                              jobs: {
+                                x: {
+                                  stage: "sheet-complete",
+                                  submitAttempted: true,
+                                  resultUrl:
+                                    "https://x.com/johnny_guides/status/1",
+                                },
+                              },
+                            },
+                          }
+                        : message.type === "SYNC_CREATOR_TOOLS"
+                          ? {
+                              ok: true,
+                              creatorTools: { registered: [], skipped: [] },
+                            }
+                          : { ok: true },
             );
           },
         },
@@ -262,7 +392,7 @@ async function mountConsole(page, options = {}) {
         async getCatalogueSnapshot() {
           return {
             status: "snapshot",
-            rows: [
+            rows: catalogueRows || [
               {
                 row: 125,
                 id: "resident-evil-ashley",
@@ -292,6 +422,7 @@ async function mountConsole(page, options = {}) {
       };
       globalThis.CreatorSocialDistributionRuntimeReady = runtimeReady;
       globalThis.CreatorSocialTraceEvidence = traceEvidence;
+      globalThis.CreatorSocialPollDelayMs = socialPollDelayMs;
       globalThis.CreatorUploadQueueEvidence = {
         snapshot() {
           return {
@@ -302,8 +433,10 @@ async function mountConsole(page, options = {}) {
     },
     {
       presetSnapshots: options.presetSnapshots || [defaultPresets],
-      runtimeReady: options.runtimeReady === true,
+      runtimeReady: options.runtimeReady ?? false,
       traceEvidence: options.traceEvidence || null,
+      catalogueRows: options.catalogueRows || null,
+      socialPollDelayMs: options.socialPollDelayMs ?? 10,
     },
   );
   for (const relative of [
@@ -313,6 +446,7 @@ async function mountConsole(page, options = {}) {
     "creator-tools/ph-uploader.js",
     "creator-tools/catalogue-contract.js",
     "creator-tools/catalogue-proposal.js",
+    "creator-tools/social-distribution-contract.js",
     "creator-tools/subreddit-presets.js",
     "upload-console.js",
   ]) {
@@ -334,6 +468,139 @@ async function mountConsole(page, options = {}) {
     });
   }
 }
+
+test("one Yes starts an X-only social run even when paid catalogue links already exist", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+  });
+  try {
+    await mountConsole(page, {
+      runtimeReady: { x: true, redgifs: false, reddit: false },
+      traceEvidence: { x: hash("f") },
+      catalogueRows: [
+        {
+          row: 125,
+          id: "resident-evil-ashley",
+          releaseDate: "2026-09-04",
+          title: "gooning to Ashley",
+          description: "Catalogue description",
+          seasonArc: "Resident Evil",
+          episode: "",
+          pornhubLink: "https://pornhub.com/view_video.php?viewkey=3",
+          onlyfansLink: "https://onlyfans.com/1/johnny_guides",
+          fanslyLink: "https://fansly.com/post/2",
+          manyvidsLink: "https://manyvids.com/Video/4",
+          fingerprint: "1234abcd",
+        },
+      ],
+    });
+    await page.locator("#targetSocialX").check();
+    await page.locator("#uploadSocialTeaser").setInputFiles({
+      name: "Ashley social teaser.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("social"),
+    });
+    await page.locator("#socialCaption").fill("Caption");
+    try {
+      await page.waitForFunction(
+        () => !document.querySelector("#confirmUpload").disabled,
+        null,
+        { timeout: 5000 },
+      );
+    } catch (error) {
+      const state = await page.evaluate(() => ({
+        socialErrors:
+          document.querySelector("#socialErrors")?.textContent || "",
+        draftErrors: document.querySelector("#draftErrors")?.textContent || "",
+        traceStatus:
+          document.querySelector("#socialTraceStatus")?.textContent || "",
+        paidLink: document.querySelector("#socialPaidLink")?.value || "",
+        paidOptions: [...document.querySelector("#socialPaidLink").options].map(
+          (option) => ({ value: option.value, label: option.textContent }),
+        ),
+        question: document.querySelector("#matchQuestion")?.textContent || "",
+      }));
+      throw new Error(
+        `Social confirmation stayed disabled: ${JSON.stringify(state)}`,
+        {
+          cause: error,
+        },
+      );
+    }
+    await page.locator("#confirmUpload").click();
+    try {
+      await page.waitForFunction(
+        () =>
+          __socialUiMessages.some(
+            (message) => message.type === "START_CREATOR_SOCIAL_DISTRIBUTION",
+          ),
+        null,
+        { timeout: 5000 },
+      );
+    } catch (error) {
+      const state = await page.evaluate(() => ({
+        status: document.querySelector("#matchStatus")?.textContent || "",
+        errors: document.querySelector("#draftErrors")?.textContent || "",
+        messages: structuredClone(__socialUiMessages),
+      }));
+      throw new Error(`Social run did not start: ${JSON.stringify(state)}`, {
+        cause: error,
+      });
+    }
+    await page.waitForFunction(
+      () =>
+        __socialUiMessages.some(
+          (message) => message.type === "RESUME_CREATOR_SOCIAL_DISTRIBUTION",
+        ),
+      null,
+      { timeout: 5000 },
+    );
+
+    const captured = await page.evaluate(() => ({
+      messages: structuredClone(__socialUiMessages),
+      portMessages: structuredClone(__socialUiPortMessages),
+    }));
+    const prepared = captured.messages.find(
+      (message) => message.type === "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
+    );
+    assert.ok(prepared);
+    assert.equal(prepared.caption, "Caption");
+    assert.equal(
+      prepared.plan.caption.sha256,
+      "87d296ec94898c86baf805dbcc47af48e618ec25df0441f7471c60a7d6b05b4e",
+    );
+    assert.equal(
+      prepared.plan.socialFile.sha256,
+      "3e860f41a5ea92c49803d6ec96d452693b6dcefb0e8c0bf0125b0e3debac5281",
+    );
+    assert.equal(JSON.stringify(prepared.plan).includes("Caption"), false);
+    assert.equal(
+      captured.messages.some(
+        (message) => message.type === "PREPARE_CREATOR_UPLOAD",
+      ),
+      false,
+    );
+    assert.equal(
+      captured.portMessages.some(
+        (message) =>
+          message.type === "bind-social-session" &&
+          message.sessionId === prepared.plan.id,
+      ),
+      true,
+    );
+    assert.equal(
+      captured.messages.some(
+        (message) =>
+          message.type === "RESUME_CREATOR_SOCIAL_DISTRIBUTION" &&
+          message.sessionId === prepared.plan.id,
+      ),
+      true,
+    );
+  } finally {
+    await browser.close();
+  }
+});
 
 test("workflow helpers are active and configured only inside the uploader Settings tab", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -485,6 +752,7 @@ test("Yes rechecks selected subreddit revisions before any platform mutation", a
 
 for (const viewport of [
   { name: "desktop", width: 1280, height: 900 },
+  { name: "compact", width: 768, height: 900 },
   { name: "mobile", width: 390, height: 844 },
 ]) {
   test(`social distributor renders and gates unrecorded adapters at ${viewport.name}`, async () => {
