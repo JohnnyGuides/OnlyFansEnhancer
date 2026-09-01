@@ -147,6 +147,9 @@
 
   function mergeStage(previous, next) {
     if (!next || previous === next) return previous;
+    if (previous === "posted-link-unresolved" && next === "result-captured") {
+      return next;
+    }
     if (TERMINAL_STAGES.has(previous)) return previous;
     if (previous === "sheet-complete") return previous;
     if (TERMINAL_STAGES.has(next)) return next;
@@ -235,6 +238,33 @@
     });
   }
 
+  async function unblock(id, jobId) {
+    const normalizedJobId = clean(jobId, 100);
+    return enqueue(async () => {
+      const previous = await load(id);
+      if (!previous) throw new Error("Distribution session was not found.");
+      const job = previous.jobs?.[normalizedJobId];
+      if (!job) throw new Error("Unknown distribution job.");
+      if (job.stage !== "blocked" || job.submitAttempted) {
+        throw new Error(
+          "Only an unsubmitted dependency-blocked job can reopen.",
+        );
+      }
+      const next = {
+        ...previous,
+        jobs: {
+          ...previous.jobs,
+          [normalizedJobId]: {
+            stage: "planned",
+            submitAttempted: false,
+          },
+        },
+      };
+      await storage.set({ [key(id)]: next });
+      return next;
+    });
+  }
+
   async function list() {
     const result = await storage.get(null);
     return Object.entries(result)
@@ -249,5 +279,6 @@
     create,
     list,
     load,
+    unblock,
   });
 })();

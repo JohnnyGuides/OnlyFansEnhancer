@@ -6,6 +6,7 @@ importScripts(
   "creator-tools/upload-session-store.js",
   "creator-tools/social-distribution-contract.js",
   "creator-tools/social-distribution-session-store.js",
+  "creator-tools/social-distribution-orchestrator.js",
   "creator-tools/x-teaser-contract.js",
   "creator-tools/x-teaser-session-store.js",
   "creator-tools/x-teaser-reconcile.js",

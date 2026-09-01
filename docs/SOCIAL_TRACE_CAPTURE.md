@@ -1,6 +1,6 @@
 # Social publishing trace capture
 
-Version 0.15.1 includes sanitized Record Steps panels for X, Redgifs, and Reddit.
+Version 0.15.2 includes sanitized Record Steps panels for X, Redgifs, and Reddit.
 These traces are mandatory evidence for the publishing adapters; the recorder
 does not fill fields, upload media, or click platform controls.
 
