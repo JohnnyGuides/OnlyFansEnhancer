@@ -3,6 +3,8 @@
 var CREATOR_UPLOAD_SPREADSHEET_ID =
   "1Ninkxbv1SOvatcJ3AP4zwKWxdc32imlIkP_IMUSTR9E";
 var CREATOR_UPLOAD_SHEET_NAME = "2026 Video Catalogue";
+var CREATOR_UPLOAD_PRESET_SHEET_NAME = "2026 uploads";
+var CREATOR_UPLOAD_LEDGER_SHEET_NAME = "Creator Distribution Ledger";
 var CREATOR_UPLOAD_SECRET_PROPERTY = "CREATOR_UPLOAD_SECRET";
 var CREATOR_UPLOAD_MATCH_THRESHOLD = 75;
 var CREATOR_UPLOAD_LINK_FIELDS = {
@@ -107,6 +109,7 @@ function creatorUploadFingerprint(row) {
     row.fanslyLink,
     row.manyvidsLink,
     row.twitterTeasers,
+    row.redditPosts,
   ]
     .map(creatorUploadClean)
     .join("\u001f");
@@ -161,6 +164,34 @@ function creatorUploadCanonicalTwitterStatus(value) {
   return match && match[1].toLowerCase() !== "i"
     ? "https://x.com/" + match[1] + "/status/" + match[2]
     : null;
+}
+
+function creatorUploadCanonicalRedditPost(value) {
+  try {
+    var url = new URL(creatorUploadClean(value));
+    var match = url.pathname.match(
+      /^\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})\/([A-Za-z0-9_-]+)\/?$/i,
+    );
+    return url.protocol === "https:" &&
+      url.hostname === "www.reddit.com" &&
+      match
+      ? "https://www.reddit.com/r/" +
+          match[1] +
+          "/comments/" +
+          match[2].toLowerCase() +
+          "/" +
+          match[3]
+      : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function creatorUploadCanonicalRedgifsWatch(value) {
+  var match = creatorUploadClean(value).match(
+    /^https:\/\/www\.redgifs\.com\/watch\/([A-Za-z0-9-]{2,100})$/,
+  );
+  return match ? "https://www.redgifs.com/watch/" + match[1] : null;
 }
 
 function creatorUploadEmptyRow(row) {
@@ -334,6 +365,114 @@ function creatorUploadPlanTwitterAppend(row, request) {
   };
 }
 
+function creatorUploadPlanRedditAppend(row, request) {
+  if (creatorUploadClean(row.id) !== creatorUploadClean(request.id)) {
+    return {
+      status: "conflict",
+      row: row,
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  var redditUrl = creatorUploadCanonicalRedditPost(request.redditUrl);
+  if (!redditUrl) throw new Error("Invalid Reddit post link.");
+  var links = creatorUploadClean(row.redditPosts)
+    .split(/\s+/)
+    .map(creatorUploadClean)
+    .filter(Boolean);
+  var canonicalLinks = links
+    .map(creatorUploadCanonicalRedditPost)
+    .filter(Boolean)
+    .filter(function (link, index, values) {
+      return values.indexOf(link) === index;
+    });
+  if (canonicalLinks.indexOf(redditUrl) !== -1) {
+    return {
+      status: "idempotent",
+      row: Object.assign({}, row, {
+        redditPostCount: canonicalLinks.length,
+        redditPosts: canonicalLinks.join("\n"),
+      }),
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  if (
+    creatorUploadFingerprint(row) !== creatorUploadClean(request.fingerprint)
+  ) {
+    return {
+      status: "stale",
+      row: row,
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  canonicalLinks.push(redditUrl);
+  var next = Object.assign({}, row, {
+    redditPostCount: canonicalLinks.length,
+    redditPosts: canonicalLinks.join("\n"),
+  });
+  return {
+    status: "updated",
+    row: next,
+    fingerprint: creatorUploadFingerprint(next),
+  };
+}
+
+function creatorUploadLedgerCanonicalUrl(platform, value) {
+  if (platform === "x") return creatorUploadCanonicalTwitterStatus(value);
+  if (platform === "redgifs") return creatorUploadCanonicalRedgifsWatch(value);
+  if (platform === "reddit") return creatorUploadCanonicalRedditPost(value);
+  return null;
+}
+
+function creatorUploadPlanLedgerAppend(rows, request) {
+  var eventId = creatorUploadClean(request.eventId).slice(0, 100);
+  var runId = creatorUploadClean(request.runId).slice(0, 64);
+  var jobId = creatorUploadClean(request.jobId).slice(0, 100);
+  var platform = creatorUploadClean(request.platform).toLowerCase();
+  var catalogueRow = Number(request.catalogueRow);
+  var catalogueId = creatorUploadClean(request.catalogueId).slice(0, 500);
+  var resultId = creatorUploadClean(request.resultId).slice(0, 200);
+  var resultUrl = creatorUploadLedgerCanonicalUrl(platform, request.resultUrl);
+  var status = creatorUploadClean(request.status).toLowerCase();
+  var recordedAt = Number(request.recordedAt);
+  if (
+    !/^[A-Za-z0-9_-]{2,100}$/.test(eventId) ||
+    !/^[A-Za-z0-9_-]{8,64}$/.test(runId) ||
+    !/^[A-Za-z0-9:_-]{1,100}$/.test(jobId) ||
+    ["x", "redgifs", "reddit"].indexOf(platform) === -1 ||
+    !Number.isInteger(catalogueRow) ||
+    catalogueRow < 2 ||
+    !catalogueId ||
+    !resultId ||
+    !resultUrl ||
+    ["published", "deleted", "removed", "unresolved"].indexOf(status) === -1 ||
+    !Number.isSafeInteger(recordedAt) ||
+    recordedAt < 1
+  ) {
+    throw new Error("Invalid distribution ledger event.");
+  }
+  var row = {
+    key: runId + ":" + jobId + ":" + eventId,
+    runId: runId,
+    jobId: jobId,
+    platform: platform,
+    catalogueRow: catalogueRow,
+    catalogueId: catalogueId,
+    resultId: resultId,
+    resultUrl: resultUrl,
+    status: status,
+    recordedAt: recordedAt,
+  };
+  var existing = (Array.isArray(rows) ? rows : []).find(function (candidate) {
+    return candidate.key === row.key;
+  });
+  if (!existing) return { status: "updated", row: row };
+  var fields = Object.keys(row);
+  var identical = fields.every(function (field) {
+    return String(existing[field]) === String(row[field]);
+  });
+  return { status: identical ? "idempotent" : "conflict", row: existing };
+}
+
 function creatorUploadDateValue(value) {
   if (
     Object.prototype.toString.call(value) === "[object Date]" &&
@@ -349,7 +488,7 @@ function creatorUploadDateValue(value) {
 function creatorUploadReadRows(sheet) {
   var maxRow = Math.min(5000, Math.max(2, sheet.getMaxRows()));
   var endRow = Math.min(maxRow, Math.max(2, sheet.getLastRow() + 1));
-  var values = sheet.getRange(2, 1, endRow - 1, 15).getValues();
+  var values = sheet.getRange(2, 1, endRow - 1, 20).getValues();
   return values.map(function (cells, index) {
     return {
       row: index + 2,
@@ -364,7 +503,9 @@ function creatorUploadReadRows(sheet) {
       fanslyLink: creatorUploadClean(cells[10]),
       manyvidsLink: creatorUploadClean(cells[11]),
       twitterTeasers: creatorUploadClean(cells[14]),
-      empty: !cells.some(creatorUploadClean),
+      redditPostCount: Number(cells[18]) || 0,
+      redditPosts: creatorUploadClean(cells[19]),
+      empty: !cells.slice(0, 12).some(creatorUploadClean),
     };
   });
 }
@@ -412,15 +553,127 @@ function creatorUploadValidateDraft(payload) {
   return draft;
 }
 
-function creatorUploadSheet() {
-  var book = SpreadsheetApp.openById(CREATOR_UPLOAD_SPREADSHEET_ID);
+function creatorUploadSheet(book) {
+  book = book || SpreadsheetApp.openById(CREATOR_UPLOAD_SPREADSHEET_ID);
   var sheet = book.getSheetByName(CREATOR_UPLOAD_SHEET_NAME);
   if (!sheet) throw new Error("The catalogue sheet is unavailable.");
   return sheet;
 }
 
+function creatorUploadReadPresetRows(sheet) {
+  var lastRow = Math.min(5000, Math.max(1, sheet.getLastRow()));
+  if (lastRow < 2) return [];
+  return sheet
+    .getRange(2, 25, lastRow - 1, 3)
+    .getValues()
+    .map(function (cells) {
+      return {
+        subreddit: creatorUploadClean(cells[0]).slice(0, 23),
+        status: creatorUploadClean(cells[1]).slice(0, 30),
+        notes: creatorUploadClean(cells[2]).slice(0, 5000),
+      };
+    })
+    .filter(function (row) {
+      return row.subreddit || row.status || row.notes;
+    });
+}
+
+function creatorUploadReadLedgerRows(sheet) {
+  var lastRow = Math.min(20000, Math.max(1, sheet.getLastRow()));
+  if (lastRow < 2) return [];
+  return sheet
+    .getRange(2, 1, lastRow - 1, 10)
+    .getValues()
+    .map(function (cells) {
+      return {
+        key: creatorUploadClean(cells[0]),
+        runId: creatorUploadClean(cells[1]),
+        jobId: creatorUploadClean(cells[2]),
+        platform: creatorUploadClean(cells[3]),
+        catalogueRow: Number(cells[4]),
+        catalogueId: creatorUploadClean(cells[5]),
+        resultId: creatorUploadClean(cells[6]),
+        resultUrl: creatorUploadClean(cells[7]),
+        status: creatorUploadClean(cells[8]),
+        recordedAt: Number(cells[9]),
+      };
+    });
+}
+
+function creatorUploadLedgerSheet(book) {
+  var sheet = book.getSheetByName(CREATOR_UPLOAD_LEDGER_SHEET_NAME);
+  if (!sheet) {
+    sheet = book.insertSheet(CREATOR_UPLOAD_LEDGER_SHEET_NAME);
+    sheet.appendRow([
+      "Key",
+      "Run ID",
+      "Job ID",
+      "Platform",
+      "Catalogue row",
+      "Catalogue ID",
+      "Result ID",
+      "Result URL",
+      "Status",
+      "Recorded at (UTC ms)",
+    ]);
+  }
+  if (typeof sheet.hideSheet === "function") sheet.hideSheet();
+  return sheet;
+}
+
 function creatorUploadHandle(action, payload) {
-  var sheet = creatorUploadSheet();
+  var book = SpreadsheetApp.openById(CREATOR_UPLOAD_SPREADSHEET_ID);
+  if (action === "getSubredditPresetSnapshot") {
+    var presetSheet = book.getSheetByName(CREATOR_UPLOAD_PRESET_SHEET_NAME);
+    if (!presetSheet)
+      throw new Error("The subreddit preset sheet is unavailable.");
+    return {
+      status: "snapshot",
+      rows: creatorUploadReadPresetRows(presetSheet),
+    };
+  }
+  if (action === "appendDistributionLedger") {
+    var ledgerLock = LockService.getScriptLock();
+    if (!ledgerLock.tryLock(15000))
+      throw new Error(
+        "The distribution ledger is busy; retry this checkpoint.",
+      );
+    try {
+      var ledgerSheet = creatorUploadLedgerSheet(book);
+      var ledgerPlan = creatorUploadPlanLedgerAppend(
+        creatorUploadReadLedgerRows(ledgerSheet),
+        payload || {},
+      );
+      if (ledgerPlan.status !== "updated") return ledgerPlan;
+      var ledgerRow = ledgerPlan.row;
+      ledgerSheet.appendRow([
+        ledgerRow.key,
+        ledgerRow.runId,
+        ledgerRow.jobId,
+        ledgerRow.platform,
+        ledgerRow.catalogueRow,
+        ledgerRow.catalogueId,
+        ledgerRow.resultId,
+        ledgerRow.resultUrl,
+        ledgerRow.status,
+        ledgerRow.recordedAt,
+      ]);
+      SpreadsheetApp.flush();
+      var ledgerVerified = creatorUploadPlanLedgerAppend(
+        creatorUploadReadLedgerRows(ledgerSheet),
+        payload || {},
+      );
+      if (ledgerVerified.status !== "idempotent") {
+        throw new Error(
+          "The distribution ledger append could not be verified.",
+        );
+      }
+      return { status: "updated", row: ledgerVerified.row };
+    } finally {
+      ledgerLock.releaseLock();
+    }
+  }
+  var sheet = creatorUploadSheet(book);
   if (action === "getCatalogueSnapshot") {
     return creatorUploadSnapshot(creatorUploadReadRows(sheet));
   }
@@ -430,7 +683,11 @@ function creatorUploadHandle(action, payload) {
       creatorUploadReadRows(sheet),
     );
   }
-  if (action !== "commitPlatformLink" && action !== "appendTwitterTeaser")
+  if (
+    action !== "commitPlatformLink" &&
+    action !== "appendTwitterTeaser" &&
+    action !== "appendRedditPost"
+  )
     throw new Error("Unsupported catalogue action.");
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000))
@@ -447,7 +704,9 @@ function creatorUploadHandle(action, payload) {
     var plan =
       action === "appendTwitterTeaser"
         ? creatorUploadPlanTwitterAppend(current, payload)
-        : creatorUploadPlanCommit(current, payload);
+        : action === "appendRedditPost"
+          ? creatorUploadPlanRedditAppend(current, payload)
+          : creatorUploadPlanCommit(current, payload);
     if (plan.status !== "updated") return plan;
     if (action === "appendTwitterTeaser") {
       sheet.getRange(rowNumber, 15).setValue(plan.row.twitterTeasers);
@@ -476,6 +735,36 @@ function creatorUploadHandle(action, payload) {
         status: "updated",
         row: twitterVerified,
         fingerprint: creatorUploadFingerprint(twitterVerified),
+      };
+    }
+    if (action === "appendRedditPost") {
+      sheet
+        .getRange(rowNumber, 19, 1, 2)
+        .setValues([[plan.row.redditPostCount, plan.row.redditPosts]]);
+      SpreadsheetApp.flush();
+      var redditVerified = creatorUploadReadRows(sheet).find(function (row) {
+        return row.row === rowNumber;
+      });
+      var canonicalReddit = creatorUploadCanonicalRedditPost(payload.redditUrl);
+      var verifiedRedditLinks = redditVerified
+        ? creatorUploadClean(redditVerified.redditPosts)
+            .split(/\s+/)
+            .map(creatorUploadClean)
+            .filter(Boolean)
+        : [];
+      if (
+        !redditVerified ||
+        verifiedRedditLinks.indexOf(canonicalReddit) === -1 ||
+        redditVerified.redditPostCount !== verifiedRedditLinks.length
+      ) {
+        throw new Error(
+          "The Reddit post append could not be verified as durable.",
+        );
+      }
+      return {
+        status: "updated",
+        row: redditVerified,
+        fingerprint: creatorUploadFingerprint(redditVerified),
       };
     }
     if (creatorUploadEmptyRow(current)) {
@@ -547,6 +836,10 @@ globalThis.CreatorCatalogueBridgeTest = Object.freeze({
   matchRows: creatorUploadMatchRows,
   planCommit: creatorUploadPlanCommit,
   planTwitterAppend: creatorUploadPlanTwitterAppend,
+  planRedditAppend: creatorUploadPlanRedditAppend,
+  planLedgerAppend: creatorUploadPlanLedgerAppend,
+  readLedgerRows: creatorUploadReadLedgerRows,
+  readPresetRows: creatorUploadReadPresetRows,
   readRows: creatorUploadReadRows,
   snapshot: creatorUploadSnapshot,
 });

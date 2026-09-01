@@ -9,6 +9,9 @@
     "matchCatalogue",
     "commitPlatformLink",
     "appendTwitterTeaser",
+    "appendRedditPost",
+    "appendDistributionLedger",
+    "getSubredditPresetSnapshot",
   ]);
 
   function normalizeConfig(value = {}) {
@@ -41,6 +44,7 @@
 
   function boundedPayload(action, payload = {}) {
     if (action === "getCatalogueSnapshot") return {};
+    if (action === "getSubredditPresetSnapshot") return {};
     if (action === "matchCatalogue") {
       const value = {
         filename: String(payload.filename || "").slice(0, 255),
@@ -85,6 +89,64 @@
         !value.statusUrl
       ) {
         throw new Error("Invalid Twitter teaser append request.");
+      }
+      return value;
+    }
+    if (action === "appendRedditPost") {
+      const value = {
+        row: Number(payload.row),
+        id: String(payload.id || "")
+          .trim()
+          .slice(0, 500),
+        fingerprint: String(payload.fingerprint || "").slice(0, 64),
+        redditUrl: String(payload.redditUrl || "").slice(0, 500),
+      };
+      if (
+        !Number.isInteger(value.row) ||
+        value.row < 2 ||
+        !value.id ||
+        !/^[a-f0-9]{8,64}$/i.test(value.fingerprint) ||
+        !value.redditUrl
+      ) {
+        throw new Error("Invalid Reddit post append request.");
+      }
+      return value;
+    }
+    if (action === "appendDistributionLedger") {
+      const value = {};
+      for (const [field, maximum] of [
+        ["eventId", 100],
+        ["runId", 64],
+        ["jobId", 100],
+        ["platform", 20],
+        ["catalogueId", 500],
+        ["resultId", 200],
+        ["resultUrl", 1000],
+        ["status", 50],
+      ]) {
+        value[field] = String(payload[field] || "")
+          .trim()
+          .slice(0, Number(maximum));
+      }
+      value.catalogueRow = Number(payload.catalogueRow);
+      value.recordedAt = Number(payload.recordedAt);
+      if (
+        !/^[A-Za-z0-9_-]{2,100}$/.test(value.eventId) ||
+        !/^[A-Za-z0-9_-]{8,64}$/.test(value.runId) ||
+        !/^[A-Za-z0-9:_-]{1,100}$/.test(value.jobId) ||
+        !new Set(["x", "redgifs", "reddit"]).has(value.platform) ||
+        !Number.isInteger(value.catalogueRow) ||
+        value.catalogueRow < 2 ||
+        !value.catalogueId ||
+        !value.resultId ||
+        !value.resultUrl ||
+        !new Set(["published", "deleted", "removed", "unresolved"]).has(
+          value.status,
+        ) ||
+        !Number.isSafeInteger(value.recordedAt) ||
+        value.recordedAt < 1
+      ) {
+        throw new Error("Invalid distribution ledger append request.");
       }
       return value;
     }
@@ -195,11 +257,36 @@
     return request(await loadConfig(), "appendTwitterTeaser", payload, options);
   }
 
+  async function appendRedditPost(payload, options) {
+    return request(await loadConfig(), "appendRedditPost", payload, options);
+  }
+
+  async function appendDistributionLedger(payload, options) {
+    return request(
+      await loadConfig(),
+      "appendDistributionLedger",
+      payload,
+      options,
+    );
+  }
+
+  async function getSubredditPresetSnapshot(options) {
+    return request(
+      await loadConfig(),
+      "getSubredditPresetSnapshot",
+      {},
+      options,
+    );
+  }
+
   globalThis.CreatorCatalogueClient = Object.freeze({
     STORAGE_KEY,
+    appendDistributionLedger,
+    appendRedditPost,
     appendTwitterTeaser,
     commitPlatformLink,
     getCatalogueSnapshot,
+    getSubredditPresetSnapshot,
     loadConfig,
     matchCatalogue,
     normalizeConfig,

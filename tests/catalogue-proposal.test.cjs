@@ -126,6 +126,19 @@ test("catalogue fingerprints protect the Twitter teaser column", () => {
   );
 });
 
+test("catalogue fingerprints protect the Reddit post list", () => {
+  const contract = loadContract();
+  const original = row({ redditPosts: "" });
+  assert.notEqual(
+    contract.fingerprint(original),
+    contract.fingerprint({
+      ...original,
+      redditPosts:
+        "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post",
+    }),
+  );
+});
+
 test("strong wording infers missing Pornhub and schedules after its predecessor", () => {
   const proposal = loadProposal();
   const rows = [

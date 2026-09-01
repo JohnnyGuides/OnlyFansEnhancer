@@ -1388,20 +1388,20 @@ test("catalogue bridge reads the next writable row and does not truncate row 100
       ranges.push(range);
       return {
         getValues() {
-          return Array.from({ length: range[2] }, () => Array(15).fill(""));
+          return Array.from({ length: range[2] }, () => Array(20).fill(""));
         },
       };
     },
   };
 
   const rows = plain(bridge.readRows(sheet));
-  assert.deepEqual(ranges, [[2, 1, 134, 15]]);
+  assert.deepEqual(ranges, [[2, 1, 134, 20]]);
   assert.equal(rows.at(-1).row, 135);
 
   sheet.getLastRow = () => 1002;
   ranges.length = 0;
   const fullRows = plain(bridge.readRows(sheet));
-  assert.deepEqual(ranges, [[2, 1, 1001, 15]]);
+  assert.deepEqual(ranges, [[2, 1, 1001, 20]]);
   assert.equal(fullRows.at(-1).row, 1002);
 });
 
@@ -1588,7 +1588,7 @@ test("catalogue bridge appends one canonical Twitter teaser without touching exi
 test("Twitter teaser bridge writes column O only and verifies the updated row", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
   const bridge = context.CreatorCatalogueBridgeTest;
-  const values = Array.from({ length: 125 }, () => Array(15).fill(""));
+  const values = Array.from({ length: 125 }, () => Array(20).fill(""));
   values[123] = [
     "resident-evil-ashley",
     "2026-08-28",
@@ -1605,6 +1605,11 @@ test("Twitter teaser bridge writes column O only and verifies the updated row", 
     "",
     "=COUNTA(SPLIT(O125,CHAR(10)))",
     "",
+    "",
+    "",
+    "",
+    "",
+    "",
   ];
   const writes = [];
   let eraseTwitterAfterFlush = false;
@@ -1614,7 +1619,7 @@ test("Twitter teaser bridge writes column O only and verifies the updated row", 
     getRange(row, column, rowCount, columnCount) {
       if (row === 2 && column === 1) {
         assert.equal(rowCount, 125);
-        assert.equal(columnCount, 15);
+        assert.equal(columnCount, 20);
         return { getValues: () => structuredClone(values) };
       }
       return {
@@ -1791,6 +1796,296 @@ test("catalogue client sends only the bounded Twitter teaser append contract", a
     fingerprint: "1234abcd",
     statusUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
   });
+});
+
+test("Reddit catalogue append is canonical, fingerprinted, append-only, and idempotent", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const oldUrl =
+    "https://www.reddit.com/r/GamesGoneWild/comments/abc123/old_post";
+  const newUrl =
+    "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post";
+  const row = {
+    row: 125,
+    id: "resident-evil-ashley",
+    releaseDate: "2026-08-28",
+    title: "Ashley",
+    description: "Description",
+    twitterTeasers: "",
+    redditPostCount: 1,
+    redditPosts: oldUrl,
+  };
+  const request = {
+    row: 125,
+    id: row.id,
+    fingerprint: bridge.fingerprint(row),
+    redditUrl: `${newUrl}?utm_source=share#fragment`,
+  };
+
+  const updated = plain(bridge.planRedditAppend(row, request));
+  assert.equal(updated.status, "updated");
+  assert.equal(updated.row.redditPostCount, 2);
+  assert.equal(updated.row.redditPosts, `${oldUrl}\n${newUrl}`);
+  assert.equal(
+    plain(bridge.planRedditAppend(updated.row, request)).status,
+    "idempotent",
+    "checkpoint-loss recovery recognizes the canonical URL before stale fingerprint rejection",
+  );
+  assert.equal(
+    plain(bridge.planRedditAppend({ ...row, title: "Drift" }, request)).status,
+    "stale",
+  );
+  assert.equal(
+    plain(bridge.planRedditAppend(row, { ...request, id: "other" })).status,
+    "conflict",
+  );
+});
+
+test("distribution ledger accepts one immutable public result event and replays idempotently", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const request = {
+    eventId: "published",
+    runId: "social-distribution-0001",
+    jobId: "reddit:gamesgonewild",
+    platform: "reddit",
+    catalogueRow: 125,
+    catalogueId: "resident-evil-ashley",
+    resultId: "def456",
+    resultUrl:
+      "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post",
+    status: "published",
+    recordedAt: 1_788_280_000_000,
+  };
+  const appended = plain(bridge.planLedgerAppend([], request));
+  assert.equal(appended.status, "updated");
+  assert.equal(appended.row.key, `${request.runId}:${request.jobId}:published`);
+  assert.equal(
+    plain(bridge.planLedgerAppend([appended.row], request)).status,
+    "idempotent",
+  );
+  assert.equal(
+    plain(
+      bridge.planLedgerAppend([appended.row], {
+        ...request,
+        resultId: "different",
+      }),
+    ).status,
+    "conflict",
+  );
+});
+
+test("Reddit bridge writes only catalogue S:T and verifies count plus canonical URL", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const values = Array.from({ length: 125 }, () => Array(20).fill(""));
+  values[123][0] = "resident-evil-ashley";
+  values[123][1] = "2026-08-28";
+  values[123][2] = "Ashley";
+  const writes = [];
+  const catalogueSheet = {
+    getLastRow: () => 125,
+    getMaxRows: () => 500,
+    getRange(row, column, rowCount, columnCount) {
+      if (row === 2 && column === 1) {
+        assert.equal(columnCount, 20);
+        return { getValues: () => structuredClone(values) };
+      }
+      return {
+        setValues(next) {
+          writes.push([row, column, rowCount, columnCount, next]);
+          for (let y = 0; y < rowCount; y += 1) {
+            for (let x = 0; x < columnCount; x += 1) {
+              values[row - 2 + y][column - 1 + x] = next[y][x];
+            }
+          }
+        },
+      };
+    },
+  };
+  context.SpreadsheetApp = {
+    openById: () => ({ getSheetByName: () => catalogueSheet }),
+    flush() {},
+  };
+  context.LockService = {
+    getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }),
+  };
+  context.Utilities = { formatDate: () => "2026-08-28" };
+  const current = plain(bridge.readRows(catalogueSheet)).find(
+    (row) => row.row === 125,
+  );
+  const redditUrl =
+    "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post?utm_source=share";
+  const result = plain(
+    bridge.handle("appendRedditPost", {
+      row: 125,
+      id: current.id,
+      fingerprint: bridge.fingerprint(current),
+      redditUrl,
+    }),
+  );
+
+  assert.equal(result.status, "updated");
+  assert.equal(result.row.redditPostCount, 1);
+  assert.equal(
+    result.row.redditPosts,
+    "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post",
+  );
+  assert.deepEqual(plain(writes), [
+    [
+      125,
+      19,
+      1,
+      2,
+      [[1, "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post"]],
+    ],
+  ]);
+});
+
+test("preset snapshot reads only 2026 uploads Y:AA without mutating the workbook", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const ranges = [];
+  const presetSheet = {
+    getLastRow: () => 3,
+    getRange(...range) {
+      ranges.push(range);
+      return {
+        getValues: () => [
+          ["r/GamesGoneWild", "Approved", "flair: Cosplay"],
+          ["NSFW_GIF", "Needs review", "check title"],
+        ],
+      };
+    },
+  };
+  context.SpreadsheetApp = {
+    openById: () => ({
+      getSheetByName: (name) => (name === "2026 uploads" ? presetSheet : null),
+    }),
+  };
+  const result = plain(
+    context.CreatorCatalogueBridgeTest.handle("getSubredditPresetSnapshot", {}),
+  );
+  assert.deepEqual(ranges, [[2, 25, 2, 3]]);
+  assert.deepEqual(result, {
+    status: "snapshot",
+    rows: [
+      {
+        subreddit: "r/GamesGoneWild",
+        status: "Approved",
+        notes: "flair: Cosplay",
+      },
+      {
+        subreddit: "NSFW_GIF",
+        status: "Needs review",
+        notes: "check title",
+      },
+    ],
+  });
+});
+
+test("ledger bridge hides its sheet, appends one bounded row, and verifies readback", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const rows = [];
+  let hidden = false;
+  const ledgerSheet = {
+    getLastRow: () => rows.length + 1,
+    getRange: () => ({ getValues: () => structuredClone(rows) }),
+    appendRow(row) {
+      rows.push(row);
+    },
+    hideSheet() {
+      hidden = true;
+    },
+  };
+  context.SpreadsheetApp = {
+    openById: () => ({
+      getSheetByName: (name) =>
+        name === "Creator Distribution Ledger" ? ledgerSheet : null,
+    }),
+    flush() {},
+  };
+  context.LockService = {
+    getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }),
+  };
+  const request = {
+    eventId: "published",
+    runId: "social-distribution-0001",
+    jobId: "x",
+    platform: "x",
+    catalogueRow: 125,
+    catalogueId: "resident-evil-ashley",
+    resultId: "2094523397057237306",
+    resultUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+    status: "published",
+    recordedAt: 1_788_280_000_000,
+  };
+  const result = plain(
+    context.CreatorCatalogueBridgeTest.handle(
+      "appendDistributionLedger",
+      request,
+    ),
+  );
+  assert.equal(result.status, "updated");
+  assert.equal(hidden, true);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][0], "social-distribution-0001:x:published");
+  assert.equal(rows[0][7], request.resultUrl);
+});
+
+test("catalogue client allow-lists Reddit, ledger, and preset contracts", async () => {
+  const context = loadScripts("creator-tools/catalogue-client.js");
+  const client = context.CreatorCatalogueClient;
+  const config = {
+    endpoint:
+      "https://script.google.com/macros/s/fixture-bridge-12345678901234567890/exec",
+    secret: "fixture-bridge-secret-1234567890",
+  };
+  const sent = [];
+  const fetchImpl = async (_url, options) => {
+    sent.push(JSON.parse(options.body));
+    return new Response(
+      JSON.stringify({ ok: true, result: { status: "updated" } }),
+    );
+  };
+  await client.request(
+    config,
+    "appendRedditPost",
+    {
+      row: 125,
+      id: "resident-evil-ashley",
+      fingerprint: "1234abcd",
+      redditUrl:
+        "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post",
+      cookie: "forbidden",
+    },
+    { fetchImpl },
+  );
+  await client.request(
+    config,
+    "appendDistributionLedger",
+    {
+      eventId: "published",
+      runId: "social-distribution-0001",
+      jobId: "reddit:gamesgonewild",
+      platform: "reddit",
+      catalogueRow: 125,
+      catalogueId: "resident-evil-ashley",
+      resultId: "def456",
+      resultUrl:
+        "https://www.reddit.com/r/GamesGoneWild/comments/def456/new_post",
+      status: "published",
+      recordedAt: 1_788_280_000_000,
+      caption: "forbidden",
+    },
+    { fetchImpl },
+  );
+  await client.request(config, "getSubredditPresetSnapshot", {}, { fetchImpl });
+
+  assert.equal(sent[0].action, "appendRedditPost");
+  assert.equal(Object.hasOwn(sent[0].payload, "cookie"), false);
+  assert.equal(sent[1].action, "appendDistributionLedger");
+  assert.equal(Object.hasOwn(sent[1].payload, "caption"), false);
+  assert.deepEqual(sent[2].payload, {});
 });
 
 test("upload console performs no platform mutation before the single Yes confirmation", async () => {

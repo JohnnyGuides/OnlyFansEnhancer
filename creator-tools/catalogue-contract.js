@@ -142,6 +142,22 @@
     }
   }
 
+  function canonicalRedditPostUrl(value) {
+    try {
+      const url = new URL(clean(value));
+      const match = url.pathname.match(
+        /^\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})\/([A-Za-z0-9_-]+)\/?$/i,
+      );
+      return url.protocol === "https:" &&
+        url.hostname === "www.reddit.com" &&
+        match
+        ? `https://www.reddit.com/r/${match[1]}/comments/${match[2].toLowerCase()}/${match[3]}`
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   function safeLinkCommit(existing, incoming) {
     const current = clean(existing);
     const next = clean(incoming);
@@ -165,6 +181,7 @@
       row.fanslyLink,
       row.manyvidsLink,
       row.twitterTeasers,
+      row.redditPosts,
     ]
       .map(clean)
       .join("\u001f");
@@ -178,6 +195,7 @@
 
   globalThis.CreatorCatalogueContract = Object.freeze({
     canonicalPostUrl,
+    canonicalRedditPostUrl,
     canonicalXStatusUrl,
     fingerprint,
     normalizedText,
