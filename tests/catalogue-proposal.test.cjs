@@ -97,6 +97,35 @@ test("Pornhub catalogue URLs accept only one canonical viewkey", () => {
   );
 });
 
+test("X catalogue URLs accept only one canonical numeric status", () => {
+  const contract = loadContract();
+  assert.equal(
+    contract.canonicalXStatusUrl(
+      "https://x.com/Johnny_Guides/status/2094523397057237306",
+    ),
+    "https://x.com/Johnny_Guides/status/2094523397057237306",
+  );
+  for (const value of [
+    "https://twitter.com/Johnny_Guides/status/2094523397057237306",
+    "https://x.com/i/status/2094523397057237306",
+    "https://x.com/Johnny_Guides/status/2094523397057237306?private=1",
+  ]) {
+    assert.equal(contract.canonicalXStatusUrl(value), null);
+  }
+});
+
+test("catalogue fingerprints protect the Twitter teaser column", () => {
+  const contract = loadContract();
+  const original = row({ twitterTeasers: "" });
+  assert.notEqual(
+    contract.fingerprint(original),
+    contract.fingerprint({
+      ...original,
+      twitterTeasers: "https://x.com/Johnny_Guides/status/2094523397057237306",
+    }),
+  );
+});
+
 test("strong wording infers missing Pornhub and schedules after its predecessor", () => {
   const proposal = loadProposal();
   const rows = [

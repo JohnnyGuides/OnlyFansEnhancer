@@ -1388,20 +1388,20 @@ test("catalogue bridge reads the next writable row and does not truncate row 100
       ranges.push(range);
       return {
         getValues() {
-          return Array.from({ length: range[2] }, () => Array(12).fill(""));
+          return Array.from({ length: range[2] }, () => Array(15).fill(""));
         },
       };
     },
   };
 
   const rows = plain(bridge.readRows(sheet));
-  assert.deepEqual(ranges, [[2, 1, 134, 12]]);
+  assert.deepEqual(ranges, [[2, 1, 134, 15]]);
   assert.equal(rows.at(-1).row, 135);
 
   sheet.getLastRow = () => 1002;
   ranges.length = 0;
   const fullRows = plain(bridge.readRows(sheet));
-  assert.deepEqual(ranges, [[2, 1, 1001, 12]]);
+  assert.deepEqual(ranges, [[2, 1, 1001, 15]]);
   assert.equal(fullRows.at(-1).row, 1002);
 });
 
@@ -1521,6 +1521,129 @@ test("catalogue bridge commit is fingerprinted, idempotent, and never overwrites
   );
 });
 
+test("catalogue bridge appends one canonical Twitter teaser without touching existing links", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const oldUrl = "https://x.com/Johnny_Guides/status/2094523397057237001";
+  const newUrl = "https://x.com/Johnny_Guides/status/2094523397057237306";
+  const row = {
+    row: 125,
+    id: "resident-evil-ashley",
+    releaseDate: "2026-08-28",
+    title: "Ashley",
+    description: "Description",
+    seasonArc: "Resident Evil",
+    episode: "",
+    pornhubLink: "",
+    onlyfansLink: "https://onlyfans.com/1/johnny_guides",
+    fanslyLink: "https://fansly.com/post/2",
+    manyvidsLink: "",
+    twitterTeasers: oldUrl,
+  };
+  const request = {
+    row: 125,
+    id: "resident-evil-ashley",
+    fingerprint: bridge.fingerprint(row),
+    statusUrl: newUrl,
+  };
+
+  const updated = plain(bridge.planTwitterAppend(row, request));
+  assert.equal(updated.status, "updated");
+  assert.equal(updated.row.twitterTeasers, `${oldUrl}\n${newUrl}`);
+  assert.equal(updated.row.onlyfansLink, row.onlyfansLink);
+  assert.equal(updated.row.fanslyLink, row.fanslyLink);
+  assert.equal(
+    plain(
+      bridge.planTwitterAppend(updated.row, {
+        ...request,
+        fingerprint: updated.fingerprint,
+      }),
+    ).status,
+    "idempotent",
+  );
+  assert.equal(
+    plain(bridge.planTwitterAppend({ ...row, title: "Drift" }, request)).status,
+    "stale",
+  );
+  assert.equal(
+    plain(bridge.planTwitterAppend(row, { ...request, id: "wrong-row" }))
+      .status,
+    "conflict",
+  );
+  assert.throws(
+    () =>
+      bridge.planTwitterAppend(row, {
+        ...request,
+        statusUrl: `${newUrl}?ambiguous=1`,
+      }),
+    /Twitter teaser/i,
+  );
+});
+
+test("Twitter teaser bridge writes column O only and verifies the updated row", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const bridge = context.CreatorCatalogueBridgeTest;
+  const values = Array.from({ length: 125 }, () => Array(15).fill(""));
+  values[123] = [
+    "resident-evil-ashley",
+    "2026-08-28",
+    "Ashley",
+    "Description",
+    "Resident Evil",
+    "FantasyFuck",
+    "",
+    "",
+    "",
+    "https://onlyfans.com/1/johnny_guides",
+    "https://fansly.com/post/2",
+    "",
+    "",
+    "=COUNTA(SPLIT(O125,CHAR(10)))",
+    "",
+  ];
+  const writes = [];
+  const sheet = {
+    getLastRow: () => 125,
+    getMaxRows: () => 500,
+    getRange(row, column, rowCount, columnCount) {
+      if (row === 2 && column === 1) {
+        assert.equal(rowCount, 125);
+        assert.equal(columnCount, 15);
+        return { getValues: () => structuredClone(values) };
+      }
+      return {
+        setValue(value) {
+          writes.push([row, column, value]);
+          values[row - 2][column - 1] = value;
+        },
+      };
+    },
+  };
+  context.SpreadsheetApp = {
+    openById: () => ({ getSheetByName: () => sheet }),
+    flush() {},
+  };
+  context.LockService = {
+    getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }),
+  };
+  context.Utilities = { formatDate: () => "2026-08-28" };
+  const current = plain(bridge.readRows(sheet)).find((row) => row.row === 125);
+  const statusUrl = "https://x.com/Johnny_Guides/status/2094523397057237306";
+
+  const result = plain(
+    bridge.handle("appendTwitterTeaser", {
+      row: 125,
+      id: "resident-evil-ashley",
+      fingerprint: bridge.fingerprint(current),
+      statusUrl,
+    }),
+  );
+
+  assert.equal(result.status, "updated");
+  assert.deepEqual(writes, [[125, 15, statusUrl]]);
+  assert.equal(values[123][13], "=COUNTA(SPLIT(O125,CHAR(10)))");
+});
+
 test("catalogue client sends bounded metadata only in a no-referrer POST body", async () => {
   const context = loadScripts("creator-tools/catalogue-client.js");
   const client = context.CreatorCatalogueClient;
@@ -1608,6 +1731,43 @@ test("catalogue client sends an empty bounded snapshot payload", async () => {
   assert.equal(result.status, "snapshot");
   assert.equal(requests[0].body.action, "getCatalogueSnapshot");
   assert.deepEqual(requests[0].body.payload, {});
+});
+
+test("catalogue client sends only the bounded Twitter teaser append contract", async () => {
+  const context = loadScripts("creator-tools/catalogue-client.js");
+  let sent;
+  const result = await context.CreatorCatalogueClient.request(
+    {
+      endpoint:
+        "https://script.google.com/macros/s/fixture-bridge-12345678901234567890/exec",
+      secret: "fixture-bridge-secret-1234567890",
+    },
+    "appendTwitterTeaser",
+    {
+      row: 125,
+      id: "resident-evil-ashley",
+      fingerprint: "1234abcd",
+      statusUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+      cookie: "forbidden",
+      requestBody: "forbidden",
+    },
+    {
+      fetchImpl: async (_url, options) => {
+        sent = JSON.parse(options.body);
+        return new Response(
+          JSON.stringify({ ok: true, result: { status: "updated" } }),
+        );
+      },
+    },
+  );
+
+  assert.equal(result.status, "updated");
+  assert.deepEqual(plain(sent.payload), {
+    row: 125,
+    id: "resident-evil-ashley",
+    fingerprint: "1234abcd",
+    statusUrl: "https://x.com/Johnny_Guides/status/2094523397057237306",
+  });
 });
 
 test("upload console performs no platform mutation before the single Yes confirmation", async () => {

@@ -13,22 +13,7 @@
   }
 
   function canonicalStatusUrl(value) {
-    try {
-      const url = new URL(clean(value, 500));
-      const match = url.pathname.match(
-        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})$/,
-      );
-      return url.protocol === "https:" &&
-        url.hostname === "x.com" &&
-        !url.search &&
-        !url.hash &&
-        match &&
-        match[1].toLowerCase() !== "i"
-        ? `https://x.com/${match[1]}/status/${match[2]}`
-        : null;
-    } catch {
-      return null;
-    }
+    return catalogue.canonicalXStatusUrl(clean(value, 500));
   }
 
   function finiteNumber(value, minimum, maximum) {

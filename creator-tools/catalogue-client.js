@@ -8,6 +8,7 @@
     "getCatalogueSnapshot",
     "matchCatalogue",
     "commitPlatformLink",
+    "appendTwitterTeaser",
   ]);
 
   function normalizeConfig(value = {}) {
@@ -64,6 +65,26 @@
         )
       ) {
         throw new Error("Invalid catalogue match request.");
+      }
+      return value;
+    }
+    if (action === "appendTwitterTeaser") {
+      const value = {
+        row: Number(payload.row),
+        id: String(payload.id || "")
+          .trim()
+          .slice(0, 500),
+        fingerprint: String(payload.fingerprint || "").slice(0, 64),
+        statusUrl: String(payload.statusUrl || "").slice(0, 500),
+      };
+      if (
+        !Number.isInteger(value.row) ||
+        value.row < 2 ||
+        !value.id ||
+        !/^[a-f0-9]{8,64}$/i.test(value.fingerprint) ||
+        !value.statusUrl
+      ) {
+        throw new Error("Invalid Twitter teaser append request.");
       }
       return value;
     }
@@ -170,8 +191,13 @@
     return request(await loadConfig(), "commitPlatformLink", payload, options);
   }
 
+  async function appendTwitterTeaser(payload, options) {
+    return request(await loadConfig(), "appendTwitterTeaser", payload, options);
+  }
+
   globalThis.CreatorCatalogueClient = Object.freeze({
     STORAGE_KEY,
+    appendTwitterTeaser,
     commitPlatformLink,
     getCatalogueSnapshot,
     loadConfig,

@@ -106,6 +106,7 @@ function creatorUploadFingerprint(row) {
     row.onlyfansLink,
     row.fanslyLink,
     row.manyvidsLink,
+    row.twitterTeasers,
   ]
     .map(creatorUploadClean)
     .join("\u001f");
@@ -150,6 +151,16 @@ function creatorUploadCanonicalUrl(platform, value) {
     return match ? "https://www.manyvids.com/Video/" + match[1] : null;
   }
   return null;
+}
+
+function creatorUploadCanonicalTwitterStatus(value) {
+  var raw = creatorUploadClean(value);
+  var match = raw.match(
+    /^https:\/\/x\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})$/,
+  );
+  return match && match[1].toLowerCase() !== "i"
+    ? "https://x.com/" + match[1] + "/status/" + match[2]
+    : null;
 }
 
 function creatorUploadEmptyRow(row) {
@@ -285,6 +296,44 @@ function creatorUploadPlanCommit(row, request) {
   };
 }
 
+function creatorUploadPlanTwitterAppend(row, request) {
+  if (
+    creatorUploadFingerprint(row) !== creatorUploadClean(request.fingerprint)
+  ) {
+    return {
+      status: "stale",
+      row: row,
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  if (creatorUploadClean(row.id) !== creatorUploadClean(request.id)) {
+    return {
+      status: "conflict",
+      row: row,
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  var statusUrl = creatorUploadCanonicalTwitterStatus(request.statusUrl);
+  if (!statusUrl) throw new Error("Invalid Twitter teaser status link.");
+  var current = creatorUploadClean(row.twitterTeasers);
+  var links = current.split(/\s+/).map(creatorUploadClean).filter(Boolean);
+  if (links.indexOf(statusUrl) !== -1) {
+    return {
+      status: "idempotent",
+      row: row,
+      fingerprint: creatorUploadFingerprint(row),
+    };
+  }
+  var next = Object.assign({}, row, {
+    twitterTeasers: links.concat([statusUrl]).join("\n"),
+  });
+  return {
+    status: "updated",
+    row: next,
+    fingerprint: creatorUploadFingerprint(next),
+  };
+}
+
 function creatorUploadDateValue(value) {
   if (
     Object.prototype.toString.call(value) === "[object Date]" &&
@@ -300,7 +349,7 @@ function creatorUploadDateValue(value) {
 function creatorUploadReadRows(sheet) {
   var maxRow = Math.min(5000, Math.max(2, sheet.getMaxRows()));
   var endRow = Math.min(maxRow, Math.max(2, sheet.getLastRow() + 1));
-  var values = sheet.getRange(2, 1, endRow - 1, 12).getValues();
+  var values = sheet.getRange(2, 1, endRow - 1, 15).getValues();
   return values.map(function (cells, index) {
     return {
       row: index + 2,
@@ -314,6 +363,7 @@ function creatorUploadReadRows(sheet) {
       onlyfansLink: creatorUploadClean(cells[9]),
       fanslyLink: creatorUploadClean(cells[10]),
       manyvidsLink: creatorUploadClean(cells[11]),
+      twitterTeasers: creatorUploadClean(cells[14]),
       empty: !cells.some(creatorUploadClean),
     };
   });
@@ -380,7 +430,7 @@ function creatorUploadHandle(action, payload) {
       creatorUploadReadRows(sheet),
     );
   }
-  if (action !== "commitPlatformLink")
+  if (action !== "commitPlatformLink" && action !== "appendTwitterTeaser")
     throw new Error("Unsupported catalogue action.");
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000))
@@ -394,8 +444,23 @@ function creatorUploadHandle(action, payload) {
       return row.row === rowNumber;
     });
     if (!current) throw new Error("The catalogue row is unavailable.");
-    var plan = creatorUploadPlanCommit(current, payload);
+    var plan =
+      action === "appendTwitterTeaser"
+        ? creatorUploadPlanTwitterAppend(current, payload)
+        : creatorUploadPlanCommit(current, payload);
     if (plan.status !== "updated") return plan;
+    if (action === "appendTwitterTeaser") {
+      sheet.getRange(rowNumber, 15).setValue(plan.row.twitterTeasers);
+      SpreadsheetApp.flush();
+      var twitterVerified = creatorUploadReadRows(sheet).find(function (row) {
+        return row.row === rowNumber;
+      });
+      return {
+        status: "updated",
+        row: twitterVerified,
+        fingerprint: creatorUploadFingerprint(twitterVerified),
+      };
+    }
     if (creatorUploadEmptyRow(current)) {
       sheet
         .getRange(rowNumber, 1, 1, 4)
@@ -461,8 +526,10 @@ function doPost(event) {
 
 globalThis.CreatorCatalogueBridgeTest = Object.freeze({
   fingerprint: creatorUploadFingerprint,
+  handle: creatorUploadHandle,
   matchRows: creatorUploadMatchRows,
   planCommit: creatorUploadPlanCommit,
+  planTwitterAppend: creatorUploadPlanTwitterAppend,
   readRows: creatorUploadReadRows,
   snapshot: creatorUploadSnapshot,
 });

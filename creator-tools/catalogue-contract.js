@@ -123,6 +123,25 @@
     }
   }
 
+  function canonicalXStatusUrl(value) {
+    try {
+      const url = new URL(clean(value));
+      const match = url.pathname.match(
+        /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})$/,
+      );
+      return url.protocol === "https:" &&
+        url.hostname === "x.com" &&
+        !url.search &&
+        !url.hash &&
+        match &&
+        match[1].toLowerCase() !== "i"
+        ? `https://x.com/${match[1]}/status/${match[2]}`
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   function safeLinkCommit(existing, incoming) {
     const current = clean(existing);
     const next = clean(incoming);
@@ -145,6 +164,7 @@
       row.onlyfansLink,
       row.fanslyLink,
       row.manyvidsLink,
+      row.twitterTeasers,
     ]
       .map(clean)
       .join("\u001f");
@@ -158,6 +178,7 @@
 
   globalThis.CreatorCatalogueContract = Object.freeze({
     canonicalPostUrl,
+    canonicalXStatusUrl,
     fingerprint,
     normalizedText,
     safeLinkCommit,
