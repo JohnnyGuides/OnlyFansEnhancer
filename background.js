@@ -5,6 +5,7 @@ importScripts(
   "creator-tools/upload-session-store.js",
   "creator-tools/x-teaser-contract.js",
   "creator-tools/x-teaser-session-store.js",
+  "creator-tools/x-teaser-reconcile.js",
 );
 
 ("use strict");
@@ -29,6 +30,38 @@ const CREATOR_UPLOAD_SESSION_STORE = globalThis.CreatorUploadSessionStore;
 const X_TEASER_CONTRACT = globalThis.CreatorXTeaserContract;
 const X_TEASER_SESSION_STORE = globalThis.CreatorXTeaserSessionStore;
 const X_TEASER_BINDING_KEY = "creatorXTeaserChromeBindingV1";
+const X_TEASER_NATIVE_HOST = "com.johnnyguides.creator_x_teaser";
+
+function sendXTeaserNative(request) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(
+      X_TEASER_NATIVE_HOST,
+      request,
+      (response) => {
+        if (chrome.runtime.lastError)
+          return reject(new Error(chrome.runtime.lastError.message));
+        if (!response?.ok)
+          return reject(
+            new Error(
+              response?.error ||
+                "The X teaser native host rejected the request.",
+            ),
+          );
+        resolve(response);
+      },
+    );
+  });
+}
+
+async function reconcileXTeaser(sessionId, frames) {
+  return globalThis.CreatorXTeaserReconcile.run({
+    sessionId,
+    frames,
+    store: X_TEASER_SESSION_STORE,
+    nativeSend: sendXTeaserNative,
+    catalogueClient: CREATOR_CATALOGUE_CLIENT,
+  });
+}
 
 async function openXTeaserRecorder() {
   const url = chrome.runtime.getURL("x-teaser.html");
@@ -72,16 +105,29 @@ async function captureBoundXStatus(details) {
   const stored = await chrome.storage.local.get(X_TEASER_BINDING_KEY);
   const binding = stored[X_TEASER_BINDING_KEY];
   if (!binding || binding.xTabId !== details.tabId) return;
+  const existingSession = await X_TEASER_SESSION_STORE.load(binding.id);
+  if (existingSession?.capture) return;
   await chrome.scripting.executeScript({
     target: { tabId: details.tabId },
     files: ["creator-tools/x-teaser-observer.js"],
   });
-  const [execution] = await chrome.scripting.executeScript({
-    target: { tabId: details.tabId },
-    func: () =>
-      globalThis.CreatorXTeaserObserver.capture(document, location.href),
-  });
-  const capture = X_TEASER_CONTRACT.validateCapture(execution?.result);
+  let capture;
+  let lastError;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const [execution] = await chrome.scripting.executeScript({
+      target: { tabId: details.tabId },
+      func: () =>
+        globalThis.CreatorXTeaserObserver.capture(document, location.href),
+    });
+    try {
+      capture = X_TEASER_CONTRACT.validateCapture(execution?.result);
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  if (!capture) throw lastError || new Error("X status capture remained incomplete.");
   await X_TEASER_SESSION_STORE.save({
     id: binding.id,
     stage: "status-captured",
@@ -89,8 +135,8 @@ async function captureBoundXStatus(details) {
     updatedAt: Date.now(),
   });
   if (binding.recorderTabId) {
-    await chrome.tabs
-      .sendMessage(binding.recorderTabId, {
+    await chrome.runtime
+      .sendMessage({
         type: "X_TEASER_CAPTURED",
         id: binding.id,
         capture,
@@ -99,13 +145,21 @@ async function captureBoundXStatus(details) {
   }
 }
 
+const xTeaserNavigationFilter = {
+  url: [{ hostEquals: "x.com", pathContains: "/status/" }],
+};
+function onXTeaserNavigation(details) {
+  captureBoundXStatus(details).catch((error) =>
+    console.error("X teaser capture failed.", error),
+  );
+}
 chrome.webNavigation.onCompleted?.addListener?.(
-  (details) => {
-    captureBoundXStatus(details).catch((error) =>
-      console.error("X teaser capture failed.", error),
-    );
-  },
-  { url: [{ hostEquals: "x.com", pathContains: "/status/" }] },
+  onXTeaserNavigation,
+  xTeaserNavigationFilter,
+);
+chrome.webNavigation.onHistoryStateUpdated?.addListener?.(
+  onXTeaserNavigation,
+  xTeaserNavigationFilter,
 );
 const GELBOORU_FORBIDDEN_TAG_PARTS = /(^|_)(trans)(_|$)/i;
 
@@ -3832,8 +3886,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { uploadConsole: await openUploadConsole() };
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };
+      case "GET_X_TEASER_SESSIONS":
+        return { sessions: await X_TEASER_SESSION_STORE.list() };
       case "PAIR_X_TEASER":
         return { xTeaser: await pairXTeaser(message.pairing, sender.tab?.id) };
+      case "RECONCILE_X_TEASER":
+        return { xTeaser: await reconcileXTeaser(message.id, message.frames) };
       case "PROBE_CREATOR_UPLOAD_TARGETS":
         return {
           results: await probeCreatorUploadTargets(message.targets),

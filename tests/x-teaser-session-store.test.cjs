@@ -192,3 +192,24 @@ test("next action resumes only the first incomplete reconciliation stage", () =>
   assert.equal(store.nextAction({ stage: "sheet-complete" }), "move-source");
   assert.equal(store.nextAction({ stage: "moved" }), "complete");
 });
+
+test("audit receipt survives restart without accepting private paths", async () => {
+  const { store } = loadStore();
+  const id = "receipt_session_123";
+  await store.save({ id, stage: "paired", pairing: pairing() });
+  await store.save({
+    id,
+    stage: "status-captured",
+    capture: capture(),
+  });
+  await store.save({
+    id,
+    stage: "audit-complete",
+    auditOutcome: "updated",
+    auditReceipt: "abcdef0123456789abcdef0123456789",
+    sourcePath: "D:\\MEDIA\\private.mp4",
+  });
+  const restored = await store.load(id);
+  assert.equal(restored.auditReceipt, "abcdef0123456789abcdef0123456789");
+  assert.equal(restored.sourcePath, undefined);
+});

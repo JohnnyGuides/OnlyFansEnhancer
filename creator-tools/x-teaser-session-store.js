@@ -108,6 +108,13 @@
       if (Object.hasOwn(record, field))
         output[field] = clean(record[field], 500);
     }
+    if (Object.hasOwn(record, "auditReceipt")) {
+      const receipt = clean(record.auditReceipt, 128);
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(receipt)) {
+        throw new Error("Invalid X teaser audit receipt.");
+      }
+      output.auditReceipt = receipt;
+    }
     for (const field of ["createdAt", "updatedAt"]) {
       const number = Number(record[field]);
       if (Number.isSafeInteger(number) && number >= 0) output[field] = number;
@@ -138,7 +145,12 @@
     const previousRank = STAGES.indexOf(previous.stage);
     const nextRank = STAGES.indexOf(next.stage || previous.stage);
     output.stage = STAGES[Math.max(previousRank, nextRank)];
-    for (const field of ["auditOutcome", "sheetOutcome", "moveOutcome"]) {
+    for (const field of [
+      "auditOutcome",
+      "auditReceipt",
+      "sheetOutcome",
+      "moveOutcome",
+    ]) {
       if (previous[field]) output[field] = previous[field];
     }
     if (STAGES.indexOf(output.stage) >= 1 && !output.capture) {

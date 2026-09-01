@@ -97,6 +97,7 @@ $requiredArchiveEntries = @(
   "creator-tools/upload-session-store.js",
   "creator-tools/x-teaser-contract.js",
   "creator-tools/x-teaser-session-store.js",
+  "creator-tools/x-teaser-reconcile.js",
   "creator-tools/x-teaser-observer.js",
   "creator-tools/c4s-upload.js",
   "creator-tools/ph-uploader.js",
@@ -148,7 +149,12 @@ try {
   $validationArchive.Dispose()
 }
 
-$hash = Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath
+$hashStream = [System.IO.File]::OpenRead($zipPath)
+try {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try { $hashValue = ([System.BitConverter]::ToString($sha.ComputeHash($hashStream))).Replace("-", "") }
+  finally { $sha.Dispose() }
+} finally { $hashStream.Dispose() }
 Write-Output "PACKAGE=$zipPath"
-Write-Output "SHA256=$($hash.Hash)"
+Write-Output "SHA256=$hashValue"
 Write-Output "VALIDATED_ENTRIES=$($requiredArchiveEntries.Count)"

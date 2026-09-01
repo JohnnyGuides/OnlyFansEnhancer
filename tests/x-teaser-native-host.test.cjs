@@ -229,7 +229,10 @@ test("native host rejects traversal and stable identity mismatches", () => {
       fs.existsSync(path.join(value.auditRoot, "frame-data.json")),
       true,
     );
-    assert.equal(fs.readdirSync(path.join(value.auditRoot, "frames")).length, 0);
+    assert.equal(
+      fs.readdirSync(path.join(value.auditRoot, "frames")).length,
+      0,
+    );
   } finally {
     fs.rmSync(value.root, { recursive: true, force: true });
   }

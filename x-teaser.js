@@ -6,7 +6,9 @@ const fileInput = document.querySelector("#teaserFile"),
   summary = document.querySelector("#summary"),
   result = document.querySelector("#result");
 let fileProof = null,
-  rows = [];
+  rows = [],
+  frames = [],
+  resumeSession = null;
 function message(payload) {
   return new Promise((resolve, reject) =>
     chrome.runtime.sendMessage(payload, (response) => {
@@ -49,6 +51,42 @@ async function proofOf(file) {
       .join(""),
   };
 }
+async function framesOf(file, duration) {
+  const video = document.createElement("video");
+  const url = URL.createObjectURL(file);
+  video.muted = true;
+  try {
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = () =>
+        reject(new Error("Chrome could not decode the teaser."));
+      video.src = url;
+    });
+    const output = [];
+    for (const fraction of [0.2, 0.5, 0.8]) {
+      await new Promise((resolve, reject) => {
+        video.onseeked = resolve;
+        video.onerror = () =>
+          reject(new Error("Chrome could not decode an audit frame."));
+        video.currentTime = Math.min(
+          duration * fraction,
+          Math.max(duration - 0.05, 0),
+        );
+      });
+      const scale = Math.min(1, 960 / video.videoWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      canvas
+        .getContext("2d")
+        .drawImage(video, 0, 0, canvas.width, canvas.height);
+      output.push(canvas.toDataURL("image/jpeg", 0.82));
+    }
+    return output;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 function renderRows(ranked) {
   rows = ranked.rows;
   rowSelect.replaceChildren(new Option("Choose the exact catalogue entry", ""));
@@ -65,6 +103,17 @@ function updateConfirmation() {
     ? `Pair “${fileProof.basename}” with catalogue row ${row.row}: ${row.title}?`
     : "Choose a file and catalogue row to continue.";
 }
+
+function sameFileProof(left, right) {
+  return (
+    left &&
+    right &&
+    ["basename", "size", "lastModified", "sha256"].every(
+      (field) => left[field] === right[field],
+    ) &&
+    Math.abs(left.duration - right.duration) < 0.05
+  );
+}
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files?.[0];
   if (!file) return;
@@ -72,6 +121,22 @@ fileInput.addEventListener("change", async () => {
   fileStatus.textContent = "Reading file identity…";
   try {
     fileProof = await proofOf(file);
+    frames = await framesOf(file, fileProof.duration);
+    if (resumeSession) {
+      if (!sameFileProof(fileProof, resumeSession.pairing.file))
+        throw new Error(
+          "This is not the exact teaser from the unfinished session.",
+        );
+      renderRows({
+        rows: [{ ...resumeSession.pairing.catalogue, score: 100 }],
+      });
+      rowSelect.value = String(resumeSession.pairing.catalogue.row);
+      rowSelect.disabled = true;
+      confirmButton.textContent = "Resume Reconciliation";
+      fileStatus.textContent = `${file.name} · exact unfinished-session identity confirmed`;
+      updateConfirmation();
+      return;
+    }
     const snapshot = await CreatorCatalogueClient.getCatalogueSnapshot();
     renderRows(
       CreatorXTeaserContract.rankCatalogueRows(fileProof, snapshot.rows),
@@ -82,12 +147,40 @@ fileInput.addEventListener("change", async () => {
     fileStatus.textContent = error.message;
   }
 });
+
+chrome.runtime.onMessage.addListener((incoming) => {
+  if (incoming?.type !== "X_TEASER_CAPTURED") return;
+  result.textContent =
+    "X status captured. Writing the audit, then the Sheet, then moving the source…";
+  message({ type: "RECONCILE_X_TEASER", id: incoming.id, frames })
+    .then(({ xTeaser }) => {
+      result.textContent =
+        xTeaser.stage === "moved"
+          ? `Complete: ${xTeaser.capture.statusUrl} was audited, added to the catalogue, and moved to Done.`
+          : `Stopped safely at ${xTeaser.stage}.`;
+    })
+    .catch((error) => {
+      result.textContent = `${error.message} Nothing after the failed stage was attempted.`;
+    });
+});
 rowSelect.addEventListener("change", updateConfirmation);
 confirmButton.addEventListener("click", async () => {
   const row = rows.find((item) => String(item.row) === rowSelect.value);
   confirmButton.disabled = true;
   result.textContent = "Rechecking the catalogue and requesting X access…";
   try {
+    if (resumeSession) {
+      const response = await message({
+        type: "RECONCILE_X_TEASER",
+        id: resumeSession.id,
+        frames,
+      });
+      result.textContent =
+        response.xTeaser.stage === "moved"
+          ? `Complete: ${response.xTeaser.capture.statusUrl} was audited, added to the catalogue, and moved to Done.`
+          : `Stopped safely at ${response.xTeaser.stage}.`;
+      return;
+    }
     const granted = await chrome.permissions.request({
       origins: ["https://x.com/*"],
     });
@@ -111,3 +204,18 @@ confirmButton.addEventListener("click", async () => {
     confirmButton.disabled = false;
   }
 });
+
+message({ type: "GET_X_TEASER_SESSIONS" })
+  .then(({ sessions }) => {
+    resumeSession =
+      [...sessions]
+        .reverse()
+        .find((session) => session.capture && session.stage !== "moved") ||
+      null;
+    if (resumeSession) {
+      fileStatus.textContent = `Unfinished ${resumeSession.stage} session found for ${resumeSession.pairing.file.basename}. Reselect that exact file to resume without reposting.`;
+    }
+  })
+  .catch((error) => {
+    result.textContent = error.message;
+  });

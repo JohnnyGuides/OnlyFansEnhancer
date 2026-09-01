@@ -20,10 +20,13 @@ test("personal Chrome manifest exposes the recorder without Firefox metadata", (
     fs.readFileSync(path.join(root, "popup.html"), "utf8"),
     /id="xTeaserRecorder"/,
   );
+  const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
+  assert.match(background, /onCompleted/);
+  assert.match(background, /onHistoryStateUpdated/);
 });
 
 test("X observer captures one unambiguous canonical video status", () => {
-  const context = { globalThis: {} };
+  const context = { globalThis: {}, URL };
   vm.runInNewContext(
     fs.readFileSync(
       path.join(root, "creator-tools", "x-teaser-observer.js"),
@@ -44,7 +47,9 @@ test("X observer captures one unambiguous canonical video status", () => {
       if (selector === "div[lang]") return { textContent: "teaser caption" };
       return null;
     },
-    querySelectorAll() {
+    querySelectorAll(selector) {
+      if (selector === "a[href]")
+        return [{ href: "https://x.com/johnny_guides/status/123456789" }];
       return [];
     },
   };
@@ -62,7 +67,7 @@ test("X observer captures one unambiguous canonical video status", () => {
 });
 
 test("X observer fails closed for multiple articles and warning gates", () => {
-  const context = { globalThis: {} };
+  const context = { globalThis: {}, URL };
   vm.runInNewContext(
     fs.readFileSync(
       path.join(root, "creator-tools", "x-teaser-observer.js"),
@@ -73,7 +78,10 @@ test("X observer fails closed for multiple articles and warning gates", () => {
   const gated = {
     innerText: "Content warning",
     querySelector: () => null,
-    querySelectorAll: () => [{ textContent: "Show" }],
+    querySelectorAll: (selector) =>
+      selector === "a[href]"
+        ? [{ href: "https://x.com/johnny_guides/status/123" }]
+        : [{ textContent: "Show" }],
   };
   const result = context.globalThis.CreatorXTeaserObserver.capture(
     { querySelectorAll: () => [gated, gated] },
@@ -82,4 +90,39 @@ test("X observer fails closed for multiple articles and warning gates", () => {
   assert.equal(result.articleCount, 2);
   assert.equal(result.warningGate, true);
   assert.equal(result.video, false);
+});
+
+test("X observer ignores reply articles that do not own the current status URL", () => {
+  const context = { globalThis: {}, URL };
+  vm.runInNewContext(
+    fs.readFileSync(
+      path.join(root, "creator-tools", "x-teaser-observer.js"),
+      "utf8",
+    ),
+    context,
+  );
+  const article = (href, video) => ({
+    innerText: "caption",
+    querySelector: (selector) =>
+      selector === "video"
+        ? video
+        : selector === "time[datetime]"
+          ? { dateTime: "2026-09-01T10:00:00.000Z" }
+          : selector === "div[lang]"
+            ? { textContent: "caption" }
+            : null,
+    querySelectorAll: (selector) => (selector === "a[href]" ? [{ href }] : []),
+  });
+  const targetVideo = { duration: 4, poster: "https://pbs.twimg.com/a.jpg" };
+  const result = context.globalThis.CreatorXTeaserObserver.capture(
+    {
+      querySelectorAll: () => [
+        article("https://x.com/other/status/999", null),
+        article("https://x.com/johnny_guides/status/123", targetVideo),
+      ],
+    },
+    "https://x.com/johnny_guides/status/123",
+  );
+  assert.equal(result.articleCount, 1);
+  assert.equal(result.video, true);
 });

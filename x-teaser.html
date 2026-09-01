@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#090b10" />
     <title>X teaser recorder</title>
     <link rel="stylesheet" href="x-teaser.css" />
   </head>
@@ -18,13 +19,24 @@
       <section>
         <h2>Select the local teaser</h2>
         <label for="teaserFile">Teaser video</label
-        ><input id="teaserFile" type="file" accept="video/*" />
+        ><input
+          id="teaserFile"
+          name="teaserFile"
+          type="file"
+          accept="video/*"
+          autocomplete="off"
+        />
         <p id="fileStatus" class="status">No file selected.</p>
       </section>
       <section>
         <h2>Choose the catalogue entry</h2>
         <label for="catalogueRow">Exact video</label
-        ><select id="catalogueRow" disabled>
+        ><select
+          id="catalogueRow"
+          name="catalogueRow"
+          autocomplete="off"
+          disabled
+        >
           <option value="">Select a teaser first</option>
         </select>
         <p class="status">

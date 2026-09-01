@@ -50,6 +50,11 @@ try {
   $archive.Dispose()
 }
 
-$hash = Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath
+$hashStream = [System.IO.File]::OpenRead($zipPath)
+try {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try { $hashValue = ([System.BitConverter]::ToString($sha.ComputeHash($hashStream))).Replace("-", "") }
+  finally { $sha.Dispose() }
+} finally { $hashStream.Dispose() }
 Write-Output "PACKAGE=$zipPath"
-Write-Output "SHA256=$($hash.Hash)"
+Write-Output "SHA256=$hashValue"
