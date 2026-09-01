@@ -9,7 +9,8 @@ let fileProof = null,
   rows = [],
   frames = [],
   resumeSession = null,
-  rebindCandidate = null;
+  rebindCandidate = null,
+  suppressAutoReconcile = false;
 function message(payload) {
   return new Promise((resolve, reject) =>
     chrome.runtime.sendMessage(payload, (response) => {
@@ -151,7 +152,7 @@ fileInput.addEventListener("change", async () => {
 
 chrome.runtime.onMessage.addListener((incoming) => {
   if (incoming?.type !== "X_TEASER_CAPTURED") return;
-  if (frames.length !== 3) {
+  if (suppressAutoReconcile || frames.length !== 3) {
     result.textContent =
       "X status captured. Reselect the exact teaser to resume reconciliation without reposting.";
     return;
@@ -176,12 +177,15 @@ confirmButton.addEventListener("click", async () => {
   result.textContent = "Rechecking the catalogue and requesting X access…";
   try {
     if (rebindCandidate) {
+      frames = [];
       const response = await message({
         type: "CONFIRM_X_TEASER_REBIND",
         ...rebindCandidate,
       });
       resumeSession = response.rebind.session;
       rebindCandidate = null;
+      suppressAutoReconcile = false;
+      fileInput.disabled = false;
       confirmButton.textContent = "Resume Reconciliation";
       result.textContent =
         "X status captured. Reselect the exact teaser to resume reconciliation without reposting.";
@@ -238,6 +242,9 @@ message({ type: "GET_X_TEASER_SESSIONS" })
       result.textContent = `Observation resumed for ${paired.pairing.file.basename}. Continue in the bound X tab; Chrome will not repost.`;
     }
     if (rebind?.action === "confirm-status") {
+      frames = [];
+      suppressAutoReconcile = true;
+      fileInput.disabled = true;
       rebindCandidate = {
         id: rebind.id,
         tabId: rebind.tabId,

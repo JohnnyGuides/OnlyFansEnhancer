@@ -26,6 +26,17 @@ test("personal Chrome manifest exposes the recorder without Firefox metadata", (
   assert.match(background, /rebindXTeaserObservation/);
 });
 
+test("restored-status confirmation cannot reuse pre-confirmation audit frames", () => {
+  const recorder = fs.readFileSync(path.join(root, "x-teaser.js"), "utf8");
+  assert.match(recorder, /suppressAutoReconcile = true/);
+  assert.match(recorder, /fileInput\.disabled = true/);
+  assert.match(recorder, /frames = \[\]/);
+  assert.match(
+    recorder,
+    /if \(suppressAutoReconcile \|\| frames\.length !== 3\)/,
+  );
+});
+
 test("X observer captures one unambiguous canonical video status", () => {
   const context = { globalThis: {}, URL };
   vm.runInNewContext(
