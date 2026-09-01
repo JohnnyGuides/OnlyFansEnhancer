@@ -116,10 +116,6 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     await page.waitForFunction(
       () => document.querySelector("#realbooruDebug")?.textContent,
     );
-    await page.waitForFunction(
-      () => document.querySelector("#workflowProfiles")?.value,
-    );
-    await page.locator("#toolC4sUpload").waitFor();
     await page.locator("#currentAvatarGrid .avatar-tile").waitFor();
     assert.equal(
       await page.locator("#currentAvatarGrid .avatar-tile").count(),
@@ -162,30 +158,33 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
         document.querySelectorAll("#retiredAvatarGrid .avatar-tile").length ===
         0,
     );
-    assert.equal(await page.locator("#toolC4sUpload").isChecked(), false);
-    assert.equal(
-      await page.locator("#toolOnlyfansAutoSelect").isChecked(),
-      false,
+    const workflowPage = await context.newPage();
+    workflowPage.on("pageerror", (error) => pageErrors.push(error.message));
+    await workflowPage.goto(
+      `chrome-extension://${extensionId}/upload-console.html`,
     );
-    assert.equal(
-      await page.locator("#toolOnlyfansAutoFollow").isChecked(),
-      false,
+    await workflowPage.getByRole("tab", { name: "Settings" }).click();
+    await workflowPage.locator("#toolC4sUpload").waitFor();
+    await workflowPage.waitForFunction(
+      () => document.querySelector("#workflowProfiles")?.value,
     );
-    assert.equal(
-      await page.locator("#toolRedditBannerCensor").isChecked(),
-      true,
-    );
-    assert.equal(
-      await page.locator("#toolUploadTraceRecorder").isChecked(),
-      true,
-    );
-    await page.locator("#toolRedditBannerCensor").uncheck();
-    await page.locator("#toolUploadTraceRecorder").uncheck();
-    await page.locator("#toolOnlyfansAutoSelect").check();
-    await page.locator("#saveWorkflow").click();
-    await page
-      .locator("#workflowStatus")
-      .filter({ hasText: "Workflow settings saved." })
+    for (const toolId of [
+      "toolC4sUpload",
+      "toolOnlyfansAutoSelect",
+      "toolOnlyfansAutoFollow",
+      "toolRedditBannerCensor",
+      "toolUploadTraceRecorder",
+    ]) {
+      assert.equal(await workflowPage.locator(`#${toolId}`).isChecked(), true);
+    }
+    await workflowPage.locator("#toolC4sUpload").uncheck();
+    await workflowPage.locator("#toolRedditBannerCensor").uncheck();
+    await workflowPage.locator("#toolUploadTraceRecorder").uncheck();
+    await workflowPage.locator("#toolOnlyfansAutoFollow").uncheck();
+    await workflowPage.locator("#saveWorkflowSettings").click();
+    await workflowPage
+      .locator("#workflowSettingsStatus")
+      .filter({ hasText: "Helper settings saved" })
       .waitFor({ timeout: 60000 });
 
     const toolkitState = await workers[0].evaluate(async () => {
@@ -216,21 +215,26 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
           typeof CreatorUploadSessionStore?.save === "function",
       };
     });
-    assert.equal(toolkitState.settings.schemaVersion, 2);
+    assert.equal(toolkitState.settings.schemaVersion, 3);
     assert.equal(toolkitState.settings.tools.c4sUpload.enabled, false);
     assert.equal(toolkitState.settings.tools.onlyfansAutoSelect.enabled, true);
     assert.equal(toolkitState.settings.tools.onlyfansAutoSelect.autorun, false);
     assert.equal(toolkitState.settings.tools.onlyfansAutoFollow.enabled, false);
     assert.deepEqual(toolkitState.registrations, [
+      "creator-toolkit-fansly",
+      "creator-toolkit-manyvids",
       "creator-toolkit-onlyfans-lists",
+      "creator-toolkit-pornhub",
+      "creator-toolkit-sheer",
     ]);
     assert.equal(toolkitState.parsedRealbooruId, "321");
     assert.equal(toolkitState.hasUploadSessionStore, true);
     assert.equal(
-      JSON.parse(await page.locator("#workflowProfiles").inputValue()).sheerTags
-        .mode,
+      JSON.parse(await workflowPage.locator("#workflowProfiles").inputValue())
+        .sheerTags.mode,
       "append",
     );
+    await workflowPage.close();
 
     await workers[0].evaluate(async () => {
       const result = await chrome.storage.local.get("creatorToolkitV2");

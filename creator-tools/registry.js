@@ -6,7 +6,7 @@
   const STORAGE_KEY = "creatorToolkitV2";
   const LEGACY_STORAGE_KEY = "creatorToolkitV1";
   const ACTION_LOG_KEY = "creatorToolkitActionLogV1";
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
 
   const TOOL_DEFINITIONS = Object.freeze({
     uploadTraceRecorder: Object.freeze({
@@ -20,49 +20,49 @@
       id: "c4sUpload",
       title: "Clips4Sale upload assistant",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     phUploader: Object.freeze({
       id: "phUploader",
       title: "Pornhub uploader presets",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     fanslyPrefill: Object.freeze({
       id: "fanslyPrefill",
       title: "Fansly post prefill",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     manyvidsAutofill: Object.freeze({
       id: "manyvidsAutofill",
       title: "ManyVids edit assistant",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     sheerTags: Object.freeze({
       id: "sheerTags",
       title: "Sheer tag assistant",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     onlyfansAutoSelect: Object.freeze({
       id: "onlyfansAutoSelect",
       title: "OnlyFans list selection assistant",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     onlyfansAutoFollow: Object.freeze({
       id: "onlyfansAutoFollow",
       title: "OnlyFans follow assistant",
       mutates: true,
-      defaultEnabled: false,
+      defaultEnabled: true,
       defaultAutorun: false,
     }),
     redditBannerCensor: Object.freeze({
@@ -733,13 +733,15 @@
   function normalizeSettings(rawSettings) {
     const errors = [];
     const raw = isPlainObject(rawSettings) ? rawSettings : {};
+    const activateIntegratedHelpers = Number(raw.schemaVersion || 0) < 3;
     const tools = {};
 
     for (const [id, definition] of Object.entries(TOOL_DEFINITIONS)) {
       const candidate = isPlainObject(raw.tools) ? raw.tools[id] : null;
       tools[id] = {
-        enabled:
-          candidate && typeof candidate.enabled === "boolean"
+        enabled: activateIntegratedHelpers
+          ? definition.defaultEnabled
+          : candidate && typeof candidate.enabled === "boolean"
             ? candidate.enabled
             : definition.defaultEnabled,
         autorun:
@@ -762,7 +764,7 @@
   }
 
   function migrateLegacySettings(legacy) {
-    const raw = { schemaVersion: SCHEMA_VERSION, tools: {}, profiles: {} };
+    const raw = { schemaVersion: 2, tools: {}, profiles: {} };
     const source = isPlainObject(legacy) ? legacy : {};
     for (const [id, definition] of Object.entries(TOOL_DEFINITIONS)) {
       raw.tools[id] = {

@@ -33,10 +33,11 @@ replacement. All masked avatars are forced into the same circular frame.
 
 ## Creator workflow helpers
 
-Each helper has its own opt-in toggle and versioned profile in extension
-settings. State-changing helpers are disabled by default. Enabling one requests
-only that site's optional permission and adds a manual **preview → confirm →
-verified result** panel. The Master Uploader is the deliberate exception: after
+All integrated helpers are available by default. Their toggles, versioned
+profiles, and local history live under **Upload console → Settings**. Opening a
+supported site never starts a state-changing helper: its panel still requires
+the helper's own **preview → confirm → verified result** flow. The Master
+Uploader is the deliberate exception: after
 one exact Yes confirmation, it may drive the observed OnlyFans, Fansly, and
 ManyVids upload/schedule controls and reconcile the resulting links. It calls
 the same saved-profile recipes as the standalone Fansly, ManyVids, and Pornhub
@@ -157,12 +158,11 @@ not included.
    under **Video catalogue bridge**. The secret authorizes the otherwise
    anonymous extension request; do not share either value.
 7. Confirm your own handle is listed and choose an avatar source.
-8. Enable only the workflow helpers you want and approve their per-site
-   permissions. The upload trace recorder is enabled but idle by default;
-   recording begins only after **Start trace**. Review the advanced profile
-   JSON if you need different metadata, limits, or exact mode labels.
-9. Reload a newly enabled creator-site tab. Existing enabled tools stop
-   immediately when disabled.
+8. Open **Upload console → Settings** to turn helpers off or adjust advanced
+   profile JSON. The upload trace recorder is available but idle; recording
+   begins only after **Start trace**.
+9. Save helper changes, then reload an already-open creator-site tab if needed.
+   Disabling a helper also stops its work in open tabs.
 10. Reload OnlyFans.
 
 The personal edition requests access only to the supported creator-site routes

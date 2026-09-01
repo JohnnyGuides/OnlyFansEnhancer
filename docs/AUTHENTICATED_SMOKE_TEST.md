@@ -15,11 +15,10 @@ part of the release smoke test.
 ## Before testing
 
 - Build and load the validated personal ZIP or its exact source revision.
-- Open the extension options and restore safe defaults.
-- Confirm every state-changing helper is disabled and has autorun off.
-- Grant only the origin currently under test.
-- Enable one helper, reload its supported route, and confirm only one toolkit
-  panel is mounted.
+- Open **Upload console → Settings** and restore safe profiles.
+- Confirm every state-changing helper has autorun off.
+- Disable every helper except the one under test, reload its supported route,
+  and confirm only one toolkit panel is mounted.
 - Use a draft with harmless test metadata and a manual recovery path.
 - Keep DevTools open for uncaught errors, but do not paste private page markup
   into issues or logs.
@@ -27,12 +26,12 @@ part of the release smoke test.
 For every helper, verify that Disable and Stop prevent the next mutation, a
 route change removes the panel, returning to the route mounts one clean panel,
 and missing/duplicate/hidden controls yield a visible failure with no guessed
-action. Also verify that the options-page action log records a concise truthful
+action. Also verify that the uploader Settings history records a concise truthful
 outcome without page content or credentials.
 
 ## Upload console
 
-- Confirm the extension reports version `0.13.0` before testing. For the release
+- Confirm the extension reports version `0.16.0` before testing. For the release
   smoke pass, stop at the final preview on every site; do not click the global
   Yes when it would reach a real final platform control.
 - Configure distinctive safe saved profiles and verify the Master Uploader

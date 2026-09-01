@@ -75,16 +75,19 @@ const fixtures = [
       },
     );
 
-    const options = await context.newPage();
-    await options.goto(`chrome-extension://${extensionId}/options.html`);
-    await options.locator("#toolUploadTraceRecorder").waitFor();
-    await options.locator("#toolRedditBannerCensor").uncheck();
-    await options.locator("#saveWorkflow").click();
-    await options
-      .locator("#workflowStatus")
-      .filter({ hasText: "Workflow settings saved." })
+    const settings = await context.newPage();
+    await settings.goto(
+      `chrome-extension://${extensionId}/upload-console.html`,
+    );
+    await settings.getByRole("tab", { name: "Settings" }).click();
+    await settings.locator("#toolUploadTraceRecorder").waitFor();
+    await settings.locator("#toolRedditBannerCensor").uncheck();
+    await settings.locator("#saveWorkflowSettings").click();
+    await settings
+      .locator("#workflowSettingsStatus")
+      .filter({ hasText: "Helper settings saved" })
       .waitFor({ timeout: 60000 });
-    await options.close();
+    await settings.close();
 
     for (const fixture of fixtures) {
       const page = await context.newPage();

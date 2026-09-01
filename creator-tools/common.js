@@ -91,7 +91,13 @@
       registry.LEGACY_STORAGE_KEY,
     ]);
     const current = stored[registry.STORAGE_KEY];
-    if (current) return registry.normalizeSettings(current).value;
+    if (current) {
+      const normalized = registry.normalizeSettings(current).value;
+      if (JSON.stringify(current) !== JSON.stringify(normalized)) {
+        await storageSet({ [registry.STORAGE_KEY]: normalized });
+      }
+      return normalized;
+    }
 
     const migrated = registry.migrateLegacySettings(
       stored[registry.LEGACY_STORAGE_KEY],

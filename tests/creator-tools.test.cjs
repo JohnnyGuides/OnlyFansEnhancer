@@ -32,16 +32,35 @@ function loadRegistry() {
   return context.CreatorToolkitRegistry;
 }
 
-test("personal manifest uses least-privilege dynamic creator registrations", () => {
+test("personal manifest keeps every integrated creator helper active", () => {
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.15.3");
+  assert.equal(manifest.version, "0.16.0");
   assert.equal(
     fs.existsSync(path.join(toolsRoot, "catalogue-proposal.js")),
     true,
   );
-  assert.deepEqual(manifest.host_permissions, ["https://onlyfans.com/*"]);
+  const expectedCreatorOrigins = [
+    "https://onlyfans.com/*",
+    "https://workspace.clips4sale.com/*",
+    "https://pornhub.mainhub.com/*",
+    "https://fansly.com/*",
+    "https://www.manyvids.com/*",
+    "https://my.sheer.com/*",
+    "https://www.reddit.com/*",
+    "https://sh.reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://www.redgifs.com/*",
+    "https://x.com/*",
+  ];
+  for (const origin of expectedCreatorOrigins) {
+    assert.ok(
+      manifest.host_permissions.includes(origin),
+      `${origin} must be available without a separate options-page grant`,
+    );
+    assert.equal(manifest.optional_host_permissions.includes(origin), false);
+  }
   assert.ok(manifest.permissions.includes("scripting"));
   assert.ok(manifest.permissions.includes("offscreen"));
   assert.equal(
@@ -90,15 +109,9 @@ test("personal manifest uses least-privilege dynamic creator registrations", () 
   assert.deepEqual(manifest.content_scripts[0].js, ["core.js", "content.js"]);
 
   const expectedOptionalOrigins = [
-    "https://workspace.clips4sale.com/*",
-    "https://pornhub.mainhub.com/*",
-    "https://fansly.com/*",
-    "https://www.manyvids.com/*",
-    "https://my.sheer.com/*",
-    "https://www.reddit.com/*",
-    "https://sh.reddit.com/*",
-    "https://old.reddit.com/*",
-    "https://www.redgifs.com/*",
+    "https://gelbooru.com/*",
+    "https://*.gelbooru.com/*",
+    "https://realbooru.com/*",
     "https://script.google.com/*",
     "https://script.googleusercontent.com/*",
   ];
@@ -142,14 +155,14 @@ test("every adapter parses, mounts through the lifecycle, and is dynamically reg
   }
 });
 
-test("the registry fails closed and separates enabled from autorun", () => {
+test("the registry defaults every integrated helper on without autorunning mutations", () => {
   const registry = loadRegistry();
   const defaults = registry.normalizeSettings({}).value;
   for (const [id, definition] of Object.entries(registry.TOOL_DEFINITIONS)) {
     assert.equal(typeof defaults.tools[id].enabled, "boolean");
     assert.equal(typeof defaults.tools[id].autorun, "boolean");
+    assert.equal(defaults.tools[id].enabled, true, `${id} must default on`);
     if (definition.mutates) {
-      assert.equal(defaults.tools[id].enabled, false, `${id} must default off`);
       assert.equal(
         defaults.tools[id].autorun,
         false,
@@ -178,9 +191,40 @@ test("the registry fails closed and separates enabled from autorun", () => {
       typoTool: { enabled: true },
     },
   }).value;
-  assert.equal(malformed.tools.c4sUpload.enabled, false);
+  assert.equal(malformed.tools.c4sUpload.enabled, true);
   assert.equal(malformed.tools.c4sUpload.autorun, false);
   assert.equal(Object.hasOwn(malformed.tools, "typoTool"), false);
+});
+
+test("schema 2 enables every helper once and schema 3 preserves later choices", () => {
+  const registry = loadRegistry();
+  const oldSettings = registry.normalizeSettings({
+    schemaVersion: 2,
+    tools: Object.fromEntries(
+      Object.keys(registry.TOOL_DEFINITIONS).map((id) => [
+        id,
+        { enabled: false, autorun: false },
+      ]),
+    ),
+    profiles: { fanslyPrefill: { message: "kept" } },
+  }).value;
+
+  assert.equal(oldSettings.schemaVersion, 3);
+  assert.equal(
+    Object.values(oldSettings.tools).every((tool) => tool.enabled === true),
+    true,
+  );
+  assert.equal(oldSettings.profiles.fanslyPrefill.message, "kept");
+
+  const changedInUploader = registry.normalizeSettings({
+    ...oldSettings,
+    tools: {
+      ...oldSettings.tools,
+      c4sUpload: { enabled: false, autorun: false },
+    },
+  }).value;
+  assert.equal(changedInUploader.tools.c4sUpload.enabled, false);
+  assert.equal(changedInUploader.tools.fanslyPrefill.enabled, true);
 });
 
 test("Pornhub series mappings retain only bounded exact preset names", () => {

@@ -2,25 +2,10 @@
 
 const AVATAR_CACHE_SIZE = 96;
 const $ = (selector) => document.querySelector(selector);
-const CREATOR_REGISTRY = globalThis.CreatorToolkitRegistry;
 const CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
-if (!CREATOR_REGISTRY) {
-  throw new Error("Creator toolkit settings registry failed to load.");
-}
 if (!CATALOGUE_CLIENT) {
   throw new Error("Creator catalogue client failed to load.");
 }
-const TOOLKIT_CONTROLS = Object.freeze({
-  uploadTraceRecorder: "#toolUploadTraceRecorder",
-  c4sUpload: "#toolC4sUpload",
-  phUploader: "#toolPhUploader",
-  fanslyPrefill: "#toolFanslyPrefill",
-  manyvidsAutofill: "#toolManyvidsAutofill",
-  sheerTags: "#toolSheerTags",
-  onlyfansAutoSelect: "#toolOnlyfansAutoSelect",
-  onlyfansAutoFollow: "#toolOnlyfansAutoFollow",
-  redditBannerCensor: "#toolRedditBannerCensor",
-});
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -44,43 +29,11 @@ function showStatus(message, isError = false) {
   status.style.color = isError ? "#ffb4c4" : "#91d8ac";
 }
 
-function showWorkflowStatus(message, isError = false) {
-  const status = $("#workflowStatus");
-  status.textContent = message;
-  status.style.color = isError ? "#ffb4c4" : "#91d8ac";
-}
-
 function showCatalogueStatus(message, isError = false) {
   const status = $("#catalogueBridgeStatus");
   status.textContent = message;
   status.style.color = isError ? "#ffb4c4" : "#91d8ac";
 }
-
-const TOOL_PERMISSION_ORIGINS = Object.freeze({
-  uploadTraceRecorder: [
-    "https://onlyfans.com/*",
-    "https://fansly.com/*",
-    "https://www.manyvids.com/*",
-    "https://pornhub.mainhub.com/*",
-    "https://www.reddit.com/*",
-    "https://sh.reddit.com/*",
-    "https://old.reddit.com/*",
-    "https://www.redgifs.com/*",
-    "https://x.com/*",
-  ],
-  c4sUpload: ["https://workspace.clips4sale.com/*"],
-  phUploader: ["https://pornhub.mainhub.com/*"],
-  fanslyPrefill: ["https://fansly.com/*"],
-  manyvidsAutofill: ["https://www.manyvids.com/*"],
-  sheerTags: ["https://my.sheer.com/*"],
-  onlyfansAutoSelect: ["https://onlyfans.com/*"],
-  onlyfansAutoFollow: ["https://onlyfans.com/*"],
-  redditBannerCensor: [
-    "https://www.reddit.com/*",
-    "https://sh.reddit.com/*",
-    "https://old.reddit.com/*",
-  ],
-});
 
 function toggleGelbooruFields() {
   const mode = $("#avatarMode").value;
@@ -116,31 +69,6 @@ function validateGelbooruCredentials() {
   return credentials;
 }
 
-async function loadWorkflowSettings() {
-  const stored = await chrome.storage.local.get([
-    CREATOR_REGISTRY.STORAGE_KEY,
-    CREATOR_REGISTRY.LEGACY_STORAGE_KEY,
-    CREATOR_REGISTRY.ACTION_LOG_KEY,
-  ]);
-  const settings = stored[CREATOR_REGISTRY.STORAGE_KEY]
-    ? CREATOR_REGISTRY.normalizeSettings(stored[CREATOR_REGISTRY.STORAGE_KEY])
-        .value
-    : CREATOR_REGISTRY.migrateLegacySettings(
-        stored[CREATOR_REGISTRY.LEGACY_STORAGE_KEY],
-      );
-  if (!stored[CREATOR_REGISTRY.STORAGE_KEY]) {
-    await chrome.storage.local.set({
-      [CREATOR_REGISTRY.STORAGE_KEY]: settings,
-    });
-  }
-  for (const [key, selector] of Object.entries(TOOLKIT_CONTROLS)) {
-    $(selector).checked = settings.tools[key]?.enabled === true;
-  }
-  $("#workflowProfiles").value = JSON.stringify(settings.profiles, null, 2);
-  renderWorkflowHistory(stored[CREATOR_REGISTRY.ACTION_LOG_KEY]);
-  return settings;
-}
-
 async function loadCatalogueBridge() {
   const config = await CATALOGUE_CLIENT.loadConfig();
   $("#catalogueBridgeUrl").value = config.endpoint;
@@ -170,27 +98,6 @@ async function saveCatalogueBridge() {
   $("#catalogueBridgeUrl").value = saved.endpoint;
   $("#catalogueBridgeSecret").value = saved.secret;
   showCatalogueStatus("Catalogue bridge saved for the upload console.");
-}
-
-function renderWorkflowHistory(history) {
-  const list = $("#workflowHistory");
-  list.replaceChildren();
-  const entries = Array.isArray(history) ? history.slice(0, 50) : [];
-  for (const entry of entries) {
-    const row = document.createElement("li");
-    const time = entry.timestamp
-      ? new Date(entry.timestamp).toLocaleString()
-      : "unknown time";
-    row.textContent = `${time} · ${entry.toolId || "unknown tool"} · ${
-      entry.status || "unknown"
-    } · ${entry.summary || "no summary"}`;
-    list.appendChild(row);
-  }
-  if (!entries.length) {
-    const row = document.createElement("li");
-    row.textContent = "No workflow actions have been recorded.";
-    list.appendChild(row);
-  }
 }
 
 async function loadIdentitySettings() {
@@ -327,7 +234,6 @@ async function loadAvatarManagementView() {
 
 async function load() {
   const results = await Promise.allSettled([
-    loadWorkflowSettings(),
     loadCatalogueBridge(),
     loadIdentitySettings(),
     loadIdentityStats(),
@@ -594,91 +500,6 @@ async function testRealbooru() {
   }
 }
 
-function workflowSettingsFromForm() {
-  let profiles;
-  try {
-    profiles = JSON.parse($("#workflowProfiles").value);
-  } catch (error) {
-    throw new Error(`Workflow profile JSON is invalid: ${error.message}`, {
-      cause: error,
-    });
-  }
-  const tools = Object.fromEntries(
-    Object.entries(TOOLKIT_CONTROLS).map(([key, selector]) => [
-      key,
-      {
-        enabled: $(selector).checked === true,
-        autorun: key === "redditBannerCensor" && $(selector).checked === true,
-      },
-    ]),
-  );
-  const normalized = CREATOR_REGISTRY.normalizeSettings({
-    schemaVersion: CREATOR_REGISTRY.SCHEMA_VERSION,
-    tools,
-    profiles,
-  });
-  if (normalized.errors.length) {
-    throw new Error(normalized.errors.join(" "));
-  }
-  return normalized.value;
-}
-
-async function requestWorkflowPermissions(settings) {
-  const origins = new Set();
-  for (const [toolId, tool] of Object.entries(settings.tools)) {
-    if (!tool.enabled) continue;
-    for (const origin of TOOL_PERMISSION_ORIGINS[toolId] || []) {
-      if (origin !== "https://onlyfans.com/*") origins.add(origin);
-    }
-  }
-  if (!origins.size) return true;
-  return chrome.permissions.request({ origins: Array.from(origins).sort() });
-}
-
-async function saveWorkflowSettings() {
-  showWorkflowStatus("");
-  const settings = workflowSettingsFromForm();
-  const granted = await requestWorkflowPermissions(settings);
-  if (!granted) {
-    throw new Error(
-      "Required creator-site permission was not granted. Workflow settings were not changed.",
-    );
-  }
-  await chrome.storage.local.set({
-    [CREATOR_REGISTRY.STORAGE_KEY]: settings,
-  });
-  const { creatorTools } = await sendMessage({
-    type: "SYNC_CREATOR_TOOLS",
-  });
-  $("#workflowProfiles").value = JSON.stringify(settings.profiles, null, 2);
-  const skipped = creatorTools.skipped || [];
-  showWorkflowStatus(
-    skipped.length
-      ? `Saved, but ${skipped.length} helper registration(s) were skipped because a site permission is missing.`
-      : "Workflow settings saved. Active tools stop immediately when disabled; reload a site tab after newly enabling its panel.",
-    skipped.length > 0,
-  );
-}
-
-function resetWorkflowProfiles() {
-  $("#workflowProfiles").value = JSON.stringify(
-    CREATOR_REGISTRY.DEFAULT_PROFILES,
-    null,
-    2,
-  );
-  showWorkflowStatus(
-    "Safe profile defaults restored in the editor. Review them, then click Save workflow settings.",
-  );
-}
-
-async function clearWorkflowHistory() {
-  await chrome.storage.local.set({
-    [CREATOR_REGISTRY.ACTION_LOG_KEY]: [],
-  });
-  renderWorkflowHistory([]);
-  showWorkflowStatus("Local workflow history cleared.");
-}
-
 async function save() {
   showStatus("");
   const avatarMode = $("#avatarMode").value;
@@ -738,20 +559,9 @@ $("#avatarMode").addEventListener("change", toggleGelbooruFields);
 $("#save").addEventListener("click", () => {
   save().catch((error) => showStatus(error.message, true));
 });
-$("#saveWorkflow").addEventListener("click", () => {
-  saveWorkflowSettings().catch((error) =>
-    showWorkflowStatus(error.message, true),
-  );
-});
 $("#saveCatalogueBridge").addEventListener("click", () => {
   saveCatalogueBridge().catch((error) =>
     showCatalogueStatus(error.message, true),
-  );
-});
-$("#resetWorkflowProfiles").addEventListener("click", resetWorkflowProfiles);
-$("#clearWorkflowHistory").addEventListener("click", () => {
-  clearWorkflowHistory().catch((error) =>
-    showWorkflowStatus(error.message, true),
   );
 });
 $("#reset").addEventListener("click", () => {

@@ -2683,6 +2683,7 @@ for (const scenario of [
       await page.evaluate((config) => {
         globalThis.consoleMessages = [];
         globalThis.catalogueRequests = 0;
+        globalThis.permissionRequests = 0;
         globalThis.fetch = async () => {
           globalThis.catalogueRequests += 1;
           return new Response("Unavailable", { status: 503 });
@@ -2693,7 +2694,12 @@ for (const scenario of [
               get: async () => ({ creatorUploadSheetBridgeV1: config }),
             },
           },
-          permissions: { request: async () => true },
+          permissions: {
+            request: async () => {
+              globalThis.permissionRequests += 1;
+              return true;
+            },
+          },
           runtime: {
             connect: () => ({
               onMessage: { addListener() {} },
@@ -2769,6 +2775,11 @@ for (const scenario of [
         await page.evaluate(() => globalThis.catalogueRequests),
         scenario.requests,
       );
+      assert.equal(
+        await page.evaluate(() => globalThis.permissionRequests),
+        0,
+        "Required creator-site access must not prompt during an upload.",
+      );
 
       // Editing must keep the explicit upload-only choice and invalidate the old preview.
       await page.locator("#uploadDescription").fill("My final description");
@@ -2803,6 +2814,11 @@ for (const scenario of [
         await page.locator("#results button").count(),
         0,
         "Successful upload-only posts must not offer a repost or sheet retry.",
+      );
+      assert.equal(
+        await page.evaluate(() => globalThis.permissionRequests),
+        0,
+        "Required creator-site access must not prompt during an upload.",
       );
     } finally {
       await browser.close();

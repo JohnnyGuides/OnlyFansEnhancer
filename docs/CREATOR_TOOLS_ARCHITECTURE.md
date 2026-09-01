@@ -8,7 +8,8 @@ Store edition under `store/`.
 
 Every state-changing adapter must satisfy all of these invariants:
 
-1. It defaults disabled and cannot autorun.
+1. It may be available by default, but cannot autorun a mutation merely because
+   a supported page opened.
 2. It shows a complete local preview before a confirmation action.
 3. It targets one visible, connected, enabled, semantically verified control.
 4. Autocomplete and taxonomy values require one exact normalized match.
@@ -37,8 +38,8 @@ or failure can never block an adapter.
 ## Files
 
 - `creator-tools/registry.js` is the only settings/profile schema and migration
-  source. Mutating defaults are false. Profile policy is validated and
-  bounded.
+  source. Schema 3 activates integrated helpers once while keeping every
+  mutation manual. Profile policy is validated and bounded.
 - `creator-tools/common.js` owns storage, lifecycle, abortable waits, exact DOM
   contracts, action budgets, the accessible Shadow DOM panel, and local logs.
 - `creator-tools/onlyfans-list-common.js` owns stable user keys, context
@@ -47,9 +48,11 @@ or failure can never block an adapter.
 - `creator-tools/upload-trace-recorder.js` owns the bounded local observation
   panel used to gather evidence for future adapters. It is registered per site
   and does not use the mutation runtime.
-- `upload-console.js` owns the editable Master Uploader draft and every `File`
-  object. It loads one normalized saved-profile snapshot, displays one exact
-  cross-site plan, and sends it only after the creator confirms Yes.
+- `upload-console.js` owns the editable Master Uploader draft, every `File`
+  object, and the single helper Settings surface. It loads one normalized
+  saved-profile snapshot, displays one exact cross-site plan, and sends it only
+  after the creator confirms Yes. Changing helper settings preserves selected
+  files but invalidates and rebuilds an existing confirmation.
 - `creator-tools/upload-session-store.js` stores only bounded allow-listed job
   metadata in `chrome.storage.session`. Monotonic submission flags, numeric
   ManyVids IDs, and captured canonical URLs cannot be cleared by a later write.
@@ -65,9 +68,9 @@ or failure can never block an adapter.
 - Each remaining file is one platform adapter. It may know site selectors but
   must not duplicate storage, lifecycle, panel, logging, or action-budget
   logic.
-- `background.js` dynamically registers only enabled adapters. Creator origins
-  are optional permissions; OnlyFans remains a required origin for the
-  identity-mask product. It also coordinates authenticated Master Uploader tabs,
+- `background.js` dynamically registers only enabled adapters. Supported
+  creator-site origins are declared by the personal build; Gelbooru, Realbooru,
+  and the optional catalogue bridge retain optional access. It also coordinates authenticated Master Uploader tabs,
   checkpoints every stage, and refuses to repeat an uncertain final submission.
 
 ## Master Uploader boundaries
@@ -86,7 +89,7 @@ mismatch; only a teaser missing at confirmation may be supplied later.
 
 Pornhub is intentionally narrower. The confirmed plan chooses the optional
 Pornhub video or falls back to the full video and records that effective
-filename, but version 0.13.0 applies only the verified exact preset metadata.
+filename, but version 0.16.0 applies only the verified exact preset metadata.
 File assignment, title/description, scheduling, final Submit, and canonical link
 capture remain manual. The catalogue contract already validates canonical
 `viewkey` links and column H without inventing or scraping one.
@@ -107,10 +110,11 @@ tools.<toolId>.autorun
 profiles.<toolId>
 ```
 
-The registry sanitizes runtime data and reports invalid profile policy to the
-options page. Legacy `creatorToolkitV1` booleans migrate once. Existing enabled
-tools remain enabled after migration, but all rewritten mutating behavior is
-still manual.
+The registry sanitizes runtime data and reports invalid profile policy in
+**Upload console → Settings**. Legacy `creatorToolkitV1` booleans migrate once;
+schema 2 settings then activate all integrated helpers once. Schema 3 preserves
+every later on/off choice. All mutating behavior remains manual outside an
+exact confirmed Master Uploader plan.
 
 `chrome.storage.onChanged` is the emergency-stop path. A mounted adapter is
 aborted and disposed immediately when disabled or reconfigured. The background
@@ -119,7 +123,7 @@ worker separately updates future-page content-script registrations.
 ## Adding or changing an adapter
 
 1. Add its definition and safe profile defaults to `registry.js`.
-2. Add its optional origin and dynamic registration to `background.js`.
+2. Add its supported origin and dynamic registration to `background.js`.
 3. Use `CreatorToolkit.mountTool`; return a complete disposer.
 4. Use `createToolPanel` and `createActionRunner`.
 5. Implement a read-only inspector that builds a preview and signature.

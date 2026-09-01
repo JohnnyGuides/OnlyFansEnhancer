@@ -203,6 +203,7 @@ async function mountConsole(page, options = {}) {
       const stored = {
         creatorSocialSubredditSelectionV1: ["GamesGoneWild"],
       };
+      globalThis.__socialUiStorage = stored;
       globalThis.chrome = {
         storage: {
           local: {
@@ -240,7 +241,12 @@ async function mountConsole(page, options = {}) {
                 ? { ok: true, uploadSession: { platforms: [] } }
                 : message.type === "START_CREATOR_UPLOAD"
                   ? { ok: true, results: [] }
-                  : { ok: true },
+                  : message.type === "SYNC_CREATOR_TOOLS"
+                    ? {
+                        ok: true,
+                        creatorTools: { registered: [], skipped: [] },
+                      }
+                    : { ok: true },
             );
           },
         },
@@ -328,6 +334,89 @@ async function mountConsole(page, options = {}) {
     });
   }
 }
+
+test("workflow helpers are active and configured only inside the uploader Settings tab", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+  });
+  try {
+    await mountConsole(page);
+
+    const uploaderTab = page.getByRole("tab", { name: "Uploader" });
+    const settingsTab = page.getByRole("tab", { name: "Settings" });
+    assert.equal(await uploaderTab.getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator("#settingsPanel").isHidden(), true);
+    assert.equal(
+      await page.locator("#confirmation").getAttribute("hidden"),
+      null,
+    );
+
+    await settingsTab.click();
+    assert.equal(await settingsTab.getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator("#settingsPanel").isVisible(), true);
+
+    const switches = page.locator('#settingsPanel input[role="switch"]');
+    assert.equal(await switches.count(), 9);
+    for (const helper of await switches.all()) {
+      assert.equal(await helper.isChecked(), true);
+    }
+
+    await page.locator("#toolC4sUpload").uncheck();
+    assert.match(
+      await page.locator("#workflowSettingsStatus").innerText(),
+      /unsaved/i,
+    );
+    await page.locator("#saveWorkflowSettings").click();
+    await page.getByText(/Helper settings saved/i).waitFor();
+    assert.equal(
+      await page.locator("#confirmation").getAttribute("hidden"),
+      "",
+    );
+
+    const persisted = await page.evaluate(() => ({
+      settings: structuredClone(__socialUiStorage.creatorToolkitV2),
+      messages: structuredClone(__socialUiMessages),
+      fileName: document.querySelector("#uploadFullVideo").files[0]?.name || "",
+    }));
+    assert.equal(persisted.settings.schemaVersion, 3);
+    assert.equal(persisted.settings.tools.c4sUpload.enabled, false);
+    assert.equal(persisted.settings.tools.fanslyPrefill.enabled, true);
+    assert.equal(
+      persisted.messages.some(
+        (message) => message.type === "SYNC_CREATOR_TOOLS",
+      ),
+      true,
+    );
+
+    await uploaderTab.click();
+    assert.equal(await page.locator("#uploaderPanel").isVisible(), true);
+    assert.equal(persisted.fileName, "Ashley full.mp4");
+
+    await uploaderTab.focus();
+    await uploaderTab.press("ArrowRight");
+    assert.equal(await settingsTab.getAttribute("aria-selected"), "true");
+    assert.equal(await settingsTab.getAttribute("tabindex"), "0");
+    assert.equal(await uploaderTab.getAttribute("tabindex"), "-1");
+    await settingsTab.press("Home");
+    assert.equal(await uploaderTab.getAttribute("aria-selected"), "true");
+
+    const optionsPage = await browser.newPage();
+    const optionsHtml = fs
+      .readFileSync(path.join(repositoryRoot, "options.html"), "utf8")
+      .replace(/<script[^>]+><\/script>/gi, "");
+    await optionsPage.setContent(optionsHtml);
+    assert.equal(await optionsPage.locator("#toolC4sUpload").count(), 0);
+    assert.equal(
+      await optionsPage
+        .getByRole("heading", { name: "Workflow helpers" })
+        .count(),
+      0,
+    );
+  } finally {
+    await browser.close();
+  }
+});
 
 test("Yes rechecks selected subreddit revisions before any platform mutation", async () => {
   const browser = await chromium.launch({ headless: true });

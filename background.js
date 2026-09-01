@@ -2303,9 +2303,14 @@ async function getCreatorSettings() {
     CREATOR_REGISTRY.LEGACY_STORAGE_KEY,
   ]);
   if (stored[CREATOR_REGISTRY.STORAGE_KEY]) {
-    return CREATOR_REGISTRY.normalizeSettings(
-      stored[CREATOR_REGISTRY.STORAGE_KEY],
-    ).value;
+    const current = stored[CREATOR_REGISTRY.STORAGE_KEY];
+    const normalized = CREATOR_REGISTRY.normalizeSettings(current).value;
+    if (JSON.stringify(current) !== JSON.stringify(normalized)) {
+      await chrome.storage.local.set({
+        [CREATOR_REGISTRY.STORAGE_KEY]: normalized,
+      });
+    }
+    return normalized;
   }
   const migrated = CREATOR_REGISTRY.migrateLegacySettings(
     stored[CREATOR_REGISTRY.LEGACY_STORAGE_KEY],
@@ -2356,7 +2361,7 @@ async function performCreatorToolRegistrationSync(settings = null) {
     if (!(await hasAllOrigins(definition.origins))) {
       skipped.push({
         id: definition.id,
-        reason: "required optional site permission is not granted",
+        reason: "required site access is not available",
       });
       continue;
     }
@@ -3951,11 +3956,18 @@ chrome.runtime.onInstalled.addListener(async () => {
     writes[SETTINGS_KEY] = normalizedIdentitySettings;
   }
   if (!current[STATE_KEY]) writes[STATE_KEY] = normalizeState();
-  if (!current[CREATOR_REGISTRY.STORAGE_KEY]) {
-    writes[CREATOR_REGISTRY.STORAGE_KEY] =
-      CREATOR_REGISTRY.migrateLegacySettings(
+  const currentCreatorSettings = current[CREATOR_REGISTRY.STORAGE_KEY];
+  const normalizedCreatorSettings = currentCreatorSettings
+    ? CREATOR_REGISTRY.normalizeSettings(currentCreatorSettings).value
+    : CREATOR_REGISTRY.migrateLegacySettings(
         current[CREATOR_REGISTRY.LEGACY_STORAGE_KEY],
       );
+  if (
+    !currentCreatorSettings ||
+    JSON.stringify(currentCreatorSettings) !==
+      JSON.stringify(normalizedCreatorSettings)
+  ) {
+    writes[CREATOR_REGISTRY.STORAGE_KEY] = normalizedCreatorSettings;
   }
   if (Object.keys(writes).length > 0) await chrome.storage.local.set(writes);
   await syncCreatorToolRegistrations();

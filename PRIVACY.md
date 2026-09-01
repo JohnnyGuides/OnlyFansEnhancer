@@ -1,11 +1,11 @@
 # Privacy policy
 
-Last updated: July 26, 2026
+Last updated: September 1, 2026
 
 Creator Workflow Toolkit is a personal, locally installed extension. Its Fan
 Identity Mask feature replaces fan names and profile pictures in the local
-browser display. Its optional workflow helpers interact with supported creator
-site forms and controls at the user's direction.
+browser display. Its workflow helpers interact with supported creator-site
+forms and controls only at the user's direction.
 
 ## Data processed and stored locally
 
@@ -62,8 +62,10 @@ local data URLs. A network rule sets `Referer: https://realbooru.com/` only for
 Realbooru thumbnail and image paths.
 
 The creator workflow helpers make no requests to a developer-operated service.
-They request site access only when needed and require a local preview and
-confirmation before changing a form or account state. When a helper fills a
+The personal build declares access to its supported creator sites so helpers
+are ready without an upload-time permission prompt. State-changing helpers
+still require a local preview and confirmation before changing a form or
+account state. When a helper fills a
 form, follows an account, selects users, or clicks a site control, the supported
 website processes that action through its normal authenticated page behavior,
 just as it would after a manual click. The extension does not transmit workflow
@@ -104,10 +106,10 @@ explicitly re-enable an unassigned retired picture in extension settings;
 clearing extension storage or uninstalling removes the entire history.
 
 Workflow-helper settings and up to 100 concise local action-result entries
-remain until they are cleared in extension settings, extension storage is
-cleared, or the extension is uninstalled. Entries contain the tool ID, time,
-page URL, overall result, and per-field status; they do not copy post bodies,
-messages, credentials, or page content.
+remain until they are cleared under **Upload console → Settings**, extension
+storage is cleared, or the extension is uninstalled. Entries contain the tool
+ID, time, page URL, overall result, and per-field status; they do not copy post
+bodies, messages, credentials, or page content.
 
 ## Security note
 

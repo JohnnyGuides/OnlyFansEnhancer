@@ -1,14 +1,14 @@
 # Social publishing trace capture
 
-Version 0.15.3 includes sanitized Record Steps panels for X, Redgifs, and Reddit.
+Version 0.16.0 includes sanitized Record Steps panels for X, Redgifs, and Reddit.
 These traces are mandatory evidence for the publishing adapters; the recorder
 does not fill fields, upload media, or click platform controls.
 
 ## Before recording
 
 1. Load or reload the unpacked personal extension in `chrome://extensions`.
-2. Open the extension options, keep **Upload trace recorder** enabled, and
-   select **Save workflow settings** to grant the optional site permissions.
+2. Open **Upload console → Settings**, keep **Upload trace recorder** enabled,
+   and select **Save helper settings**.
 3. Sign in to X, Redgifs, and Reddit in ordinary Chrome tabs.
 4. Use a real social teaser and normal text. Entered caption, body, and link
    values are represented only as `empty` or `nonempty` in the downloaded

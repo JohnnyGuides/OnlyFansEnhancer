@@ -110,6 +110,9 @@ test("store edition loads, requires consent, and renders listing screenshot", as
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`chrome-extension://${extensionId}/options.html`);
     await page.locator("#consentAccepted").waitFor();
+    await page.waitForFunction(
+      () => document.querySelector("#enabled")?.disabled === true,
+    );
 
     assert.equal(await page.locator("#consentAccepted").isChecked(), false);
     assert.equal(await page.locator("#enabled").isDisabled(), true);

@@ -105,7 +105,7 @@ test("shared runtime fails closed, disposes on settings changes, and aborts pend
       };
     });
     assert.deepEqual(initial, {
-      c4sEnabled: false,
+      c4sEnabled: true,
       exactStatus: "found",
       missingStatus: "missing",
       ambiguousCode: "AMBIGUOUS_TARGET",
@@ -214,6 +214,39 @@ test("shared runtime fails closed, disposes on settings changes, and aborts pend
     assert.equal(stopped.status, "stopped");
     assert.equal(stopped.mutated, false);
     assert.equal(stopped.logged, "stopped");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("loading schema 2 settings persists the one-time all-helper activation", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await loadRuntime(page, {
+      creatorToolkitV2: {
+        schemaVersion: 2,
+        tools: {
+          c4sUpload: { enabled: false, autorun: false },
+          uploadTraceRecorder: { enabled: false, autorun: false },
+        },
+        profiles: { fanslyPrefill: { message: "preserve this" } },
+      },
+    });
+
+    const result = await page.evaluate(async () => {
+      const settings = await CreatorToolkit.loadSettings();
+      return {
+        loaded: settings,
+        stored: __toolkitTestStorage.creatorToolkitV2,
+      };
+    });
+
+    assert.equal(result.loaded.schemaVersion, 3);
+    assert.equal(result.loaded.tools.c4sUpload.enabled, true);
+    assert.equal(result.loaded.tools.uploadTraceRecorder.enabled, true);
+    assert.equal(result.loaded.profiles.fanslyPrefill.message, "preserve this");
+    assert.deepEqual(result.stored, result.loaded);
   } finally {
     await browser.close();
   }

@@ -40,7 +40,8 @@ test("recorder is integrated into the personal toolkit and excluded from store",
   assert.equal(registry.TOOL_DEFINITIONS.uploadTraceRecorder.mutates, false);
   assert.equal(defaults.tools.uploadTraceRecorder.enabled, true);
   assert.equal(defaults.tools.uploadTraceRecorder.autorun, false);
-  assert.match(read("options.html"), /id="toolUploadTraceRecorder"/);
+  assert.match(read("upload-console.html"), /id="toolUploadTraceRecorder"/);
+  assert.doesNotMatch(read("options.html"), /id="toolUploadTraceRecorder"/);
   assert.match(
     read("scripts/build-personal-package.ps1"),
     /creator-tools\/upload-trace-recorder\.js/,

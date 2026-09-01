@@ -11,6 +11,17 @@
   const PRESET_REVISION = /^[a-f0-9]{8,64}$/i;
   const X_CAPTION_MAX = 280;
   const REDDIT_TITLE_MAX = 300;
+  const WORKFLOW_TOOL_CONTROLS = Object.freeze({
+    uploadTraceRecorder: "#toolUploadTraceRecorder",
+    c4sUpload: "#toolC4sUpload",
+    phUploader: "#toolPhUploader",
+    fanslyPrefill: "#toolFanslyPrefill",
+    manyvidsAutofill: "#toolManyvidsAutofill",
+    sheerTags: "#toolSheerTags",
+    onlyfansAutoSelect: "#toolOnlyfansAutoSelect",
+    onlyfansAutoFollow: "#toolOnlyfansAutoFollow",
+    redditBannerCensor: "#toolRedditBannerCensor",
+  });
 
   function localDateTimeValue(date, timeZone) {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -539,6 +550,20 @@
     const confirmUpload = get("#confirmUpload");
     const rejectMatch = get("#rejectMatch");
     const results = get("#results");
+    const workspaceTabs = get("#workspaceTabs");
+    const uploaderTab = get("#uploaderTab");
+    const settingsTab = get("#settingsTab");
+    const uploaderPanel = get("#uploaderPanel");
+    const settingsPanel = get("#settingsPanel");
+    const workflowSettingsForm = get("#workflowSettingsForm");
+    const workflowSettingsStatus = get("#workflowSettingsStatus");
+    const workflowProfilesInput = get("#workflowProfiles");
+    const saveWorkflowSettingsButton = get("#saveWorkflowSettings");
+    const resetWorkflowProfilesButton = get("#resetWorkflowProfiles");
+    const clearWorkflowHistoryButton = get("#clearWorkflowHistory");
+    const workflowHistory = get("#workflowHistory");
+    const activeHelperCount = get("#activeHelperCount");
+    const creatorRegistry = globalThis.CreatorToolkitRegistry;
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const initialSchedule = nextFridayUtc(new Date(), timeZone);
     let fullFile = null;
@@ -573,8 +598,176 @@
           : [];
       });
     const platformStates = new Map();
+    const workflowControls = Object.fromEntries(
+      Object.entries(WORKFLOW_TOOL_CONTROLS).map(([id, selector]) => [
+        id,
+        get(selector),
+      ]),
+    );
 
     releaseDate.value = initialSchedule.releaseDate;
+
+    function selectWorkspaceTab(nextTab, focus = false) {
+      const showSettings = nextTab === settingsTab;
+      for (const [tab, panel, selected] of [
+        [uploaderTab, uploaderPanel, !showSettings],
+        [settingsTab, settingsPanel, showSettings],
+      ]) {
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        panel.hidden = !selected;
+      }
+      if (focus) nextTab.focus();
+    }
+
+    function handleWorkspaceTabKey(event) {
+      const tabs = [uploaderTab, settingsTab];
+      const current = tabs.indexOf(event.currentTarget);
+      let next = current;
+      if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") {
+        next = (current - 1 + tabs.length) % tabs.length;
+      } else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      selectWorkspaceTab(tabs[next], true);
+    }
+
+    function updateActiveHelperCount() {
+      const active = Object.values(workflowControls).filter(
+        (control) => control.checked,
+      ).length;
+      activeHelperCount.textContent = `${active} active`;
+    }
+
+    function showWorkflowSettingsStatus(message, state = "saved") {
+      workflowSettingsStatus.textContent = message;
+      workflowSettingsStatus.dataset.state = state;
+    }
+
+    function markWorkflowSettingsDirty() {
+      updateActiveHelperCount();
+      showWorkflowSettingsStatus(
+        "Unsaved changes. Save to update active site helpers and upload recipes.",
+        "dirty",
+      );
+    }
+
+    function renderWorkflowHistory(history) {
+      workflowHistory.replaceChildren();
+      const entries = Array.isArray(history) ? history.slice(0, 50) : [];
+      for (const entry of entries) {
+        const row = document.createElement("li");
+        const time = entry.timestamp
+          ? new Date(entry.timestamp).toLocaleString()
+          : "unknown time";
+        row.textContent = `${time} · ${entry.toolId || "unknown tool"} · ${entry.status || "unknown"} · ${entry.summary || "no summary"}`;
+        workflowHistory.append(row);
+      }
+      if (!entries.length) {
+        const row = document.createElement("li");
+        row.textContent = "No workflow actions have been recorded.";
+        workflowHistory.append(row);
+      }
+    }
+
+    function workflowSettingsFromForm() {
+      let profiles;
+      try {
+        profiles = JSON.parse(workflowProfilesInput.value);
+      } catch (error) {
+        throw new Error(`Workflow profile JSON is invalid: ${error.message}`, {
+          cause: error,
+        });
+      }
+      const tools = Object.fromEntries(
+        Object.entries(workflowControls).map(([id, control]) => [
+          id,
+          {
+            enabled: control.checked,
+            autorun: id === "redditBannerCensor" && control.checked,
+          },
+        ]),
+      );
+      const normalized = creatorRegistry.normalizeSettings({
+        schemaVersion: creatorRegistry.SCHEMA_VERSION,
+        tools,
+        profiles,
+      });
+      if (normalized.errors.length) {
+        throw new Error(normalized.errors.join(" "));
+      }
+      return normalized.value;
+    }
+
+    async function loadWorkflowSettingsPanel() {
+      const settings = await globalThis.CreatorToolkit.loadSettings();
+      for (const [id, control] of Object.entries(workflowControls)) {
+        control.checked = settings.tools[id]?.enabled === true;
+      }
+      workflowProfilesInput.value = JSON.stringify(settings.profiles, null, 2);
+      workflowProfiles = settings.profiles;
+      profilesLoaded = true;
+      const stored = await chrome.storage.local.get(
+        creatorRegistry.ACTION_LOG_KEY,
+      );
+      renderWorkflowHistory(stored[creatorRegistry.ACTION_LOG_KEY]);
+      updateActiveHelperCount();
+      showWorkflowSettingsStatus(
+        "All changes are saved. Enabled helpers are available on matching sites.",
+      );
+      return settings;
+    }
+
+    async function saveWorkflowSettingsPanel() {
+      saveWorkflowSettingsButton.disabled = true;
+      showWorkflowSettingsStatus("Saving helper settings…", "loading");
+      try {
+        const settings = await globalThis.CreatorToolkit.saveSettings(
+          workflowSettingsFromForm(),
+        );
+        const response = await sendMessage({ type: "SYNC_CREATOR_TOOLS" });
+        workflowProfilesInput.value = JSON.stringify(
+          settings.profiles,
+          null,
+          2,
+        );
+        workflowProfiles = settings.profiles;
+        profilesLoaded = true;
+        updateActiveHelperCount();
+        invalidateMatch();
+        scheduleMatch();
+        const skipped = response.creatorTools?.skipped || [];
+        showWorkflowSettingsStatus(
+          skipped.length
+            ? `Helper settings saved, but ${skipped.length} site registration${skipped.length === 1 ? " is" : "s are"} unavailable. Check Chrome site access, then reload that site.`
+            : "Helper settings saved. Active site helpers and upload recipes are updated.",
+          skipped.length ? "error" : "saved",
+        );
+      } catch (error) {
+        showWorkflowSettingsStatus(error.message, "error");
+      } finally {
+        saveWorkflowSettingsButton.disabled = false;
+      }
+    }
+
+    function resetWorkflowProfiles() {
+      workflowProfilesInput.value = JSON.stringify(
+        creatorRegistry.DEFAULT_PROFILES,
+        null,
+        2,
+      );
+      markWorkflowSettingsDirty();
+    }
+
+    async function clearWorkflowHistory() {
+      await chrome.storage.local.set({
+        [creatorRegistry.ACTION_LOG_KEY]: [],
+      });
+      renderWorkflowHistory([]);
+      showWorkflowSettingsStatus("Local workflow history cleared.");
+    }
 
     function selectedTargets() {
       return [
@@ -1775,25 +1968,6 @@
           rejectMatch.disabled = false;
           return;
         }
-        const optionalOrigins = [
-          ...(targets.includes("fansly") ? ["https://fansly.com/*"] : []),
-          ...(targets.includes("manyvids")
-            ? ["https://www.manyvids.com/*"]
-            : []),
-          ...(targets.includes("pornhub")
-            ? ["https://pornhub.mainhub.com/*"]
-            : []),
-        ];
-        if (optionalOrigins.length) {
-          const granted = await chrome.permissions.request({
-            origins: optionalOrigins,
-          });
-          if (!granted)
-            throw new Error(
-              "Selected platform site permission was not granted.",
-            );
-          await sendMessage({ type: "SYNC_CREATOR_TOOLS" });
-        }
         const sessionId = randomSessionId();
         const confirmedFiles = {
           full: fullFile,
@@ -1984,6 +2158,29 @@
         refreshSocialReview();
       });
     }
+    for (const tab of [uploaderTab, settingsTab]) {
+      tab.addEventListener("click", () => selectWorkspaceTab(tab));
+      tab.addEventListener("keydown", handleWorkspaceTabKey);
+    }
+    for (const control of Object.values(workflowControls)) {
+      control.addEventListener("change", markWorkflowSettingsDirty);
+    }
+    workflowProfilesInput.addEventListener("input", markWorkflowSettingsDirty);
+    saveWorkflowSettingsButton.addEventListener("click", () => {
+      void saveWorkflowSettingsPanel();
+    });
+    resetWorkflowProfilesButton.addEventListener(
+      "click",
+      resetWorkflowProfiles,
+    );
+    clearWorkflowHistoryButton.addEventListener("click", () => {
+      void clearWorkflowHistory().catch((error) =>
+        showWorkflowSettingsStatus(error.message, "error"),
+      );
+    });
+    workflowSettingsForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+    });
     refreshSubreddits.addEventListener("click", async () => {
       refreshSubreddits.disabled = true;
       await loadSubredditPresets({ refresh: true });
@@ -2089,7 +2286,7 @@
 
     refreshReleaseSummary();
     refreshSocialReview();
-    refreshProfiles()
+    loadWorkflowSettingsPanel()
       .then(() => scheduleMatch())
       .catch((error) => {
         matchStatus.textContent = error.message;
