@@ -74,8 +74,13 @@ async function openXTeaserRecorder() {
 }
 
 async function pairXTeaser(pairing, recorderTabId) {
-  const unfinished = (await X_TEASER_SESSION_STORE.list()).find((session) => session.stage !== "moved");
-  if (unfinished) throw new Error("Finish or recover the existing X teaser session before pairing another file.");
+  const unfinished = (await X_TEASER_SESSION_STORE.list()).find(
+    (session) => session.stage !== "moved",
+  );
+  if (unfinished)
+    throw new Error(
+      "Finish or recover the existing X teaser session before pairing another file.",
+    );
   const id = crypto.randomUUID().replaceAll("-", "").slice(0, 24);
   await X_TEASER_SESSION_STORE.save({
     id,
@@ -98,7 +103,9 @@ async function pairXTeaser(pairing, recorderTabId) {
   return { id, xTabId: xTab.id };
 }
 
-async function captureBoundXStatus(details) {
+const xTeaserCaptureInFlight = new Map();
+
+async function captureBoundXStatusOnce(details) {
   if (
     details.frameId !== 0 ||
     !X_TEASER_CONTRACT.canonicalStatusUrl(details.url)
@@ -146,6 +153,17 @@ async function captureBoundXStatus(details) {
       })
       .catch(() => {});
   }
+}
+
+function captureBoundXStatus(details) {
+  const key = Number(details.tabId);
+  if (xTeaserCaptureInFlight.has(key)) return xTeaserCaptureInFlight.get(key);
+  const operation = captureBoundXStatusOnce(details).finally(() => {
+    if (xTeaserCaptureInFlight.get(key) === operation)
+      xTeaserCaptureInFlight.delete(key);
+  });
+  xTeaserCaptureInFlight.set(key, operation);
+  return operation;
 }
 
 const xTeaserNavigationFilter = {
