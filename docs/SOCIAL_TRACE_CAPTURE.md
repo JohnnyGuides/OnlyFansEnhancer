@@ -1,6 +1,7 @@
 # Social publishing trace capture
 
-Version 0.16.0 includes sanitized Record Steps panels for X, Redgifs, and Reddit.
+Version 0.16.1 includes an on-demand sanitized trace recorder for X, Redgifs,
+and Reddit.
 These traces are mandatory evidence for the publishing adapters; the recorder
 does not fill fields, upload media, or click platform controls.
 
@@ -15,11 +16,13 @@ does not fill fields, upload media, or click platform controls.
    trace.
 5. Record one platform at a time. Begin before selecting the file and stop only
    after the canonical public result is visible.
+6. On each platform, click the extension icon and select **Show trace recorder
+   on this tab**. The recorder is hidden until you request it.
 
 ## X trace
 
 1. Open the X post composer.
-2. Select **Start trace**.
+2. Open the recorder from the extension icon, then select **Start trace**.
 3. Select the social teaser and enter the caption.
 4. Publish the main post and wait for its canonical `/status/<id>` page.
 5. Create the first reply with the paid-video URL.
@@ -31,7 +34,7 @@ The required result is named `creator-upload-trace-x-<timestamp>.json`.
 ## Redgifs trace
 
 1. Open the Redgifs uploader.
-2. Select **Start trace**.
+2. Open the recorder from the extension icon, then select **Start trace**.
 3. Select the social teaser and complete every required metadata/control step.
 4. Continue through upload and processing.
 5. Publish and wait until the canonical `/watch/<slug>` page is visible.
@@ -44,7 +47,7 @@ The required result is named `creator-upload-trace-redgifs-<timestamp>.json`.
 Use the Redgifs URL produced by the preceding trace.
 
 1. Open Reddit's create-post flow for one representative target subreddit.
-2. Select **Start trace**.
+2. Open the recorder from the extension icon, then select **Start trace**.
 3. Create a link post using the Redgifs URL.
 4. Enter the title and any body text you normally use.
 5. Select the subreddit, flair, and NSFW controls as required.

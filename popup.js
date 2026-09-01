@@ -147,10 +147,14 @@ $("#uploadConsole").addEventListener("click", () => {
   });
 });
 
-$("#xTeaserRecorder").addEventListener("click", () => {
-  sendMessage({ type: "OPEN_X_TEASER_RECORDER" }).catch((error) => {
+$("#showTraceRecorder").addEventListener("click", async () => {
+  try {
+    const response = await sendMessage({ type: "SHOW_UPLOAD_TRACE_RECORDER" });
+    $("#note").textContent =
+      `Trace recorder opened on ${response.traceRecorder.platform}.`;
+  } catch (error) {
     $("#note").textContent = error.message;
-  });
+  }
 });
 
 load().catch((error) => {

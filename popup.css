@@ -169,10 +169,17 @@ button {
   cursor: pointer;
   font: inherit;
   font-weight: 700;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(145, 220, 255, 0.22);
 }
 
 button:hover {
   background: #31415b;
+}
+
+button:focus-visible {
+  outline: 2px solid #91dcff;
+  outline-offset: 2px;
 }
 
 button:disabled {
@@ -193,6 +200,7 @@ button.primary:hover {
   background: #3b2d46;
 }
 
+#showTraceRecorder,
 #options {
   margin-top: 8px;
 }

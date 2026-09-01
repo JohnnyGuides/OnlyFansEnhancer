@@ -276,6 +276,22 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     await uploadPage.goto(
       "https://onlyfans.com/my/collections/user-lists/expired?private=remove-me",
     );
+    assert.equal(
+      await uploadPage.locator("#creator-upload-trace-recorder-host").count(),
+      0,
+      "The recorder must stay hidden until the extension popup requests it.",
+    );
+    const popup = await context.newPage();
+    popup.on("pageerror", (error) => pageErrors.push(error.message));
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await popup.waitForFunction(
+      () => document.querySelector("#sourceMix")?.value,
+    );
+    await workers[0].evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      await chrome.tabs.update(tab.id, { active: true });
+    }, uploadPage.url());
+    await popup.locator("#showTraceRecorder").click();
     await uploadPage.locator("#creator-upload-trace-recorder-host").waitFor();
     const recorderPosition = await uploadPage
       .locator("#creator-upload-trace-recorder-host")
@@ -363,6 +379,13 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     assert.doesNotMatch(serializedTrace, /private controlled caption/);
     assert.doesNotMatch(serializedTrace, /creator@example\.com/);
     assert.doesNotMatch(serializedTrace, /token=remove-me|private=remove-me/);
+    await uploadPage
+      .getByRole("button", { name: "Hide trace recorder" })
+      .click();
+    assert.equal(
+      await uploadPage.locator("#creator-upload-trace-recorder-host").count(),
+      0,
+    );
 
     const formBeforeProbe = await uploadPage
       .locator("#upload-form")
@@ -399,12 +422,6 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     assert.ok(modes.includes("realbooru"));
     assert.ok(modes.includes("mixed"));
 
-    const popup = await context.newPage();
-    popup.on("pageerror", (error) => pageErrors.push(error.message));
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await popup.waitForFunction(
-      () => document.querySelector("#sourceMix")?.value,
-    );
     const popupView = await popup.evaluate(() => {
       const slider = document.querySelector("#sourceMix");
       slider.value = "30";
@@ -418,6 +435,11 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
         realbooru: document.querySelector("#realbooruChance").textContent,
         resetNames: Boolean(document.querySelector("#resetNames")),
         resetPictures: Boolean(document.querySelector("#resetPictures")),
+        showTraceRecorder: Boolean(
+          document.querySelector("#showTraceRecorder"),
+        ),
+        legacyXRecorder: Boolean(document.querySelector("#xTeaserRecorder")),
+        noteLive: document.querySelector("#note").getAttribute("aria-live"),
       };
     });
     assert.deepEqual(popupView, {
@@ -429,7 +451,16 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
       realbooru: "30% real",
       resetNames: true,
       resetPictures: true,
+      showTraceRecorder: true,
+      legacyXRecorder: false,
+      noteLive: "polite",
     });
+    await workers[0].evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      await chrome.tabs.update(tab.id, { active: true });
+    }, uploadPage.url());
+    await popup.locator("#showTraceRecorder").click();
+    await uploadPage.locator("#creator-upload-trace-recorder-host").waitFor();
     const uploadConsolePromise = context.waitForEvent("page");
     const sequentialConsoleIds = await popup.evaluate(async () => {
       const first = await chrome.runtime.sendMessage({

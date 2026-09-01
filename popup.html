@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#121823" />
     <title>Creator Workflow Toolkit</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
@@ -51,14 +52,16 @@
         <button id="resetPictures" type="button">Reset pictures</button>
       </div>
 
-      <p id="note" class="note">
+      <p id="note" class="note" aria-live="polite">
         Workflow helpers are ready by default. Change them in Upload console →
         Settings.
       </p>
       <button id="uploadConsole" class="primary" type="button">
         Open upload console
       </button>
-      <button id="xTeaserRecorder" type="button">Open X teaser recorder</button>
+      <button id="showTraceRecorder" type="button">
+        Show trace recorder on this tab
+      </button>
       <button id="options" type="button">Open toolkit settings</button>
     </main>
     <script src="popup.js"></script>

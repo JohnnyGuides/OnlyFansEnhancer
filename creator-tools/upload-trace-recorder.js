@@ -1005,6 +1005,17 @@
     return button;
   }
 
+  function hidePanel() {
+    panel?.host.remove();
+    panel = null;
+    return true;
+  }
+
+  function showPanel() {
+    if (!panel) mountPanel();
+    return true;
+  }
+
   function mountPanel() {
     document.getElementById(HOST_ID)?.remove();
     const host = document.createElement("aside");
@@ -1016,11 +1027,16 @@
     style.textContent = `
       :host { all: initial; }
       .panel { box-sizing: border-box; width: min(360px, calc(100vw - 32px)); padding: 13px; border: 1px solid #61556e; border-radius: 12px; background: #19151f; color: #f8f5fb; box-shadow: 0 12px 34px rgba(0,0,0,.45); font: 13px/1.4 system-ui, sans-serif; }
-      h2 { margin: 0 0 5px; font-size: 14px; }
+      .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
+      h2 { margin: 0; font-size: 14px; }
       p { margin: 0 0 10px; color: #cfc6d8; }
       .actions { display: flex; flex-wrap: wrap; gap: 7px; }
-      button { border: 1px solid #675a75; border-radius: 8px; padding: 7px 9px; background: #2b2434; color: white; font: inherit; cursor: pointer; }
-      button:first-child { border-color: #8e6df2; background: #7452dc; }
+      button { border: 1px solid #675a75; border-radius: 8px; padding: 7px 9px; background: #2b2434; color: white; font: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: rgba(182,160,255,.2); }
+      .actions button:first-child { border-color: #8e6df2; background: #7452dc; }
+      .hide { width: auto; padding: 4px 7px; background: transparent; color: #cfc6d8; font-size: 12px; }
+      button:hover:not(:disabled) { background: #3a3046; }
+      .actions button:first-child:hover:not(:disabled) { background: #8564e8; }
+      button:focus-visible { outline: 2px solid #b6a0ff; outline-offset: 2px; }
       button:disabled { opacity: .45; cursor: default; }
       [role="status"] { margin-top: 10px; padding: 8px; border-radius: 8px; background: #282230; color: #ddd5e5; }
       [data-tone="recording"] { background: #1e3c32; color: #d8ffef; }
@@ -1028,8 +1044,13 @@
     `;
     const frame = document.createElement("section");
     frame.className = "panel";
+    const headingRow = document.createElement("div");
+    headingRow.className = "heading";
     const heading = document.createElement("h2");
     heading.textContent = "Upload trace recorder";
+    const hide = makeButton("Hide trace recorder", async () => hidePanel());
+    hide.className = "hide";
+    headingRow.append(heading, hide);
     const description = document.createElement("p");
     description.textContent =
       "Captures sanitized events locally; never publishes.";
@@ -1051,7 +1072,7 @@
     actions.append(start, stop, download, discard);
     const status = document.createElement("div");
     status.setAttribute("role", "status");
-    frame.append(heading, description, actions, status);
+    frame.append(headingRow, description, actions, status);
     shadow.append(style, frame);
     (document.documentElement || document.body).appendChild(host);
     panel = { host, start, stop, download, discard, status };
@@ -1059,7 +1080,6 @@
   }
 
   async function initialize() {
-    mountPanel();
     currentTrace = await readTrace();
     if (
       currentTrace?.active &&
@@ -1071,6 +1091,7 @@
       currentTrace?.active &&
       currentTrace.origin === location.origin
     ) {
+      showPanel();
       startObservers();
       scheduleSnapshot();
     }
@@ -1098,6 +1119,8 @@
     platformFor,
     candidatePostUrl,
     recordToolkitEvent,
+    showPanel,
+    hidePanel,
   });
 
   if (globalThis.document && globalThis.chrome?.storage?.local) {

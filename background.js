@@ -2325,6 +2325,16 @@ async function hasAllOrigins(origins) {
   return chrome.permissions.contains({ origins });
 }
 
+const CREATOR_TRACE_PLATFORM_LABELS = Object.freeze({
+  "creator-toolkit-upload-trace-onlyfans": "OnlyFans",
+  "creator-toolkit-upload-trace-fansly": "Fansly",
+  "creator-toolkit-upload-trace-manyvids": "ManyVids",
+  "creator-toolkit-upload-trace-pornhub": "Pornhub",
+  "creator-toolkit-upload-trace-x": "X",
+  "creator-toolkit-upload-trace-redgifs": "Redgifs",
+  "creator-toolkit-upload-trace-reddit": "Reddit",
+});
+
 function creatorDefinitionMatchesUrl(definition, url) {
   try {
     const currentOrigin = new URL(url).origin;
@@ -2334,6 +2344,55 @@ function creatorDefinitionMatchesUrl(definition, url) {
   } catch {
     return false;
   }
+}
+
+function showCreatorUploadTraceRecorderPanel() {
+  return globalThis.CreatorUploadTraceRecorder?.showPanel?.() === true;
+}
+
+async function showUploadTraceRecorder() {
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+  });
+  const definition = CREATOR_SCRIPT_DEFINITIONS.find(
+    (entry) =>
+      entry.toolIds.includes("uploadTraceRecorder") &&
+      creatorDefinitionMatchesUrl(entry, tab?.url),
+  );
+  if (!tab?.id || !definition) {
+    throw new Error(
+      "Open a supported creator site, then show the trace recorder again.",
+    );
+  }
+  const settings = await getCreatorSettings();
+  if (settings.tools.uploadTraceRecorder?.enabled !== true) {
+    throw new Error("Enable Upload trace recorder in Upload console → Settings.");
+  }
+  if (!(await hasAllOrigins(definition.origins))) {
+    throw new Error("Grant this extension site access, then try again.");
+  }
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+  const mainFrame = frames?.find((frame) => frame.frameId === 0);
+  if (
+    !mainFrame?.documentId ||
+    !creatorDefinitionMatchesUrl(definition, mainFrame.url)
+  ) {
+    throw new Error("The active page changed. Try showing the recorder again.");
+  }
+  const target = { tabId: tab.id, documentIds: [mainFrame.documentId] };
+  await chrome.scripting.executeScript({ target, files: definition.js });
+  const [shown] = await chrome.scripting.executeScript({
+    target,
+    func: showCreatorUploadTraceRecorderPanel,
+  });
+  if (shown?.result !== true) {
+    throw new Error("The trace recorder could not open on this page.");
+  }
+  return {
+    tabId: tab.id,
+    platform: CREATOR_TRACE_PLATFORM_LABELS[definition.id],
+  };
 }
 
 async function performCreatorToolRegistrationSync(settings = null) {
@@ -4019,6 +4078,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { creatorSettings: await getCreatorSettings() };
       case "OPEN_UPLOAD_CONSOLE":
         return { uploadConsole: await openUploadConsole() };
+      case "SHOW_UPLOAD_TRACE_RECORDER":
+        return { traceRecorder: await showUploadTraceRecorder() };
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };
       case "GET_X_TEASER_SESSIONS":

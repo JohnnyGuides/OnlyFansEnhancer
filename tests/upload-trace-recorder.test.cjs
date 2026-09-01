@@ -284,6 +284,20 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
     await page.addScriptTag({ path: recorderPath });
     await page.addScriptTag({ path: registryPath });
     await page.addScriptTag({ path: commonPath });
+    assert.equal(
+      await page.locator("#creator-upload-trace-recorder-host").count(),
+      0,
+      "an idle recorder must not cover the site until the user asks to see it",
+    );
+    await page.evaluate(() => CreatorUploadTraceRecorder.showPanel());
+    await page.locator("#creator-upload-trace-recorder-host").waitFor();
+    await page.getByRole("button", { name: "Hide trace recorder" }).click();
+    assert.equal(
+      await page.locator("#creator-upload-trace-recorder-host").count(),
+      0,
+      "hiding the recorder must remove its page overlay",
+    );
+    await page.evaluate(() => CreatorUploadTraceRecorder.showPanel());
     await page.locator("#creator-upload-trace-recorder-host").waitFor();
     const formBefore = await page
       .locator("#upload-form")

@@ -31,6 +31,9 @@ Doing nothing is a valid failure mode. Guessing is not.
 The upload trace recorder is read-only and follows a separate observation
 contract: it never starts automatically, never changes platform state, never
 captures form values or request content, and stops at 45 minutes or 800 events.
+Its page panel uses progressive disclosure: it mounts only after the popup's
+**Show trace recorder on this tab** action, or when an active same-origin trace
+must resume after navigation.
 The shared runtime emits optional provenance markers for panel actions, control
 mutations, and run outcomes. These calls are failure-isolated: recorder absence
 or failure can never block an adapter.

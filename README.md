@@ -99,8 +99,9 @@ recipe, and Pornhub orientation/tags/categories being authorized.
   supplied later. Fully terminal jobs are removed from session storage, while
   recoverable sheet/link states remain available for the browser session.
 - **Upload trace recorder** is a read-only development helper enabled by
-  default. Its small panel remains idle until **Start trace** is clicked, then
-  records bounded, sanitized upload evidence across same-site refreshes for
+  default. It stays hidden until **Show trace recorder on this tab** is selected
+  from the extension popup, then records bounded, sanitized upload evidence
+  after **Start trace** across same-site refreshes for
   OnlyFans, Fansly, ManyVids, or Pornhub. It never captures captions, file
   names, file bytes, raw status text, cookies, headers, or request bodies and
   never publishes anything. It distinguishes trusted user choices, toolkit
@@ -159,8 +160,9 @@ not included.
    anonymous extension request; do not share either value.
 7. Confirm your own handle is listed and choose an avatar source.
 8. Open **Upload console → Settings** to turn helpers off or adjust advanced
-   profile JSON. The upload trace recorder is available but idle; recording
-   begins only after **Start trace**.
+   profile JSON. To record a workflow, open the creator-site tab, click the
+   extension icon, select **Show trace recorder on this tab**, then select
+   **Start trace**. The recorder is otherwise hidden.
 9. Save helper changes, then reload an already-open creator-site tab if needed.
    Disabling a helper also stops its work in open tabs.
 10. Reload OnlyFans.

@@ -34,6 +34,7 @@ const openTabs = new Map([
 const tabUpdatedListeners = new Set();
 const probeExecutionOrder = [];
 const recorderInjectionTabs = [];
+const recorderShowTabs = [];
 const deniedOrigins = new Set();
 let nextTabId = 50;
 let offscreenOpen = false;
@@ -332,15 +333,22 @@ const chrome = {
           },
         ];
       }
+      if (details.func?.name === "showCreatorUploadTraceRecorderPanel") {
+        recorderShowTabs.push(details.target.tabId);
+        return [{ frameId: 0, result: true }];
+      }
       throw new Error("Unexpected function-based capability probe.");
     },
   },
   tabs: {
-    async query({ url }) {
-      const prefix = String(url || "").replace(/\*$/, "");
-      return Array.from(openTabs.values()).filter((tab) =>
-        String(tab.url || "").startsWith(prefix),
-      );
+    async query({ url, active } = {}) {
+      let tabs = Array.from(openTabs.values());
+      if (url) {
+        const prefix = String(url).replace(/\*$/, "");
+        tabs = tabs.filter((tab) => String(tab.url || "").startsWith(prefix));
+      }
+      if (active === true) tabs = tabs.filter((tab) => tab.active === true);
+      return tabs;
     },
     async create({ url, active }) {
       const tab = { id: nextTabId, url, active, status: "complete" };
@@ -1290,6 +1298,17 @@ function send(message) {
     "https://sh.reddit.com/*",
     "https://old.reddit.com/*",
   ]);
+
+  openTabs.get(41).active = true;
+  recorderInjectionTabs.length = 0;
+  recorderShowTabs.length = 0;
+  const shownRecorder = await send({ type: "SHOW_UPLOAD_TRACE_RECORDER" });
+  assert.equal(
+    JSON.stringify(shownRecorder.traceRecorder),
+    '{"tabId":41,"platform":"OnlyFans"}',
+  );
+  assert.deepEqual(recorderInjectionTabs, [41]);
+  assert.deepEqual(recorderShowTabs, [41]);
 
   const uploadProbe = await send({
     type: "PROBE_CREATOR_UPLOAD_TARGETS",

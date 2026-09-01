@@ -89,12 +89,26 @@ const fixtures = [
       .waitFor({ timeout: 60000 });
     await settings.close();
 
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await popup.locator("#showTraceRecorder").waitFor();
+
     for (const fixture of fixtures) {
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", (error) => errors.push(error.message));
       await page.setViewportSize(fixture.viewport);
       await page.goto(fixture.url);
+      assert.equal(
+        await page.locator("#creator-upload-trace-recorder-host").count(),
+        0,
+        `${fixture.platform} recorder must be hidden by default`,
+      );
+      await worker.evaluate(async (url) => {
+        const [tab] = await chrome.tabs.query({ url });
+        await chrome.tabs.update(tab.id, { active: true });
+      }, fixture.url);
+      await popup.locator("#showTraceRecorder").click();
       await page.getByRole("button", { name: "Start trace" }).waitFor();
       assert.equal(
         await page.evaluate(
@@ -124,6 +138,8 @@ const fixtures = [
       await page.getByRole("button", { name: "Discard saved trace" }).click();
       await page.close();
     }
+
+    await popup.close();
 
     console.log(
       "PASS: Chrome rendered sanitized X, Redgifs, and Reddit trace capture without publishing.",
