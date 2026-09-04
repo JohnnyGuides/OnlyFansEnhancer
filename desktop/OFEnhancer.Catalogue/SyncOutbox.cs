@@ -7,7 +7,7 @@ namespace OFEnhancer.Catalogue;
 internal static partial class SyncOutbox
 {
     private const string MetadataKey = "ofenhancer.item_id.v1";
-    private static readonly HashSet<string> UrlFields = ["onlyfans", "fansly", "manyvids", "pornhubFree", "pornhubPaid", "clips4sale", "x", "reddit", "redgifs"];
+    private static readonly HashSet<string> UrlFields = ["onlyfans", "fansly", "manyvids", "pornhubFree", "pornhubPaid", "clips4sale", "x", "reddit"];
     private static readonly HashSet<string> CountFields = ["xTeasers", "redditTeasers"];
     private static readonly HashSet<string> TimestampFields = ["lastVerifiedSync"];
 
@@ -76,6 +76,12 @@ internal static partial class SyncOutbox
 
     internal static void MarkAttempted(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc) =>
         Transition(connection, operationId, occurredUtc, "attempted", null, "state = 'pending'", "attempted_utc = $occurredUtc, attempt_count = attempt_count + 1");
+
+    internal static void MarkPendingCompleted(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc) =>
+        Transition(connection, operationId, occurredUtc, "completed", null, "state = 'pending'", "completed_utc = $occurredUtc, resolved_utc = $occurredUtc");
+
+    internal static void MarkPendingConflict(SqliteConnection connection, string operationId, string errorCode, DateTimeOffset occurredUtc) =>
+        Transition(connection, operationId, occurredUtc, "conflict", ErrorCode(errorCode), "state = 'pending'", "error_code = $errorCode, resolved_utc = $occurredUtc");
 
     internal static void MarkCompleted(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc) =>
         Transition(connection, operationId, occurredUtc, "completed", null, "state IN ('attempted', 'unresolved')", "error_code = NULL, completed_utc = $occurredUtc, resolved_utc = $occurredUtc");
@@ -259,6 +265,8 @@ public sealed partial class CatalogueStore
     public IReadOnlyList<SyncOutboxItem> GetOpenSyncOperations() => SyncOutbox.GetOpen(connection);
     public SyncOutboxItem GetSyncOperation(string operationId) => SyncOutbox.Get(connection, operationId);
     public void MarkSyncAttempted(string operationId, DateTimeOffset occurredUtc) => SyncOutbox.MarkAttempted(connection, operationId, occurredUtc);
+    public void MarkSyncPendingCompleted(string operationId, DateTimeOffset occurredUtc) => SyncOutbox.MarkPendingCompleted(connection, operationId, occurredUtc);
+    public void MarkSyncPendingConflict(string operationId, string errorCode, DateTimeOffset occurredUtc) => SyncOutbox.MarkPendingConflict(connection, operationId, errorCode, occurredUtc);
     public void MarkSyncCompleted(string operationId, DateTimeOffset occurredUtc) => SyncOutbox.MarkCompleted(connection, operationId, occurredUtc);
     public void MarkSyncConflict(string operationId, string errorCode, DateTimeOffset occurredUtc) => SyncOutbox.MarkConflict(connection, operationId, errorCode, occurredUtc);
     public void MarkSyncUnresolved(string operationId, string errorCode, DateTimeOffset occurredUtc) => SyncOutbox.MarkUnresolved(connection, operationId, errorCode, occurredUtc);

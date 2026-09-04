@@ -15,6 +15,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
     private const string EmptyFingerprint = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     private const string IntendedFingerprint = "bd08ab4a65c82aa016d2d495a901c8e2a5fb9cc184364a72047fce1663651844";
     private const string ForeignFingerprint = "a9fb65167b6dbe13c4c8fcdb34c916b1574efee4d33eb2015fe308efed12be34";
+    private const string RedgifsFingerprint = "dd458d0b7d57a39bcabc5a2b4adfb022e27957653fd95ecb8c52fceb4522149d";
     private static readonly DateTimeOffset Clock = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
 
     [TestMethod]
@@ -44,6 +45,28 @@ public sealed class GoogleCatalogueSyncWorkerTests
     }
 
     [TestMethod]
+    public async Task SelectedSheetIdControlsTheCurrentTitleAndNeverTouchesAnUnrelatedPreferredTab()
+    {
+        using SyncFixture fixture = SyncFixture.Create();
+        string operationId = fixture.Enqueue("ashley", Clock);
+        fixture.Google.SetSheetTitle("Catalogue Copy", includeUnrelatedPreferredTab: true);
+        fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
+        fixture.Google.SetCell("'Catalogue Copy'!J93", null);
+        fixture.Google.SetCell(Range(93), ForeignValue);
+
+        await fixture.Worker.RunOnceAsync(CancellationToken.None);
+
+        Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
+        Assert.AreEqual(2, fixture.Google.SheetPropertyReads);
+        Assert.AreEqual(1, fixture.Google.Mutations.Count);
+        Assert.AreEqual("'Catalogue Copy'!J93", fixture.Google.Mutations[0].Range);
+        CollectionAssert.AreEqual(
+            new[] { "'Catalogue Copy'!J93", "'Catalogue Copy'!J93" },
+            fixture.Google.CellReads.ToArray()
+        );
+    }
+
+    [TestMethod]
     public async Task AlreadyAppliedValueCompletesByReadWithoutMutation()
     {
         using SyncFixture fixture = SyncFixture.Create();
@@ -55,6 +78,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         Assert.AreEqual(1, summary.Completed);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
+        AssertNoMutationAttempt(fixture.Store, operationId);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
     }
 
@@ -70,6 +94,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         Assert.AreEqual(1, summary.Conflicts);
         Assert.AreEqual("remote-fingerprint-changed", fixture.Store.GetSyncOperation(operationId).ErrorCode);
+        AssertNoMutationAttempt(fixture.Store, operationId);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
     }
 
@@ -85,6 +110,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual("remote-value-not-empty", fixture.Store.GetSyncOperation(operationId).ErrorCode);
+        AssertNoMutationAttempt(fixture.Store, operationId);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
     }
 
@@ -100,6 +126,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual("intended-fingerprint-invalid", fixture.Store.GetSyncOperation(operationId).ErrorCode);
+        AssertNoMutationAttempt(fixture.Store, operationId);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
     }
 
@@ -116,6 +143,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual("metadata-row-ambiguous", fixture.Store.GetSyncOperation(operationId).ErrorCode);
+        AssertNoMutationAttempt(fixture.Store, operationId);
         Assert.AreEqual(0, fixture.Google.CellReads.Count);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
     }
@@ -247,7 +275,43 @@ public sealed class GoogleCatalogueSyncWorkerTests
         Assert.AreEqual(1, fixture.Google.Mutations.Count);
     }
 
+    [TestMethod]
+    public async Task UnsupportedDestinationIsRejectedBeforeTheWorkerCanLeaveItPending()
+    {
+        using SyncFixture fixture = SyncFixture.Create();
+        fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
+        SyncOutboxException? rejection = null;
+        try
+        {
+            fixture.Enqueue(
+                "ashley",
+                Clock,
+                intendedFingerprint: RedgifsFingerprint,
+                destination: "redgifs",
+                payloadValue: "https://www.redgifs.com/watch/ashley-preview"
+            );
+        }
+        catch (SyncOutboxException exception)
+        {
+            rejection = exception;
+        }
+
+        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+
+        Assert.IsNotNull(rejection);
+        Assert.AreEqual(0, summary.Pending);
+        Assert.AreEqual(0, fixture.Google.MetadataSearches.Count);
+        Assert.AreEqual(0, fixture.Google.Mutations.Count);
+    }
+
     private static string Range(int row) => $"'2026 Video Catalogue'!J{row}";
+
+    private static void AssertNoMutationAttempt(CatalogueStore store, string operationId)
+    {
+        SyncOutboxItem operation = store.GetSyncOperation(operationId);
+        Assert.AreEqual(0, operation.AttemptCount);
+        Assert.IsNull(operation.AttemptedUtc);
+    }
 
     private sealed class SyncFixture : IDisposable
     {
@@ -316,7 +380,9 @@ public sealed class GoogleCatalogueSyncWorkerTests
             string sourceKey,
             DateTimeOffset createdUtc,
             string expectedFingerprint = EmptyFingerprint,
-            string intendedFingerprint = IntendedFingerprint
+            string intendedFingerprint = IntendedFingerprint,
+            string destination = "onlyfans",
+            string payloadValue = IntendedValue
         )
         {
             string itemId = ItemId(sourceKey);
@@ -328,8 +394,8 @@ public sealed class GoogleCatalogueSyncWorkerTests
                 CatalogueSheetId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 "ofenhancer.item_id.v1",
                 itemId,
-                "onlyfans",
-                IntendedValue,
+                destination,
+                payloadValue,
                 expectedFingerprint,
                 intendedFingerprint,
                 SyncOutboxState.Pending,
@@ -364,18 +430,26 @@ public sealed class GoogleCatalogueSyncWorkerTests
         private readonly Dictionary<string, string?> _cells = new(StringComparer.Ordinal);
         private TaskCompletionSource? _metadataRelease;
         private TaskCompletionSource? _metadataPaused;
+        private string _sheetTitle = "2026 Video Catalogue";
+        private bool _includeUnrelatedPreferredTab;
 
         public List<string> MetadataSearches { get; } = [];
         public List<string> CellReads { get; } = [];
         public List<Mutation> Mutations { get; } = [];
         public Action? OnMutation { get; set; }
         public bool ThrowAfterAcceptingMutation { get; set; }
+        public int SheetPropertyReads { get; private set; }
         public Task MetadataSearchPaused => _metadataPaused?.Task
             ?? throw new InvalidOperationException("Metadata search is not paused.");
 
         public void SetRow(string itemId, int? row) => _rows[itemId] = [row];
         public void SetRows(string itemId, params int?[] rows) => _rows[itemId] = rows;
         public void SetCell(string range, string? value) => _cells[range] = value;
+        public void SetSheetTitle(string title, bool includeUnrelatedPreferredTab = false)
+        {
+            _sheetTitle = title;
+            _includeUnrelatedPreferredTab = includeUnrelatedPreferredTab;
+        }
 
         public void PauseNextMetadataSearch()
         {
@@ -407,6 +481,11 @@ public sealed class GoogleCatalogueSyncWorkerTests
                     _metadataRelease = null;
                 }
                 return Json(request, MetadataJson(itemId));
+            }
+            if (request.Method == HttpMethod.Get && path.EndsWith("/spreadsheets/workbook-one", StringComparison.Ordinal))
+            {
+                SheetPropertyReads++;
+                return Json(request, SheetPropertiesJson());
             }
             if (request.Method == HttpMethod.Get && path.Contains("/values/", StringComparison.Ordinal))
             {
@@ -461,6 +540,42 @@ public sealed class GoogleCatalogueSyncWorkerTests
                             },
                         },
                     }),
+            });
+        }
+
+        private string SheetPropertiesJson()
+        {
+            List<object> sheets =
+            [
+                new
+                {
+                    properties = new
+                    {
+                        sheetId = CatalogueSheetId,
+                        title = _sheetTitle,
+                        hidden = false,
+                        gridProperties = new { rowCount = 5_002, columnCount = 24 },
+                    },
+                },
+            ];
+            if (_includeUnrelatedPreferredTab)
+            {
+                sheets.Add(new
+                {
+                    properties = new
+                    {
+                        sheetId = 17,
+                        title = "2026 Video Catalogue",
+                        hidden = false,
+                        gridProperties = new { rowCount = 100, columnCount = 24 },
+                    },
+                });
+            }
+            return JsonSerializer.Serialize(new
+            {
+                spreadsheetId = "workbook-one",
+                properties = new { title = "Work" },
+                sheets,
             });
         }
 

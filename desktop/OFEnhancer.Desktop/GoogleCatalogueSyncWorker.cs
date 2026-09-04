@@ -197,7 +197,12 @@ internal sealed class GoogleCatalogueSyncWorker
             return new(null, null, "metadata-sheet-mismatch");
 
         string column = GoogleWorkbookProfile.ColumnForDestination(operation.DestinationField);
-        string title = GoogleWorkbookProfile.PreferredCatalogueTitle.Replace("'", "''", StringComparison.Ordinal);
+        GoogleSheetIdentity sheet = await _workspace.ReadSheetIdentityAsync(
+            operation.WorkbookId,
+            match.SheetId,
+            cancellationToken
+        ).ConfigureAwait(false);
+        string title = sheet.Title.Replace("'", "''", StringComparison.Ordinal);
         string range = $"'{title}'!{column}{match.RowNumber}";
         GoogleProjectionCell cell = await _workspace.ReadProjectionCellAsync(
             operation.WorkbookId,
@@ -211,15 +216,13 @@ internal sealed class GoogleCatalogueSyncWorker
 
     private SyncOutcome MarkPendingCompleted(SyncOutboxItem operation)
     {
-        _store.MarkSyncAttempted(operation.OperationId, UtcNow());
-        _store.MarkSyncCompleted(operation.OperationId, UtcNow());
+        _store.MarkSyncPendingCompleted(operation.OperationId, UtcNow());
         return SyncOutcome.Completed;
     }
 
     private SyncOutcome MarkPendingConflict(SyncOutboxItem operation, string errorCode)
     {
-        _store.MarkSyncAttempted(operation.OperationId, UtcNow());
-        _store.MarkSyncConflict(operation.OperationId, errorCode, UtcNow());
+        _store.MarkSyncPendingConflict(operation.OperationId, errorCode, UtcNow());
         return SyncOutcome.Conflict;
     }
 

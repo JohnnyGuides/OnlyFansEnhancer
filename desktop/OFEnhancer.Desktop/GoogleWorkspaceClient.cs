@@ -95,18 +95,10 @@ internal sealed class GoogleWorkspaceClient
     {
         string workbookId = Required(fileId, 256, "fileId");
         string baseEndpoint = $"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}";
-        Uri metadataEndpoint = BuildUri(baseEndpoint, [("fields", SpreadsheetMetadataFields)]);
-        byte[] metadataBody = await SendReadAsync(
-            token => CreateJsonRequest(HttpMethod.Get, metadataEndpoint, token),
-            SheetsOrigin,
-            MaximumMetadataResponseBytes,
+        GoogleWorkbookSnapshot metadata = await ReadWorkbookMetadataAsync(
+            workbookId,
             cancellationToken
         ).ConfigureAwait(false);
-        GoogleWorkbookSnapshot metadata = GoogleWorkbookSnapshot.Parse(metadataBody);
-        if (!string.Equals(metadata.WorkbookId, workbookId, StringComparison.Ordinal))
-            throw new GoogleCatalogueException("invalid-google-response");
-        if (metadata.Sheets.Count > MaximumSheets)
-            throw new GoogleCatalogueException("workbook-sheet-limit");
 
         List<(string Name, string Value)> query =
         [
@@ -130,6 +122,48 @@ internal sealed class GoogleWorkspaceClient
             throw new GoogleCatalogueException("invalid-google-response");
         }
         return snapshot;
+    }
+
+    internal async Task<GoogleSheetIdentity> ReadSheetIdentityAsync(
+        string fileId,
+        int sheetId,
+        CancellationToken cancellationToken
+    )
+    {
+        string workbookId = Required(fileId, 256, "fileId");
+        if (sheetId < 0)
+            throw new GoogleCatalogueException("invalid-sheet-id");
+        GoogleWorkbookSnapshot metadata = await ReadWorkbookMetadataAsync(
+            workbookId,
+            cancellationToken
+        ).ConfigureAwait(false);
+        GoogleSheetSnapshot[] matches = metadata.Sheets
+            .Where(sheet => sheet.SheetId == sheetId)
+            .ToArray();
+        if (matches.Length != 1)
+            throw new GoogleCatalogueException("invalid-google-response");
+        return new(matches[0].SheetId, matches[0].Title);
+    }
+
+    private async Task<GoogleWorkbookSnapshot> ReadWorkbookMetadataAsync(
+        string workbookId,
+        CancellationToken cancellationToken
+    )
+    {
+        string endpoint = $"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}";
+        Uri metadataEndpoint = BuildUri(endpoint, [("fields", SpreadsheetMetadataFields)]);
+        byte[] metadataBody = await SendReadAsync(
+            token => CreateJsonRequest(HttpMethod.Get, metadataEndpoint, token),
+            SheetsOrigin,
+            MaximumMetadataResponseBytes,
+            cancellationToken
+        ).ConfigureAwait(false);
+        GoogleWorkbookSnapshot metadata = GoogleWorkbookSnapshot.Parse(metadataBody);
+        if (!string.Equals(metadata.WorkbookId, workbookId, StringComparison.Ordinal))
+            throw new GoogleCatalogueException("invalid-google-response");
+        if (metadata.Sheets.Count > MaximumSheets)
+            throw new GoogleCatalogueException("workbook-sheet-limit");
+        return metadata;
     }
 
     internal async Task<IReadOnlyList<GoogleMetadataMatch>> SearchItemMetadataAsync(
@@ -506,6 +540,8 @@ internal sealed class GoogleWorkspaceClient
 }
 
 internal sealed record GoogleSpreadsheetIdentity(string Id, string Title);
+
+internal sealed record GoogleSheetIdentity(int SheetId, string Title);
 
 internal sealed record GoogleWorkbookSnapshot(
     string WorkbookId,

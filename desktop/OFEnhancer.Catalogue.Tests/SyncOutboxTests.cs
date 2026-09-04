@@ -49,6 +49,24 @@ public sealed class SyncOutboxTests
     }
 
     [TestMethod]
+    public void EnqueueRejectsCanonicalPlatformWithoutAnOwnedGoogleColumn()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = OpenWithItem(temp.Path, out string itemId);
+
+        Assert.ThrowsException<SyncOutboxException>(
+            () => store.EnqueueProjection(Request(
+                itemId,
+                "idempotency-redgifs",
+                payloadValue: "https://www.redgifs.com/watch/ashley-preview",
+                destination: "redgifs"
+            ))
+        );
+
+        Assert.AreEqual(0, store.GetOpenSyncOperations().Count);
+    }
+
+    [TestMethod]
     public void PendingOperationMovesThroughAttemptedToCompleted()
     {
         using TestDirectory temp = new();
@@ -61,6 +79,47 @@ public sealed class SyncOutboxTests
         Assert.AreEqual(0, store.GetOpenSyncOperations().Count);
         Assert.AreEqual(SyncOutboxState.Completed, store.GetSyncOperation(item.OperationId).State);
         Assert.AreEqual(1, store.GetSyncOperation(item.OperationId).AttemptCount);
+    }
+
+    [TestMethod]
+    public void PendingPreflightCompletionIsAtomicWithoutAttemptAudit()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = OpenWithItem(temp.Path, out string itemId);
+        SyncOutboxItem item = store.EnqueueProjection(Request(itemId, "idempotency-preflight-complete"));
+
+        store.MarkSyncPendingCompleted(item.OperationId, Clock);
+
+        SyncOutboxItem completed = store.GetSyncOperation(item.OperationId);
+        Assert.AreEqual(SyncOutboxState.Completed, completed.State);
+        Assert.AreEqual(0, completed.AttemptCount);
+        Assert.IsNull(completed.AttemptedUtc);
+        Assert.AreEqual(Clock, completed.CompletedUtc);
+        Assert.AreEqual(Clock, completed.ResolvedUtc);
+        Assert.ThrowsException<SyncOutboxException>(
+            () => store.MarkSyncAttempted(item.OperationId, Clock.AddSeconds(1))
+        );
+    }
+
+    [TestMethod]
+    public void PendingPreflightConflictIsAtomicWithoutAttemptAudit()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = OpenWithItem(temp.Path, out string itemId);
+        SyncOutboxItem item = store.EnqueueProjection(Request(itemId, "idempotency-preflight-conflict"));
+
+        store.MarkSyncPendingConflict(item.OperationId, "remote-value-not-empty", Clock);
+
+        SyncOutboxItem conflict = store.GetSyncOperation(item.OperationId);
+        Assert.AreEqual(SyncOutboxState.Conflict, conflict.State);
+        Assert.AreEqual("remote-value-not-empty", conflict.ErrorCode);
+        Assert.AreEqual(0, conflict.AttemptCount);
+        Assert.IsNull(conflict.AttemptedUtc);
+        Assert.IsNull(conflict.CompletedUtc);
+        Assert.AreEqual(Clock, conflict.ResolvedUtc);
+        Assert.ThrowsException<SyncOutboxException>(
+            () => store.MarkSyncAttempted(item.OperationId, Clock.AddSeconds(1))
+        );
     }
 
     [TestMethod]
@@ -126,7 +185,7 @@ public sealed class SyncOutboxTests
         return store;
     }
 
-    private static SyncOutboxItem Request(string itemId, string idempotencyKey, string payloadValue = CanonicalOnlyFans, string? operationId = null, DateTimeOffset? createdUtc = null) =>
+    private static SyncOutboxItem Request(string itemId, string idempotencyKey, string payloadValue = CanonicalOnlyFans, string? operationId = null, DateTimeOffset? createdUtc = null, string destination = "onlyfans") =>
         new(
             operationId ?? Guid.NewGuid().ToString("D"),
             idempotencyKey,
@@ -135,7 +194,7 @@ public sealed class SyncOutboxTests
             "2126708696",
             "ofenhancer.item_id.v1",
             itemId,
-            "onlyfans",
+            destination,
             payloadValue,
             new string('a', 64),
             new string('b', 64),
