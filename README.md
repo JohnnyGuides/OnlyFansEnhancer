@@ -10,6 +10,29 @@ The personal edition is intentionally broader than the separately packaged
 Chrome Web Store edition. The store edition remains the narrow, display-only
 **Fan Identity Mask** product under `store/`.
 
+## Desktop foundation (0.18.0)
+
+Version 0.18.0 adds the first desktop foundation without replacing the working
+Chrome uploader. The Windows app owns one current-user local agent and shows
+the same plain-web shell packaged with the personal extension. Chrome reaches
+that agent through the stateless `com.johnnyguides.ofenhancer` native bridge.
+The new internal file attacher uses Chrome's debugger API only to put one exact
+local path into one exact, allow-listed file control; it never clicks a submit
+button and always detaches.
+
+`npm run stage:desktop` creates a self-contained, allow-listed package under
+`dist/ofenhancer-desktop-v0.18.0/`. `npm run build:desktop` also compiles the
+per-user installer when Inno Setup 6 is installed. The installer uses
+`%LocalAppData%`, offers update/reinstall or uninstall when it finds an existing
+copy, and opens a short Chrome connection guide. It does not edit Chrome
+profiles or enterprise policy. The current unpacked extension ID cannot be
+reproduced in a different folder, so moving from this repository to the
+installed copy is an explicit one-time Chrome step.
+
+This milestone proves the desktop shell, pipe, native relay, package, and local
+file attachment. It does not yet move the catalogue, media generation, posting,
+or social monitoring authority into the desktop app.
+
 ## Fan Identity Mask
 
 - Names and avatars on comments beneath posts

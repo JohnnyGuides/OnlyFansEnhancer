@@ -1,4 +1,5 @@
 using System.Security.Principal;
+using System.IO;
 using System.Windows;
 using System.Windows.Forms;
 using OFEnhancer.Protocol;
@@ -17,7 +18,8 @@ public partial class App : System.Windows.Application
         base.OnStartup(eventArgs);
         if (eventArgs.Args.Contains("--status-json", StringComparer.Ordinal))
         {
-            Console.Out.Write(AgentProtocol.Serialize(AgentStatus.Current));
+            using StreamWriter output = new(Console.OpenStandardOutput()) { AutoFlush = true };
+            output.Write(AgentProtocol.Serialize(AgentStatus.Current));
             Shutdown();
             return;
         }

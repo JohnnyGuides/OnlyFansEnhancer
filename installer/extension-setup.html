@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Connect Chrome to OFEnhancer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #090b10;
+        color: #f4f5f7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+      }
+      main {
+        width: min(720px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 64px 0;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 42px;
+      }
+      img {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+      }
+      h1,
+      h2,
+      p {
+        margin-top: 0;
+      }
+      h1 {
+        margin-bottom: 4px;
+        font-size: clamp(2rem, 7vw, 3.8rem);
+        letter-spacing: -0.04em;
+      }
+      header p,
+      li,
+      .note {
+        color: #aeb6c3;
+        line-height: 1.6;
+      }
+      ol {
+        padding-left: 1.5rem;
+      }
+      li {
+        margin: 18px 0;
+      }
+      code {
+        display: block;
+        overflow-wrap: anywhere;
+        margin-top: 8px;
+        padding: 14px;
+        border: 1px solid #303744;
+        border-radius: 10px;
+        background: #111722;
+        color: #dceef7;
+      }
+      .note {
+        margin-top: 34px;
+        padding-top: 22px;
+        border-top: 1px solid #303744;
+      }
+      :focus-visible {
+        outline: 3px solid #65cfff;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="assets/finalLogo.png" alt="" />
+        <div>
+          <h1>Connect Chrome</h1>
+          <p>One manual step keeps the extension yours.</p>
+        </div>
+      </header>
+      <ol>
+        <li>
+          Open <strong>chrome://extensions</strong> and turn on Developer mode.
+        </li>
+        <li>
+          Choose <strong>Load unpacked</strong>, then select the
+          <strong>extension</strong> folder beside this page.
+        </li>
+        <li>Copy the 32-letter extension ID shown by Chrome.</li>
+        <li>
+          Open PowerShell in this folder and run:<code
+            >.\tools\register-native-host.ps1 -InstallRoot . -ExtensionId
+            YOUR_EXTENSION_ID</code
+          >
+        </li>
+        <li>Restart OFEnhancer. Its status should change to Connected.</li>
+      </ol>
+      <p class="note">
+        Chrome will mention debugger access. OFEnhancer uses it only to attach a
+        local file to the exact upload control, then detaches. This setup does
+        not post anything.
+      </p>
+    </main>
+  </body>
+</html>

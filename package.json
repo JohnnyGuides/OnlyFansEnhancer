@@ -13,14 +13,17 @@
     "test:desktop-shell-ui": "node tests/desktop-shell-ui.test.cjs",
     "test:desktop-native-bridge": "node --test tests/desktop-native-bridge.test.cjs",
     "test:local-file-attacher-chrome": "node tests/local-file-attacher-chrome.test.cjs",
+    "test:desktop-package": "node --test tests/desktop-package.test.cjs",
     "build:personal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-personal-package.ps1",
     "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1",
     "build:x-teaser-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-x-teaser-native-host.ps1",
+    "stage:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-package.ps1 -StageOnly",
+    "build:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-package.ps1",
     "lint": "eslint creator-tools options.js realbooru-parser.js upload-console.js x-teaser.js",
     "typecheck": "tsc -p jsconfig.json",
     "format": "prettier --write \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
     "format:check": "prettier --check \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-native-bridge && npm run test:local-file-attacher-chrome && npm run build:personal && npm run build:store"
+    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-native-bridge && npm run test:local-file-attacher-chrome && npm run test:desktop-package && npm run build:personal && npm run build:store"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
