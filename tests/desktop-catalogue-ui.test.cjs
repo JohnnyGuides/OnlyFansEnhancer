@@ -52,6 +52,77 @@ const populated = {
   inventoryStatus: "not-scanned",
 };
 
+const googleClientId =
+  "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
+const firstPlanHash = "a".repeat(64);
+const secondPlanHash = "b".repeat(64);
+const workbookName = "Creator Catalogue";
+const sheetName = "2026 Video Catalogue";
+
+const googleStates = Object.freeze({
+  notConfigured: { state: "notConfigured" },
+  disconnected: { state: "disconnected" },
+  connecting: { state: "connecting" },
+  needsInspection: {
+    state: "needsInspection",
+    workbookName,
+  },
+  migrationReady: {
+    state: "migrationReady",
+    workbookName,
+    sheetName,
+    planHash: firstPlanHash,
+    rowsToBind: 2,
+    migrationChanges: 5,
+    pendingCount: 0,
+    conflictCount: 0,
+    lastVerifiedSync: null,
+  },
+  refreshedMigration: {
+    state: "migrationReady",
+    workbookName,
+    sheetName,
+    planHash: secondPlanHash,
+    rowsToBind: 3,
+    migrationChanges: 6,
+    pendingCount: 0,
+    conflictCount: 0,
+    lastVerifiedSync: null,
+  },
+  ready: {
+    state: "ready",
+    workbookName,
+    sheetName,
+    pendingCount: 2,
+    conflictCount: 0,
+    lastVerifiedSync: "2026-09-04T12:00:00Z",
+  },
+  syncing: {
+    state: "syncing",
+    workbookName,
+    sheetName,
+    pendingCount: 2,
+    conflictCount: 0,
+    lastVerifiedSync: "2026-09-04T12:00:00Z",
+  },
+  conflict: {
+    state: "conflict",
+    workbookName,
+    sheetName,
+    pendingCount: 1,
+    conflictCount: 1,
+    errorCode: "remote-fingerprint-changed",
+    sensitiveTitle: "PRIVATE VIDEO TITLE MUST NOT LEAK",
+  },
+  error: {
+    state: "error",
+    workbookName,
+    sheetName,
+    errorCode: "google-token-refresh-failed",
+    sensitiveTitle: "PRIVATE VIDEO TITLE MUST NOT LEAK",
+  },
+});
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -94,9 +165,9 @@ async function withServer(run) {
   }
 }
 
-async function installHost(page, initialState = null) {
+async function installHost(page, initialState = null, googleOptions = {}) {
   await page.addInitScript(
-    ({ initial, populatedState }) => {
+    ({ initial, populatedState, googleFixtures }) => {
       let catalogue = initial || {
         items: [],
         unmatchedAssets: [],
@@ -104,8 +175,23 @@ async function installHost(page, initialState = null) {
         inventoryStatus: "not-scanned",
       };
       let failNextScan = true;
+      let googleStatus = structuredClone(
+        googleFixtures.initial || { state: "notConfigured" },
+      );
+      const googleStatusQueue = (googleFixtures.statusQueue || []).map(
+        (value) => structuredClone(value),
+      );
+      const inspectionQueue = (googleFixtures.inspectionQueue || []).map(
+        (value) => structuredClone(value),
+      );
+      let staleApply = Boolean(googleFixtures.staleApplyOnce);
       globalThis.__catalogueImportCalls = 0;
       globalThis.__catalogueConfirmCalls = 0;
+      globalThis.__googleHostCalls = [];
+      globalThis.__setGoogleState = (next) => {
+        googleStatus = structuredClone(next);
+        googleStatusQueue.length = 0;
+      };
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
@@ -162,17 +248,603 @@ async function installHost(page, initialState = null) {
           return { ...payload, changed: true };
         }
         if (operation === "openChromeUploader") return { opened: true };
+        if (
+          [
+            "getGoogleCatalogueStatus",
+            "saveGoogleClientId",
+            "startGoogleCatalogueConnection",
+            "cancelGoogleCatalogueConnection",
+            "inspectGoogleWorkbook",
+            "applyGoogleWorkbookMigration",
+            "syncGoogleCatalogue",
+            "disconnectGoogleCatalogue",
+          ].includes(operation)
+        ) {
+          globalThis.__googleHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          if (
+            operation !== "getGoogleCatalogueStatus" &&
+            googleFixtures.operationDelayMs
+          ) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, googleFixtures.operationDelayMs),
+            );
+          }
+          if (operation === "getGoogleCatalogueStatus") {
+            if (googleStatusQueue.length)
+              googleStatus = googleStatusQueue.shift();
+            return structuredClone(googleStatus);
+          }
+          if (operation === "saveGoogleClientId") {
+            googleStatus = { state: "disconnected" };
+            return structuredClone(googleStatus);
+          }
+          if (operation === "startGoogleCatalogueConnection") {
+            googleStatus = { state: "connecting" };
+            return structuredClone(googleStatus);
+          }
+          if (operation === "cancelGoogleCatalogueConnection") {
+            googleStatus = { state: "disconnected" };
+            return structuredClone(googleStatus);
+          }
+          if (operation === "inspectGoogleWorkbook") {
+            if (inspectionQueue.length) googleStatus = inspectionQueue.shift();
+            else
+              googleStatus = structuredClone(
+                googleFixtures.inspected || googleStatus,
+              );
+            return structuredClone(googleStatus);
+          }
+          if (operation === "applyGoogleWorkbookMigration") {
+            if (staleApply) {
+              staleApply = false;
+              throw new Error("stale-migration-plan");
+            }
+            googleStatus = structuredClone(
+              googleFixtures.applied || {
+                ...googleStatus,
+                state: "ready",
+                planHash: null,
+              },
+            );
+            return structuredClone(googleStatus);
+          }
+          if (operation === "syncGoogleCatalogue") {
+            googleStatus = structuredClone(
+              googleFixtures.synced || {
+                ...googleStatus,
+                state: "syncing",
+              },
+            );
+            return structuredClone(googleStatus);
+          }
+          googleStatus = { state: "disconnected" };
+          return structuredClone(googleStatus);
+        }
         throw new Error("unsupported-operation");
       };
     },
-    { initial: initialState, populatedState: populated },
+    {
+      initial: initialState,
+      populatedState: populated,
+      googleFixtures: googleOptions,
+    },
   );
+}
+
+function captureErrors(page) {
+  const errors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+  return errors;
+}
+
+async function googleCalls(page, operation) {
+  return page.evaluate(
+    (name) => __googleHostCalls.filter((call) => call.operation === name),
+    operation,
+  );
+}
+
+async function setGoogleState(page, state) {
+  await page.evaluate((next) => __setGoogleState(next), state);
+  await page.getByRole("button", { name: "Uploads" }).click();
+  await page.getByRole("button", { name: "Catalogue" }).click();
+}
+
+async function tabTo(page, locator, label) {
+  await page.evaluate(() => document.activeElement?.blur());
+  for (let index = 0; index < 30; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await locator.evaluate((node) => node === document.activeElement)) {
+      assert.equal(await page.locator(":focus-visible").count(), 1, label);
+      return;
+    }
+  }
+  assert.fail(`${label} was not reachable with Tab`);
+}
+
+async function testGoogleStates(browser, port) {
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
+  const errors = captureErrors(page);
+  await installHost(page, populated, { initial: googleStates.notConfigured });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+
+  const strip = page.locator("#googleCatalogue");
+  await strip
+    .getByText("Add your Google setup in Settings.", { exact: true })
+    .waitFor();
+  assert.equal(await page.locator("#googleCatalogue").count(), 1);
+  assert.equal(await strip.locator('[role="status"]').count(), 1);
+  await tabTo(
+    page,
+    strip.getByRole("button", { name: "Settings" }),
+    "Settings focus",
+  );
+
+  await setGoogleState(page, googleStates.disconnected);
+  await strip
+    .getByText("Connect the workbook you use for your catalogue.", {
+      exact: true,
+    })
+    .waitFor();
+  await tabTo(
+    page,
+    strip.getByRole("button", { name: "Connect Google Sheet" }),
+    "Connect focus",
+  );
+
+  await setGoogleState(page, googleStates.connecting);
+  await strip.getByText("Finish in your browser.", { exact: true }).waitFor();
+  await tabTo(
+    page,
+    strip.getByRole("button", { name: "Cancel" }),
+    "Cancel focus",
+  );
+
+  await setGoogleState(page, googleStates.needsInspection);
+  await strip
+    .getByText(`${workbookName} is connected. Check it before syncing.`, {
+      exact: true,
+    })
+    .waitFor();
+  await tabTo(
+    page,
+    strip.getByRole("button", { name: "Check workbook" }),
+    "Check focus",
+  );
+
+  await setGoogleState(page, googleStates.migrationReady);
+  await strip
+    .getByText("2 rows need linking. 5 workbook changes are ready.", {
+      exact: true,
+    })
+    .waitFor();
+  const review = strip.getByRole("button", { name: "Review changes" });
+  await tabTo(page, review, "Review focus");
+  await review.click();
+  const dialog = page.getByRole("dialog", { name: "Update Google Sheet?" });
+  await dialog.waitFor();
+  assert.equal(
+    await dialog.getByText(workbookName, { exact: true }).count(),
+    1,
+  );
+  assert.equal(await dialog.getByText(sheetName, { exact: true }).count(), 1);
+  assert.equal(await dialog.getByText("2 rows", { exact: true }).count(), 1);
+  assert.equal(await dialog.getByText("5 changes", { exact: true }).count(), 1);
+  assert.equal(
+    await dialog.getByText("0 conflicts", { exact: true }).count(),
+    1,
+  );
+  const no = dialog.getByRole("button", { name: "No", exact: true });
+  assert.equal(
+    await no.evaluate((button) => button === document.activeElement),
+    true,
+  );
+  await tabTo(
+    page,
+    dialog.getByRole("button", { name: "Yes, update the workbook" }),
+    "Yes focus",
+  );
+  await no.click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(
+    (await googleCalls(page, "applyGoogleWorkbookMigration")).length,
+    0,
+  );
+  assert.equal(
+    await review.evaluate((button) => button === document.activeElement),
+    true,
+  );
+
+  await review.click();
+  await dialog.waitFor();
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(
+    (await googleCalls(page, "applyGoogleWorkbookMigration")).length,
+    0,
+  );
+  assert.equal(
+    await review.evaluate((button) => button === document.activeElement),
+    true,
+  );
+
+  await setGoogleState(page, googleStates.ready);
+  await strip.getByText(/2 updates waiting\./).waitFor();
+  await tabTo(
+    page,
+    strip.getByRole("button", { name: "Sync now" }),
+    "Sync focus",
+  );
+
+  await setGoogleState(page, googleStates.conflict);
+  await strip
+    .getByText("The workbook changed. Check it before syncing.", {
+      exact: true,
+    })
+    .waitFor();
+
+  await setGoogleState(page, googleStates.error);
+  await strip
+    .getByText("Reconnect Google Sheet to continue.", { exact: true })
+    .waitFor();
+  assert.equal(
+    await strip.getByRole("button", { name: "Reconnect" }).count(),
+    1,
+  );
+
+  const stripText = await strip.innerText();
+  assert.equal(
+    /oauth|metadata|fingerprint|outbox|hash/i.test(stripText),
+    false,
+  );
+  assert.equal(stripText.includes("PRIVATE VIDEO TITLE MUST NOT LEAK"), false);
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testGoogleSettings(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  const errors = captureErrors(page);
+  await installHost(page, populated, { initial: googleStates.notConfigured });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  const setup = page.locator("#googleSetup");
+  assert.equal(
+    await setup.getAttribute("open"),
+    null,
+    "Google setup starts expanded",
+  );
+  await setup.getByText("Google setup", { exact: true }).click();
+  const input = setup.getByRole("textbox", { name: "Google client ID" });
+  await input.fill("not-a-client-id");
+  await setup.getByRole("button", { name: "Save setup" }).click();
+  await setup
+    .getByText("Enter a valid Google client ID.", { exact: true })
+    .waitFor();
+  assert.equal(await input.getAttribute("aria-invalid"), "true");
+  assert.equal((await googleCalls(page, "saveGoogleClientId")).length, 0);
+
+  await input.fill(`  ${googleClientId}  `);
+  await setup.getByRole("button", { name: "Save setup" }).click();
+  await setup.getByText("Google setup saved.", { exact: true }).waitFor();
+  assert.deepEqual((await googleCalls(page, "saveGoogleClientId")).at(-1), {
+    operation: "saveGoogleClientId",
+    payload: { clientId: googleClientId },
+  });
+  assert.equal(await input.getAttribute("aria-invalid"), "false");
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testGoogleActionCalls(browser, port) {
+  const fixtures = [
+    {
+      state: googleStates.disconnected,
+      button: "Connect Google Sheet",
+      operation: "startGoogleCatalogueConnection",
+    },
+    {
+      state: googleStates.connecting,
+      button: "Cancel",
+      operation: "cancelGoogleCatalogueConnection",
+    },
+    {
+      state: googleStates.needsInspection,
+      button: "Check workbook",
+      operation: "inspectGoogleWorkbook",
+      options: { inspected: googleStates.migrationReady },
+    },
+    {
+      state: googleStates.ready,
+      button: "Sync now",
+      operation: "syncGoogleCatalogue",
+      options: { synced: googleStates.ready },
+    },
+    {
+      state: googleStates.ready,
+      button: "Disconnect",
+      operation: "disconnectGoogleCatalogue",
+    },
+  ];
+  for (const fixture of fixtures) {
+    const page = await browser.newPage({
+      viewport: { width: 800, height: 700 },
+    });
+    const errors = captureErrors(page);
+    await installHost(page, populated, {
+      initial: fixture.state,
+      ...(fixture.options || {}),
+    });
+    await page.goto(`http://127.0.0.1:${port}/index.html`);
+    await page.getByRole("button", { name: "Catalogue" }).click();
+    const button = page.locator("#googleCatalogue").getByRole("button", {
+      name: fixture.button,
+      exact: true,
+    });
+    await button.click();
+    await page.waitForFunction(
+      (operation) =>
+        __googleHostCalls.some((call) => call.operation === operation),
+      fixture.operation,
+    );
+    assert.deepEqual((await googleCalls(page, fixture.operation)).at(-1), {
+      operation: fixture.operation,
+      payload: {},
+    });
+    assert.deepEqual(errors, [], `${fixture.operation} console errors`);
+    await page.close();
+  }
+}
+
+async function testGoogleMigration(browser, port) {
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
+  const errors = captureErrors(page);
+  await installHost(page, populated, {
+    initial: googleStates.migrationReady,
+    staleApplyOnce: true,
+    inspectionQueue: [googleStates.refreshedMigration],
+  });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  const review = page.getByRole("button", { name: "Review changes" });
+  await review.click();
+  await page.evaluate(
+    (next) => __setGoogleState(next),
+    googleStates.refreshedMigration,
+  );
+  await page.getByRole("button", { name: "Yes, update the workbook" }).click();
+  await page
+    .getByText("The workbook changed. Review the updated changes.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.deepEqual(
+    (await googleCalls(page, "applyGoogleWorkbookMigration")).at(-1),
+    {
+      operation: "applyGoogleWorkbookMigration",
+      payload: { planHash: firstPlanHash },
+    },
+  );
+  assert.equal((await googleCalls(page, "inspectGoogleWorkbook")).length, 1);
+  assert.equal(
+    await page.getByRole("button", { name: "Review changes" }).count(),
+    1,
+  );
+
+  await page.getByRole("button", { name: "Review changes" }).click();
+  await page.getByRole("button", { name: "Yes, update the workbook" }).click();
+  assert.deepEqual(
+    (await googleCalls(page, "applyGoogleWorkbookMigration")).at(-1),
+    {
+      operation: "applyGoogleWorkbookMigration",
+      payload: { planHash: secondPlanHash },
+    },
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testGoogleBusyStates(browser, port) {
+  const syncPage = await browser.newPage({
+    viewport: { width: 800, height: 700 },
+  });
+  await installHost(syncPage, populated, {
+    initial: googleStates.ready,
+    synced: googleStates.ready,
+    operationDelayMs: 200,
+  });
+  await syncPage.goto(`http://127.0.0.1:${port}/index.html`);
+  await syncPage.getByRole("button", { name: "Catalogue" }).click();
+  const sync = syncPage.getByRole("button", { name: "Sync now" });
+  await sync.click();
+  await syncPage.waitForFunction(() =>
+    __googleHostCalls.some((call) => call.operation === "syncGoogleCatalogue"),
+  );
+  assert.equal(
+    await sync.isDisabled(),
+    true,
+    "Sync remains enabled while busy",
+  );
+  assert.equal(await sync.getAttribute("aria-busy"), "true");
+  assert.equal(
+    await syncPage.locator("#googleCatalogueStatus").getAttribute("aria-busy"),
+    "true",
+  );
+  assert.equal(
+    await syncPage.getByRole("button", { name: "Disconnect" }).isDisabled(),
+    true,
+  );
+  await syncPage.waitForFunction(
+    () => !document.querySelector("#googlePrimaryAction").disabled,
+  );
+  await syncPage.close();
+
+  const migrationPage = await browser.newPage({
+    viewport: { width: 800, height: 700 },
+  });
+  await installHost(migrationPage, populated, {
+    initial: googleStates.migrationReady,
+    operationDelayMs: 200,
+  });
+  await migrationPage.goto(`http://127.0.0.1:${port}/index.html`);
+  await migrationPage.getByRole("button", { name: "Catalogue" }).click();
+  await migrationPage.getByRole("button", { name: "Review changes" }).click();
+  const yes = migrationPage.getByRole("button", {
+    name: "Yes, update the workbook",
+  });
+  await yes.click();
+  await migrationPage.waitForFunction(() =>
+    __googleHostCalls.some(
+      (call) => call.operation === "applyGoogleWorkbookMigration",
+    ),
+  );
+  assert.equal(await yes.isDisabled(), true, "Yes remains enabled while busy");
+  assert.equal(await yes.getAttribute("aria-busy"), "true");
+  assert.equal(
+    await migrationPage.getByRole("button", { name: "No" }).isDisabled(),
+    true,
+  );
+  await migrationPage
+    .getByRole("dialog", { name: "Update Google Sheet?" })
+    .waitFor({ state: "hidden" });
+  await migrationPage.close();
+}
+
+async function testGooglePolling(browser, port) {
+  const cases = [
+    {
+      name: "connecting",
+      queue: [googleStates.connecting, googleStates.needsInspection],
+      settledText: `${workbookName} is connected. Check it before syncing.`,
+    },
+    {
+      name: "syncing",
+      queue: [googleStates.syncing, googleStates.ready],
+      settledText: /2 updates waiting\./,
+    },
+  ];
+  for (const fixture of cases) {
+    const page = await browser.newPage({
+      viewport: { width: 800, height: 700 },
+    });
+    const errors = captureErrors(page);
+    await installHost(page, populated, {
+      initial: fixture.queue[0],
+      statusQueue: fixture.queue,
+    });
+    await page.goto(`http://127.0.0.1:${port}/index.html`);
+    await page.getByRole("button", { name: "Catalogue" }).click();
+    await page
+      .locator("#googleCatalogue")
+      .getByText(fixture.settledText)
+      .waitFor({ timeout: 4000 });
+    assert.equal(
+      (await googleCalls(page, "getGoogleCatalogueStatus")).length,
+      2,
+      fixture.name,
+    );
+    await page.waitForTimeout(1650);
+    assert.equal(
+      (await googleCalls(page, "getGoogleCatalogueStatus")).length,
+      2,
+      `${fixture.name} did not stop`,
+    );
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+
+  for (const stopEvent of ["navigation", "pagehide"]) {
+    const page = await browser.newPage({
+      viewport: { width: 800, height: 700 },
+    });
+    await installHost(page, populated, { initial: googleStates.connecting });
+    await page.goto(`http://127.0.0.1:${port}/index.html`);
+    await page.getByRole("button", { name: "Catalogue" }).click();
+    await page.getByText("Finish in your browser.", { exact: true }).waitFor();
+    if (stopEvent === "navigation")
+      await page.getByRole("button", { name: "Uploads" }).click();
+    else await page.evaluate(() => dispatchEvent(new Event("pagehide")));
+    await page.waitForTimeout(1650);
+    assert.equal(
+      (await googleCalls(page, "getGoogleCatalogueStatus")).length,
+      1,
+      stopEvent,
+    );
+    await page.close();
+  }
+
+  const ready = await browser.newPage({
+    viewport: { width: 800, height: 700 },
+  });
+  await installHost(ready, populated, { initial: googleStates.ready });
+  await ready.goto(`http://127.0.0.1:${port}/index.html`);
+  await ready.getByRole("button", { name: "Catalogue" }).click();
+  await ready.getByText(/2 updates waiting\./).waitFor();
+  await ready.waitForTimeout(1650);
+  assert.equal(
+    (await googleCalls(ready, "getGoogleCatalogueStatus")).length,
+    1,
+  );
+  await ready.close();
+}
+
+async function testGoogleResponsive(browser, port) {
+  for (const viewport of [
+    { name: "desktop", width: 1440, height: 900 },
+    { name: "compact", width: 800, height: 700 },
+    { name: "mobile", width: 390, height: 844 },
+  ]) {
+    const page = await browser.newPage({ viewport });
+    const errors = captureErrors(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await installHost(page, populated, { initial: googleStates.ready });
+    await page.goto(`http://127.0.0.1:${port}/index.html`);
+    await page.getByRole("button", { name: "Catalogue" }).click();
+    const sync = page.getByRole("button", { name: "Sync now" });
+    await sync.waitFor();
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+      `${viewport.name} Google strip overflows`,
+    );
+    await tabTo(page, sync, `${viewport.name} Sync focus`);
+    assert.equal(
+      await sync.evaluate(
+        (button) => getComputedStyle(button).transitionDuration,
+      ),
+      "0s",
+      `${viewport.name} reduced motion`,
+    );
+    assert.deepEqual(errors, [], `${viewport.name} Google console errors`);
+    await page.close();
+  }
 }
 
 async function main() {
   await withServer(async (port) => {
     const browser = await chromium.launch({ headless: true });
     try {
+      await testGoogleStates(browser, port);
+      await testGoogleSettings(browser, port);
+      await testGoogleActionCalls(browser, port);
+      await testGoogleMigration(browser, port);
+      await testGoogleBusyStates(browser, port);
+      await testGooglePolling(browser, port);
+      await testGoogleResponsive(browser, port);
+
       const page = await browser.newPage({
         viewport: { width: 1440, height: 900 },
       });

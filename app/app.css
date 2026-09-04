@@ -47,6 +47,7 @@ button {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
+summary:focus-visible,
 main:focus-visible {
   outline: 3px solid #65cfff;
   outline-offset: 3px;
@@ -375,6 +376,53 @@ nav button:active {
   grid-column: 1 / -1;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.google-catalogue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid #303744;
+}
+
+.google-catalogue-copy {
+  min-width: 0;
+}
+
+.google-catalogue-copy h2 {
+  margin-bottom: 4px;
+  font-size: 0.82rem;
+  color: #8f99a8;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.google-catalogue-copy p {
+  margin: 0;
+  color: #dce1e8;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.google-catalogue-actions,
+.dialog-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.google-catalogue .action-button {
+  min-height: 44px;
+  padding-block: 10px;
+}
+
+button[aria-busy="true"] {
+  cursor: progress;
 }
 
 .catalogue-loading {
@@ -724,6 +772,105 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 
+.settings-disclosure {
+  max-width: 720px;
+  border-bottom: 1px solid #303744;
+}
+
+.settings-disclosure summary {
+  min-height: 48px;
+  padding: 18px 0;
+  color: #f4f5f7;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.settings-disclosure summary::marker {
+  color: #65cfff;
+}
+
+.settings-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.45fr) minmax(0, 1fr) auto;
+  gap: 8px 24px;
+  align-items: center;
+  padding: 0 0 20px;
+}
+
+.settings-form label {
+  grid-row: 1;
+  color: #cbd2dc;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.settings-form input {
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid #3a4352;
+  border-radius: 12px;
+  background: #0d1118;
+  color: #f4f5f7;
+  font: inherit;
+}
+
+.settings-form input[aria-invalid="true"] {
+  border-color: #f07272;
+}
+
+.settings-form > .secondary-button {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.settings-form > p {
+  grid-column: 2 / -1;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.settings-form .action-status {
+  min-height: 1.5em;
+  color: #cbd2dc;
+}
+
+.google-migration-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 24px 0 0;
+  border-top: 1px solid #303744;
+}
+
+.google-migration-summary div {
+  min-width: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid #303744;
+}
+
+.google-migration-summary dt {
+  margin-bottom: 4px;
+  color: #8f99a8;
+  font-size: 0.75rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.google-migration-summary dd {
+  margin: 0;
+  color: #f4f5f7;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.dialog-actions {
+  margin-top: 22px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     display: block;
@@ -771,6 +918,10 @@ dialog::backdrop {
   .catalogue-actions {
     grid-column: auto;
   }
+
+  .google-catalogue {
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 560px) {
@@ -804,12 +955,43 @@ dialog::backdrop {
     width: 100%;
   }
 
+  .google-catalogue {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .google-catalogue-actions {
+    justify-content: stretch;
+  }
+
+  .google-catalogue-actions button {
+    flex: 1 1 140px;
+  }
+
   .settings-list div {
     display: block;
   }
 
   .settings-list dd {
     margin-top: 5px;
+  }
+
+  .settings-form {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .settings-form label,
+  .settings-form input,
+  .settings-form > .secondary-button,
+  .settings-form > p {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .settings-form > .secondary-button {
+    width: 100%;
   }
 
   .catalogue-row {
@@ -881,6 +1063,19 @@ dialog::backdrop {
 
   .candidate-action {
     grid-column: 2;
+  }
+
+  .google-migration-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .dialog-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .dialog-actions button {
+    width: 100%;
   }
 }
 

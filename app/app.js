@@ -32,6 +32,37 @@
   const matchDialogStatus = document.querySelector("#matchDialogStatus");
   const candidateList = document.querySelector("#candidateList");
   const closeMatchDialog = document.querySelector("#closeMatchDialog");
+  const googleCatalogue = document.querySelector("#googleCatalogue");
+  const googleCatalogueStatus = document.querySelector(
+    "#googleCatalogueStatus",
+  );
+  const googlePrimaryAction = document.querySelector("#googlePrimaryAction");
+  const googleDisconnect = document.querySelector("#googleDisconnect");
+  const googleSetup = document.querySelector("#googleSetup");
+  const googleSetupForm = document.querySelector("#googleSetupForm");
+  const googleClientId = document.querySelector("#googleClientId");
+  const googleSetupStatus = document.querySelector("#googleSetupStatus");
+  const googleMigrationDialog = document.querySelector(
+    "#googleMigrationDialog",
+  );
+  const googleMigrationWorkbook = document.querySelector(
+    "#googleMigrationWorkbook",
+  );
+  const googleMigrationSheet = document.querySelector("#googleMigrationSheet");
+  const googleMigrationRows = document.querySelector("#googleMigrationRows");
+  const googleMigrationChanges = document.querySelector(
+    "#googleMigrationChanges",
+  );
+  const googleMigrationConflicts = document.querySelector(
+    "#googleMigrationConflicts",
+  );
+  const googleMigrationStatus = document.querySelector(
+    "#googleMigrationStatus",
+  );
+  const cancelGoogleMigration = document.querySelector(
+    "#cancelGoogleMigration",
+  );
+  const applyGoogleMigration = document.querySelector("#applyGoogleMigration");
 
   const platformNames = Object.freeze({
     onlyfans: "OnlyFans",
@@ -51,6 +82,9 @@
   let catalogueFilter = "all";
   let renderLimit = 100;
   let currentAsset = null;
+  let googleStatusView = null;
+  let googlePollTimer = null;
+  let frozenMigration = null;
 
   function showView(name) {
     for (const button of buttons) {
@@ -60,7 +94,10 @@
     }
     for (const panel of panels) panel.hidden = panel.dataset.panel !== name;
     document.querySelector(`[data-panel="${name}"] h1`)?.focus?.();
-    if (name === "catalogue") loadCatalogue();
+    if (name === "catalogue") {
+      loadCatalogue();
+      refreshGoogleCatalogue();
+    } else stopGooglePolling();
   }
 
   function thumbnailUrl(assetId) {
@@ -281,6 +318,301 @@
     control.setAttribute("aria-busy", String(busy));
   }
 
+  function cataloguePanelIsVisible() {
+    return !document.querySelector('[data-panel="catalogue"]')?.hidden;
+  }
+
+  function stopGooglePolling() {
+    if (googlePollTimer !== null) global.clearTimeout(googlePollTimer);
+    googlePollTimer = null;
+  }
+
+  function scheduleGooglePolling(state) {
+    stopGooglePolling();
+    if (
+      cataloguePanelIsVisible() &&
+      (state === "connecting" || state === "syncing")
+    ) {
+      googlePollTimer = global.setTimeout(refreshGoogleCatalogue, 1500);
+    }
+  }
+
+  function plural(count, singular, pluralForm = `${singular}s`) {
+    return `${count} ${count === 1 ? singular : pluralForm}`;
+  }
+
+  function formatGoogleDate(value) {
+    if (!value) return "Not checked yet.";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Not checked yet.";
+    return `Last checked ${new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date)}.`;
+  }
+
+  function setGooglePrimaryAction(label, action, className = "action-button") {
+    googlePrimaryAction.textContent = label;
+    googlePrimaryAction.dataset.googleAction = action;
+    googlePrimaryAction.className = className;
+    googlePrimaryAction.hidden = false;
+    setBusy(googlePrimaryAction, false);
+  }
+
+  function renderGoogleCatalogue(view, notice = "") {
+    const knownStates = new Set([
+      "notConfigured",
+      "disconnected",
+      "connecting",
+      "needsInspection",
+      "migrationReady",
+      "ready",
+      "syncing",
+      "conflict",
+      "error",
+    ]);
+    const state = knownStates.has(view?.state) ? view.state : "error";
+    googleStatusView = {
+      state,
+      workbookName:
+        typeof view?.workbookName === "string" ? view.workbookName : "",
+      sheetName: typeof view?.sheetName === "string" ? view.sheetName : "",
+      planHash: typeof view?.planHash === "string" ? view.planHash : "",
+      rowsToBind: Number.isInteger(view?.rowsToBind) ? view.rowsToBind : 0,
+      migrationChanges: Number.isInteger(view?.migrationChanges)
+        ? view.migrationChanges
+        : 0,
+      pendingCount: Number.isInteger(view?.pendingCount)
+        ? view.pendingCount
+        : 0,
+      conflictCount: Number.isInteger(view?.conflictCount)
+        ? view.conflictCount
+        : 0,
+      lastVerifiedSync: view?.lastVerifiedSync || null,
+      errorCode: typeof view?.errorCode === "string" ? view.errorCode : "",
+    };
+
+    googleCatalogue.hidden = false;
+    googleDisconnect.hidden = true;
+    setBusy(googleDisconnect, false);
+    googleCatalogueStatus.setAttribute("aria-busy", "false");
+
+    if (notice) {
+      googleCatalogueStatus.textContent = notice;
+    } else if (state === "notConfigured") {
+      googleCatalogueStatus.textContent = "Add your Google setup in Settings.";
+    } else if (state === "disconnected") {
+      googleCatalogueStatus.textContent =
+        "Connect the workbook you use for your catalogue.";
+    } else if (state === "connecting") {
+      googleCatalogueStatus.textContent = "Finish in your browser.";
+    } else if (state === "needsInspection") {
+      googleCatalogueStatus.textContent = `${googleStatusView.workbookName || "Your workbook"} is connected. Check it before syncing.`;
+    } else if (state === "migrationReady") {
+      const rowVerb = googleStatusView.rowsToBind === 1 ? "needs" : "need";
+      const changeVerb = googleStatusView.migrationChanges === 1 ? "is" : "are";
+      googleCatalogueStatus.textContent = `${plural(googleStatusView.rowsToBind, "row")} ${rowVerb} linking. ${plural(googleStatusView.migrationChanges, "workbook change")} ${changeVerb} ready.`;
+    } else if (state === "ready") {
+      googleCatalogueStatus.textContent = `${plural(googleStatusView.pendingCount, "update")} waiting. ${formatGoogleDate(googleStatusView.lastVerifiedSync)}`;
+    } else if (state === "syncing") {
+      googleCatalogueStatus.textContent = "Syncing Google Sheet…";
+      googleCatalogueStatus.setAttribute("aria-busy", "true");
+    } else if (state === "conflict") {
+      googleCatalogueStatus.textContent =
+        "The workbook changed. Check it before syncing.";
+    } else if (
+      googleStatusView.errorCode.includes("authorization") ||
+      googleStatusView.errorCode.includes("token")
+    ) {
+      googleCatalogueStatus.textContent = "Reconnect Google Sheet to continue.";
+    } else {
+      googleCatalogueStatus.textContent =
+        "OFEnhancer could not finish that Google Sheet action.";
+    }
+
+    if (state === "notConfigured") {
+      setGooglePrimaryAction("Settings", "settings", "secondary-button");
+    } else if (state === "disconnected") {
+      setGooglePrimaryAction("Connect Google Sheet", "connect");
+    } else if (state === "connecting") {
+      setGooglePrimaryAction("Cancel", "cancel", "secondary-button");
+    } else if (state === "needsInspection") {
+      setGooglePrimaryAction("Check workbook", "inspect");
+      googleDisconnect.hidden = false;
+    } else if (state === "migrationReady") {
+      setGooglePrimaryAction("Review changes", "review");
+      googleDisconnect.hidden = false;
+    } else if (state === "ready") {
+      setGooglePrimaryAction("Sync now", "sync");
+      googleDisconnect.hidden = false;
+    } else if (state === "syncing") {
+      setGooglePrimaryAction("Syncing…", "sync");
+      setBusy(googlePrimaryAction, true);
+      googleDisconnect.hidden = false;
+      googleDisconnect.disabled = true;
+    } else if (state === "conflict") {
+      setGooglePrimaryAction("Check workbook", "inspect");
+      googleDisconnect.hidden = false;
+    } else if (
+      googleStatusView.errorCode.includes("authorization") ||
+      googleStatusView.errorCode.includes("token")
+    ) {
+      setGooglePrimaryAction("Reconnect", "connect");
+      googleDisconnect.hidden = false;
+    } else if (googleStatusView.workbookName) {
+      setGooglePrimaryAction("Check workbook", "inspect");
+      googleDisconnect.hidden = false;
+    } else {
+      setGooglePrimaryAction("Connect Google Sheet", "connect");
+    }
+
+    scheduleGooglePolling(state);
+  }
+
+  async function refreshGoogleCatalogue() {
+    stopGooglePolling();
+    if (!cataloguePanelIsVisible()) return;
+    try {
+      const status = await global.OFEnhancerHost.request(
+        "getGoogleCatalogueStatus",
+      );
+      if (cataloguePanelIsVisible()) renderGoogleCatalogue(status);
+    } catch (error) {
+      if (!cataloguePanelIsVisible()) return;
+      renderGoogleCatalogue({ state: "error", errorCode: error?.message });
+    }
+  }
+
+  function openGoogleSettings() {
+    showView("settings");
+    googleSetup.open = true;
+    global.requestAnimationFrame(() => googleClientId.focus());
+  }
+
+  function openGoogleMigrationReview() {
+    if (!/^[a-f0-9]{64}$/.test(googleStatusView?.planHash || "")) {
+      googleCatalogueStatus.textContent =
+        "Check the workbook again before reviewing changes.";
+      return;
+    }
+    frozenMigration = { ...googleStatusView };
+    googleMigrationWorkbook.textContent =
+      frozenMigration.workbookName || "Selected workbook";
+    googleMigrationSheet.textContent =
+      frozenMigration.sheetName || "Catalogue sheet";
+    googleMigrationRows.textContent = plural(frozenMigration.rowsToBind, "row");
+    googleMigrationChanges.textContent = plural(
+      frozenMigration.migrationChanges,
+      "change",
+    );
+    googleMigrationConflicts.textContent = plural(
+      frozenMigration.conflictCount,
+      "conflict",
+    );
+    googleMigrationStatus.textContent = "";
+    googleMigrationDialog.showModal();
+  }
+
+  async function runGoogleAction(action) {
+    if (action === "settings") {
+      openGoogleSettings();
+      return;
+    }
+    if (action === "review") {
+      openGoogleMigrationReview();
+      return;
+    }
+    const operations = {
+      connect: "startGoogleCatalogueConnection",
+      cancel: "cancelGoogleCatalogueConnection",
+      inspect: "inspectGoogleWorkbook",
+      sync: "syncGoogleCatalogue",
+    };
+    const operation = operations[action];
+    if (!operation) return;
+
+    setBusy(googlePrimaryAction, true);
+    googleDisconnect.disabled = true;
+    googleCatalogueStatus.setAttribute("aria-busy", "true");
+    const workingCopy = {
+      connect: "Opening your browser…",
+      cancel: "Cancelling connection…",
+      inspect: "Checking workbook…",
+      sync: "Syncing Google Sheet…",
+    };
+    googleCatalogueStatus.textContent = workingCopy[action];
+    try {
+      renderGoogleCatalogue(await global.OFEnhancerHost.request(operation));
+    } catch (error) {
+      renderGoogleCatalogue({
+        ...googleStatusView,
+        state: "error",
+        errorCode: error?.message,
+      });
+    }
+  }
+
+  async function disconnectGoogle() {
+    setBusy(googleDisconnect, true);
+    setBusy(googlePrimaryAction, true);
+    googleCatalogueStatus.setAttribute("aria-busy", "true");
+    googleCatalogueStatus.textContent = "Disconnecting Google Sheet…";
+    try {
+      renderGoogleCatalogue(
+        await global.OFEnhancerHost.request("disconnectGoogleCatalogue"),
+      );
+    } catch (error) {
+      renderGoogleCatalogue({
+        ...googleStatusView,
+        state: "error",
+        errorCode: error?.message,
+      });
+    }
+  }
+
+  async function applyGoogleMigrationPlan() {
+    const approved = frozenMigration;
+    if (!approved) return;
+    setBusy(applyGoogleMigration, true);
+    cancelGoogleMigration.disabled = true;
+    googleMigrationStatus.textContent = "Updating workbook…";
+    try {
+      const status = await global.OFEnhancerHost.request(
+        "applyGoogleWorkbookMigration",
+        { planHash: approved.planHash },
+      );
+      googleMigrationDialog.close();
+      renderGoogleCatalogue(status);
+    } catch (error) {
+      if (error?.message === "stale-migration-plan") {
+        googleMigrationDialog.close();
+        googleCatalogueStatus.setAttribute("aria-busy", "true");
+        googleCatalogueStatus.textContent = "Checking the updated workbook…";
+        try {
+          const status = await global.OFEnhancerHost.request(
+            "inspectGoogleWorkbook",
+          );
+          renderGoogleCatalogue(
+            status,
+            "The workbook changed. Review the updated changes.",
+          );
+        } catch (inspectionError) {
+          renderGoogleCatalogue({
+            ...googleStatusView,
+            state: "error",
+            errorCode: inspectionError?.message,
+          });
+        }
+      } else {
+        googleMigrationStatus.textContent =
+          "OFEnhancer could not update the workbook. Choose No and check it again.";
+      }
+    } finally {
+      setBusy(applyGoogleMigration, false);
+      cancelGoogleMigration.disabled = false;
+    }
+  }
+
   function openMatchDialog(asset) {
     currentAsset = asset;
     matchDialogFile.textContent = asset.fileName;
@@ -401,6 +733,64 @@
     currentAsset = null;
     matchDialogStatus.textContent = "";
   });
+
+  googlePrimaryAction.addEventListener("click", () =>
+    runGoogleAction(googlePrimaryAction.dataset.googleAction),
+  );
+  googleDisconnect.addEventListener("click", disconnectGoogle);
+
+  googleClientId.addEventListener("input", () => {
+    googleClientId.setCustomValidity("");
+    googleClientId.setAttribute("aria-invalid", "false");
+    googleSetupStatus.textContent = "";
+  });
+  googleSetupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const clientId = googleClientId.value.trim();
+    if (
+      !/^[0-9]{6,30}-[a-z0-9]{8,128}\.apps\.googleusercontent\.com$/.test(
+        clientId,
+      )
+    ) {
+      googleClientId.setCustomValidity("Enter a valid Google client ID.");
+      googleClientId.setAttribute("aria-invalid", "true");
+      googleSetupStatus.textContent = "Enter a valid Google client ID.";
+      googleClientId.focus();
+      return;
+    }
+
+    googleClientId.setCustomValidity("");
+    googleClientId.setAttribute("aria-invalid", "false");
+    googleClientId.value = clientId;
+    const submit = googleSetupForm.querySelector('[type="submit"]');
+    setBusy(submit, true);
+    googleSetupForm.setAttribute("aria-busy", "true");
+    googleSetupStatus.textContent = "Saving Google setup…";
+    try {
+      googleStatusView = await global.OFEnhancerHost.request(
+        "saveGoogleClientId",
+        { clientId },
+      );
+      googleSetupStatus.textContent = "Google setup saved.";
+    } catch {
+      googleSetupStatus.textContent = "OFEnhancer could not save Google setup.";
+    } finally {
+      setBusy(submit, false);
+      googleSetupForm.setAttribute("aria-busy", "false");
+    }
+  });
+
+  cancelGoogleMigration.addEventListener("click", () =>
+    googleMigrationDialog.close(),
+  );
+  applyGoogleMigration.addEventListener("click", applyGoogleMigrationPlan);
+  googleMigrationDialog.addEventListener("close", () => {
+    frozenMigration = null;
+    googleMigrationStatus.textContent = "";
+  });
+
+  global.addEventListener("pagehide", stopGooglePolling);
+  global.addEventListener("beforeunload", stopGooglePolling);
 
   openUploader.addEventListener("click", async () => {
     openUploader.disabled = true;

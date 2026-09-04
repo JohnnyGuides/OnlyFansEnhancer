@@ -116,6 +116,38 @@
             </div>
           </div>
 
+          <section
+            id="googleCatalogue"
+            class="google-catalogue"
+            aria-labelledby="googleCatalogueTitle"
+            hidden
+          >
+            <div class="google-catalogue-copy">
+              <h2 id="googleCatalogueTitle">Google Sheet</h2>
+              <p
+                id="googleCatalogueStatus"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              ></p>
+            </div>
+            <div class="google-catalogue-actions">
+              <button
+                id="googlePrimaryAction"
+                class="action-button"
+                type="button"
+              ></button>
+              <button
+                id="googleDisconnect"
+                class="quiet-button"
+                type="button"
+                hidden
+              >
+                Disconnect
+              </button>
+            </div>
+          </section>
+
           <p id="catalogueStatus" class="action-status" role="status"></p>
 
           <div
@@ -215,9 +247,92 @@
               </dd>
             </div>
           </dl>
+          <details id="googleSetup" class="settings-disclosure">
+            <summary>Google setup</summary>
+            <form id="googleSetupForm" class="settings-form" novalidate>
+              <label for="googleClientId">Google client ID</label>
+              <p id="googleClientIdHelp">
+                Paste the client ID for this desktop app.
+              </p>
+              <input
+                id="googleClientId"
+                name="google-client-id"
+                type="text"
+                inputmode="url"
+                autocomplete="off"
+                spellcheck="false"
+                aria-describedby="googleClientIdHelp googleSetupStatus"
+                aria-invalid="false"
+                required
+              />
+              <button class="secondary-button" type="submit">Save setup</button>
+              <p
+                id="googleSetupStatus"
+                class="action-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </form>
+          </details>
         </section>
       </main>
     </div>
+
+    <dialog
+      id="googleMigrationDialog"
+      aria-labelledby="googleMigrationTitle"
+      aria-describedby="googleMigrationIntro"
+    >
+      <div class="dialog-heading">
+        <div>
+          <h2 id="googleMigrationTitle">Update Google Sheet?</h2>
+          <p id="googleMigrationIntro">
+            Check the workbook and choose Yes or No.
+          </p>
+        </div>
+      </div>
+      <dl class="google-migration-summary">
+        <div>
+          <dt>Workbook</dt>
+          <dd id="googleMigrationWorkbook"></dd>
+        </div>
+        <div>
+          <dt>Sheet</dt>
+          <dd id="googleMigrationSheet"></dd>
+        </div>
+        <div>
+          <dt>Rows</dt>
+          <dd id="googleMigrationRows"></dd>
+        </div>
+        <div>
+          <dt>Changes</dt>
+          <dd id="googleMigrationChanges"></dd>
+        </div>
+        <div>
+          <dt>Conflicts</dt>
+          <dd id="googleMigrationConflicts"></dd>
+        </div>
+      </dl>
+      <p
+        id="googleMigrationStatus"
+        class="action-status"
+        role="status"
+        aria-live="polite"
+      ></p>
+      <div class="dialog-actions">
+        <button
+          id="cancelGoogleMigration"
+          class="quiet-button"
+          type="button"
+          autofocus
+        >
+          No
+        </button>
+        <button id="applyGoogleMigration" class="action-button" type="button">
+          Yes, update the workbook
+        </button>
+      </div>
+    </dialog>
 
     <dialog id="matchDialog" aria-labelledby="matchDialogTitle">
       <div class="dialog-heading">
