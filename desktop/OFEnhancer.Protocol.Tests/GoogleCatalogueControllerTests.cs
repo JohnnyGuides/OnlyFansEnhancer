@@ -57,6 +57,26 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public void Cancel_outside_connecting_rejects_without_touching_restored_ready_state()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        harness.RestartController();
+        GoogleRefreshCredential before = harness.Vault.Load()!;
+        GoogleCatalogueSelection selectionBefore = harness.Store.GetGoogleCatalogueSelection()!;
+
+        GoogleCatalogueControllerException error = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            harness.Controller.cancelGoogleCatalogueConnection
+        );
+
+        GoogleCatalogueStatusView status = harness.Controller.getGoogleCatalogueStatus();
+        Assert.AreEqual("google-connection-not-in-progress", error.Code);
+        Assert.AreEqual("ready", status.State);
+        Assert.AreEqual(before, harness.Vault.Load());
+        Assert.AreEqual(selectionBefore, harness.Store.GetGoogleCatalogueSelection());
+        Assert.IsFalse(harness.Session.Disposed);
+    }
+
+    [TestMethod]
     public void Inspection_and_exact_hash_migration_reach_ready()
     {
         using ControllerHarness harness = ConnectedHarness();
@@ -134,7 +154,7 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual("Private catalogue", restored.WorkbookName);
         Assert.AreEqual("2026 Video Catalogue", restored.SheetName);
         Assert.AreEqual(factoriesBeforeRestart + 1, harness.SessionFactoryCalls);
-        Assert.AreEqual(0, harness.Connection.StartCalls);
+        Assert.AreEqual(0, harness.Connections.Count);
         Assert.AreEqual("ready", harness.Controller.syncGoogleCatalogue().State);
         Assert.AreEqual("1", harness.Session.LastSyncSheetId);
 
@@ -275,18 +295,57 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
-    public void Late_connection_completion_after_disconnect_cannot_restore_state_or_credentials()
+    public void Stale_connection_cannot_overwrite_or_delete_a_newer_connection_credential()
     {
         using ControllerHarness harness = new();
         harness.Controller.startGoogleCatalogueConnection();
+        FakeConnection oldConnection = harness.Connection;
         harness.Controller.disconnectGoogleCatalogue();
-        harness.Vault.Save(new("just-saved-refresh-token", DateTimeOffset.UtcNow));
+        harness.Controller.startGoogleCatalogueConnection();
+        FakeConnection newConnection = harness.Connection;
+        GoogleRefreshCredential expected = new(
+            "refresh-token-b",
+            new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero)
+        );
 
-        harness.Connection.Complete(new(WorkbookId, "Private catalogue", DateTimeOffset.UtcNow));
+        newConnection.Complete(
+            new("workbook-b", "Workbook B", DateTimeOffset.UtcNow),
+            expected
+        );
+        oldConnection.Complete(
+            new("workbook-a", "Workbook A", DateTimeOffset.UtcNow),
+            new("refresh-token-a", DateTimeOffset.UtcNow)
+        );
 
+        GoogleRefreshCredential credential = harness.Vault.Load()!;
+        GoogleCatalogueStatusView status = harness.Controller.getGoogleCatalogueStatus();
+
+        Assert.AreEqual(expected, credential);
+        Assert.AreEqual("needsInspection", status.State);
+        Assert.AreEqual("Workbook B", status.WorkbookName);
+        Assert.AreEqual(1, harness.SessionFactoryCalls);
+    }
+
+    [TestMethod]
+    public async Task Disconnect_serializes_with_a_final_credential_save_and_leaves_no_credential()
+    {
+        BlockingGoogleTokenVault vault = new();
+        using ControllerHarness harness = new(vault: vault);
+        harness.Controller.startGoogleCatalogueConnection();
+        Task completion = Task.Run(() => harness.Connection.Complete(
+            new(WorkbookId, "Private catalogue", DateTimeOffset.UtcNow),
+            new("final-refresh-token", DateTimeOffset.UtcNow)
+        ));
+        await vault.SaveEntered;
+
+        Task<GoogleCatalogueStatusView> disconnect = Task.Run(
+            harness.Controller.disconnectGoogleCatalogue
+        );
+        vault.ReleaseSave();
+        await Task.WhenAll(completion, disconnect);
+
+        Assert.IsNull(vault.Load());
         Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
-        Assert.IsNull(harness.Vault.Load());
-        Assert.AreEqual(0, harness.SessionFactoryCalls);
     }
 
     [TestMethod]
@@ -328,6 +387,38 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(1, status.PendingCount);
         Assert.AreEqual(1, status.ConflictCount);
         Assert.AreEqual(SyncOutboxState.Pending, harness.Store.GetSyncOperation(preservedPending.OperationId).State);
+    }
+
+    [TestMethod]
+    public void Empty_sync_preserves_null_and_prior_last_verified_timestamp()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(0, 0, 0, 0, false));
+
+        GoogleCatalogueStatusView first = harness.Controller.syncGoogleCatalogue();
+
+        Assert.IsNull(first.LastVerifiedSync);
+        DateTimeOffset prior = new(2026, 9, 4, 9, 0, 0, TimeSpan.Zero);
+        harness.Store.MarkGoogleCatalogueSync(WorkbookId, "1", prior);
+        harness.RestartController();
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(0, 0, 0, 0, false));
+
+        GoogleCatalogueStatusView second = harness.Controller.syncGoogleCatalogue();
+
+        Assert.AreEqual(prior, second.LastVerifiedSync);
+    }
+
+    [TestMethod]
+    public void Remote_readback_advances_last_verified_timestamp()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        DateTimeOffset before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(1, 0, 0, 0, true));
+
+        GoogleCatalogueStatusView result = harness.Controller.syncGoogleCatalogue();
+
+        Assert.IsNotNull(result.LastVerifiedSync);
+        Assert.IsTrue(result.LastVerifiedSync > before);
     }
 
     [TestMethod]
@@ -613,14 +704,13 @@ public sealed class GoogleCatalogueControllerTests
     {
         private readonly TestDirectory _temp = new();
 
-        internal ControllerHarness(bool configure = true)
+        internal ControllerHarness(bool configure = true, IGoogleTokenVault? vault = null)
         {
             Settings = new(Path.Combine(_temp.Path, "settings.json"));
             if (configure)
                 Settings.Save(new(null, ClientId));
             Store = CatalogueStore.Open(Path.Combine(_temp.Path, "catalogue.db"));
-            Vault = new();
-            Connection = new();
+            Vault = vault ?? new MemoryGoogleTokenVault();
             Session = new();
             Controller = CreateController();
         }
@@ -629,10 +719,11 @@ public sealed class GoogleCatalogueControllerTests
                 Settings,
                 Store,
                 Vault,
-                (_, completed) =>
+                (_, scopedVault, completed) =>
                 {
-                    Connection.Completed = completed;
-                    return Connection;
+                    FakeConnection connection = new(scopedVault) { Completed = completed };
+                    Connections.Add(connection);
+                    return connection;
                 },
                 (_, _) =>
                 {
@@ -643,8 +734,9 @@ public sealed class GoogleCatalogueControllerTests
 
         internal DesktopSettingsStore Settings { get; }
         internal CatalogueStore Store { get; }
-        internal MemoryGoogleTokenVault Vault { get; }
-        internal FakeConnection Connection { get; private set; }
+        internal IGoogleTokenVault Vault { get; }
+        internal List<FakeConnection> Connections { get; } = [];
+        internal FakeConnection Connection => Connections[^1];
         internal FakeSession Session { get; private set; }
         internal GoogleCatalogueController Controller { get; private set; }
         internal int SessionFactoryCalls { get; private set; }
@@ -652,7 +744,7 @@ public sealed class GoogleCatalogueControllerTests
         internal void RestartController()
         {
             Controller.Dispose();
-            Connection = new();
+            Connections.Clear();
             Session = new();
             Controller = CreateController();
         }
@@ -667,9 +759,15 @@ public sealed class GoogleCatalogueControllerTests
 
     private sealed class FakeConnection : IGoogleConnectionSession
     {
+        private readonly IGoogleTokenVault _vault;
+
+        internal FakeConnection(IGoogleTokenVault vault)
+        {
+            _vault = vault;
+        }
+
         internal Action<GoogleConnectionCompletion>? Completed { get; set; }
         internal int CancelCalls { get; private set; }
-        internal int StartCalls { get; private set; }
         internal bool Disposed { get; private set; }
 
         public GoogleConnectionSnapshot Snapshot { get; private set; } =
@@ -677,7 +775,6 @@ public sealed class GoogleCatalogueControllerTests
 
         public void Start()
         {
-            StartCalls++;
             Snapshot = new(GoogleConnectionState.Connecting, null);
         }
 
@@ -687,8 +784,12 @@ public sealed class GoogleCatalogueControllerTests
             Snapshot = new(GoogleConnectionState.Disconnected, null);
         }
 
-        internal void Complete(GoogleConnectionCompletion completion)
+        internal void Complete(
+            GoogleConnectionCompletion completion,
+            GoogleRefreshCredential? credential = null
+        )
         {
+            _vault.Save(credential ?? new("fake-refresh-token", DateTimeOffset.UtcNow));
             Snapshot = new(GoogleConnectionState.NeedsInspection, null);
             Completed!(completion);
         }
@@ -770,5 +871,27 @@ public sealed class GoogleCatalogueControllerTests
                 ),
             };
         }
+    }
+
+    private sealed class BlockingGoogleTokenVault : IGoogleTokenVault
+    {
+        private readonly MemoryGoogleTokenVault _inner = new();
+        private readonly TaskCompletionSource _saveEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _saveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal Task SaveEntered => _saveEntered.Task;
+
+        public GoogleRefreshCredential? Load() => _inner.Load();
+
+        public void Save(GoogleRefreshCredential credential)
+        {
+            _saveEntered.TrySetResult();
+            _saveRelease.Task.GetAwaiter().GetResult();
+            _inner.Save(credential);
+        }
+
+        public void Delete() => _inner.Delete();
+
+        internal void ReleaseSave() => _saveRelease.TrySetResult();
     }
 }

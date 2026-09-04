@@ -60,6 +60,8 @@ internal sealed class GoogleCatalogueSyncWorker
         int completed = 0;
         int conflicts = 0;
         int unresolved = 0;
+        bool remoteVerificationOccurred = false;
+        void RecordRemoteVerification() => remoteVerificationOccurred = true;
         foreach (SyncOutboxItem operation in operations)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -68,8 +70,8 @@ internal sealed class GoogleCatalogueSyncWorker
             try
             {
                 SyncOutcome outcome = operation.State == SyncOutboxState.Pending
-                    ? await ProcessPendingAsync(operation, cancellationToken).ConfigureAwait(false)
-                    : await ReconcileReadOnlyAsync(operation, cancellationToken).ConfigureAwait(false);
+                    ? await ProcessPendingAsync(operation, RecordRemoteVerification, cancellationToken).ConfigureAwait(false)
+                    : await ReconcileReadOnlyAsync(operation, RecordRemoteVerification, cancellationToken).ConfigureAwait(false);
                 switch (outcome)
                 {
                     case SyncOutcome.Completed:
@@ -93,18 +95,19 @@ internal sealed class GoogleCatalogueSyncWorker
             }
         }
 
-        return new(completed, conflicts, unresolved, pendingCount());
+        return new(completed, conflicts, unresolved, pendingCount(), remoteVerificationOccurred);
     }
 
     private async Task<SyncOutcome> ProcessPendingAsync(
         SyncOutboxItem operation,
+        Action recordRemoteVerification,
         CancellationToken cancellationToken
     )
     {
         if (!string.Equals(Fingerprint(operation.PayloadValue), operation.IntendedValueFingerprint, StringComparison.Ordinal))
             return MarkPendingConflict(operation, "intended-fingerprint-invalid");
 
-        TargetCell target = await ResolveTargetAsync(operation, cancellationToken).ConfigureAwait(false);
+        TargetCell target = await ResolveTargetAsync(operation, recordRemoteVerification, cancellationToken).ConfigureAwait(false);
         if (target.ErrorCode is not null)
             return MarkPendingConflict(operation, target.ErrorCode);
 
@@ -134,19 +137,20 @@ internal sealed class GoogleCatalogueSyncWorker
         }
         catch (GoogleCatalogueException)
         {
-            return await ReconcileAttemptedAsync(operation, cancellationToken).ConfigureAwait(false);
+            return await ReconcileAttemptedAsync(operation, recordRemoteVerification, cancellationToken).ConfigureAwait(false);
         }
-        return await ReconcileAttemptedAsync(operation, cancellationToken).ConfigureAwait(false);
+        return await ReconcileAttemptedAsync(operation, recordRemoteVerification, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SyncOutcome> ReconcileAttemptedAsync(
         SyncOutboxItem operation,
+        Action recordRemoteVerification,
         CancellationToken cancellationToken
     )
     {
         try
         {
-            TargetCell target = await ResolveTargetAsync(operation, cancellationToken).ConfigureAwait(false);
+            TargetCell target = await ResolveTargetAsync(operation, recordRemoteVerification, cancellationToken).ConfigureAwait(false);
             if (target.ErrorCode is not null)
                 return MarkAttemptedUnresolved(operation, "sync-readback-unavailable");
             if (string.Equals(target.Cell!.Value, operation.PayloadValue, StringComparison.Ordinal))
@@ -165,12 +169,13 @@ internal sealed class GoogleCatalogueSyncWorker
 
     private async Task<SyncOutcome> ReconcileReadOnlyAsync(
         SyncOutboxItem operation,
+        Action recordRemoteVerification,
         CancellationToken cancellationToken
     )
     {
         try
         {
-            TargetCell target = await ResolveTargetAsync(operation, cancellationToken).ConfigureAwait(false);
+            TargetCell target = await ResolveTargetAsync(operation, recordRemoteVerification, cancellationToken).ConfigureAwait(false);
             if (target.ErrorCode is not null)
                 return KeepOrMarkUnresolved(operation);
             if (string.Equals(target.Cell!.Value, operation.PayloadValue, StringComparison.Ordinal))
@@ -189,6 +194,7 @@ internal sealed class GoogleCatalogueSyncWorker
 
     private async Task<TargetCell> ResolveTargetAsync(
         SyncOutboxItem operation,
+        Action recordRemoteVerification,
         CancellationToken cancellationToken
     )
     {
@@ -198,6 +204,7 @@ internal sealed class GoogleCatalogueSyncWorker
             return new(null, null, "metadata-sheet-invalid");
         }
 
+        recordRemoteVerification();
         IReadOnlyList<GoogleMetadataMatch> matches = await _workspace.SearchItemMetadataAsync(
             operation.WorkbookId,
             operation.MetadataValue,
@@ -270,4 +277,10 @@ internal sealed class GoogleCatalogueSyncWorker
     private sealed record TargetCell(string? Range, GoogleProjectionCell? Cell, string? ErrorCode);
 }
 
-internal sealed record GoogleSyncSummary(int Completed, int Conflicts, int Unresolved, int Pending);
+internal sealed record GoogleSyncSummary(
+    int Completed,
+    int Conflicts,
+    int Unresolved,
+    int Pending,
+    bool RemoteVerificationOccurred = false
+);

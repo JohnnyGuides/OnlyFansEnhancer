@@ -39,11 +39,13 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 {
     private const string CatalogueProfile = "catalogue-v1";
     private readonly object _gate = new();
+    private readonly object _credentialGate = new();
     private readonly DesktopSettingsStore _settings;
     private readonly CatalogueStore _store;
     private readonly IGoogleTokenVault _tokenVault;
     private readonly Func<
         string,
+        IGoogleTokenVault,
         Action<GoogleConnectionCompletion>,
         IGoogleConnectionSession
     > _connectionFactory;
@@ -70,7 +72,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         DesktopSettingsStore settings,
         CatalogueStore store,
         IGoogleTokenVault tokenVault,
-        Func<string, Action<GoogleConnectionCompletion>, IGoogleConnectionSession> connectionFactory,
+        Func<string, IGoogleTokenVault, Action<GoogleConnectionCompletion>, IGoogleConnectionSession> connectionFactory,
         Func<string, GoogleConnectionCompletion, IGoogleCatalogueSession> sessionFactory
     )
     {
@@ -94,10 +96,10 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             settings,
             store,
             tokenVault,
-            (clientId, completed) => new GoogleConnectionCoordinator(
+            (clientId, connectionVault, completed) => new GoogleConnectionCoordinator(
                 clientId,
                 httpClient,
-                tokenVault,
+                connectionVault,
                 static () => new HttpListenerGoogleOAuthCallbackReceiver(),
                 openBrowser,
                 completed
@@ -157,7 +159,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 throw new GoogleCatalogueControllerException("google-operation-in-progress");
             if (_connection?.Snapshot.State == GoogleConnectionState.Connecting)
                 throw new GoogleCatalogueControllerException("google-connection-in-progress");
-            epoch = ++_connectionEpoch;
+            epoch = BeginConnectionEpochLocked();
             previousConnection = _connection;
             previousSession = _session;
             _connection = null;
@@ -170,6 +172,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             _connectionErrorCode = null;
             connection = _connectionFactory(
                 clientId,
+                new EpochGoogleTokenVault(this, epoch),
                 completion => CompleteConnection(epoch, clientId, completion)
             );
             _connection = connection;
@@ -190,7 +193,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 if (ReferenceEquals(_connection, connection))
                 {
                     _connection = null;
-                    _connectionEpoch++;
+                    InvalidateConnectionEpochLocked(deleteCredential: false);
                     connection.Dispose();
                 }
             }
@@ -204,11 +207,12 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         lock (_gate)
         {
             ThrowIfDisposed();
-            _connectionEpoch++;
-            _connection?.Cancel();
+            if (_connection?.Snapshot.State != GoogleConnectionState.Connecting)
+                throw new GoogleCatalogueControllerException("google-connection-not-in-progress");
             try
             {
-                _tokenVault.Delete();
+                InvalidateConnectionEpochLocked(deleteCredential: true);
+                _connection.Cancel();
             }
             catch
             {
@@ -363,7 +367,10 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             lock (_gate)
             {
                 ThrowIfDisposed();
-                if (summary.Conflicts == 0 && summary.Unresolved == 0 && summary.Pending == 0)
+                if (summary.RemoteVerificationOccurred
+                    && summary.Conflicts == 0
+                    && summary.Unresolved == 0
+                    && summary.Pending == 0)
                 {
                     _store.MarkGoogleCatalogueSync(
                         workbookId,
@@ -400,11 +407,10 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             ThrowIfDisposed();
             if (Volatile.Read(ref _catalogueOperationActive) != 0)
                 throw new GoogleCatalogueControllerException("google-operation-in-progress");
-            _connectionEpoch++;
             try
             {
+                InvalidateConnectionEpochLocked(deleteCredential: true);
                 _connection?.Cancel();
-                _tokenVault.Delete();
                 _store.ClearGoogleCatalogueSelection();
             }
             catch
@@ -434,7 +440,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             if (_disposed)
                 return;
             _disposed = true;
-            _connectionEpoch++;
+            InvalidateConnectionEpochLocked(deleteCredential: false);
             _lifetime.Cancel();
             connection = _connection;
             session = _session;
@@ -455,11 +461,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     {
         lock (_gate)
         {
-            if (_disposed || epoch != _connectionEpoch)
-            {
-                DeleteStaleCredential();
+            if (_disposed || !IsCurrentConnectionEpochLocked(epoch))
                 return;
-            }
         }
 
         IGoogleCatalogueSession? session = null;
@@ -468,11 +471,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             session = _sessionFactory(clientId, completion);
             lock (_gate)
             {
-                if (_disposed || epoch != _connectionEpoch)
-                {
-                    DeleteStaleCredential();
+                if (_disposed || !IsCurrentConnectionEpochLocked(epoch))
                     return;
-                }
                 _store.SaveGoogleCatalogueWorkbook(completion.WorkbookId, completion.WorkbookTitle);
                 _session?.Dispose();
                 _session = session;
@@ -489,9 +489,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         {
             lock (_gate)
             {
-                if (!_disposed && epoch == _connectionEpoch)
+                if (!_disposed && IsCurrentConnectionEpochLocked(epoch))
                 {
-                    DeleteStaleCredential();
+                    DeleteCredentialIfCurrent(epoch);
                     try
                     {
                         _store.ClearGoogleCatalogueSelection();
@@ -577,16 +577,68 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             throw new GoogleCatalogueControllerException("google-catalogue-unavailable");
     }
 
-    private void DeleteStaleCredential()
+    private long BeginConnectionEpochLocked()
     {
-        try
+        lock (_credentialGate)
         {
-            _tokenVault.Delete();
+            return ++_connectionEpoch;
         }
-        catch
+    }
+
+    private void InvalidateConnectionEpochLocked(bool deleteCredential)
+    {
+        lock (_credentialGate)
         {
-            // A stale completion must never become visible; disconnect can be retried explicitly.
+            _connectionEpoch++;
+            if (deleteCredential)
+                _tokenVault.Delete();
         }
+    }
+
+    private bool IsCurrentConnectionEpochLocked(long epoch)
+    {
+        lock (_credentialGate)
+        {
+            return epoch == _connectionEpoch;
+        }
+    }
+
+    private GoogleRefreshCredential? LoadCredential(long epoch)
+    {
+        lock (_credentialGate)
+        {
+            return epoch == _connectionEpoch ? _tokenVault.Load() : null;
+        }
+    }
+
+    private void SaveCredential(long epoch, GoogleRefreshCredential credential)
+    {
+        lock (_credentialGate)
+        {
+            if (epoch == _connectionEpoch)
+                _tokenVault.Save(credential);
+        }
+    }
+
+    private void DeleteCredentialIfCurrent(long epoch)
+    {
+        lock (_credentialGate)
+        {
+            if (epoch == _connectionEpoch)
+                _tokenVault.Delete();
+        }
+    }
+
+    private sealed class EpochGoogleTokenVault(
+        GoogleCatalogueController owner,
+        long epoch
+    ) : IGoogleTokenVault
+    {
+        public GoogleRefreshCredential? Load() => owner.LoadCredential(epoch);
+
+        public void Save(GoogleRefreshCredential credential) => owner.SaveCredential(epoch, credential);
+
+        public void Delete() => owner.DeleteCredentialIfCurrent(epoch);
     }
 
     private void RestorePersistedSession()

@@ -77,6 +77,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Completed);
+        Assert.IsTrue(summary.RemoteVerificationOccurred);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
         AssertNoMutationAttempt(fixture.Store, operationId);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
@@ -327,7 +328,21 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         Assert.IsNotNull(rejection);
         Assert.AreEqual(0, summary.Pending);
+        Assert.IsFalse(summary.RemoteVerificationOccurred);
         Assert.AreEqual(0, fixture.Google.MetadataSearches.Count);
+        Assert.AreEqual(0, fixture.Google.Mutations.Count);
+    }
+
+    [TestMethod]
+    public async Task EmptyScopedOutboxReportsNoRemoteVerification()
+    {
+        using SyncFixture fixture = SyncFixture.Create();
+
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
+
+        Assert.IsFalse(summary.RemoteVerificationOccurred);
+        Assert.AreEqual(0, fixture.Google.MetadataSearches.Count);
+        Assert.AreEqual(0, fixture.Google.CellReads.Count);
         Assert.AreEqual(0, fixture.Google.Mutations.Count);
     }
 
