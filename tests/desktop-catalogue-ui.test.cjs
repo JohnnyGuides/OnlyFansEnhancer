@@ -124,6 +124,15 @@ const googleStates = Object.freeze({
     errorCode: "remote-fingerprint-changed",
     sensitiveTitle: "PRIVATE VIDEO TITLE MUST NOT LEAK",
   },
+  syncUnresolved: {
+    state: "conflict",
+    workbookName,
+    sheetName,
+    pendingCount: 0,
+    conflictCount: 0,
+    lastVerifiedSync: null,
+    errorCode: "google-sync-unresolved",
+  },
   error: {
     state: "error",
     workbookName,
@@ -195,6 +204,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
         (value) => structuredClone(value),
       );
       let staleApply = Boolean(googleFixtures.staleApplyOnce);
+      let migrationError = googleFixtures.migrationErrorOnce || "";
       globalThis.__catalogueImportCalls = 0;
       globalThis.__catalogueConfirmCalls = 0;
       globalThis.__googleHostCalls = [];
@@ -311,6 +321,11 @@ async function installHost(page, initialState = null, googleOptions = {}) {
             if (staleApply) {
               staleApply = false;
               throw new Error("stale-migration-plan");
+            }
+            if (migrationError) {
+              const code = migrationError;
+              migrationError = "";
+              throw new Error(code);
             }
             googleStatus = structuredClone(
               googleFixtures.applied || {
@@ -516,6 +531,22 @@ async function testGoogleStates(browser, port) {
       exact: true,
     })
     .waitFor();
+  assert.equal(
+    await strip.getByRole("button", { name: "Check workbook" }).count(),
+    1,
+  );
+
+  await setGoogleState(page, googleStates.syncUnresolved);
+  await strip
+    .getByText(
+      "OFEnhancer could not confirm the last Google Sheet update. Sync again to check it.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(
+    await strip.getByRole("button", { name: "Sync again" }).count(),
+    1,
+  );
 
   await setGoogleState(page, googleStates.error);
   await strip
@@ -747,9 +778,9 @@ async function testGoogleErrorRecovery(browser, port) {
     {
       code: "google-sync-unresolved",
       message:
-        "OFEnhancer could not confirm the last workbook update. Check the workbook before trying again.",
-      action: "Check workbook",
-      operation: "inspectGoogleWorkbook",
+        "OFEnhancer could not confirm the last Google Sheet update. Sync again to check it.",
+      action: "Sync again",
+      operation: "syncGoogleCatalogue",
       disconnect: true,
     },
     {
@@ -958,6 +989,61 @@ async function testGoogleMigration(browser, port) {
       operation: "applyGoogleWorkbookMigration",
       payload: { planHash: secondPlanHash },
     },
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testGoogleMigrationFailure(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  const errors = captureErrors(page);
+  await installHost(page, populated, {
+    initial: googleStates.migrationReady,
+    migrationErrorOnce: "google-migration-unresolved",
+    inspected: googleStates.refreshedMigration,
+  });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page.getByRole("button", { name: "Review changes" }).click();
+  await page.getByRole("button", { name: "Yes, update the workbook" }).click();
+
+  const strip = page.locator("#googleCatalogue");
+  await strip
+    .getByText(
+      "OFEnhancer could not confirm the workbook update. Check the workbook before trying again.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("dialog", { name: "Update Google Sheet?" })
+      .isVisible(),
+    false,
+    "migration failure retained the stale dialog",
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Review changes" }).count(),
+    0,
+    "migration failure retained the stale review action",
+  );
+  assert.deepEqual(
+    (await googleCalls(page, "applyGoogleWorkbookMigration")).at(-1),
+    {
+      operation: "applyGoogleWorkbookMigration",
+      payload: { planHash: firstPlanHash },
+    },
+  );
+
+  await strip.getByRole("button", { name: "Check workbook" }).click();
+  await page.getByRole("button", { name: "Review changes" }).click();
+  await page.getByRole("button", { name: "Yes, update the workbook" }).click();
+  assert.deepEqual(
+    (await googleCalls(page, "applyGoogleWorkbookMigration")).at(-1),
+    {
+      operation: "applyGoogleWorkbookMigration",
+      payload: { planHash: secondPlanHash },
+    },
+    "migration failure reused the stale plan hash",
   );
   assert.deepEqual(errors, []);
   await page.close();
@@ -1217,6 +1303,7 @@ async function main() {
       await testGoogleActionCalls(browser, port);
       await testGoogleErrorRecovery(browser, port);
       await testGoogleMigration(browser, port);
+      await testGoogleMigrationFailure(browser, port);
       await testGoogleBusyStates(browser, port);
       await testGooglePolling(browser, port);
       await testGoogleResponsive(browser, port);

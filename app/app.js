@@ -391,13 +391,25 @@
         action: "inspect",
         allowDisconnect: true,
       };
-    if (
-      code === "google-sync-unresolved" ||
-      code === "google-migration-unresolved"
-    )
+    if (code === "google-sync-unresolved")
       return {
         message:
-          "OFEnhancer could not confirm the last workbook update. Check the workbook before trying again.",
+          "OFEnhancer could not confirm the last Google Sheet update. Sync again to check it.",
+        label: "Sync again",
+        action: "sync",
+        allowDisconnect: true,
+      };
+    if (code === "google-migration-unresolved")
+      return {
+        message:
+          "OFEnhancer could not confirm the workbook update. Check the workbook before trying again.",
+        label: "Check workbook",
+        action: "inspect",
+        allowDisconnect: true,
+      };
+    if (code === "google-sync-conflict")
+      return {
+        message: "The workbook changed. Check it before syncing.",
         label: "Check workbook",
         action: "inspect",
         allowDisconnect: true,
@@ -435,11 +447,15 @@
         label: "Connect Google Sheet",
         action: "connect",
       };
-    if (
-      code === "google-workbook-not-ready" ||
-      code === "google-sync-conflict" ||
-      code === "google-migration-failed"
-    )
+    if (code === "google-migration-failed")
+      return {
+        message:
+          "OFEnhancer could not update the workbook. Check it before trying again.",
+        label: "Check workbook",
+        action: "inspect",
+        allowDisconnect: true,
+      };
+    if (code === "google-workbook-not-ready")
       return {
         message: "Check the workbook before trying that action again.",
         label: "Check workbook",
@@ -457,6 +473,10 @@
         action: "refresh",
         className: "secondary-button",
       };
+    return null;
+  }
+
+  function defaultGoogleErrorPresentation() {
     return {
       message:
         "OFEnhancer could not finish the Google Sheet action. Try again.",
@@ -483,7 +503,10 @@
       workbookName:
         typeof view?.workbookName === "string" ? view.workbookName : "",
       sheetName: typeof view?.sheetName === "string" ? view.sheetName : "",
-      planHash: typeof view?.planHash === "string" ? view.planHash : "",
+      planHash:
+        state === "migrationReady" && typeof view?.planHash === "string"
+          ? view.planHash
+          : "",
       rowsToBind: Number.isInteger(view?.rowsToBind) ? view.rowsToBind : 0,
       migrationChanges: Number.isInteger(view?.migrationChanges)
         ? view.migrationChanges
@@ -497,17 +520,21 @@
       lastVerifiedSync: view?.lastVerifiedSync || null,
       errorCode: typeof view?.errorCode === "string" ? view.errorCode : "",
     };
+    const codePresentation = googleErrorPresentation(
+      googleStatusView.errorCode,
+    );
     const errorPresentation =
-      state === "error"
-        ? googleErrorPresentation(googleStatusView.errorCode)
-        : null;
+      codePresentation ||
+      (state === "error" ? defaultGoogleErrorPresentation() : null);
 
     googleCatalogue.hidden = false;
     googleDisconnect.hidden = true;
     setBusy(googleDisconnect, false);
     googleCatalogueStatus.setAttribute("aria-busy", "false");
 
-    if (notice) {
+    if (codePresentation) {
+      googleCatalogueStatus.textContent = codePresentation.message;
+    } else if (notice) {
       googleCatalogueStatus.textContent = notice;
     } else if (state === "notConfigured") {
       googleCatalogueStatus.textContent = "Add your Google setup in Settings.";
@@ -540,7 +567,14 @@
       googleCatalogueStatus.textContent = errorPresentation.message;
     }
 
-    if (state === "notConfigured") {
+    if (codePresentation) {
+      setGooglePrimaryAction(
+        codePresentation.label,
+        codePresentation.action,
+        codePresentation.className,
+      );
+      googleDisconnect.hidden = !codePresentation.allowDisconnect;
+    } else if (state === "notConfigured") {
       setGooglePrimaryAction("Settings", "settings", "secondary-button");
     } else if (state === "disconnected") {
       setGooglePrimaryAction("Connect Google Sheet", "connect");
@@ -724,8 +758,13 @@
           });
         }
       } else {
-        googleMigrationStatus.textContent =
-          "OFEnhancer could not update the workbook. Choose No and check it again.";
+        googleMigrationDialog.close();
+        renderGoogleCatalogue({
+          ...googleStatusView,
+          state: "error",
+          planHash: null,
+          errorCode: error?.message,
+        });
       }
     } finally {
       setBusy(applyGoogleMigration, false);
