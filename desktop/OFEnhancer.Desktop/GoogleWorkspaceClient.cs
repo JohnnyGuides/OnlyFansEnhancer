@@ -29,7 +29,7 @@ internal sealed class GoogleWorkspaceClient
     private const string SpreadsheetMetadataFields =
         "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)))";
     private const string WorkbookFields =
-        "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(effectiveValue,formattedValue,hyperlink)),columnMetadata(hiddenByUser)),columnGroups(range(sheetId,dimension,startIndex,endIndex),depth,collapsed)),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(dimensionRange(sheetId,dimension,startIndex,endIndex)))";
+        "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(effectiveValue,formattedValue,hyperlink)),columnMetadata(hiddenByUser)),columnGroups(range(sheetId,dimension,startIndex,endIndex),depth,collapsed)),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))";
     private readonly HttpClient _httpClient;
     private readonly IGoogleAccessTokenSource _tokens;
 
@@ -181,8 +181,9 @@ internal sealed class GoogleWorkspaceClient
                 if (!string.Equals(parsed.Key, ItemMetadataKey, StringComparison.Ordinal)
                     || !string.Equals(parsed.Value, canonicalItemId, StringComparison.Ordinal)
                     || !string.Equals(parsed.Visibility, "DOCUMENT", StringComparison.Ordinal)
+                    || parsed.LocationKind != GoogleDeveloperMetadataLocationKind.DimensionRange
                     || !string.Equals(parsed.Dimension, "ROWS", StringComparison.Ordinal)
-                    || parsed.SheetId <= 0
+                    || parsed.SheetId < 0
                     || parsed.StartRowIndex < 0
                     || parsed.EndRowIndex != parsed.StartRowIndex + 1)
                 {
@@ -538,7 +539,7 @@ internal sealed record GoogleWorkbookSnapshot(
                 {
                     throw Invalid();
                 }
-                int sheetId = Integer(sheetProperties, "sheetId", 1, int.MaxValue);
+                int sheetId = Integer(sheetProperties, "sheetId", 0, int.MaxValue);
                 string sheetTitle = String(sheetProperties, "title", 100);
                 bool hidden = sheetProperties.TryGetProperty("hidden", out JsonElement hiddenValue)
                     && hiddenValue.ValueKind == JsonValueKind.True;
@@ -582,21 +583,65 @@ internal sealed record GoogleWorkbookSnapshot(
     {
         if (metadata.ValueKind != JsonValueKind.Object
             || !metadata.TryGetProperty("location", out JsonElement location)
-            || location.ValueKind != JsonValueKind.Object
-            || !location.TryGetProperty("dimensionRange", out JsonElement range)
-            || range.ValueKind != JsonValueKind.Object)
+            || location.ValueKind != JsonValueKind.Object)
         {
             throw Invalid();
         }
+
+        int metadataId = Integer(metadata, "metadataId", 1, int.MaxValue);
+        string key = String(metadata, "metadataKey", 256);
+        string value = String(metadata, "metadataValue", 256);
+        string visibility = String(metadata, "visibility", 32);
+        bool hasSpreadsheet = location.TryGetProperty("spreadsheet", out JsonElement spreadsheet);
+        bool hasSheet = location.TryGetProperty("sheetId", out _);
+        bool hasDimension = location.TryGetProperty("dimensionRange", out JsonElement range);
+        if ((hasSpreadsheet ? 1 : 0) + (hasSheet ? 1 : 0) + (hasDimension ? 1 : 0) != 1)
+            throw Invalid();
+
+        if (hasSpreadsheet)
+        {
+            if (spreadsheet.ValueKind != JsonValueKind.True)
+                throw Invalid();
+            return new(
+                metadataId,
+                key,
+                value,
+                visibility,
+                0,
+                string.Empty,
+                0,
+                0,
+                GoogleDeveloperMetadataLocationKind.Spreadsheet
+            );
+        }
+
+        if (hasSheet)
+        {
+            return new(
+                metadataId,
+                key,
+                value,
+                visibility,
+                Integer(location, "sheetId", 0, int.MaxValue),
+                string.Empty,
+                0,
+                0,
+                GoogleDeveloperMetadataLocationKind.Sheet
+            );
+        }
+
+        if (range.ValueKind != JsonValueKind.Object)
+            throw Invalid();
         return new(
-            Integer(metadata, "metadataId", 1, int.MaxValue),
-            String(metadata, "metadataKey", 256),
-            String(metadata, "metadataValue", 256),
-            String(metadata, "visibility", 32),
-            Integer(range, "sheetId", 1, int.MaxValue),
+            metadataId,
+            key,
+            value,
+            visibility,
+            Integer(range, "sheetId", 0, int.MaxValue),
             String(range, "dimension", 32),
             Integer(range, "startIndex", 0, 10_000_000),
-            Integer(range, "endIndex", 1, 10_000_000)
+            Integer(range, "endIndex", 1, 10_000_000),
+            GoogleDeveloperMetadataLocationKind.DimensionRange
         );
     }
 
@@ -700,7 +745,7 @@ internal sealed record GoogleWorkbookSnapshot(
             if (group.ValueKind != JsonValueKind.Object
                 || !group.TryGetProperty("range", out JsonElement range)
                 || range.ValueKind != JsonValueKind.Object
-                || Integer(range, "sheetId", 1, int.MaxValue) != expectedSheetId
+                || Integer(range, "sheetId", 0, int.MaxValue) != expectedSheetId
                 || !string.Equals(String(range, "dimension", 32), "COLUMNS", StringComparison.Ordinal))
             {
                 throw Invalid();
@@ -805,8 +850,16 @@ internal sealed record GoogleDeveloperMetadataSnapshot(
     int SheetId,
     string Dimension,
     int StartRowIndex,
-    int EndRowIndex
+    int EndRowIndex,
+    GoogleDeveloperMetadataLocationKind LocationKind = GoogleDeveloperMetadataLocationKind.DimensionRange
 );
+
+internal enum GoogleDeveloperMetadataLocationKind
+{
+    Spreadsheet,
+    Sheet,
+    DimensionRange,
+}
 
 internal sealed record GoogleMetadataMatch(int MetadataId, string Value, int SheetId, int RowNumber);
 

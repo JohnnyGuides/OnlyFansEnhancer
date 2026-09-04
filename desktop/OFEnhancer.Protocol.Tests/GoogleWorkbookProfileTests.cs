@@ -275,6 +275,38 @@ public sealed class GoogleWorkbookProfileTests
     }
 
     [TestMethod]
+    public void RemoteMetadataThatContradictsLocalSourceIdentityReturnsAnExactConflict()
+    {
+        GoogleWorkbookSnapshot legacy = LegacySnapshot();
+        GoogleDeveloperMetadataSnapshot conflictingAshley = legacy.DeveloperMetadata.Single() with
+        {
+            MetadataId = 7002,
+            Value = "22222222-2222-4222-8222-222222222222",
+            StartRowIndex = 1,
+            EndRowIndex = 2,
+        };
+        GoogleWorkbookSnapshot conflicting = legacy with
+        {
+            DeveloperMetadata = [.. legacy.DeveloperMetadata, conflictingAshley],
+        };
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.ImportSnapshot(LocalCatalogueSnapshot("ashley"));
+        CatalogueItemSummary original = store.GetItems(includeArchived: true).Single();
+
+        WorkbookInspection inspection = GoogleWorkbookProfile.Inspect(conflicting, store);
+
+        CollectionAssert.Contains(
+            inspection.Conflicts.ToArray(),
+            new WorkbookConflict("metadata-source-identity-conflict", "A2")
+        );
+        CatalogueItemSummary retained = store.GetItems(includeArchived: true).Single();
+        Assert.AreEqual(original.ItemId, retained.ItemId);
+        Assert.AreEqual("ashley", retained.SourceKey);
+        Assert.AreEqual(0, inspection.Bindings.Count);
+    }
+
+    [TestMethod]
     public void NonEmptyForeignTechnicalCellsBlockMigration()
     {
         GoogleWorkbookSnapshot legacy = LegacySnapshot();
@@ -290,9 +322,13 @@ public sealed class GoogleWorkbookProfileTests
         Assert.IsTrue(headerInspection.Conflicts.Any(conflict => conflict.Code == "owned-range-conflict"));
         Assert.AreEqual(0, headerStore.GetItems(includeArchived: true).Count);
 
-        GoogleWorkbookSnapshot foreignStableId = ReplaceMainRow(
+        GoogleWorkbookSnapshot stableHeader = ReplaceMainRow(
             legacy,
-            SetCell(legacy.Sheets[0].Rows[1], 21, "22222222-2222-4222-8222-222222222222")
+            SetCell(legacy.Sheets[0].Rows[0], 21, "OFEnhancer ID")
+        );
+        GoogleWorkbookSnapshot foreignStableId = ReplaceMainRow(
+            stableHeader,
+            SetCell(stableHeader.Sheets[0].Rows[1], 21, "22222222-2222-4222-8222-222222222222")
         );
         using TestDirectory rowTemp = new();
         using CatalogueStore rowStore = CatalogueStore.Open(Path.Combine(rowTemp.Path, "catalogue.db"));
@@ -300,6 +336,80 @@ public sealed class GoogleWorkbookProfileTests
         WorkbookInspection rowInspection = GoogleWorkbookProfile.Inspect(foreignStableId, rowStore);
 
         Assert.IsTrue(rowInspection.Conflicts.Any(conflict => conflict.Code == "stable-id-conflict"));
+    }
+
+    [DataTestMethod]
+    [DataRow(22, "https://www.pornhub.com/view_video.php?viewkey=foreign-paid", "V2")]
+    [DataRow(23, "https://www.clips4sale.com/studio/123/456/foreign", "W2")]
+    [DataRow(24, "2026-09-04T12:00:00.0000000+00:00", "X2")]
+    public void MissingTechnicalHeaderNeverClaimsNonEmptyCells(
+        int column,
+        string foreignValue,
+        string expectedTarget
+    )
+    {
+        GoogleWorkbookSnapshot legacy = LegacySnapshot();
+        GoogleWorkbookSnapshot foreignCell = ReplaceMainRow(
+            legacy,
+            SetCell(legacy.Sheets[0].Rows[1], column, foreignValue)
+        );
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        WorkbookInspection inspection = GoogleWorkbookProfile.Inspect(foreignCell, store);
+
+        CollectionAssert.Contains(
+            inspection.Conflicts.ToArray(),
+            new WorkbookConflict("owned-range-conflict", expectedTarget)
+        );
+        Assert.IsFalse(inspection.MigrationPlan.Operations.Any(operation =>
+            operation.Kind is "set-headers" or "configure-technical-columns"));
+        Assert.AreEqual(0, store.GetItems(includeArchived: true).Count);
+    }
+
+    [TestMethod]
+    public void EmptyMissingTechnicalColumnsRemainAnAdditiveMigration()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        WorkbookInspection inspection = GoogleWorkbookProfile.Inspect(LegacySnapshot(), store);
+
+        Assert.AreEqual(0, inspection.Conflicts.Count);
+        SingleOperation(inspection, "set-headers", "'2026 Video Catalogue'!U1:X1");
+        Assert.IsTrue(inspection.MigrationPlan.Operations.Any(operation =>
+            operation.Kind == "configure-technical-columns"));
+    }
+
+    [TestMethod]
+    public void MissingTechnicalHeaderFindsForeignCellOutsideCatalogueRows()
+    {
+        GoogleWorkbookSnapshot legacy = LegacySnapshot();
+        GoogleSheetSnapshot main = legacy.Sheets[0];
+        GoogleWorkbookRowSnapshot technicalOnly = SetCell(
+            new GoogleWorkbookRowSnapshot(25, []),
+            22,
+            "foreign"
+        );
+        GoogleWorkbookSnapshot foreignCell = legacy with
+        {
+            Sheets =
+            [
+                main with { Rows = [.. main.Rows, technicalOnly] },
+                .. legacy.Sheets.Skip(1),
+            ],
+        };
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        WorkbookInspection inspection = GoogleWorkbookProfile.Inspect(foreignCell, store);
+
+        CollectionAssert.Contains(
+            inspection.Conflicts.ToArray(),
+            new WorkbookConflict("owned-range-conflict", "V25")
+        );
+        Assert.IsFalse(inspection.MigrationPlan.Operations.Any(operation =>
+            operation.Kind is "set-headers" or "configure-technical-columns"));
     }
 
     [TestMethod]
@@ -517,6 +627,28 @@ public sealed class GoogleWorkbookProfileTests
     private static string FixtureText(string fileName) => File.ReadAllText(
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Fixtures", fileName))
     );
+
+    private static string LocalCatalogueSnapshot(string sourceKey) =>
+        System.Text.Json.JsonSerializer.Serialize(new
+        {
+            version = 1,
+            items = new[]
+            {
+                new
+                {
+                    sourceKey,
+                    sourceRow = 42,
+                    title = "Existing Ashley",
+                    description = "Existing description",
+                    plannedDate = "2026-09-11",
+                    series = "Resident Evil",
+                    episode = "04",
+                    xTeasers = 0,
+                    redditTeasers = 0,
+                    platformLinks = new Dictionary<string, string>(),
+                },
+            },
+        });
 
     private static JsonNode ReverseObjectProperties(JsonNode node)
     {

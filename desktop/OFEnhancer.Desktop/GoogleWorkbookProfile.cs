@@ -64,25 +64,35 @@ internal static class GoogleWorkbookProfile
         GoogleSheetSnapshot selected = SelectCatalogueSheet(snapshot);
         GoogleWorkbookRowSnapshot header = selected.Rows.SingleOrDefault(row => row.RowNumber == 1)
             ?? throw new GoogleCatalogueException("workbook-profile-not-found");
-        GoogleWorkbookRowSnapshot[] populatedRows = selected.Rows
-            .Where(row => row.RowNumber > 1 && IsPopulated(row))
+        GoogleWorkbookRowSnapshot[] bodyRows = selected.Rows
+            .Where(row => row.RowNumber > 1)
             .OrderBy(row => row.RowNumber)
             .ToArray();
+        GoogleWorkbookRowSnapshot[] populatedRows = bodyRows.Where(IsPopulated).ToArray();
         if (populatedRows.Length > MaximumRows)
             throw new GoogleCatalogueException("workbook-row-limit");
 
         List<WorkbookConflict> conflicts = [];
-        bool technicalHeadersComplete = InspectTechnicalHeaders(header, conflicts);
+        bool[] ownedTechnicalColumns = InspectTechnicalHeaders(header, bodyRows, conflicts);
+        bool technicalHeadersComplete = ownedTechnicalColumns.All(owned => owned);
         InspectCompanionTabs(snapshot, conflicts);
 
         Dictionary<int, string> metadataByRow = ValidateItemMetadata(snapshot, selected, populatedRows, conflicts);
-        WorkbookProjection projection = BuildProjection(snapshot.WorkbookId, selected, populatedRows, metadataByRow);
+        WorkbookProjection projection = BuildProjection(
+            snapshot.WorkbookId,
+            selected,
+            populatedRows,
+            metadataByRow,
+            ownedTechnicalColumns
+        );
+        InspectSourceIdentityConflicts(projection, store.GetItems(includeArchived: true), conflicts);
 
         List<WorkbookMigrationOperation> operations = BuildStructuralOperations(
             snapshot,
             selected,
             technicalHeadersComplete,
-            TechnicalColumnsConfigured(selected)
+            TechnicalColumnsConfigured(selected),
+            conflicts.All(conflict => conflict.Code != "owned-range-conflict")
         );
         if (conflicts.Count > 0)
             return CompleteInspection(selected, projection, [], conflicts, operations);
@@ -113,7 +123,7 @@ internal static class GoogleWorkbookProfile
         foreach (GoogleWorkbookRowSnapshot row in populatedRows)
         {
             GoogleRowBinding binding = bindings.Single(candidate => candidate.LastObservedRow == row.RowNumber);
-            string? stableCell = Cell(row, 21);
+            string? stableCell = ownedTechnicalColumns[0] ? Cell(row, 21) : null;
             if (stableCell is not null)
             {
                 string? canonicalCell = CanonicalGuidOrNull(stableCell);
@@ -229,24 +239,28 @@ internal static class GoogleWorkbookProfile
             string.Equals(Cell(header, pair.Key), pair.Value, StringComparison.Ordinal));
     }
 
-    private static bool InspectTechnicalHeaders(
+    private static bool[] InspectTechnicalHeaders(
         GoogleWorkbookRowSnapshot header,
+        IReadOnlyList<GoogleWorkbookRowSnapshot> rows,
         ICollection<WorkbookConflict> conflicts
     )
     {
-        bool complete = true;
+        bool[] ownedColumns = new bool[TechnicalHeaders.Length];
         for (int offset = 0; offset < TechnicalHeaders.Length; offset++)
         {
-            string? actual = Cell(header, 21 + offset);
-            if (actual is null)
+            int column = 21 + offset;
+            string? actual = Cell(header, column);
+            if (string.Equals(actual, TechnicalHeaders[offset], StringComparison.Ordinal))
             {
-                complete = false;
+                ownedColumns[offset] = true;
                 continue;
             }
-            if (!string.Equals(actual, TechnicalHeaders[offset], StringComparison.Ordinal))
-                conflicts.Add(new("owned-range-conflict", $"{ColumnName(21 + offset)}1"));
+            if (actual is not null)
+                conflicts.Add(new("owned-range-conflict", $"{ColumnName(column)}1"));
+            foreach (GoogleWorkbookRowSnapshot row in rows.Where(row => Cell(row, column) is not null))
+                conflicts.Add(new("owned-range-conflict", $"{ColumnName(column)}{row.RowNumber}"));
         }
-        return complete;
+        return ownedColumns;
     }
 
     private static void InspectCompanionTabs(
@@ -290,6 +304,7 @@ internal static class GoogleWorkbookProfile
                 && itemId is not null
                 && string.Equals(metadata.Value, itemId, StringComparison.Ordinal)
                 && string.Equals(metadata.Visibility, "DOCUMENT", StringComparison.Ordinal)
+                && metadata.LocationKind == GoogleDeveloperMetadataLocationKind.DimensionRange
                 && metadata.SheetId == selected.SheetId
                 && string.Equals(metadata.Dimension, "ROWS", StringComparison.Ordinal)
                 && metadata.StartRowIndex >= 1
@@ -308,11 +323,40 @@ internal static class GoogleWorkbookProfile
         return byRow;
     }
 
+    private static void InspectSourceIdentityConflicts(
+        WorkbookProjection projection,
+        IReadOnlyList<CatalogueItemSummary> localItems,
+        ICollection<WorkbookConflict> conflicts
+    )
+    {
+        Dictionary<string, CatalogueItemSummary> bySource = localItems.ToDictionary(
+            item => item.SourceKey,
+            StringComparer.Ordinal
+        );
+        Dictionary<string, CatalogueItemSummary> byItemId = localItems.ToDictionary(
+            item => item.ItemId,
+            StringComparer.Ordinal
+        );
+        foreach (WorkbookCatalogueItem row in projection.Items.Where(row => row.MetadataId is not null))
+        {
+            bySource.TryGetValue(row.SourceKey, out CatalogueItemSummary? sourceItem);
+            byItemId.TryGetValue(row.MetadataId!, out CatalogueItemSummary? metadataItem);
+            if ((metadataItem is null && sourceItem is not null)
+                || (metadataItem is not null
+                    && sourceItem is not null
+                    && !string.Equals(metadataItem.ItemId, sourceItem.ItemId, StringComparison.Ordinal)))
+            {
+                conflicts.Add(new("metadata-source-identity-conflict", $"A{row.SourceRow}"));
+            }
+        }
+    }
+
     private static WorkbookProjection BuildProjection(
         string workbookId,
         GoogleSheetSnapshot sheet,
         IReadOnlyList<GoogleWorkbookRowSnapshot> rows,
-        IReadOnlyDictionary<int, string> metadataByRow
+        IReadOnlyDictionary<int, string> metadataByRow,
+        IReadOnlyList<bool> ownedTechnicalColumns
     )
     {
         List<WorkbookCatalogueItem> items = new(rows.Count);
@@ -326,7 +370,7 @@ internal static class GoogleWorkbookProfile
                     throw new GoogleCatalogueException("invalid-workbook-date");
                 plannedDate = rawDate;
             }
-            string? verified = Cell(row, 24);
+            string? verified = ownedTechnicalColumns[3] ? Cell(row, 24) : null;
             if (verified is not null
                 && !DateTimeOffset.TryParseExact(verified, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _))
             {
@@ -339,8 +383,10 @@ internal static class GoogleWorkbookProfile
             AddLink(links, "manyvids", Link(row, 12));
             AddLink(links, "x", Link(row, 15));
             AddLink(links, "reddit", Link(row, 18));
-            AddLink(links, "pornhubPaid", Link(row, 22));
-            AddLink(links, "clips4sale", Link(row, 23));
+            if (ownedTechnicalColumns[1])
+                AddLink(links, "pornhubPaid", Link(row, 22));
+            if (ownedTechnicalColumns[2])
+                AddLink(links, "clips4sale", Link(row, 23));
             items.Add(new(
                 sourceRow: row.RowNumber,
                 sourceKey: RequiredCell(row, 1, "source-key", 200),
@@ -362,7 +408,8 @@ internal static class GoogleWorkbookProfile
         GoogleWorkbookSnapshot snapshot,
         GoogleSheetSnapshot selected,
         bool technicalHeadersComplete,
-        bool technicalColumnsConfigured
+        bool technicalColumnsConfigured,
+        bool allowTechnicalChanges
     )
     {
         List<WorkbookMigrationOperation> operations = [];
@@ -375,7 +422,7 @@ internal static class GoogleWorkbookProfile
             else if (!sheet.Hidden)
                 operations.Add(new("hide-companion", title, null, []));
         }
-        if (!technicalHeadersComplete)
+        if (allowTechnicalChanges && !technicalHeadersComplete)
         {
             operations.Add(new(
                 "set-headers",
@@ -384,7 +431,7 @@ internal static class GoogleWorkbookProfile
                 TechnicalHeaders
             ));
         }
-        if (!technicalColumnsConfigured)
+        if (allowTechnicalChanges && !technicalColumnsConfigured)
         {
             operations.Add(new(
                 "configure-technical-columns",

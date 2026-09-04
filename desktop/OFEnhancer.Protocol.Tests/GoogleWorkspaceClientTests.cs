@@ -69,7 +69,10 @@ public sealed class GoogleWorkspaceClientTests
             },
             dataQuery["ranges"].ToArray()
         );
-        StringAssert.Contains(dataQuery["fields"].Single(), "developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(dimensionRange(sheetId,dimension,startIndex,endIndex)))");
+        StringAssert.Contains(
+            dataQuery["fields"].Single(),
+            "developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))"
+        );
         Assert.AreEqual("workbook-one", snapshot.WorkbookId);
         Assert.AreEqual(2, snapshot.Sheets.Count);
     }
@@ -89,6 +92,61 @@ public sealed class GoogleWorkspaceClientTests
 
         Assert.AreEqual("google-request-failed", error.Code);
         Assert.AreEqual(2, handler.Requests.Count);
+    }
+
+    [TestMethod]
+    public async Task WorkbookReadAcceptsGoogleSheetIdZero()
+    {
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, """
+            {"spreadsheetId":"workbook-zero","properties":{"title":"Work"},"sheets":[{"properties":{"sheetId":0,"title":"First Sheet","hidden":false,"gridProperties":{"rowCount":100,"columnCount":24}}}]}
+            """);
+        handler.EnqueueJson(HttpStatusCode.OK, """
+            {"spreadsheetId":"workbook-zero","properties":{"title":"Work"},"sheets":[{"properties":{"sheetId":0,"title":"First Sheet","hidden":false,"gridProperties":{"rowCount":100,"columnCount":24}},"data":[{"startRow":0,"startColumn":0,"rowData":[]}]}],"developerMetadata":[{"metadataId":7,"metadataKey":"ofenhancer.item_id.v1","metadataValue":"11111111-1111-4111-8111-111111111111","visibility":"DOCUMENT","location":{"dimensionRange":{"sheetId":0,"dimension":"ROWS","startIndex":1,"endIndex":2}}}]}
+            """);
+        using HttpClient httpClient = new(handler);
+        GoogleWorkspaceClient client = new(httpClient, new FakeTokenSource("access"));
+
+        GoogleWorkbookSnapshot snapshot = await client.ReadWorkbookAsync("workbook-zero", CancellationToken.None);
+
+        Assert.AreEqual(0, AssertSingle(snapshot.Sheets).SheetId);
+        Assert.AreEqual(0, AssertSingle(snapshot.DeveloperMetadata).SheetId);
+    }
+
+    [TestMethod]
+    public async Task WorkbookReadIgnoresValidUnrelatedMetadataLocationScopes()
+    {
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, """
+            {"spreadsheetId":"workbook-metadata","properties":{"title":"Work"},"sheets":[{"properties":{"sheetId":0,"title":"First Sheet","hidden":false,"gridProperties":{"rowCount":100,"columnCount":24}}}]}
+            """);
+        handler.EnqueueJson(HttpStatusCode.OK, """
+            {
+              "spreadsheetId":"workbook-metadata",
+              "properties":{"title":"Work"},
+              "sheets":[{"properties":{"sheetId":0,"title":"First Sheet","hidden":false,"gridProperties":{"rowCount":100,"columnCount":24}},"data":[{"startRow":0,"startColumn":0,"rowData":[]}]}],
+              "developerMetadata":[
+                {"metadataId":1,"metadataKey":"other.spreadsheet","metadataValue":"v1","visibility":"DOCUMENT","location":{"spreadsheet":true}},
+                {"metadataId":2,"metadataKey":"other.sheet","metadataValue":"v2","visibility":"DOCUMENT","location":{"sheetId":0}},
+                {"metadataId":3,"metadataKey":"other.column","metadataValue":"v3","visibility":"DOCUMENT","location":{"dimensionRange":{"sheetId":0,"dimension":"COLUMNS","startIndex":0,"endIndex":1}}},
+                {"metadataId":4,"metadataKey":"ofenhancer.item_id.v1","metadataValue":"11111111-1111-4111-8111-111111111111","visibility":"DOCUMENT","location":{"dimensionRange":{"sheetId":0,"dimension":"ROWS","startIndex":1,"endIndex":2}}}
+              ]
+            }
+            """);
+        using HttpClient httpClient = new(handler);
+        GoogleWorkspaceClient client = new(httpClient, new FakeTokenSource("access"));
+
+        GoogleWorkbookSnapshot snapshot = await client.ReadWorkbookAsync("workbook-metadata", CancellationToken.None);
+
+        Assert.AreEqual(4, snapshot.DeveloperMetadata.Count);
+        GoogleDeveloperMetadataSnapshot owned = snapshot.DeveloperMetadata.Single(metadata => metadata.Key == "ofenhancer.item_id.v1");
+        Assert.AreEqual("ROWS", owned.Dimension);
+        Assert.AreEqual(0, owned.SheetId);
+        Dictionary<string, List<string>> query = ParseQuery(handler.Requests[1].Uri);
+        StringAssert.Contains(
+            query["fields"].Single(),
+            "location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex))"
+        );
     }
 
     [TestMethod]
@@ -135,7 +193,7 @@ public sealed class GoogleWorkspaceClientTests
     {
         RecordingHandler handler = new();
         handler.EnqueueJson(HttpStatusCode.OK, """
-            {"matchedDeveloperMetadata":[{"developerMetadata":{"metadataId":77,"metadataKey":"ofenhancer.item_id.v1","metadataValue":"11111111-1111-4111-8111-111111111111","visibility":"DOCUMENT","location":{"dimensionRange":{"sheetId":2126708696,"dimension":"ROWS","startIndex":92,"endIndex":93}}}}]}
+            {"matchedDeveloperMetadata":[{"developerMetadata":{"metadataId":77,"metadataKey":"ofenhancer.item_id.v1","metadataValue":"11111111-1111-4111-8111-111111111111","visibility":"DOCUMENT","location":{"dimensionRange":{"sheetId":0,"dimension":"ROWS","startIndex":92,"endIndex":93}}}}]}
             """);
         handler.EnqueueJson(HttpStatusCode.OK, """{"range":"'2026 Video Catalogue'!J93","majorDimension":"ROWS","values":[["https://onlyfans.com/123456789/johnny_guides"]]}""");
         using HttpClient httpClient = new(handler);
@@ -161,7 +219,7 @@ public sealed class GoogleWorkspaceClientTests
             Assert.AreEqual("ROW", lookup.GetProperty("locationType").GetString());
         }
         GoogleMetadataMatch match = AssertSingle(metadata);
-        Assert.AreEqual(2126708696, match.SheetId);
+        Assert.AreEqual(0, match.SheetId);
         Assert.AreEqual(93, match.RowNumber);
 
         Assert.AreEqual("https://sheets.googleapis.com/v4/spreadsheets/workbook%2Fone/values/%272026%20Video%20Catalogue%27%21J93", handler.Requests[1].Uri.GetLeftPart(UriPartial.Path));
