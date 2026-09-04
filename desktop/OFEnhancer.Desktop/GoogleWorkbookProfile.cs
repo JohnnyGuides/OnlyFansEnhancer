@@ -7,6 +7,43 @@ using OFEnhancer.Catalogue;
 
 namespace OFEnhancer.Desktop;
 
+internal static class GoogleWorkbookContract
+{
+    internal const string AuditTitle = "_Audit";
+    internal const string MigrationAction = "workbook-migration";
+    internal const string MigrationOutcome = "completed";
+    internal const string SchemaVersion = "Schema v1";
+    internal static readonly string[] TechnicalHeaders =
+        ["OFEnhancer ID", "Pornhub Paid", "Clips4Sale", "Last verified sync"];
+    internal static readonly IReadOnlyDictionary<string, string[]> CompanionHeaders =
+        new SortedDictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["_Publications"] = ["Item ID", "Platform", "Publication URL", "Published UTC", "Operation ID", SchemaVersion],
+            ["_Assets"] = ["Item ID", "Asset ID", "Role", "Fingerprint", "Verified UTC", SchemaVersion],
+            [AuditTitle] = ["Operation ID", "Occurred UTC", "Item ID", "Action", "Outcome", "Details", SchemaVersion],
+        };
+
+    internal static string ReceiptDetails(string planHash, string identityHash) =>
+        $"plan-sha256={planHash};identity-sha256={identityHash}";
+
+    internal static string ReceiptOperationId(string planHash, string identityHash)
+    {
+        byte[] bytes = SHA256.HashData(
+            Encoding.UTF8.GetBytes(
+                $"ofenhancer.workbook-migration-receipt.v1\0{planHash}\0{identityHash}"
+            )
+        )[..16];
+        bytes[7] = (byte)((bytes[7] & 0x0f) | 0x50);
+        bytes[8] = (byte)((bytes[8] & 0x3f) | 0x80);
+        return new Guid(bytes).ToString("D");
+    }
+
+    internal static bool IsSha256(string? value) =>
+        value is not null
+        && value.Length == 64
+        && value.All(character => char.IsAsciiHexDigit(character) && !char.IsUpper(character));
+}
+
 internal static class GoogleWorkbookProfile
 {
     internal const string PreferredCatalogueTitle = "2026 Video Catalogue";
@@ -29,16 +66,6 @@ internal static class GoogleWorkbookProfile
         [17] = "Reddit Unique Teaser Count",
         [18] = "Reddit Links",
     };
-    private static readonly string[] TechnicalHeaders =
-        ["OFEnhancer ID", "Pornhub Paid", "Clips4Sale", "Last verified sync"];
-    private static readonly IReadOnlyDictionary<string, string[]> CompanionHeaders =
-        new SortedDictionary<string, string[]>(StringComparer.Ordinal)
-        {
-            ["_Publications"] = ["Item ID", "Platform", "Publication URL", "Published UTC", "Operation ID", "Schema v1"],
-            ["_Assets"] = ["Item ID", "Asset ID", "Role", "Fingerprint", "Verified UTC", "Schema v1"],
-            ["_Audit"] = ["Operation ID", "Occurred UTC", "Item ID", "Action", "Outcome", "Details", "Schema v1"],
-        };
-
     internal static string ColumnForDestination(string destination) => destination switch
     {
         "pornhubFree" => "H",
@@ -76,16 +103,18 @@ internal static class GoogleWorkbookProfile
         bool[] ownedTechnicalColumns = InspectTechnicalHeaders(header, bodyRows, conflicts);
         bool technicalHeadersComplete = ownedTechnicalColumns.All(owned => owned);
         InspectCompanionTabs(snapshot, conflicts);
+        IReadOnlyList<WorkbookMigrationReceipt> receipts = InspectMigrationReceipts(snapshot, conflicts);
 
         Dictionary<int, string> metadataByRow = ValidateItemMetadata(snapshot, selected, populatedRows, conflicts);
-        WorkbookProjection projection = BuildProjection(
+        WorkbookProjection projection = NormalizeProjection(BuildProjection(
             snapshot.WorkbookId,
             selected,
             populatedRows,
             metadataByRow,
             ownedTechnicalColumns
-        );
-        InspectSourceIdentityConflicts(projection, store.GetItems(includeArchived: true), conflicts);
+        ));
+        IReadOnlyList<CatalogueItemSummary> localItems = store.GetItems(includeArchived: true);
+        InspectSourceIdentityConflicts(projection, localItems, conflicts);
 
         List<WorkbookMigrationOperation> operations = BuildStructuralOperations(
             snapshot,
@@ -94,31 +123,9 @@ internal static class GoogleWorkbookProfile
             TechnicalColumnsConfigured(selected),
             conflicts.All(conflict => conflict.Code != "owned-range-conflict")
         );
+        GoogleRowBinding[] bindings = ResolveBindings(projection, localItems, conflicts);
         if (conflicts.Count > 0)
-            return CompleteInspection(selected, projection, [], conflicts, operations);
-
-        try
-        {
-            store.ImportWorkbookProjection(projection);
-        }
-        catch (WorkbookProjectionException error) when (error.Message.Contains("Platform link", StringComparison.Ordinal))
-        {
-            throw new GoogleCatalogueException("invalid-workbook-link");
-        }
-        catch (WorkbookProjectionException)
-        {
-            throw new GoogleCatalogueException("invalid-workbook-projection");
-        }
-
-        projection = NormalizeProjection(projection, store.GetItems(includeArchived: true));
-
-        GoogleRowBinding[] bindings = store.GetGoogleBindings(snapshot.WorkbookId)
-            .Where(binding => string.Equals(binding.SheetId, selected.SheetId.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
-            .OrderBy(binding => binding.LastObservedRow)
-            .ThenBy(binding => binding.ItemId, StringComparer.Ordinal)
-            .ToArray();
-        if (bindings.Length != populatedRows.Length)
-            throw new GoogleCatalogueException("invalid-workbook-projection");
+            return CompleteInspection(selected, projection, [], receipts, conflicts, operations);
 
         foreach (GoogleWorkbookRowSnapshot row in populatedRows)
         {
@@ -149,42 +156,131 @@ internal static class GoogleWorkbookProfile
                 ));
             }
         }
-        return CompleteInspection(selected, projection, bindings, conflicts, operations);
+        return CompleteInspection(selected, projection, bindings, receipts, conflicts, operations);
     }
 
-    private static WorkbookProjection NormalizeProjection(
-        WorkbookProjection projection,
-        IReadOnlyList<CatalogueItemSummary> storedItems
-    )
+    private static WorkbookProjection NormalizeProjection(WorkbookProjection projection)
     {
-        Dictionary<string, CatalogueItemSummary> bySource = storedItems.ToDictionary(
-            item => item.SourceKey,
-            StringComparer.Ordinal
-        );
         WorkbookCatalogueItem[] normalized = projection.Items.Select(item =>
         {
-            CatalogueItemSummary stored = bySource[item.SourceKey];
+            if (item.Series?.Length > 200 || item.Episode?.Length > 100)
+                throw new GoogleCatalogueException("invalid-workbook-projection");
+            SortedDictionary<string, string> links = new(StringComparer.Ordinal);
+            foreach ((string platform, string value) in item.PlatformLinks)
+            {
+                if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
+                    || uri.Scheme != Uri.UriSchemeHttps
+                    || !string.IsNullOrEmpty(uri.UserInfo)
+                    || !uri.IsDefaultPort)
+                {
+                    throw new GoogleCatalogueException("invalid-workbook-link");
+                }
+                string? canonical = CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri);
+                if (canonical is null)
+                    throw new GoogleCatalogueException("invalid-workbook-link");
+                links.Add(platform, canonical);
+            }
             return new WorkbookCatalogueItem(
                 item.SourceRow,
-                stored.SourceKey,
-                stored.Title,
-                stored.Description,
-                stored.PlannedDate,
-                stored.Series,
-                stored.Episode,
-                stored.XTeasers,
-                stored.RedditTeasers,
-                stored.PlatformLinks,
+                item.SourceKey,
+                item.Title,
+                item.Description,
+                item.PlannedDate,
+                item.Series,
+                item.Episode,
+                item.XTeasers,
+                item.RedditTeasers,
+                links,
                 item.MetadataId
             );
         }).ToArray();
         return projection with { Items = normalized };
     }
 
+    private static GoogleRowBinding[] ResolveBindings(
+        WorkbookProjection projection,
+        IReadOnlyList<CatalogueItemSummary> localItems,
+        ICollection<WorkbookConflict> conflicts
+    )
+    {
+        Dictionary<string, CatalogueItemSummary> bySource = localItems.ToDictionary(
+            item => item.SourceKey,
+            StringComparer.Ordinal
+        );
+        Dictionary<string, CatalogueItemSummary> byItemId = localItems.ToDictionary(
+            item => item.ItemId,
+            StringComparer.Ordinal
+        );
+        HashSet<string> assigned = new(StringComparer.Ordinal);
+        List<GoogleRowBinding> bindings = new(projection.Items.Count);
+        foreach (WorkbookCatalogueItem row in projection.Items.OrderBy(item => item.SourceRow))
+        {
+            bySource.TryGetValue(row.SourceKey, out CatalogueItemSummary? sourceItem);
+            string itemId = row.MetadataId
+                ?? sourceItem?.ItemId
+                ?? DerivedItemId(projection.WorkbookId, projection.SheetId, row.SourceKey);
+            if ((byItemId.TryGetValue(itemId, out CatalogueItemSummary? existing)
+                    && !string.Equals(existing.SourceKey, row.SourceKey, StringComparison.Ordinal))
+                || !assigned.Add(itemId))
+            {
+                conflicts.Add(new("item-identity-conflict", $"A{row.SourceRow}"));
+                continue;
+            }
+            bindings.Add(new(
+                projection.WorkbookId,
+                projection.SheetId,
+                itemId,
+                itemId,
+                row.SourceRow,
+                RowFingerprint(row),
+                DateTimeOffset.UnixEpoch
+            ));
+        }
+        return bindings.ToArray();
+    }
+
+    private static string DerivedItemId(string workbookId, string sheetId, string sourceKey)
+    {
+        byte[] input = Encoding.UTF8.GetBytes(
+            $"ofenhancer.workbook-provisional-item.v1\0{workbookId}\0{sheetId}\0{sourceKey}"
+        );
+        byte[] bytes = SHA256.HashData(input)[..16];
+        bytes[7] = (byte)((bytes[7] & 0x0f) | 0x50);
+        bytes[8] = (byte)((bytes[8] & 0x3f) | 0x80);
+        return new Guid(bytes).ToString("D");
+    }
+
+    private static string RowFingerprint(WorkbookCatalogueItem row)
+    {
+        using MemoryStream output = new();
+        using (Utf8JsonWriter writer = new(output))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("sourceRow", row.SourceRow);
+            writer.WriteString("sourceKey", row.SourceKey);
+            writer.WriteString("title", row.Title);
+            writer.WriteString("description", row.Description);
+            WriteNullable(writer, "plannedDate", row.PlannedDate);
+            WriteNullable(writer, "series", row.Series);
+            WriteNullable(writer, "episode", row.Episode);
+            writer.WriteNumber("xTeasers", row.XTeasers);
+            writer.WriteNumber("redditTeasers", row.RedditTeasers);
+            WriteNullable(writer, "metadataId", row.MetadataId);
+            writer.WritePropertyName("platformLinks");
+            writer.WriteStartObject();
+            foreach ((string platform, string url) in row.PlatformLinks.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                writer.WriteString(platform, url);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+        return Convert.ToHexString(SHA256.HashData(output.ToArray())).ToLowerInvariant();
+    }
+
     private static WorkbookInspection CompleteInspection(
         GoogleSheetSnapshot selected,
         WorkbookProjection projection,
         IReadOnlyList<GoogleRowBinding> bindings,
+        IReadOnlyList<WorkbookMigrationReceipt> receipts,
         IReadOnlyList<WorkbookConflict> conflicts,
         IReadOnlyList<WorkbookMigrationOperation> operations
     )
@@ -203,15 +299,18 @@ internal static class GoogleWorkbookProfile
             sorted
         );
         string hash = Hash(plan);
+        string identityFingerprint = MigrationIdentityFingerprint(projection, bindings);
         return new(
             selected.SheetId,
             selected.Title,
             projection,
             bindings,
+            receipts,
             conflicts.OrderBy(conflict => conflict.Code, StringComparer.Ordinal)
                 .ThenBy(conflict => conflict.Target, StringComparer.Ordinal)
                 .ToArray(),
             plan,
+            identityFingerprint,
             hash,
             conflicts.Count == 0 && sorted.Length == 0
         );
@@ -245,12 +344,12 @@ internal static class GoogleWorkbookProfile
         ICollection<WorkbookConflict> conflicts
     )
     {
-        bool[] ownedColumns = new bool[TechnicalHeaders.Length];
-        for (int offset = 0; offset < TechnicalHeaders.Length; offset++)
+        bool[] ownedColumns = new bool[GoogleWorkbookContract.TechnicalHeaders.Length];
+        for (int offset = 0; offset < GoogleWorkbookContract.TechnicalHeaders.Length; offset++)
         {
             int column = 21 + offset;
             string? actual = Cell(header, column);
-            if (string.Equals(actual, TechnicalHeaders[offset], StringComparison.Ordinal))
+            if (string.Equals(actual, GoogleWorkbookContract.TechnicalHeaders[offset], StringComparison.Ordinal))
             {
                 ownedColumns[offset] = true;
                 continue;
@@ -268,7 +367,7 @@ internal static class GoogleWorkbookProfile
         ICollection<WorkbookConflict> conflicts
     )
     {
-        foreach ((string title, string[] expectedHeaders) in CompanionHeaders)
+        foreach ((string title, string[] expectedHeaders) in GoogleWorkbookContract.CompanionHeaders)
         {
             GoogleSheetSnapshot? sheet = snapshot.Sheets.SingleOrDefault(candidate =>
                 string.Equals(candidate.Title, title, StringComparison.Ordinal));
@@ -281,6 +380,81 @@ internal static class GoogleWorkbookProfile
             if (!exact)
                 conflicts.Add(new("companion-tab-conflict", title));
         }
+    }
+
+    private static IReadOnlyList<WorkbookMigrationReceipt> InspectMigrationReceipts(
+        GoogleWorkbookSnapshot snapshot,
+        ICollection<WorkbookConflict> conflicts
+    )
+    {
+        GoogleSheetSnapshot? audit = snapshot.Sheets.SingleOrDefault(sheet =>
+            string.Equals(sheet.Title, GoogleWorkbookContract.AuditTitle, StringComparison.Ordinal)
+        );
+        if (audit is null)
+            return [];
+
+        List<WorkbookMigrationReceipt> receipts = [];
+        HashSet<string> planHashes = new(StringComparer.Ordinal);
+        foreach (GoogleWorkbookRowSnapshot row in audit.Rows.Where(row => row.RowNumber > 1))
+        {
+            if (!string.Equals(Cell(row, 4), GoogleWorkbookContract.MigrationAction, StringComparison.Ordinal))
+                continue;
+            string target = $"{GoogleWorkbookContract.AuditTitle}!A{row.RowNumber}:G{row.RowNumber}";
+            string? operationId = Cell(row, 1);
+            string? occurredUtc = Cell(row, 2);
+            string? details = Cell(row, 6);
+            if (operationId is null
+                || !Guid.TryParseExact(operationId, "D", out Guid parsedOperationId)
+                || !string.Equals(operationId, parsedOperationId.ToString("D"), StringComparison.Ordinal)
+                || occurredUtc is null
+                || !DateTimeOffset.TryParseExact(
+                    occurredUtc,
+                    "O",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out _
+                )
+                || Cell(row, 3) is not null
+                || !string.Equals(Cell(row, 5), GoogleWorkbookContract.MigrationOutcome, StringComparison.Ordinal)
+                || !TryParseReceiptDetails(details, out string planHash, out string identityHash)
+                || !string.Equals(Cell(row, 7), GoogleWorkbookContract.SchemaVersion, StringComparison.Ordinal)
+                || !string.Equals(
+                    operationId,
+                    GoogleWorkbookContract.ReceiptOperationId(planHash, identityHash),
+                    StringComparison.Ordinal
+                )
+                || !planHashes.Add(planHash))
+            {
+                conflicts.Add(new("migration-receipt-conflict", target));
+                continue;
+            }
+            receipts.Add(new(operationId, planHash, identityHash, row.RowNumber));
+        }
+        return receipts.OrderBy(receipt => receipt.RowNumber).ToArray();
+    }
+
+    private static bool TryParseReceiptDetails(
+        string? details,
+        out string planHash,
+        out string identityHash
+    )
+    {
+        const string PlanPrefix = "plan-sha256=";
+        const string IdentityPrefix = ";identity-sha256=";
+        int expectedLength = PlanPrefix.Length + 64 + IdentityPrefix.Length + 64;
+        if (details is null
+            || details.Length != expectedLength
+            || !details.StartsWith(PlanPrefix, StringComparison.Ordinal)
+            || !details.AsSpan(PlanPrefix.Length + 64, IdentityPrefix.Length).SequenceEqual(IdentityPrefix))
+        {
+            planHash = string.Empty;
+            identityHash = string.Empty;
+            return false;
+        }
+        planHash = details.Substring(PlanPrefix.Length, 64);
+        identityHash = details[^64..];
+        return GoogleWorkbookContract.IsSha256(planHash)
+            && GoogleWorkbookContract.IsSha256(identityHash);
     }
 
     private static Dictionary<int, string> ValidateItemMetadata(
@@ -342,6 +516,8 @@ internal static class GoogleWorkbookProfile
             bySource.TryGetValue(row.SourceKey, out CatalogueItemSummary? sourceItem);
             byItemId.TryGetValue(row.MetadataId!, out CatalogueItemSummary? metadataItem);
             if ((metadataItem is null && sourceItem is not null)
+                || (metadataItem is not null
+                    && !string.Equals(metadataItem.SourceKey, row.SourceKey, StringComparison.Ordinal))
                 || (metadataItem is not null
                     && sourceItem is not null
                     && !string.Equals(metadataItem.ItemId, sourceItem.ItemId, StringComparison.Ordinal)))
@@ -413,7 +589,7 @@ internal static class GoogleWorkbookProfile
     )
     {
         List<WorkbookMigrationOperation> operations = [];
-        foreach ((string title, string[] headers) in CompanionHeaders)
+        foreach ((string title, string[] headers) in GoogleWorkbookContract.CompanionHeaders)
         {
             GoogleSheetSnapshot? sheet = snapshot.Sheets.SingleOrDefault(candidate =>
                 string.Equals(candidate.Title, title, StringComparison.Ordinal));
@@ -428,7 +604,7 @@ internal static class GoogleWorkbookProfile
                 "set-headers",
                 $"'{EscapeSheetTitle(selected.Title)}'!U1:X1",
                 1,
-                TechnicalHeaders
+                GoogleWorkbookContract.TechnicalHeaders
             ));
         }
         if (allowTechnicalChanges && !technicalColumnsConfigured)
@@ -539,6 +715,63 @@ internal static class GoogleWorkbookProfile
         return Convert.ToHexString(SHA256.HashData(output.ToArray())).ToLowerInvariant();
     }
 
+    private static string MigrationIdentityFingerprint(
+        WorkbookProjection projection,
+        IReadOnlyList<GoogleRowBinding> bindings
+    )
+    {
+        if (projection.Items.Count != bindings.Count)
+            return string.Empty;
+        using MemoryStream output = new();
+        using (Utf8JsonWriter writer = new(output))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("workbookId", projection.WorkbookId);
+            writer.WriteString("sheetId", projection.SheetId);
+            writer.WritePropertyName("items");
+            writer.WriteStartArray();
+            foreach (WorkbookCatalogueItem item in projection.Items.OrderBy(item => item.SourceRow))
+            {
+                GoogleRowBinding binding = bindings.Single(candidate =>
+                    candidate.LastObservedRow == item.SourceRow
+                );
+                writer.WriteStartObject();
+                writer.WriteNumber("sourceRow", item.SourceRow);
+                writer.WriteString("sourceKey", item.SourceKey);
+                writer.WriteString("sourceFingerprint", SourceIdentityFingerprint(item));
+                writer.WriteString("itemId", binding.ItemId);
+                writer.WriteString("metadataId", binding.MetadataId);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+        return Convert.ToHexString(SHA256.HashData(output.ToArray())).ToLowerInvariant();
+    }
+
+    private static string SourceIdentityFingerprint(WorkbookCatalogueItem item)
+    {
+        using MemoryStream output = new();
+        using (Utf8JsonWriter writer = new(output))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("title", item.Title);
+            writer.WriteString("description", item.Description);
+            WriteNullable(writer, "plannedDate", item.PlannedDate);
+            WriteNullable(writer, "series", item.Series);
+            WriteNullable(writer, "episode", item.Episode);
+            writer.WriteNumber("xTeasers", item.XTeasers);
+            writer.WriteNumber("redditTeasers", item.RedditTeasers);
+            writer.WritePropertyName("platformLinks");
+            writer.WriteStartObject();
+            foreach ((string platform, string url) in item.PlatformLinks.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                writer.WriteString(platform, url);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+        return Convert.ToHexString(SHA256.HashData(output.ToArray())).ToLowerInvariant();
+    }
+
     private static void WriteNullable(Utf8JsonWriter writer, string property, string? value)
     {
         if (value is null)
@@ -619,10 +852,19 @@ internal sealed record WorkbookInspection(
     string CatalogueSheetTitle,
     WorkbookProjection Projection,
     IReadOnlyList<GoogleRowBinding> Bindings,
+    IReadOnlyList<WorkbookMigrationReceipt> MigrationReceipts,
     IReadOnlyList<WorkbookConflict> Conflicts,
     WorkbookMigrationPlan MigrationPlan,
+    string MigrationIdentityFingerprint,
     string PlanHash,
     bool AlreadyMigrated
+);
+
+internal sealed record WorkbookMigrationReceipt(
+    string OperationId,
+    string PlanHash,
+    string IdentityHash,
+    int RowNumber
 );
 
 internal sealed record WorkbookConflict(string Code, string Target);

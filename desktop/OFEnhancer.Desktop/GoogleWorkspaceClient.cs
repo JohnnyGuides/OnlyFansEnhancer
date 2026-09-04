@@ -22,7 +22,9 @@ internal sealed class GoogleWorkspaceClient
     private const int MaximumMetadataResponseBytes = 256 * 1024;
     private const int MaximumWorkbookResponseBytes = 16 * 1024 * 1024;
     private const int MaximumMutationResponseBytes = 1024 * 1024;
-    private const int MaximumRequestBytes = 1024 * 1024;
+    private const int MaximumValuesRequestBytes = 1024 * 1024;
+    internal const int MaximumStructuralRequestBytes = 4 * 1024 * 1024;
+    internal const int MaximumStructuralRequestCount = 5_016;
     private const int MaximumSheets = 100;
     private static readonly Uri DriveOrigin = new("https://www.googleapis.com");
     private static readonly Uri SheetsOrigin = new("https://sheets.googleapis.com");
@@ -267,7 +269,7 @@ internal sealed class GoogleWorkspaceClient
     {
         ArgumentNullException.ThrowIfNull(batch);
         string workbookId = Required(batch.WorkbookId, 256, "workbookId");
-        if (batch.Requests is null || batch.Requests.Count is < 1 or > 500
+        if (batch.Requests is null || batch.Requests.Count is < 1 or > MaximumStructuralRequestCount
             || batch.Requests.Any(request => request.ValueKind != JsonValueKind.Object))
         {
             throw new GoogleCatalogueException("invalid-google-batch");
@@ -293,14 +295,14 @@ internal sealed class GoogleWorkspaceClient
         {
             range = Required(update.Range, 512, "range"),
             majorDimension = "ROWS",
-            values = new[] { new[] { Required(update.Value, MaximumRequestBytes, "value", allowEmpty: true) } },
+            values = new[] { new[] { Required(update.Value, MaximumValuesRequestBytes, "value", allowEmpty: true) } },
         }).ToArray();
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(new
         {
             valueInputOption = "USER_ENTERED",
             data = updates,
         });
-        EnsureRequestSize(body);
+        EnsureRequestSize(body, MaximumValuesRequestBytes);
         return SendMutationAsync(
             new($"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}/values:batchUpdate"),
             body,
@@ -440,13 +442,13 @@ internal sealed class GoogleWorkspaceClient
             writer.WriteEndObject();
         }
         byte[] body = output.ToArray();
-        EnsureRequestSize(body);
+        EnsureRequestSize(body, MaximumStructuralRequestBytes);
         return body;
     }
 
-    private static void EnsureRequestSize(byte[] body)
+    private static void EnsureRequestSize(byte[] body, int maximumBytes)
     {
-        if (body.Length > MaximumRequestBytes)
+        if (body.Length > maximumBytes)
             throw new GoogleCatalogueException("google-request-too-large");
     }
 

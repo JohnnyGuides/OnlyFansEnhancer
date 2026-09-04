@@ -25,6 +25,8 @@ public sealed class GoogleWorkbookMigratorTests
         Assert.AreEqual("stale-migration-plan", error.Code);
         Assert.AreEqual(1, fixture.Handler.InspectionCount);
         Assert.AreEqual(0, fixture.Handler.MutationCount);
+        Assert.AreEqual(0, fixture.Store.GetItems(includeArchived: true).Count);
+        Assert.AreEqual(0, fixture.Store.GetGoogleBindings("workbook-legacy").Count);
     }
 
     [TestMethod]
@@ -60,8 +62,9 @@ public sealed class GoogleWorkbookMigratorTests
 
         using JsonDocument batch = JsonDocument.Parse(fixture.Handler.MutationBody!);
         JsonElement[] requests = batch.RootElement.GetProperty("requests").EnumerateArray().ToArray();
-        Assert.AreEqual(12, requests.Length);
+        Assert.AreEqual(11, requests.Length);
         AssertCompanionTabs(requests);
+        AssertMigrationReceipt(requests, fixture.ApprovedInspection);
         AssertTechnicalColumns(requests);
         AssertRowBindings(requests, fixture.ApprovedInspection.Bindings);
         AssertOnlyOwnedRanges(requests);
@@ -124,6 +127,43 @@ public sealed class GoogleWorkbookMigratorTests
     }
 
     [TestMethod]
+    public async Task ReplayRejectsAHashWithoutAnExactCurrentReceipt()
+    {
+        using MigrationFixture fixture = MigrationFixture.CreateAlreadyMigrated();
+        string unrelatedHash = new('a', 64);
+        if (string.Equals(unrelatedHash, fixture.ApprovedHash, StringComparison.Ordinal))
+            unrelatedHash = new string('b', 64);
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            fixture.Migrator.ApplyAsync(unrelatedHash, CancellationToken.None)
+        );
+
+        Assert.AreEqual("stale-migration-plan", error.Code);
+        Assert.AreEqual(0, fixture.Handler.MutationCount);
+        Assert.AreEqual(0, fixture.Store.GetItems(includeArchived: true).Count);
+        Assert.AreEqual(0, fixture.Store.GetGoogleBindings("workbook-legacy").Count);
+    }
+
+    [TestMethod]
+    public async Task RestartWithReceiptButIncompleteStateReturnsUnresolvedWithoutRetryOrPersistence()
+    {
+        using MigrationFixture fixture = MigrationFixture.CreateIncompleteReceiptReplay();
+
+        WorkbookMigrationResult result = await fixture.Migrator.ApplyAsync(
+            fixture.ApprovedHash,
+            CancellationToken.None
+        );
+
+        Assert.AreEqual("unresolved", result.Status);
+        Assert.IsNotNull(result.Inspection);
+        Assert.IsFalse(result.Inspection.AlreadyMigrated);
+        Assert.AreEqual(1, result.Inspection.MigrationReceipts.Count);
+        Assert.AreEqual(0, fixture.Handler.MutationCount);
+        Assert.AreEqual(0, fixture.Store.GetItems(includeArchived: true).Count);
+        Assert.AreEqual(0, fixture.Store.GetGoogleBindings("workbook-legacy").Count);
+    }
+
+    [TestMethod]
     public async Task UncertainAppliedBatchReconcilesByReadWithoutRetry()
     {
         using MigrationFixture fixture = MigrationFixture.CreateUncertain(applied: true);
@@ -164,6 +204,8 @@ public sealed class GoogleWorkbookMigratorTests
         Assert.IsNotNull(result.Inspection);
         Assert.IsFalse(result.Inspection.AlreadyMigrated);
         Assert.IsTrue(result.Inspection.MigrationPlan.Operations.Count > 0);
+        Assert.AreEqual(0, fixture.Store.GetItems(includeArchived: true).Count);
+        Assert.AreEqual(0, fixture.Store.GetGoogleBindings("workbook-legacy").Count);
     }
 
     [TestMethod]
@@ -181,6 +223,58 @@ public sealed class GoogleWorkbookMigratorTests
         Assert.IsNull(result.Inspection);
         Assert.AreEqual(1, fixture.Handler.MutationCount);
         Assert.AreEqual(1, fixture.Handler.InspectionCount);
+    }
+
+    [TestMethod]
+    public async Task ConcurrentSourceAndItemSubstitutionReturnsUnresolvedWithoutPersistence()
+    {
+        using MigrationFixture fixture = MigrationFixture.CreateSubstitutedReadback();
+
+        WorkbookMigrationResult result = await fixture.Migrator.ApplyAsync(
+            fixture.ApprovedHash,
+            CancellationToken.None
+        );
+
+        Assert.AreEqual("unresolved", result.Status);
+        Assert.AreEqual(1, fixture.Handler.MutationCount);
+        Assert.AreEqual(2, fixture.Handler.InspectionCount);
+        Assert.AreEqual(0, fixture.Store.GetItems(includeArchived: true).Count);
+        Assert.AreEqual(0, fixture.Store.GetGoogleBindings("workbook-legacy").Count);
+    }
+
+    [TestMethod]
+    [Timeout(30_000)]
+    public async Task FiveThousandRowsFitOneBoundedAtomicBatchWithoutForeignWrites()
+    {
+        using MigrationFixture fixture = MigrationFixture.CreateMaximumRows();
+
+        WorkbookMigrationResult result = await fixture.Migrator.ApplyAsync(
+            fixture.ApprovedHash,
+            CancellationToken.None
+        );
+
+        Assert.AreEqual("applied", result.Status);
+        Assert.AreEqual(1, fixture.Handler.MutationCount);
+        Assert.IsNotNull(fixture.Handler.MutationBody);
+        Assert.IsTrue(
+            Encoding.UTF8.GetByteCount(fixture.Handler.MutationBody)
+            <= GoogleWorkspaceClient.MaximumStructuralRequestBytes
+        );
+        using JsonDocument batch = JsonDocument.Parse(fixture.Handler.MutationBody);
+        JsonElement[] requests = batch.RootElement.GetProperty("requests").EnumerateArray().ToArray();
+        Assert.IsTrue(requests.Length <= GoogleWorkspaceClient.MaximumStructuralRequestCount);
+        Assert.AreEqual(5_000, requests.Count(request => request.TryGetProperty("createDeveloperMetadata", out _)));
+        JsonElement[] stableWrites = requests.Where(request =>
+            request.TryGetProperty("updateCells", out JsonElement update)
+            && update.GetProperty("start").GetProperty("sheetId").GetInt32() == CatalogueSheetId
+            && update.GetProperty("start").GetProperty("rowIndex").GetInt32() > 0
+        ).ToArray();
+        Assert.AreEqual(1, stableWrites.Length);
+        Assert.AreEqual(
+            5_000,
+            stableWrites[0].GetProperty("updateCells").GetProperty("rows").GetArrayLength()
+        );
+        AssertOnlyOwnedRanges(requests);
     }
 
     private static void AssertCompanionTabs(IReadOnlyList<JsonElement> requests)
@@ -208,6 +302,31 @@ public sealed class GoogleWorkbookMigratorTests
             );
             CollectionAssert.AreEqual(expected[title], ReadValues(headerRequest));
         }
+    }
+
+    private static void AssertMigrationReceipt(
+        IReadOnlyList<JsonElement> requests,
+        WorkbookInspection approved
+    )
+    {
+        JsonElement auditWrite = requests.Single(request =>
+            request.TryGetProperty("updateCells", out JsonElement update)
+            && update.GetProperty("start").GetProperty("sheetId").GetInt32() == 1002
+        );
+        JsonElement[] rows = auditWrite.GetProperty("updateCells").GetProperty("rows").EnumerateArray().ToArray();
+        Assert.AreEqual(2, rows.Length);
+        string[] receipt = ReadRowValues(rows[1]);
+        Assert.AreEqual(7, receipt.Length);
+        Assert.IsTrue(Guid.TryParseExact(receipt[0], "D", out _));
+        Assert.IsTrue(DateTimeOffset.TryParseExact(receipt[1], "O", null, System.Globalization.DateTimeStyles.RoundtripKind, out _));
+        Assert.AreEqual(string.Empty, receipt[2]);
+        Assert.AreEqual("workbook-migration", receipt[3]);
+        Assert.AreEqual("completed", receipt[4]);
+        Assert.AreEqual(
+            $"plan-sha256={approved.PlanHash};identity-sha256={approved.MigrationIdentityFingerprint}",
+            receipt[5]
+        );
+        Assert.AreEqual("Schema v1", receipt[6]);
     }
 
     private static void AssertTechnicalColumns(IReadOnlyList<JsonElement> requests)
@@ -256,15 +375,19 @@ public sealed class GoogleWorkbookMigratorTests
             && update.GetProperty("start").GetProperty("sheetId").GetInt32() == CatalogueSheetId
             && update.GetProperty("start").GetProperty("rowIndex").GetInt32() > 0
         ).ToArray();
-        Assert.AreEqual(2, stableIds.Length);
-        foreach (JsonElement request in stableIds)
+        Assert.AreEqual(1, stableIds.Length);
+        JsonElement stableIdsUpdate = stableIds[0].GetProperty("updateCells");
+        JsonElement start = stableIdsUpdate.GetProperty("start");
+        Assert.AreEqual(bindings.Min(binding => binding.LastObservedRow) - 1, start.GetProperty("rowIndex").GetInt32());
+        Assert.AreEqual(20, start.GetProperty("columnIndex").GetInt32());
+        JsonElement[] rows = stableIdsUpdate.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.AreEqual(bindings.Count, rows.Length);
+        for (int offset = 0; offset < rows.Length; offset++)
         {
-            JsonElement start = request.GetProperty("updateCells").GetProperty("start");
-            int rowNumber = start.GetProperty("rowIndex").GetInt32() + 1;
-            Assert.AreEqual(20, start.GetProperty("columnIndex").GetInt32());
+            int rowNumber = start.GetProperty("rowIndex").GetInt32() + offset + 1;
             Assert.AreEqual(
                 bindings.Single(binding => binding.LastObservedRow == rowNumber).ItemId,
-                ReadValues(request).Single()
+                ReadRowValues(rows[offset]).Single()
             );
         }
     }
@@ -304,7 +427,10 @@ public sealed class GoogleWorkbookMigratorTests
     }
 
     private static string[] ReadValues(JsonElement updateCellsRequest) =>
-        updateCellsRequest.GetProperty("updateCells").GetProperty("rows")[0].GetProperty("values")
+        ReadRowValues(updateCellsRequest.GetProperty("updateCells").GetProperty("rows")[0]);
+
+    private static string[] ReadRowValues(JsonElement row) =>
+        row.GetProperty("values")
             .EnumerateArray()
             .Select(value => value.GetProperty("userEnteredValue").GetProperty("stringValue").GetString()!)
             .ToArray();
@@ -328,6 +454,50 @@ public sealed class GoogleWorkbookMigratorTests
         foreach (JsonNode? metadata in root["developerMetadata"]!.AsArray())
             metadata!["location"]!["dimensionRange"]!["sheetId"] = 0;
         return root.ToJsonString();
+    }
+
+    private static string MaximumRowsJson(string source)
+    {
+        JsonObject root = JsonNode.Parse(source)!.AsObject();
+        JsonArray rowData = root["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
+        JsonNode header = rowData[0]!.DeepClone();
+        rowData.Clear();
+        rowData.Add(header);
+        for (int index = 1; index <= 5_000; index++)
+        {
+            JsonArray values =
+            [
+                new JsonObject { ["formattedValue"] = $"item-{index:D4}" },
+                new JsonObject(),
+                new JsonObject { ["formattedValue"] = $"Episode {index:D4}" },
+                new JsonObject { ["formattedValue"] = string.Empty },
+            ];
+            if (index == 1)
+            {
+                while (values.Count < 19)
+                    values.Add(new JsonObject());
+                values[18] = new JsonObject { ["formattedValue"] = "Foreign boundary retained" };
+            }
+            rowData.Add(new JsonObject { ["values"] = values });
+        }
+        root["developerMetadata"] = new JsonArray();
+        return root.ToJsonString();
+    }
+
+    private static string WorkbookMetadataJson(string source)
+    {
+        JsonObject workbook = JsonNode.Parse(source)!.AsObject();
+        return new JsonObject
+        {
+            ["spreadsheetId"] = workbook["spreadsheetId"]!.DeepClone(),
+            ["properties"] = workbook["properties"]!.DeepClone(),
+            ["sheets"] = new JsonArray(workbook["sheets"]!.AsArray()
+                .Select(sheet => (JsonNode?)new JsonObject
+                {
+                    ["properties"] = sheet!["properties"]!.DeepClone(),
+                })
+                .ToArray()),
+        }.ToJsonString();
     }
 
     private static string FullyMigratedJson(
@@ -400,6 +570,75 @@ public sealed class GoogleWorkbookMigratorTests
         return root.ToJsonString();
     }
 
+    private static string WithMigrationReceipt(string migrated, WorkbookInspection approved)
+    {
+        JsonObject root = JsonNode.Parse(migrated)!.AsObject();
+        JsonObject audit = root["sheets"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .Single(sheet => string.Equals(sheet["properties"]!["title"]!.GetValue<string>(), "_Audit", StringComparison.Ordinal));
+        JsonArray rowData = audit["data"]![0]!["rowData"]!.AsArray();
+        string details = $"plan-sha256={approved.PlanHash};identity-sha256={approved.MigrationIdentityFingerprint}";
+        string[] values =
+        [
+            ReceiptOperationId(approved.PlanHash, approved.MigrationIdentityFingerprint),
+            "2026-09-04T12:00:00.0000000+00:00",
+            string.Empty,
+            "workbook-migration",
+            "completed",
+            details,
+            "Schema v1",
+        ];
+        rowData.Add(new JsonObject
+        {
+            ["values"] = new JsonArray(values.Select(value =>
+                (JsonNode)new JsonObject { ["formattedValue"] = value }).ToArray()),
+        });
+        return root.ToJsonString();
+    }
+
+    private static string ReceiptOperationId(string planHash, string identityHash)
+    {
+        byte[] bytes = System.Security.Cryptography.SHA256.HashData(
+            Encoding.UTF8.GetBytes($"ofenhancer.workbook-migration-receipt.v1\0{planHash}\0{identityHash}")
+        )[..16];
+        bytes[7] = (byte)((bytes[7] & 0x0f) | 0x50);
+        bytes[8] = (byte)((bytes[8] & 0x3f) | 0x80);
+        return new Guid(bytes).ToString("D");
+    }
+
+    private static string SubstitutedMigratedJson(
+        string source,
+        WorkbookInspection approved,
+        IReadOnlyList<int> companionIds
+    )
+    {
+        const string substitutedId = "22222222-2222-4222-8222-222222222222";
+        string migrated = FullyMigratedJson(source, approved.Bindings, companionIds);
+        JsonObject root = JsonNode.Parse(WithMigrationReceipt(migrated, approved))!.AsObject();
+        JsonArray firstRow = root["sheets"]![0]!["data"]![0]!["rowData"]![1]!["values"]!.AsArray();
+        firstRow[0] = new JsonObject { ["formattedValue"] = "claire" };
+        firstRow[20] = new JsonObject { ["formattedValue"] = substitutedId };
+        JsonObject metadata = root["developerMetadata"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .Single(node => node["location"]!["dimensionRange"]!["startIndex"]!.GetValue<int>() == 1);
+        metadata["metadataValue"] = substitutedId;
+        return root.ToJsonString();
+    }
+
+    private static string IncompleteMigratedJson(
+        string source,
+        WorkbookInspection approved,
+        IReadOnlyList<int> companionIds
+    )
+    {
+        JsonObject root = JsonNode.Parse(WithMigrationReceipt(
+            FullyMigratedJson(source, approved.Bindings, companionIds),
+            approved
+        ))!.AsObject();
+        root["sheets"]![0]!["data"]![0]!["rowData"]![1]!["values"]![20] = new JsonObject();
+        return root.ToJsonString();
+    }
+
     private static JsonObject CompanionSheet(int sheetId, string title, IReadOnlyList<string> headers) =>
         new()
         {
@@ -466,7 +705,10 @@ public sealed class GoogleWorkbookMigratorTests
         {
             string legacy = FixtureText();
             (TestDirectory temp, CatalogueStore store, WorkbookInspection approved) = Approved(legacy);
-            string migrated = FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds);
+            string migrated = WithMigrationReceipt(
+                FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds),
+                approved
+            );
             return Create(temp, store, approved, [legacy, migrated], candidates ?? CompanionSheetIds);
         }
 
@@ -481,19 +723,40 @@ public sealed class GoogleWorkbookMigratorTests
         {
             string legacy = ZeroCatalogueSheetIdJson(FixtureText());
             (TestDirectory temp, CatalogueStore store, WorkbookInspection approved) = Approved(legacy);
-            string migrated = FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds);
+            string migrated = WithMigrationReceipt(
+                FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds),
+                approved
+            );
             return Create(temp, store, approved, [legacy, migrated], CompanionSheetIds);
         }
 
         public static MigrationFixture CreateAlreadyMigrated()
         {
             string legacy = FixtureText();
+            WorkbookInspection approved;
+            using (TestDirectory planningTemp = new())
+            using (CatalogueStore planningStore = CatalogueStore.Open(Path.Combine(planningTemp.Path, "catalogue.db")))
+                approved = GoogleWorkbookProfile.Inspect(Parse(legacy), planningStore);
+            string migrated = WithMigrationReceipt(
+                FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds),
+                approved
+            );
             TestDirectory temp = new();
             CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
-            WorkbookInspection legacyInspection = GoogleWorkbookProfile.Inspect(Parse(legacy), store);
-            string migrated = FullyMigratedJson(legacy, legacyInspection.Bindings, CompanionSheetIds);
-            WorkbookInspection approved = GoogleWorkbookProfile.Inspect(Parse(migrated), store);
             return Create(temp, store, approved, [migrated], CompanionSheetIds);
+        }
+
+        public static MigrationFixture CreateIncompleteReceiptReplay()
+        {
+            string legacy = FixtureText();
+            WorkbookInspection approved;
+            using (TestDirectory planningTemp = new())
+            using (CatalogueStore planningStore = CatalogueStore.Open(Path.Combine(planningTemp.Path, "catalogue.db")))
+                approved = GoogleWorkbookProfile.Inspect(Parse(legacy), planningStore);
+            string incomplete = IncompleteMigratedJson(legacy, approved, CompanionSheetIds);
+            TestDirectory temp = new();
+            CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+            return Create(temp, store, approved, [incomplete], CompanionSheetIds);
         }
 
         public static MigrationFixture CreateUncertain(bool applied)
@@ -501,7 +764,10 @@ public sealed class GoogleWorkbookMigratorTests
             string legacy = FixtureText();
             (TestDirectory temp, CatalogueStore store, WorkbookInspection approved) = Approved(legacy);
             string readback = applied
-                ? FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds)
+                ? WithMigrationReceipt(
+                    FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds),
+                    approved
+                )
                 : legacy;
             return Create(
                 temp,
@@ -525,6 +791,25 @@ public sealed class GoogleWorkbookMigratorTests
                 CompanionSheetIds,
                 cancelMutation: cancellation.Cancel
             );
+        }
+
+        public static MigrationFixture CreateSubstitutedReadback()
+        {
+            string legacy = FixtureText();
+            (TestDirectory temp, CatalogueStore store, WorkbookInspection approved) = Approved(legacy);
+            string substituted = SubstitutedMigratedJson(legacy, approved, CompanionSheetIds);
+            return Create(temp, store, approved, [legacy, substituted], CompanionSheetIds);
+        }
+
+        public static MigrationFixture CreateMaximumRows()
+        {
+            string legacy = MaximumRowsJson(FixtureText());
+            (TestDirectory temp, CatalogueStore store, WorkbookInspection approved) = Approved(legacy);
+            string migrated = WithMigrationReceipt(
+                FullyMigratedJson(legacy, approved.Bindings, CompanionSheetIds),
+                approved
+            );
+            return Create(temp, store, approved, [legacy, migrated], CompanionSheetIds);
         }
 
         private static (TestDirectory Temp, CatalogueStore Store, WorkbookInspection Inspection) Approved(string json)
@@ -594,6 +879,10 @@ public sealed class GoogleWorkbookMigratorTests
                     _snapshots.Dequeue();
                     InspectionCount++;
                     Events.Add("inspect");
+                }
+                else
+                {
+                    body = WorkbookMetadataJson(body);
                 }
                 return Json(request, body);
             }

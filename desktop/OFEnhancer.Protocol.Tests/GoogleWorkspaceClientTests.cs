@@ -293,6 +293,44 @@ public sealed class GoogleWorkspaceClientTests
         Assert.AreEqual(1, handler.PostCount);
     }
 
+    [TestMethod]
+    public async Task StructuralMutationRejectsRequestsBeyondExplicitCountAndBodyBoundsWithoutPost()
+    {
+        RecordingHandler handler = new();
+        using HttpClient httpClient = new(handler);
+        GoogleWorkspaceClient client = new(httpClient, new FakeTokenSource("access"));
+        JsonElement request = JsonDocument.Parse("""{"deleteSheet":{"sheetId":1}}""").RootElement.Clone();
+
+        await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.ApplyStructuralBatchAsync(
+                new GoogleStructuralBatch(
+                    "workbook-one",
+                    Enumerable.Repeat(request, GoogleWorkspaceClient.MaximumStructuralRequestCount + 1).ToArray()
+                ),
+                CancellationToken.None
+            )
+        );
+
+        JsonElement oversized = JsonSerializer.SerializeToElement(new
+        {
+            addSheet = new
+            {
+                properties = new
+                {
+                    title = new string('x', GoogleWorkspaceClient.MaximumStructuralRequestBytes),
+                },
+            },
+        });
+        await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.ApplyStructuralBatchAsync(
+                new GoogleStructuralBatch("workbook-one", [oversized]),
+                CancellationToken.None
+            )
+        );
+
+        Assert.AreEqual(0, handler.Requests.Count);
+    }
+
     private const string WorkbookMetadataJson = """
         {
           "spreadsheetId":"workbook-one",

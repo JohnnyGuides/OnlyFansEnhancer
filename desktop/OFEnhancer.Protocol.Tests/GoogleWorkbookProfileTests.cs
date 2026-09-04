@@ -81,6 +81,31 @@ public sealed class GoogleWorkbookProfileTests
     }
 
     [TestMethod]
+    public void InspectionAssignsScopedDeterministicProvisionalIdsWithoutMutatingCatalogue()
+    {
+        GoogleWorkbookSnapshot snapshot = LegacySnapshot();
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        WorkbookInspection first = GoogleWorkbookProfile.Inspect(snapshot, store);
+        WorkbookInspection second = GoogleWorkbookProfile.Inspect(snapshot, store);
+
+        GoogleRowBinding firstAshley = first.Bindings.Single(binding => binding.LastObservedRow == 2);
+        GoogleRowBinding secondAshley = second.Bindings.Single(binding => binding.LastObservedRow == 2);
+        Assert.AreEqual(firstAshley.ItemId, secondAshley.ItemId);
+        Assert.IsTrue(Guid.TryParseExact(firstAshley.ItemId, "D", out _));
+        Assert.AreEqual(0, store.GetItems(includeArchived: true).Count);
+        Assert.AreEqual(0, store.GetGoogleBindings("workbook-legacy").Count);
+
+        GoogleWorkbookSnapshot otherWorkbook = snapshot with { WorkbookId = "workbook-other" };
+        WorkbookInspection other = GoogleWorkbookProfile.Inspect(otherWorkbook, store);
+        Assert.AreNotEqual(
+            firstAshley.ItemId,
+            other.Bindings.Single(binding => binding.LastObservedRow == 2).ItemId
+        );
+    }
+
+    [TestMethod]
     public void PreferredTabNameBreaksOnlyARealSchemaTie()
     {
         GoogleWorkbookSnapshot ambiguous = AmbiguousSnapshot();
