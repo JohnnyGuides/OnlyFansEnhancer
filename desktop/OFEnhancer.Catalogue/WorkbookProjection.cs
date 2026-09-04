@@ -15,12 +15,11 @@ internal static class WorkbookProjectionImporter
     {
         ArgumentNullException.ThrowIfNull(projection);
         ValidatedProjection validated = Validate(projection);
-        if (!validated.Complete)
-            return;
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
         using SqliteTransaction transaction = connection.BeginTransaction();
-        Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
+        if (validated.Complete)
+            Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
 
         List<GoogleRowBinding> bindings = new(validated.Items.Count);
         foreach (ValidatedWorkbookItem row in validated.Items)
@@ -75,18 +74,19 @@ internal static class WorkbookProjectionImporter
                 DateTimeOffset.Parse(now, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
             ));
         }
-        ReplaceSheetBindings(connection, transaction, validated.WorkbookId, validated.SheetId, bindings);
+        ReplaceSheetBindings(connection, transaction, validated.WorkbookId, validated.SheetId, bindings, validated.Complete);
         transaction.Commit();
     }
 
-    private static void ReplaceSheetBindings(SqliteConnection connection, SqliteTransaction transaction, string workbookId, string sheetId, IReadOnlyList<GoogleRowBinding> bindings)
+    private static void ReplaceSheetBindings(SqliteConnection connection, SqliteTransaction transaction, string workbookId, string sheetId, IReadOnlyList<GoogleRowBinding> bindings, bool complete)
     {
-        Execute(connection, transaction, "DELETE FROM google_row_bindings WHERE workbook_id = $workbookId AND sheet_id = $sheetId", ("$workbookId", workbookId), ("$sheetId", sheetId));
+        if (complete)
+            Execute(connection, transaction, "DELETE FROM google_row_bindings WHERE workbook_id = $workbookId AND sheet_id = $sheetId", ("$workbookId", workbookId), ("$sheetId", sheetId));
         foreach (GoogleRowBinding binding in bindings)
             Execute(
                 connection,
                 transaction,
-                "INSERT INTO google_row_bindings(workbook_id, sheet_id, item_id, metadata_id, last_observed_row, verified_remote_fingerprint, verified_utc) VALUES ($workbookId, $sheetId, $itemId, $metadataId, $row, $fingerprint, $utc)",
+                "INSERT INTO google_row_bindings(workbook_id, sheet_id, item_id, metadata_id, last_observed_row, verified_remote_fingerprint, verified_utc) VALUES ($workbookId, $sheetId, $itemId, $metadataId, $row, $fingerprint, $utc) ON CONFLICT(workbook_id, sheet_id, item_id) DO UPDATE SET metadata_id = excluded.metadata_id, last_observed_row = excluded.last_observed_row, verified_remote_fingerprint = excluded.verified_remote_fingerprint, verified_utc = excluded.verified_utc",
                 ("$workbookId", binding.WorkbookId),
                 ("$sheetId", binding.SheetId),
                 ("$itemId", binding.ItemId),
@@ -241,20 +241,18 @@ public sealed partial class CatalogueStore
 
     public void ReplaceGoogleBindings(string workbookId, IReadOnlyList<GoogleRowBinding> bindings)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
         ArgumentNullException.ThrowIfNull(bindings);
+        ValidatedGoogleBindings validated = ValidateGoogleBindings(workbookId, bindings);
         using SqliteTransaction transaction = connection.BeginTransaction();
         using (SqliteCommand delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
             delete.CommandText = "DELETE FROM google_row_bindings WHERE workbook_id = $workbookId";
-            delete.Parameters.AddWithValue("$workbookId", workbookId);
+            delete.Parameters.AddWithValue("$workbookId", validated.WorkbookId);
             delete.ExecuteNonQuery();
         }
-        foreach (GoogleRowBinding binding in bindings)
+        foreach (GoogleRowBinding binding in validated.Bindings)
         {
-            if (!string.Equals(workbookId, binding.WorkbookId, StringComparison.Ordinal) || !Guid.TryParse(binding.ItemId, out _) || !Guid.TryParse(binding.MetadataId, out _) || binding.LastObservedRow <= 0)
-                throw new WorkbookProjectionException("invalid-google-binding", "Google row binding is invalid.");
             using SqliteCommand insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = "INSERT INTO google_row_bindings(workbook_id, sheet_id, item_id, metadata_id, last_observed_row, verified_remote_fingerprint, verified_utc) VALUES ($workbookId, $sheetId, $itemId, $metadataId, $row, $fingerprint, $utc)";
@@ -282,4 +280,66 @@ public sealed partial class CatalogueStore
             result.Add(new GoogleRowBinding(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt32(4), reader.GetString(5), DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)));
         return result;
     }
+
+    private static ValidatedGoogleBindings ValidateGoogleBindings(string workbookId, IReadOnlyList<GoogleRowBinding> bindings)
+    {
+        string normalizedWorkbookId = RequiredGoogleBindingText(workbookId, 256, "workbookId");
+        HashSet<(string SheetId, string ItemId)> itemKeys = [];
+        HashSet<string> metadataIds = new(StringComparer.Ordinal);
+        List<GoogleRowBinding> result = new(bindings.Count);
+        foreach (GoogleRowBinding? candidate in bindings)
+        {
+            if (candidate is null)
+                throw InvalidGoogleBinding();
+            GoogleRowBinding binding = candidate;
+            string bindingWorkbookId = RequiredGoogleBindingText(binding.WorkbookId, 256, "workbookId");
+            if (!string.Equals(normalizedWorkbookId, bindingWorkbookId, StringComparison.Ordinal))
+                throw InvalidGoogleBinding();
+            string sheetId = RequiredGoogleBindingText(binding.SheetId, 64, "sheetId");
+            string itemId = CanonicalGuid(binding.ItemId);
+            string metadataId = CanonicalGuid(binding.MetadataId);
+            if (binding.LastObservedRow is <= 0 or > 1_000_000 || binding.VerifiedUtc == default)
+                throw InvalidGoogleBinding();
+            if (!itemKeys.Add((sheetId, itemId)) || !metadataIds.Add(metadataId))
+                throw InvalidGoogleBinding();
+            result.Add(new GoogleRowBinding(
+                normalizedWorkbookId,
+                sheetId,
+                itemId,
+                metadataId,
+                binding.LastObservedRow,
+                Sha256(binding.VerifiedRemoteFingerprint),
+                binding.VerifiedUtc.ToUniversalTime()
+            ));
+        }
+        return new ValidatedGoogleBindings(normalizedWorkbookId, result);
+    }
+
+    private static string RequiredGoogleBindingText(string? value, int maximum, string field)
+    {
+        string normalized = value?.Trim() ?? "";
+        if (normalized.Length == 0 || normalized.Length > maximum)
+            throw new WorkbookProjectionException("invalid-google-binding", $"Google row binding {field} is invalid.");
+        return normalized;
+    }
+
+    private static string CanonicalGuid(string? value)
+    {
+        if (!Guid.TryParse(value, out Guid parsed))
+            throw InvalidGoogleBinding();
+        return parsed.ToString("D");
+    }
+
+    private static string Sha256(string? value)
+    {
+        string fingerprint = value?.Trim() ?? "";
+        if (fingerprint.Length != 64 || !fingerprint.All(char.IsAsciiHexDigit))
+            throw InvalidGoogleBinding();
+        return fingerprint.ToLowerInvariant();
+    }
+
+    private static WorkbookProjectionException InvalidGoogleBinding() =>
+        new("invalid-google-binding", "Google row binding is invalid.");
+
+    private sealed record ValidatedGoogleBindings(string WorkbookId, IReadOnlyList<GoogleRowBinding> Bindings);
 }

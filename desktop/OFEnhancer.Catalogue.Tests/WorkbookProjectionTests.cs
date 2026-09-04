@@ -72,11 +72,87 @@ public sealed class WorkbookProjectionTests
     {
         using TestDirectory temp = new();
         using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
-        store.ImportWorkbookProjection(Projection(complete: true, Row(7, Guid.NewGuid(), "ashley")));
+        Guid ashley = Guid.NewGuid();
+        Guid bianca = Guid.NewGuid();
+        store.ImportWorkbookProjection(Projection(complete: true, Row(7, ashley, "ashley")));
 
-        store.ImportWorkbookProjection(Projection(complete: false, Row(8, Guid.NewGuid(), "bianca")));
+        store.ImportWorkbookProjection(Projection(complete: false, Row(8, bianca, "bianca")));
 
-        Assert.IsFalse(AssertSingle(store.GetItems(includeArchived: true)).Archived);
+        CatalogueItemSummary[] items = [.. store.GetItems(includeArchived: true)];
+        Assert.AreEqual(2, items.Length);
+        Assert.IsFalse(items.Single(item => item.SourceKey == "ashley").Archived);
+        Assert.IsFalse(items.Single(item => item.SourceKey == "bianca").Archived);
+        Assert.AreEqual(2, store.GetGoogleBindings("workbook-1").Count);
+    }
+
+    [TestMethod]
+    public void ReplaceGoogleBindingsCanonicalizesGuidIdentityBeforeCheckingDuplicates()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        Guid ashley = Guid.NewGuid();
+        Guid bianca = Guid.NewGuid();
+        store.ImportWorkbookProjection(Projection(complete: true, Row(7, ashley, "ashley"), Row(8, bianca, "bianca")));
+        GoogleRowBinding[] original = [.. store.GetGoogleBindings("workbook-1")];
+        GoogleRowBinding first = original.Single(binding => binding.ItemId == ashley.ToString("D"));
+        GoogleRowBinding second = original.Single(binding => binding.ItemId == bianca.ToString("D"));
+
+        Assert.ThrowsException<WorkbookProjectionException>(
+            () => store.ReplaceGoogleBindings(
+                "workbook-1",
+                [first, second with { MetadataId = first.MetadataId.ToUpperInvariant() }]
+            )
+        );
+
+        CollectionAssert.AreEqual(original, store.GetGoogleBindings("workbook-1").ToArray());
+    }
+
+    [TestMethod]
+    public void ReplaceGoogleBindingsStoresCanonicalGuidAndUtcTimestampValues()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        Guid stable = Guid.NewGuid();
+        store.ImportWorkbookProjection(Projection(complete: true, Row(7, stable)));
+        GoogleRowBinding original = store.GetGoogleBindings("workbook-1").Single();
+        DateTimeOffset localTime = new(2026, 9, 4, 12, 0, 0, TimeSpan.FromHours(2));
+
+        store.ReplaceGoogleBindings(
+            "workbook-1",
+            [original with { ItemId = original.ItemId.ToUpperInvariant(), MetadataId = original.MetadataId.ToUpperInvariant(), VerifiedUtc = localTime }]
+        );
+
+        GoogleRowBinding stored = store.GetGoogleBindings("workbook-1").Single();
+        Assert.AreEqual(stable.ToString("D"), stored.ItemId);
+        Assert.AreEqual(stable.ToString("D"), stored.MetadataId);
+        Assert.AreEqual(localTime.ToUniversalTime(), stored.VerifiedUtc);
+    }
+
+    [TestMethod]
+    public void ReplaceGoogleBindingsRejectsInvalidValuesBeforeChangingStoredBindings()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        Guid stable = Guid.NewGuid();
+        store.ImportWorkbookProjection(Projection(complete: true, Row(7, stable)));
+        GoogleRowBinding original = store.GetGoogleBindings("workbook-1").Single();
+        GoogleRowBinding[] invalid =
+        [
+            original with { WorkbookId = new string('w', 257) },
+            original with { SheetId = new string('s', 65) },
+            original with { ItemId = "not-a-guid" },
+            original with { MetadataId = "not-a-guid" },
+            original with { VerifiedRemoteFingerprint = new string('g', 64) },
+            original with { LastObservedRow = 1_000_001 },
+            original with { VerifiedUtc = default },
+        ];
+
+        foreach (GoogleRowBinding candidate in invalid)
+            Assert.ThrowsException<WorkbookProjectionException>(
+                () => store.ReplaceGoogleBindings(candidate.WorkbookId, [candidate])
+            );
+
+        CollectionAssert.AreEqual(new[] { original }, store.GetGoogleBindings("workbook-1").ToArray());
     }
 
     private static WorkbookProjection Projection(bool complete, params WorkbookCatalogueItem[] items) =>
