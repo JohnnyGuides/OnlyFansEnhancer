@@ -22,6 +22,13 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (eventArgs.Args.Contains("--agent-once", StringComparer.Ordinal))
+        {
+            RunAgentOnce(eventArgs.Args);
+            Shutdown();
+            return;
+        }
+
         string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         instanceLock = new Mutex(true, $"Local\\OFEnhancer.Desktop.{userKey}", out bool first);
         if (!first)
@@ -79,5 +86,32 @@ public partial class App : System.Windows.Application
     {
         window?.Exit();
         Shutdown();
+    }
+
+    private static void RunAgentOnce(IReadOnlyList<string> args)
+    {
+        string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        string pipeName = DesktopAgent.DefaultPipeName(userKey);
+        for (int index = 0; index < args.Count - 1; index++)
+        {
+            if (string.Equals(args[index], "--pipe-name", StringComparison.Ordinal))
+                pipeName = args[index + 1];
+        }
+
+        try
+        {
+            AgentPipeServer server = new(pipeName);
+            server
+                .RunOnceAsync(
+                    request => AgentResponse.Success(request, AgentStatus.Current),
+                    CancellationToken.None
+                )
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch
+        {
+            Environment.ExitCode = 1;
+        }
     }
 }

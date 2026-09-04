@@ -15,21 +15,21 @@ public static class AgentPipeFrame
 
         byte[] length = new byte[sizeof(int)];
         BinaryPrimitives.WriteInt32LittleEndian(length, bytes.Length);
-        await output.WriteAsync(length, stop);
-        await output.WriteAsync(bytes, stop);
-        await output.FlushAsync(stop);
+        await output.WriteAsync(length, stop).ConfigureAwait(false);
+        await output.WriteAsync(bytes, stop).ConfigureAwait(false);
+        await output.FlushAsync(stop).ConfigureAwait(false);
     }
 
     public static async Task<string> ReadAsync(Stream input, CancellationToken stop)
     {
         byte[] length = new byte[sizeof(int)];
-        await ReadExactAsync(input, length, stop);
+        await ReadExactAsync(input, length, stop).ConfigureAwait(false);
         int count = BinaryPrimitives.ReadInt32LittleEndian(length);
         if (count is <= 0 or > AgentProtocol.MaxFrameBytes)
             throw new AgentProtocolException("frame-too-large", "The desktop message is too large.");
 
         byte[] bytes = new byte[count];
-        await ReadExactAsync(input, bytes, stop);
+        await ReadExactAsync(input, bytes, stop).ConfigureAwait(false);
         return Encoding.UTF8.GetString(bytes);
     }
 
@@ -38,7 +38,7 @@ public static class AgentPipeFrame
         int offset = 0;
         while (offset < buffer.Length)
         {
-            int read = await input.ReadAsync(buffer.AsMemory(offset), stop);
+            int read = await input.ReadAsync(buffer.AsMemory(offset), stop).ConfigureAwait(false);
             if (read == 0)
                 throw new AgentProtocolException(
                     "incomplete-frame",
@@ -64,30 +64,43 @@ public sealed partial class AgentPipeServer
         while (true)
         {
             stop.ThrowIfCancellationRequested();
-            await using NamedPipeServerStream pipe = new(
-                pipeName,
-                PipeDirection.InOut,
-                1,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
-            );
-            await pipe.WaitForConnectionAsync(stop);
-            AgentResponse response;
-            try
-            {
-                AgentRequest request = AgentRequest.Parse(await AgentPipeFrame.ReadAsync(pipe, stop));
-                response = handle(request);
-            }
-            catch (AgentProtocolException error)
-            {
-                response = AgentResponse.Failure(string.Empty, error.Code);
-            }
-            catch (Exception)
-            {
-                response = AgentResponse.Failure(string.Empty, "internal-error");
-            }
-            await AgentPipeFrame.WriteAsync(pipe, AgentProtocol.Serialize(response), stop);
+            await RunOnceAsync(handle, stop).ConfigureAwait(false);
         }
+    }
+
+    public async Task RunOnceAsync(
+        Func<AgentRequest, AgentResponse> handle,
+        CancellationToken stop
+    )
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        await using NamedPipeServerStream pipe = new(
+            pipeName,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
+        );
+        await pipe.WaitForConnectionAsync(stop).ConfigureAwait(false);
+        AgentResponse response;
+        try
+        {
+            AgentRequest request = AgentRequest.Parse(
+                await AgentPipeFrame.ReadAsync(pipe, stop).ConfigureAwait(false)
+            );
+            response = handle(request);
+        }
+        catch (AgentProtocolException error)
+        {
+            response = AgentResponse.Failure(string.Empty, error.Code);
+        }
+        catch (Exception)
+        {
+            response = AgentResponse.Failure(string.Empty, "internal-error");
+        }
+        await AgentPipeFrame
+            .WriteAsync(pipe, AgentProtocol.Serialize(response), stop)
+            .ConfigureAwait(false);
     }
 
     private static string ValidatePipeName(string value)
@@ -120,10 +133,12 @@ public sealed class AgentPipeClient
             PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
         );
-        await pipe.ConnectAsync(stop);
-        await AgentPipeFrame.WriteAsync(pipe, AgentProtocol.Serialize(request), stop);
+        await pipe.ConnectAsync(stop).ConfigureAwait(false);
+        await AgentPipeFrame
+            .WriteAsync(pipe, AgentProtocol.Serialize(request), stop)
+            .ConfigureAwait(false);
         AgentResponse response = AgentProtocol.ParseResponse(
-            await AgentPipeFrame.ReadAsync(pipe, stop)
+            await AgentPipeFrame.ReadAsync(pipe, stop).ConfigureAwait(false)
         );
         if (!string.Equals(response.RequestId, request.RequestId.ToString(), StringComparison.Ordinal))
             throw new AgentProtocolException("response-mismatch", "The desktop response does not match.");

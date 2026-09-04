@@ -42,6 +42,58 @@ const X_TEASER_CONTRACT = globalThis.CreatorXTeaserContract;
 const X_TEASER_SESSION_STORE = globalThis.CreatorXTeaserSessionStore;
 const X_TEASER_BINDING_KEY = "creatorXTeaserChromeBindingV1";
 const X_TEASER_NATIVE_HOST = "com.johnnyguides.creator_x_teaser";
+const DESKTOP_NATIVE_HOST = "com.johnnyguides.ofenhancer";
+const DESKTOP_CAPABILITIES = [
+  "desktop-shell",
+  "local-file-attach",
+  "native-bridge",
+];
+
+function getDesktopStatus() {
+  const request = {
+    protocolVersion: 1,
+    requestId: crypto.randomUUID(),
+    operation: "getStatus",
+  };
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(
+      DESKTOP_NATIVE_HOST,
+      request,
+      (response) => {
+        if (chrome.runtime.lastError)
+          return reject(new Error("desktop-unavailable"));
+        const status = response?.status;
+        if (
+          !response?.ok ||
+          response.requestId !== request.requestId ||
+          status?.protocolVersion !== 1 ||
+          !/^\d+\.\d+\.\d+$/.test(status?.productVersion || "") ||
+          !Array.isArray(status?.capabilities) ||
+          status.capabilities.length !== DESKTOP_CAPABILITIES.length ||
+          status.capabilities.some(
+            (capability, index) => capability !== DESKTOP_CAPABILITIES[index],
+          )
+        ) {
+          return reject(new Error("desktop-invalid-response"));
+        }
+        resolve({
+          productVersion: status.productVersion,
+          protocolVersion: status.protocolVersion,
+          capabilities: [...status.capabilities],
+        });
+      },
+    );
+  });
+}
+
+async function routeOFEnhancerAppRequest(operation) {
+  if (operation === "getStatus") return getDesktopStatus();
+  if (operation === "openChromeUploader") {
+    await openUploadConsole();
+    return { opened: true };
+  }
+  throw new Error("unsupported-operation");
+}
 
 function sendXTeaserNative(request) {
   return new Promise((resolve, reject) => {
@@ -2186,14 +2238,8 @@ const CREATOR_SCRIPT_DEFINITIONS = Object.freeze([
   {
     id: "creator-toolkit-upload-trace-redgifs",
     toolIds: ["uploadTraceRecorder"],
-    origins: [
-      "https://www.redgifs.com/*",
-      "https://studio.redgifs.com/*",
-    ],
-    matches: [
-      "https://www.redgifs.com/*",
-      "https://studio.redgifs.com/*",
-    ],
+    origins: ["https://www.redgifs.com/*", "https://studio.redgifs.com/*"],
+    matches: ["https://www.redgifs.com/*", "https://studio.redgifs.com/*"],
     js: ["creator-tools/upload-trace-recorder.js"],
     runAt: "document_start",
   },
@@ -2379,7 +2425,9 @@ async function showUploadTraceRecorder() {
   }
   const settings = await getCreatorSettings();
   if (settings.tools.uploadTraceRecorder?.enabled !== true) {
-    throw new Error("Enable Upload trace recorder in Upload console → Settings.");
+    throw new Error(
+      "Enable Upload trace recorder in Upload console → Settings.",
+    );
   }
   if (!(await hasAllOrigins(definition.origins))) {
     throw new Error("Grant this extension site access, then try again.");
@@ -4166,6 +4214,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { avatarView: await getAvatarManagementView() };
       case "GET_CREATOR_SETTINGS":
         return { creatorSettings: await getCreatorSettings() };
+      case "GET_DESKTOP_STATUS":
+        return { desktopStatus: await getDesktopStatus() };
+      case "OFENHANCER_APP_REQUEST":
+        return { result: await routeOFEnhancerAppRequest(message.operation) };
       case "OPEN_UPLOAD_CONSOLE":
         return { uploadConsole: await openUploadConsole() };
       case "SHOW_UPLOAD_TRACE_RECORDER":

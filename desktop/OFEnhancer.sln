@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Protocol.Tests",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Desktop", "OFEnhancer.Desktop\OFEnhancer.Desktop.csproj", "{4FCC4B4B-2789-4E3D-B69C-B898FDFD8728}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancerNativeBridge", "..\native-host\OFEnhancerNativeBridge\OFEnhancerNativeBridge.csproj", "{58189830-69CE-42D6-BBCB-BD0F179E8865}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{4FCC4B4B-2789-4E3D-B69C-B898FDFD8728}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4FCC4B4B-2789-4E3D-B69C-B898FDFD8728}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4FCC4B4B-2789-4E3D-B69C-B898FDFD8728}.Release|Any CPU.Build.0 = Release|Any CPU
+		{58189830-69CE-42D6-BBCB-BD0F179E8865}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{58189830-69CE-42D6-BBCB-BD0F179E8865}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{58189830-69CE-42D6-BBCB-BD0F179E8865}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{58189830-69CE-42D6-BBCB-BD0F179E8865}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

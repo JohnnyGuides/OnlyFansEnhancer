@@ -42,6 +42,8 @@ let nextTabGetHook = null;
 let navigateAfterProbeFileTo = "";
 let navigateBeforeRecorderInjection = null;
 let nextProbeFailure = "";
+const nativeMessages = [];
+let nextNativeError = "";
 
 function tabDocumentId(tab) {
   return `document-${tab.id}-${tab.documentVersion || 0}`;
@@ -137,6 +139,7 @@ const chrome = {
   },
   runtime: {
     id: "test-extension",
+    lastError: null,
     getURL(relativePath) {
       return `chrome-extension://test-extension/${relativePath}`;
     },
@@ -179,6 +182,25 @@ const chrome = {
         };
       }
       return { ok: false, error: "Unexpected parser operation." };
+    },
+    sendNativeMessage(host, request, callback) {
+      nativeMessages.push({ host, request: structuredClone(request) });
+      if (nextNativeError) {
+        chrome.runtime.lastError = { message: nextNativeError };
+        nextNativeError = "";
+        callback(undefined);
+        chrome.runtime.lastError = null;
+        return;
+      }
+      callback({
+        ok: true,
+        requestId: request.requestId,
+        status: {
+          productVersion: "0.18.0",
+          protocolVersion: 1,
+          capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
+        },
+      });
     },
     onInstalled: {
       addListener(listener) {
@@ -384,6 +406,7 @@ context = vm.createContext({
   btoa,
   chrome,
   console,
+  crypto,
   fetch: async (url) => {
     lastFetchUrl = String(url);
     if (
@@ -528,6 +551,36 @@ function send(message) {
     false,
   );
   assert.ok(manifest.permissions.includes("offscreen"));
+  const desktop = await send({ type: "GET_DESKTOP_STATUS" });
+  assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
+    productVersion: "0.18.0",
+    protocolVersion: 1,
+    capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
+  });
+  assert.equal(nativeMessages.at(-1).host, "com.johnnyguides.ofenhancer");
+  assert.deepEqual(Object.keys(nativeMessages.at(-1).request).sort(), [
+    "operation",
+    "protocolVersion",
+    "requestId",
+  ]);
+  assert.equal(nativeMessages.at(-1).request.operation, "getStatus");
+  nextNativeError = "Specified native messaging host not found.";
+  await assert.rejects(
+    send({ type: "GET_DESKTOP_STATUS" }),
+    /desktop-unavailable/,
+  );
+  const sharedAppStatus = await send({
+    type: "OFENHANCER_APP_REQUEST",
+    operation: "getStatus",
+  });
+  assert.equal(sharedAppStatus.result.productVersion, "0.18.0");
+  await assert.rejects(
+    send({
+      type: "OFENHANCER_APP_REQUEST",
+      operation: "deleteEverything",
+    }),
+    /unsupported-operation/,
+  );
   assert.equal(
     typeof context.CreatorSocialChromeRuntime?.create,
     "function",

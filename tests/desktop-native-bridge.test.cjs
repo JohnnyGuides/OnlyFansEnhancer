@@ -1,0 +1,176 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawn, spawnSync } = require("node:child_process");
+
+const root = path.resolve(__dirname, "..");
+const desktopExe = path.join(
+  root,
+  "desktop",
+  "OFEnhancer.Desktop",
+  "bin",
+  "Release",
+  "net8.0-windows",
+  "OFEnhancer.Desktop.exe",
+);
+const bridgeExe = path.join(
+  root,
+  "native-host",
+  "OFEnhancerNativeBridge",
+  "bin",
+  "Release",
+  "net8.0-windows",
+  "OFEnhancerNativeBridge.exe",
+);
+
+function runBridge(pipeName, requestPath) {
+  return spawnSync(bridgeExe, ["--request", pipeName, requestPath], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 5000,
+    windowsHide: true,
+  });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForExit(child) {
+  if (child.exitCode !== null) return child.exitCode;
+  return new Promise((resolve, reject) => {
+    child.once("exit", resolve);
+    child.once("error", reject);
+  });
+}
+
+async function main() {
+  const build = spawnSync(
+    "dotnet",
+    ["build", "desktop/OFEnhancer.sln", "-c", "Release"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 120000,
+      windowsHide: true,
+    },
+  );
+  assert.equal(build.status, 0, build.stdout + build.stderr);
+  assert.equal(
+    fs.existsSync(desktopExe),
+    true,
+    "desktop executable is missing",
+  );
+  assert.equal(
+    fs.existsSync(bridgeExe),
+    true,
+    "native bridge executable is missing",
+  );
+
+  const temporary = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ofenhancer-bridge-"),
+  );
+  let desktop;
+  try {
+    const request = {
+      protocolVersion: 1,
+      requestId: "9b8dcfd6-30c7-4dc0-b6da-fb4aec1c5a9c",
+      operation: "getStatus",
+    };
+    const requestPath = path.join(temporary, "request.json");
+    fs.writeFileSync(requestPath, JSON.stringify(request));
+    const pipeName = `ofenhancer-integration-${crypto.randomUUID().replaceAll("-", "")}`;
+    desktop = spawn(desktopExe, ["--agent-once", "--pipe-name", pipeName], {
+      cwd: root,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+
+    let bridge;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      bridge = runBridge(pipeName, requestPath);
+      if (bridge.status === 0) break;
+      await delay(100);
+    }
+    assert.equal(bridge.status, 0, bridge.stdout + bridge.stderr);
+    assert.deepEqual(JSON.parse(bridge.stdout), {
+      ok: true,
+      requestId: request.requestId,
+      status: {
+        productVersion: "0.18.0",
+        protocolVersion: 1,
+        capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
+      },
+    });
+    assert.equal(await waitForExit(desktop), 0);
+
+    const absentPipe = `ofenhancer-absent-${crypto.randomUUID().replaceAll("-", "")}`;
+    const unavailable = runBridge(absentPipe, requestPath);
+    assert.notEqual(unavailable.status, 0);
+    assert.equal(
+      JSON.parse(unavailable.stdout).error.code,
+      "desktop-unavailable",
+    );
+    assert.equal(
+      `${unavailable.stdout}${unavailable.stderr}`.includes(requestPath),
+      false,
+    );
+    assert.equal(
+      `${unavailable.stdout}${unavailable.stderr}`.includes(
+        JSON.stringify(request),
+      ),
+      false,
+    );
+
+    const malformedPath = path.join(
+      temporary,
+      "private-malformed-request.json",
+    );
+    const malformedText = '{"private":"do not echo"';
+    fs.writeFileSync(malformedPath, malformedText);
+    const malformed = runBridge(absentPipe, malformedPath);
+    assert.notEqual(malformed.status, 0);
+    assert.equal(JSON.parse(malformed.stdout).error.code, "invalid-request");
+    assert.equal(
+      `${malformed.stdout}${malformed.stderr}`.includes(malformedPath),
+      false,
+    );
+    assert.equal(
+      `${malformed.stdout}${malformed.stderr}`.includes(malformedText),
+      false,
+    );
+
+    const unsupportedPath = path.join(temporary, "unsupported.json");
+    const unsupportedText = JSON.stringify({
+      ...request,
+      requestId: "05a56db0-6510-4e8b-9173-5e6fb1cb197f",
+      operation: "deleteEverything",
+    });
+    fs.writeFileSync(unsupportedPath, unsupportedText);
+    const unsupported = runBridge(absentPipe, unsupportedPath);
+    assert.notEqual(unsupported.status, 0);
+    assert.equal(
+      JSON.parse(unsupported.stdout).error.code,
+      "unsupported-operation",
+    );
+    assert.equal(
+      `${unsupported.stdout}${unsupported.stderr}`.includes(unsupportedText),
+      false,
+    );
+  } finally {
+    if (desktop?.exitCode === null) desktop.kill();
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+
+  console.log(
+    "PASS: the stateless native bridge relayed one bounded desktop status request",
+  );
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
