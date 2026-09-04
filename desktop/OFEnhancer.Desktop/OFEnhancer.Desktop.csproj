@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\OFEnhancer.Catalogue\OFEnhancer.Catalogue.csproj" />
     <ProjectReference Include="..\OFEnhancer.Protocol\OFEnhancer.Protocol.csproj" />
   </ItemGroup>
 
@@ -11,7 +12,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Version>0.18.0</Version>
+    <Version>0.19.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>

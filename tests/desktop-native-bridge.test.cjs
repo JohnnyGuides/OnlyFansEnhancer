@@ -119,7 +119,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.18.0",
+        productVersion: "0.19.0",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
@@ -148,7 +148,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.18.0",
+        productVersion: "0.19.0",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },

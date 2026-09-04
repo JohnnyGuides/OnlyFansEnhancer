@@ -3,18 +3,21 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
+using OFEnhancer.Catalogue;
 
 namespace OFEnhancer.Desktop;
 
 public partial class MainWindow : Window
 {
     private readonly WebMessageRouter router;
+    private readonly ThumbnailResourceResolver thumbnails;
     private bool exiting;
 
-    public MainWindow(string? extensionId)
+    public MainWindow(string? extensionId, CatalogueStore catalogue)
     {
         InitializeComponent();
-        router = new WebMessageRouter(OpenChrome, () => extensionId);
+        router = new WebMessageRouter(OpenChrome, () => extensionId, catalogue);
+        thumbnails = new ThumbnailResourceResolver(catalogue);
     }
 
     public void Exit()
@@ -44,6 +47,48 @@ public partial class MainWindow : Window
         );
         Browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
         Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+        Browser.CoreWebView2.AddWebResourceRequestedFilter(
+            "https://thumbs.ofenhancer.local/*",
+            CoreWebView2WebResourceContext.Image
+        );
+        Browser.CoreWebView2.WebResourceRequested += (_, args) =>
+        {
+            try
+            {
+                ThumbnailResource? resource = thumbnails.Resolve(new Uri(args.Request.Uri));
+                if (resource is null)
+                {
+                    SetThumbnailNotFound(args);
+                    return;
+                }
+                FileStream stream = new(
+                    resource.Path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    bufferSize: 64 * 1024,
+                    FileOptions.SequentialScan
+                );
+                args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+                    stream,
+                    200,
+                    "OK",
+                    $"Content-Type: {resource.ContentType}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff"
+                );
+            }
+            catch (IOException)
+            {
+                SetThumbnailNotFound(args);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetThumbnailNotFound(args);
+            }
+            catch (UriFormatException)
+            {
+                SetThumbnailNotFound(args);
+            }
+        };
         Browser.CoreWebView2.WebMessageReceived += (_, message) =>
         {
             string response = router.Handle(message.TryGetWebMessageAsString());
@@ -68,5 +113,15 @@ public partial class MainWindow : Window
         ProcessStartInfo start = new("chrome.exe") { UseShellExecute = true };
         start.ArgumentList.Add(uri.AbsoluteUri);
         Process.Start(start);
+    }
+
+    private void SetThumbnailNotFound(CoreWebView2WebResourceRequestedEventArgs args)
+    {
+        args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+            new MemoryStream([]),
+            404,
+            "Not Found",
+            "Content-Type: text/plain\r\nCache-Control: no-store"
+        );
     }
 }

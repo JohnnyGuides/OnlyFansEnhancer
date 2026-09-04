@@ -1,11 +1,16 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using OFEnhancer.Catalogue;
 using OFEnhancer.Protocol;
 
 namespace OFEnhancer.Desktop;
 
-public sealed partial class WebMessageRouter(Action<Uri> openUri, Func<string?> extensionId)
+public sealed partial class WebMessageRouter(
+    Action<Uri> openUri,
+    Func<string?> extensionId,
+    CatalogueStore? catalogue = null
+)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,8 +35,12 @@ public sealed partial class WebMessageRouter(Action<Uri> openUri, Func<string?> 
             requestId = request.RequestId;
             return request.Operation switch
             {
-                "getStatus" => Success(requestId, AgentStatus.Current),
-                "openChromeUploader" => OpenUploader(requestId),
+                "getStatus" => WithEmptyPayload(request, () => Success(requestId, AgentStatus.Current)),
+                "openChromeUploader" => WithEmptyPayload(request, () => OpenUploader(requestId)),
+                "getCatalogue" => WithCatalogue(requestId, request, GetCatalogue),
+                "importCatalogueSnapshot" => WithCatalogue(requestId, request, ImportCatalogue),
+                "scanThumbnails" => WithCatalogue(requestId, request, ScanThumbnails),
+                "confirmAssetBinding" => WithCatalogue(requestId, request, ConfirmBinding),
                 _ => Failure(requestId, "unsupported-operation"),
             };
         }
@@ -39,9 +48,84 @@ public sealed partial class WebMessageRouter(Action<Uri> openUri, Func<string?> 
         {
             return Failure(requestId, "invalid-request");
         }
+        catch (WebPayloadException)
+        {
+            return Failure(requestId, "invalid-payload");
+        }
+        catch (CatalogueSnapshotException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
+        catch (CatalogueInventoryException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
+        catch (CatalogueBindingException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
         catch (Exception)
         {
             return Failure(requestId, "internal-error");
+        }
+    }
+
+    private string WithCatalogue(
+        string requestId,
+        WebRequest request,
+        Func<WebRequest, string> action
+    ) => catalogue is null ? Failure(requestId, "catalogue-unavailable") : action(request);
+
+    private string WithEmptyPayload(WebRequest request, Func<string> action)
+    {
+        DeserializePayload<EmptyPayload>(request.Payload);
+        return action();
+    }
+
+    private string GetCatalogue(WebRequest request)
+    {
+        DeserializePayload<EmptyPayload>(request.Payload);
+        return Success(request.RequestId, catalogue!.GetCatalogue());
+    }
+
+    private string ImportCatalogue(WebRequest request)
+    {
+        ImportPayload payload = DeserializePayload<ImportPayload>(request.Payload);
+        if (payload.Json is null)
+            return Failure(request.RequestId, "invalid-payload");
+        return Success(request.RequestId, catalogue!.ImportSnapshot(payload.Json));
+    }
+
+    private string ScanThumbnails(WebRequest request)
+    {
+        ScanPayload payload = DeserializePayload<ScanPayload>(request.Payload);
+        string root = string.IsNullOrWhiteSpace(payload.Root)
+            ? catalogue!.ConfiguredThumbnailRoot ?? catalogue.DefaultThumbnailRoot
+            : payload.Root;
+        return Success(request.RequestId, catalogue!.ScanThumbnails(root));
+    }
+
+    private string ConfirmBinding(WebRequest request)
+    {
+        BindingPayload payload = DeserializePayload<BindingPayload>(request.Payload);
+        return Success(
+            request.RequestId,
+            catalogue!.ConfirmAssetBinding(payload.AssetId ?? "", payload.ItemId ?? "")
+        );
+    }
+
+    private static T DeserializePayload<T>(JsonElement payload)
+    {
+        try
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                throw new JsonException("Payload must be an object.");
+            return JsonSerializer.Deserialize<T>(payload.GetRawText(), JsonOptions)
+                ?? throw new JsonException("Payload is invalid.");
+        }
+        catch (JsonException exception)
+        {
+            throw new WebPayloadException(exception);
         }
     }
 
@@ -67,6 +151,17 @@ public sealed partial class WebMessageRouter(Action<Uri> openUri, Func<string?> 
     private static partial Regex ExtensionIdPattern();
 
     private sealed record WebRequest(string RequestId, string Operation, JsonElement Payload);
+
+    private sealed record EmptyPayload;
+
+    private sealed record ImportPayload(string? Json);
+
+    private sealed record ScanPayload(string? Root);
+
+    private sealed record BindingPayload(string? AssetId, string? ItemId);
+
+    private sealed class WebPayloadException(Exception innerException)
+        : Exception("Web payload is invalid.", innerException);
 
     private sealed record WebError(string Code);
 

@@ -99,6 +99,7 @@ async function main() {
       path.join(stage, "native", "ofenhancer-native-host.json.template"),
       path.join(stage, "extension-setup.html"),
       path.join(stage, "package-manifest.json"),
+      path.join(stage, "desktop", "Microsoft.Data.Sqlite.dll"),
     ]) {
       assert.equal(
         fs.existsSync(required),
@@ -115,7 +116,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.18.0",
+      productVersion: "0.19.0",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -128,6 +129,7 @@ async function main() {
           temporary,
           "webview-profile",
         ),
+        OFENHANCER_DATA_FOLDER: path.join(temporary, "catalogue-data"),
       },
       windowsHide: true,
       stdio: "ignore",
@@ -149,6 +151,7 @@ async function main() {
             temporary,
             "webview-profile",
           ),
+          OFENHANCER_DATA_FOLDER: path.join(temporary, "catalogue-data"),
         },
         windowsHide: true,
         stdio: "ignore",
@@ -167,6 +170,11 @@ async function main() {
       desktopProcess.exitCode,
       null,
       "the first desktop authority stopped unexpectedly",
+    );
+    assert.equal(
+      fs.existsSync(path.join(temporary, "catalogue-data", "catalogue.db")),
+      true,
+      "the isolated desktop catalogue was not created",
     );
 
     const closeWindow = spawnSync(
@@ -198,7 +206,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.18.0");
+    assert.equal(manifest.productVersion, "0.19.0");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));
@@ -218,6 +226,8 @@ async function main() {
       /settings\.json$/i,
       /token|secret/i,
       /media.*selfmade|\.thumbs/i,
+      /(?:^|\/)(?:catalogue|ofenhancer)[^/]*\.(?:db|sqlite)(?:$|[.-])/i,
+      /backup-v\d+/i,
     ]) {
       assert.equal(
         relativeFiles.some((file) => forbidden.test(file)),
@@ -243,6 +253,11 @@ async function main() {
       stagedText.includes(workbookId),
       false,
       "the staged package exposes the configured workbook ID",
+    );
+    assert.equal(
+      relativeFiles.some((file) => /(?:^|\/)e_sqlite3\.dll$/i.test(file)),
+      true,
+      "the staged desktop package is missing the SQLite native runtime",
     );
     assert.match(build.stdout, /MANIFEST_SHA256=[A-F0-9]{64}/);
     console.log(`PASS: staged desktop package ${stage}`);

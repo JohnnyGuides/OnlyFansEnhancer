@@ -187,4 +187,3 @@ Automated verification must prove:
   path, private snapshot, or test fixture.
 
 No automated or manual verification clicks a public platform control.
-
