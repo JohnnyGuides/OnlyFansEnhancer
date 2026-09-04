@@ -4,6 +4,41 @@ The personal extension's creator helpers are small site adapters on one
 extension-native runtime. They are deliberately separate from the Chrome Web
 Store edition under `store/`.
 
+## Desktop foundation
+
+Version 0.18.0 adds a Windows authority beside the working personal extension:
+
+- `OFEnhancer.Desktop` owns the tray window, shared WebView2 shell, and one
+  current-user named-pipe agent. It is the only long-lived desktop process.
+- `OFEnhancerNativeBridge` is a stateless Native Messaging relay. It validates
+  one protocol request, forwards one pipe frame, returns one response, and
+  exits. It never starts a second desktop authority.
+- `OFEnhancer.Protocol` owns protocol version 1, 1 MiB framing, strict status
+  messages, and the exact capability list. Named pipes use
+  `PipeOptions.CurrentUserOnly`.
+- `app/` is one framework-free UI packaged in the WebView2 app and personal
+  extension. The shell reports unavailable work honestly; it does not render
+  sample catalogue rows or pretend later milestones exist.
+- `creator-tools/local-file-attacher.js` is an internal service-worker
+  primitive. It validates the tab's exact origin and one exact
+  `input[type=file]`, uses `DOM.setFileInputFiles`, verifies the result, and
+  detaches in every attached outcome. No runtime message accepts a local path.
+
+The personal extension alone has Chrome's `debugger` and `nativeMessaging`
+permissions. The store edition contains neither the desktop bridge nor local
+file attacher. The debugger primitive cannot submit, click a platform control,
+persist a path, or echo a path in its result or error.
+
+The current unpacked Chrome extension has no manifest key. Its ID therefore
+cannot be recreated when the installed extension moves to a different folder.
+Setup treats that ID as migration input and requires one explicit load-and-copy
+step; it never edits a Chrome profile or installs enterprise policy.
+
+Milestone 1 proves the process boundary and local file attachment only. The
+existing extension remains the upload authority until later milestones move
+catalogue data, media generation, scheduler jobs, social monitoring, and
+platform orchestration into the desktop app.
+
 ## Safety contract
 
 Every state-changing adapter must satisfy all of these invariants:

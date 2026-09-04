@@ -31,7 +31,7 @@ outcome without page content or credentials.
 
 ## Upload console
 
-- Confirm the extension reports version `0.17.1` before testing. For the release
+- Confirm the extension reports version `0.18.0` before testing. For the release
   smoke pass, stop at the final preview on every site; do not click the global
   Yes when it would reach a real final platform control.
 - Configure distinctive safe saved profiles and verify the Master Uploader

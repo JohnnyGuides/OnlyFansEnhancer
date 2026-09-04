@@ -25,7 +25,17 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs eventArgs)
     {
-        await Browser.EnsureCoreWebView2Async();
+        string userDataFolder =
+            Environment.GetEnvironmentVariable("OFENHANCER_WEBVIEW2_USER_DATA_FOLDER")
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "OFEnhancer",
+                "WebView2"
+            );
+        CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(
+            userDataFolder: userDataFolder
+        );
+        await Browser.EnsureCoreWebView2Async(environment);
         string appRoot = Path.Combine(AppContext.BaseDirectory, "app");
         Browser.CoreWebView2.SetVirtualHostNameToFolderMapping(
             "app.ofenhancer.local",
@@ -60,4 +70,3 @@ public partial class MainWindow : Window
         Process.Start(start);
     }
 }
-

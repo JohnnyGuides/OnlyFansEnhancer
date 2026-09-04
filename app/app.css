@@ -37,6 +37,7 @@ body {
 button,
 a {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button {
@@ -198,6 +199,7 @@ h1 {
   line-height: 0.95;
   letter-spacing: -0.04em;
   text-wrap: balance;
+  scroll-margin-top: 24px;
 }
 
 h2 {
@@ -243,6 +245,11 @@ p {
   background: #65cfff;
 }
 
+.action-button:active,
+nav button:active {
+  transform: translateY(1px);
+}
+
 .action-button:disabled {
   border-color: #3a4352;
   background: #202633;
@@ -283,6 +290,7 @@ p {
   margin: 0;
   color: #aeb6c3;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 860px) {

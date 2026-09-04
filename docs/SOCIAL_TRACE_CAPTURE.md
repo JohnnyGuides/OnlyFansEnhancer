@@ -1,6 +1,6 @@
 # Social publishing trace capture
 
-Version 0.17.1 includes an on-demand sanitized trace recorder for X, Redgifs,
+Version 0.18.0 includes an on-demand sanitized trace recorder for X, Redgifs,
 and Reddit. The supplied successful X trace is accepted by the Master Uploader;
 Redgifs and Reddit remain trace-gated.
 These traces are mandatory evidence for the publishing adapters; the recorder

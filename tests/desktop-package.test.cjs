@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 
@@ -23,7 +23,11 @@ function sha256(filePath) {
     .digest("hex");
 }
 
-function main() {
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function main() {
   const register = fs.readFileSync(
     path.join(root, "scripts", "register-native-host.ps1"),
     "utf8",
@@ -56,6 +60,7 @@ function main() {
   const temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "ofenhancer-package-"),
   );
+  let desktopProcess;
   try {
     const build = spawnSync(
       "powershell",
@@ -110,6 +115,81 @@ function main() {
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
 
+    desktopProcess = spawn(desktopExe, ["--extension-id", "a".repeat(32)], {
+      cwd: path.dirname(desktopExe),
+      env: {
+        ...process.env,
+        OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: path.join(
+          temporary,
+          "webview-profile",
+        ),
+      },
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    await delay(2000);
+    assert.equal(
+      desktopProcess.exitCode,
+      null,
+      "the staged desktop shell crashed on launch",
+    );
+    const secondInstance = spawn(
+      desktopExe,
+      ["--extension-id", "a".repeat(32)],
+      {
+        cwd: path.dirname(desktopExe),
+        env: {
+          ...process.env,
+          OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: path.join(
+            temporary,
+            "webview-profile",
+          ),
+        },
+        windowsHide: true,
+        stdio: "ignore",
+      },
+    );
+    await Promise.race([
+      new Promise((resolve) => secondInstance.once("exit", resolve)),
+      delay(3000),
+    ]);
+    assert.notEqual(
+      secondInstance.exitCode,
+      null,
+      "a second desktop authority remained running",
+    );
+    assert.equal(
+      desktopProcess.exitCode,
+      null,
+      "the first desktop authority stopped unexpectedly",
+    );
+
+    const closeWindow = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        `(Get-Process -Id ${desktopProcess.pid}).CloseMainWindow()`,
+      ],
+      { encoding: "utf8", timeout: 10000, windowsHide: true },
+    );
+    assert.equal(
+      closeWindow.status,
+      0,
+      closeWindow.stdout + closeWindow.stderr,
+    );
+    assert.match(
+      closeWindow.stdout,
+      /True/i,
+      "the desktop window did not accept a close request",
+    );
+    await delay(500);
+    assert.equal(
+      desktopProcess.exitCode,
+      null,
+      "closing the window stopped the tray authority",
+    );
+
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
@@ -143,13 +223,27 @@ function main() {
     assert.match(build.stdout, /MANIFEST_SHA256=[A-F0-9]{64}/);
     console.log(`PASS: staged desktop package ${stage}`);
   } finally {
-    fs.rmSync(temporary, { recursive: true, force: true });
+    if (desktopProcess?.exitCode === null) {
+      spawnSync("taskkill", ["/pid", String(desktopProcess.pid), "/t", "/f"], {
+        encoding: "utf8",
+        timeout: 10000,
+        windowsHide: true,
+      });
+      await Promise.race([
+        new Promise((resolve) => desktopProcess.once("exit", resolve)),
+        delay(3000),
+      ]);
+    }
+    fs.rmSync(temporary, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 500,
+    });
   }
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
-}
+});

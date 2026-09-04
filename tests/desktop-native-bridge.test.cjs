@@ -39,6 +39,24 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function frame(value) {
+  const payload = Buffer.from(JSON.stringify(value), "utf8");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(payload.length);
+  return Buffer.concat([header, payload]);
+}
+
+function parseFrame(value) {
+  assert.ok(value.length >= 4, "native response frame is incomplete");
+  const length = value.readUInt32LE(0);
+  assert.equal(
+    value.length,
+    length + 4,
+    "native response frame has the wrong length",
+  );
+  return JSON.parse(value.subarray(4).toString("utf8"));
+}
+
 async function waitForExit(child) {
   if (child.exitCode !== null) return child.exitCode;
   return new Promise((resolve, reject) => {
@@ -74,6 +92,7 @@ async function main() {
     path.join(os.tmpdir(), "ofenhancer-bridge-"),
   );
   let desktop;
+  let nativeDesktop;
   try {
     const request = {
       protocolVersion: 1,
@@ -106,6 +125,36 @@ async function main() {
       },
     });
     assert.equal(await waitForExit(desktop), 0);
+    desktop = null;
+
+    nativeDesktop = spawn(desktopExe, ["--agent-once"], {
+      cwd: root,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    let nativeBridge;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      nativeBridge = spawnSync(bridgeExe, [], {
+        cwd: root,
+        input: frame(request),
+        timeout: 5000,
+        windowsHide: true,
+      });
+      if (nativeBridge.status === 0) break;
+      await delay(100);
+    }
+    assert.equal(nativeBridge.status, 0, nativeBridge.stderr?.toString("utf8"));
+    assert.deepEqual(parseFrame(nativeBridge.stdout), {
+      ok: true,
+      requestId: request.requestId,
+      status: {
+        productVersion: "0.18.0",
+        protocolVersion: 1,
+        capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
+      },
+    });
+    assert.equal(await waitForExit(nativeDesktop), 0);
+    nativeDesktop = null;
 
     const absentPipe = `ofenhancer-absent-${crypto.randomUUID().replaceAll("-", "")}`;
     const unavailable = runBridge(absentPipe, requestPath);
@@ -162,6 +211,7 @@ async function main() {
     );
   } finally {
     if (desktop?.exitCode === null) desktop.kill();
+    if (nativeDesktop?.exitCode === null) nativeDesktop.kill();
     fs.rmSync(temporary, { recursive: true, force: true });
   }
 
