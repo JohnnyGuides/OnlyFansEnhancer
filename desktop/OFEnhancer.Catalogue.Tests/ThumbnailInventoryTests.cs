@@ -71,6 +71,28 @@ public sealed class ThumbnailInventoryTests
         Assert.ThrowsException<CatalogueInventoryException>(() => store.ScanThumbnails(Path.Combine(root, "one.png")));
     }
 
+    [TestMethod]
+    public void ChangingConfiguredRootMakesPreviousRootAssetsUnavailable()
+    {
+        using TestDirectory temp = new();
+        string firstRoot = Directory.CreateDirectory(Path.Combine(temp.Path, "first")).FullName;
+        string secondRoot = Directory.CreateDirectory(Path.Combine(temp.Path, "second")).FullName;
+        File.WriteAllBytes(Path.Combine(firstRoot, "first.png"), [1]);
+        File.WriteAllBytes(Path.Combine(secondRoot, "second.png"), [2]);
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        store.ScanThumbnails(firstRoot);
+        string firstAssetId = store.GetAssets().Single().AssetId;
+        ThumbnailScanSummary second = store.ScanThumbnails(secondRoot);
+
+        IReadOnlyList<MediaAssetSummary> assets = store.GetAssets(includeUnavailable: true);
+        Assert.AreEqual(1, second.AvailableAssets);
+        Assert.AreEqual(1, second.UnavailableAssets);
+        Assert.IsFalse(assets.Single(asset => asset.AssetId == firstAssetId).Available);
+        Assert.IsNull(store.ResolveAvailableAssetPath(firstAssetId));
+        Assert.AreEqual(secondRoot, store.ConfiguredThumbnailRoot);
+    }
+
     private static string Snapshot(string sourceKey, string title) =>
         """
         {"version":1,"items":[{"sourceKey":"$SOURCE$","sourceRow":12,"title":"$TITLE$","description":"","plannedDate":"2026-09-11","series":"Ashley","episode":"04","xTeasers":0,"redditTeasers":0,"platformLinks":{}}]}

@@ -48,9 +48,8 @@ internal static class ThumbnailInventory
         Execute(
             connection,
             transaction,
-            "UPDATE media_assets SET available = 0, updated_utc = $now WHERE scan_root = $root",
-            ("$now", now),
-            ("$root", fullRoot)
+            "UPDATE media_assets SET available = 0, updated_utc = $now",
+            ("$now", now)
         );
 
         foreach (ScannedFile file in files)
@@ -102,8 +101,7 @@ internal static class ThumbnailInventory
         int unavailable = ScalarInt(
             connection,
             transaction,
-            "SELECT count(*) FROM media_assets WHERE scan_root = $root AND available = 0",
-            ("$root", fullRoot)
+            "SELECT count(*) FROM media_assets WHERE available = 0"
         );
         string details = JsonSerializer.Serialize(
             new { availableAssets = files.Count, newAssets, unavailableAssets = unavailable }
