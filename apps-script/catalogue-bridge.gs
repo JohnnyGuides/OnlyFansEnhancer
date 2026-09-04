@@ -1,7 +1,6 @@
 "use strict";
 
-var CREATOR_UPLOAD_SPREADSHEET_ID =
-  "1Ninkxbv1SOvatcJ3AP4zwKWxdc32imlIkP_IMUSTR9E";
+var CREATOR_UPLOAD_SPREADSHEET_ID_PROPERTY = "CREATOR_UPLOAD_SPREADSHEET_ID";
 var CREATOR_UPLOAD_SHEET_NAME = "2026 Video Catalogue";
 var CREATOR_UPLOAD_PRESET_SHEET_NAME = "2026 uploads";
 var CREATOR_UPLOAD_LEDGER_SHEET_NAME = "Creator Distribution Ledger";
@@ -22,6 +21,25 @@ var CREATOR_UPLOAD_LINK_COLUMNS = {
 
 function creatorUploadClean(value) {
   return String(value == null ? "" : value).trim();
+}
+
+function creatorUploadSpreadsheetId() {
+  var spreadsheetId = creatorUploadClean(
+    PropertiesService.getScriptProperties().getProperty(
+      CREATOR_UPLOAD_SPREADSHEET_ID_PROPERTY,
+    ),
+  );
+  if (!spreadsheetId) {
+    throw new Error(
+      "CREATOR_UPLOAD_SPREADSHEET_ID Script Property is not configured.",
+    );
+  }
+  if (!/^[A-Za-z0-9_-]{10,200}$/.test(spreadsheetId)) {
+    throw new Error(
+      "CREATOR_UPLOAD_SPREADSHEET_ID Script Property is invalid.",
+    );
+  }
+  return spreadsheetId;
 }
 
 function creatorUploadNormalizedText(value) {
@@ -554,7 +572,7 @@ function creatorUploadValidateDraft(payload) {
 }
 
 function creatorUploadSheet(book) {
-  book = book || SpreadsheetApp.openById(CREATOR_UPLOAD_SPREADSHEET_ID);
+  book = book || SpreadsheetApp.openById(creatorUploadSpreadsheetId());
   var sheet = book.getSheetByName(CREATOR_UPLOAD_SHEET_NAME);
   if (!sheet) throw new Error("The catalogue sheet is unavailable.");
   return sheet;
@@ -622,7 +640,7 @@ function creatorUploadLedgerSheet(book) {
 }
 
 function creatorUploadHandle(action, payload) {
-  var book = SpreadsheetApp.openById(CREATOR_UPLOAD_SPREADSHEET_ID);
+  var book = SpreadsheetApp.openById(creatorUploadSpreadsheetId());
   if (action === "getSubredditPresetSnapshot") {
     var presetSheet = book.getSheetByName(CREATOR_UPLOAD_PRESET_SHEET_NAME);
     if (!presetSheet)
