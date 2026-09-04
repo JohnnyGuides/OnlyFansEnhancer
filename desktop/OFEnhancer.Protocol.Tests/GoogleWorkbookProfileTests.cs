@@ -17,8 +17,8 @@ public sealed class GoogleWorkbookProfileTests
     [DataRow("manyvids", "L")]
     [DataRow("xTeasers", "N")]
     [DataRow("x", "O")]
-    [DataRow("redditTeasers", "Q")]
-    [DataRow("reddit", "R")]
+    [DataRow("redditTeasers", "S")]
+    [DataRow("reddit", "T")]
     [DataRow("ofenhancerId", "U")]
     [DataRow("pornhubPaid", "V")]
     [DataRow("clips4sale", "W")]
@@ -192,6 +192,26 @@ public sealed class GoogleWorkbookProfileTests
 
         GoogleCatalogueException error = Assert.ThrowsException<GoogleCatalogueException>(() =>
             GoogleWorkbookProfile.Inspect(oversized, store)
+        );
+
+        Assert.AreEqual("workbook-row-limit", error.Code);
+        Assert.AreEqual(0, store.GetItems(includeArchived: true).Count);
+    }
+
+    [TestMethod]
+    public void Rows_beyond_the_bounded_read_fail_closed_instead_of_claiming_a_complete_projection()
+    {
+        GoogleWorkbookSnapshot legacy = LegacySnapshot();
+        GoogleSheetSnapshot main = legacy.Sheets[0] with { RowCount = 5_003 };
+        GoogleWorkbookSnapshot potentiallySparse = legacy with
+        {
+            Sheets = [main, .. legacy.Sheets.Skip(1)],
+        };
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        GoogleCatalogueException error = Assert.ThrowsException<GoogleCatalogueException>(() =>
+            GoogleWorkbookProfile.Inspect(potentiallySparse, store)
         );
 
         Assert.AreEqual("workbook-row-limit", error.Code);

@@ -474,9 +474,9 @@ public sealed class GoogleWorkbookMigratorTests
             ];
             if (index == 1)
             {
-                while (values.Count < 19)
+                while (values.Count < 18)
                     values.Add(new JsonObject());
-                values[18] = new JsonObject { ["formattedValue"] = "Foreign boundary retained" };
+                values[17] = new JsonObject { ["formattedValue"] = "Foreign boundary retained" };
             }
             rowData.Add(new JsonObject { ["values"] = values });
         }

@@ -54,11 +54,14 @@ internal sealed class DpapiGoogleTokenVault : IGoogleTokenVault
                     plaintext,
                     new JsonSerializerOptions { MaxDepth = 8 }
                 );
-                if (payload is null || string.IsNullOrEmpty(payload.RefreshToken) || payload.RefreshToken.Length > 8_192)
+                if (payload is null
+                    || !AppConfiguration.IsValidGoogleOAuthClientId(payload.ClientId)
+                    || string.IsNullOrEmpty(payload.RefreshToken)
+                    || payload.RefreshToken.Length > 8_192)
                 {
                     throw new InvalidDataException();
                 }
-                return new(payload.RefreshToken, payload.AccessTokenExpiresAt);
+                return new(payload.RefreshToken, payload.AccessTokenExpiresAt, payload.ClientId);
             }
             finally
             {
@@ -74,7 +77,9 @@ internal sealed class DpapiGoogleTokenVault : IGoogleTokenVault
     public void Save(GoogleRefreshCredential credential)
     {
         ArgumentNullException.ThrowIfNull(credential);
-        if (string.IsNullOrEmpty(credential.RefreshToken) || credential.RefreshToken.Length > 8_192)
+        if (!AppConfiguration.IsValidGoogleOAuthClientId(credential.ClientId)
+            || string.IsNullOrEmpty(credential.RefreshToken)
+            || credential.RefreshToken.Length > 8_192)
         {
             throw new ArgumentException("The Google refresh credential is invalid.", nameof(credential));
         }
@@ -87,7 +92,8 @@ internal sealed class DpapiGoogleTokenVault : IGoogleTokenVault
         string temporaryPath = $"{_path}.{Guid.NewGuid():N}.tmp";
         byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(new CredentialPayload(
             credential.RefreshToken,
-            credential.AccessTokenExpiresAt
+            credential.AccessTokenExpiresAt,
+            credential.ClientId
         ));
         try
         {
@@ -137,7 +143,11 @@ internal sealed class DpapiGoogleTokenVault : IGoogleTokenVault
         }
     }
 
-    private sealed record CredentialPayload(string RefreshToken, DateTimeOffset AccessTokenExpiresAt);
+    private sealed record CredentialPayload(
+        string RefreshToken,
+        DateTimeOffset AccessTokenExpiresAt,
+        string ClientId
+    );
 }
 
 internal sealed class MemoryGoogleTokenVault : IGoogleTokenVault
@@ -180,8 +190,12 @@ internal sealed class CurrentUserDpapiTokenProtector : ITokenProtector
         ProtectedData.Unprotect(ciphertext, entropy, scope);
 }
 
-internal sealed record GoogleRefreshCredential(string RefreshToken, DateTimeOffset AccessTokenExpiresAt)
+internal sealed record GoogleRefreshCredential(
+    string RefreshToken,
+    DateTimeOffset AccessTokenExpiresAt,
+    string ClientId
+)
 {
     public override string ToString() =>
-        $"GoogleRefreshCredential {{ RefreshToken = [redacted], AccessTokenExpiresAt = {AccessTokenExpiresAt:O} }}";
+        $"GoogleRefreshCredential {{ RefreshToken = [redacted], ClientId = [redacted], AccessTokenExpiresAt = {AccessTokenExpiresAt:O} }}";
 }

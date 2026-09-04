@@ -161,7 +161,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
                 tokens.AccessToken,
                 cancellation.Token
             ).ConfigureAwait(false);
-            GoogleRefreshCredential credential = new(tokens.RefreshToken, tokens.ExpiresAt);
+            GoogleRefreshCredential credential = new(tokens.RefreshToken, tokens.ExpiresAt, _clientId);
             if (Volatile.Read(ref _connectionPhase) != ConnectionActive
                 || cancellation.IsCancellationRequested)
             {

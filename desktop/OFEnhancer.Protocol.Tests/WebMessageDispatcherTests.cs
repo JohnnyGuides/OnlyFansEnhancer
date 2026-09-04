@@ -63,4 +63,29 @@ public sealed class WebMessageDispatcherTests
         browserFinished.SetResult();
         await dispatcher.DrainAsync();
     }
+
+    [TestMethod]
+    public async Task Background_completion_queues_behind_active_catalogue_request()
+    {
+        TaskCompletionSource requestEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseRequest = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        List<string> order = [];
+        WebMessageDispatcher dispatcher = new(value =>
+        {
+            order.Add(value);
+            requestEntered.SetResult();
+            releaseRequest.Task.GetAwaiter().GetResult();
+            return value;
+        });
+
+        Task<string> request = dispatcher.HandleAsync("request");
+        await requestEntered.Task;
+        Task completion = dispatcher.EnqueueAsync(() => order.Add("completion"));
+        await Task.Delay(100);
+
+        CollectionAssert.AreEqual(new[] { "request" }, order);
+        releaseRequest.SetResult();
+        await Task.WhenAll(request, completion);
+        CollectionAssert.AreEqual(new[] { "request", "completion" }, order);
+    }
 }

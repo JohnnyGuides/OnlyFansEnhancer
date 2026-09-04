@@ -21,19 +21,21 @@
                 { "formattedValue": "Title" },
                 { "formattedValue": "Description" },
                 { "formattedValue": "Season/Arc" },
-                { "formattedValue": "Episode" },
                 {},
+                { "formattedValue": "Episode" },
                 { "formattedValue": "Pornhub Free" },
                 {},
                 { "formattedValue": "OnlyFans" },
                 { "formattedValue": "Fansly" },
                 { "formattedValue": "ManyVids" },
-                {},
-                { "formattedValue": "X Teaser Count" },
-                { "formattedValue": "X Links" },
-                {},
-                { "formattedValue": "Reddit Unique Teaser Count" },
-                { "formattedValue": "Reddit Links" }
+                { "formattedValue": "# teasers unposted" },
+                { "formattedValue": "# teasers" },
+                { "formattedValue": "Twitter Teaser(s)" },
+                { "formattedValue": "Clips4Sale Link" },
+                { "formattedValue": "Cost" },
+                { "formattedValue": "Thumbnail Override" },
+                { "formattedValue": "# Reddit posts" },
+                { "formattedValue": "Reddit Post(s)" }
               ]
             },
             {
@@ -43,11 +45,13 @@
                 { "formattedValue": "Alpha episode" },
                 { "formattedValue": "Description" },
                 { "formattedValue": "Alpha" },
+                {},
                 { "formattedValue": "01" },
-                {}, {}, {}, {}, {}, {}, {},
+                {}, {}, {}, {}, {}, {},
                 { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
-                {}, {},
-                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" }
+                {}, {}, {}, {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
+                {}
               ]
             }
           ]
@@ -73,19 +77,21 @@
                 { "formattedValue": "Title" },
                 { "formattedValue": "Description" },
                 { "formattedValue": "Season/Arc" },
-                { "formattedValue": "Episode" },
                 {},
+                { "formattedValue": "Episode" },
                 { "formattedValue": "Pornhub Free" },
                 {},
                 { "formattedValue": "OnlyFans" },
                 { "formattedValue": "Fansly" },
                 { "formattedValue": "ManyVids" },
-                {},
-                { "formattedValue": "X Teaser Count" },
-                { "formattedValue": "X Links" },
-                {},
-                { "formattedValue": "Reddit Unique Teaser Count" },
-                { "formattedValue": "Reddit Links" }
+                { "formattedValue": "# teasers unposted" },
+                { "formattedValue": "# teasers" },
+                { "formattedValue": "Twitter Teaser(s)" },
+                { "formattedValue": "Clips4Sale Link" },
+                { "formattedValue": "Cost" },
+                { "formattedValue": "Thumbnail Override" },
+                { "formattedValue": "# Reddit posts" },
+                { "formattedValue": "Reddit Post(s)" }
               ]
             },
             {
@@ -95,11 +101,13 @@
                 { "formattedValue": "Beta episode" },
                 { "formattedValue": "Description" },
                 { "formattedValue": "Beta" },
+                {},
                 { "formattedValue": "02" },
-                {}, {}, {}, {}, {}, {}, {},
+                {}, {}, {}, {}, {}, {},
                 { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
-                {}, {},
-                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" }
+                {}, {}, {}, {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
+                {}
               ]
             }
           ]

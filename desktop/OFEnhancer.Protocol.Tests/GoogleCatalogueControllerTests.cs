@@ -11,6 +11,8 @@ public sealed class GoogleCatalogueControllerTests
 {
     private const string ClientId =
         "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
+    private const string OtherClientId =
+        "987654321098-zyxwvutsrqponmlkjihgfedcba654321.apps.googleusercontent.com";
     private const string WorkbookId = "private-workbook-id";
     private static readonly string PlanHash = new('a', 64);
 
@@ -54,6 +56,60 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual("disconnected", cancelled.State);
         Assert.IsNull(cancelled.ErrorCode);
         Assert.AreEqual(1, harness.Connection.CancelCalls);
+    }
+
+    [TestMethod]
+    public void Changing_client_id_cancels_inflight_authorization_and_rejects_its_late_credential()
+    {
+        using ControllerHarness harness = new();
+        harness.Controller.startGoogleCatalogueConnection();
+        FakeConnection oldConnection = harness.Connection;
+
+        GoogleCatalogueStatusView changed = harness.Controller.saveGoogleClientId(OtherClientId);
+        oldConnection.Complete(
+            new(WorkbookId, "Private catalogue", DateTimeOffset.UtcNow),
+            new("old-client-refresh", DateTimeOffset.UtcNow, ClientId)
+        );
+
+        Assert.AreEqual("disconnected", changed.State);
+        Assert.AreEqual(1, oldConnection.CancelCalls);
+        Assert.IsTrue(oldConnection.Disposed);
+        Assert.IsNull(harness.Vault.Load());
+        Assert.IsNull(harness.Store.GetGoogleCatalogueSelection());
+        Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
+    }
+
+    [TestMethod]
+    public void Changing_client_id_disconnects_restored_state_and_stays_disconnected_after_restart()
+    {
+        using ControllerHarness harness = ReadyHarness();
+
+        GoogleCatalogueStatusView changed = harness.Controller.saveGoogleClientId(OtherClientId);
+
+        Assert.AreEqual("disconnected", changed.State);
+        Assert.IsTrue(harness.Session.Disposed);
+        Assert.IsNull(harness.Vault.Load());
+        Assert.IsNull(harness.Store.GetGoogleCatalogueSelection());
+        harness.RestartController();
+        Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
+    }
+
+    [TestMethod]
+    public void Failed_old_credential_deletion_still_invalidates_the_connected_session()
+    {
+        FailingDeleteTokenVault vault = new();
+        using ControllerHarness harness = ReadyHarness(vault);
+        vault.FailDelete = true;
+
+        GoogleCatalogueControllerException error = Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+            harness.Controller.saveGoogleClientId(OtherClientId)
+        );
+
+        Assert.AreEqual("google-client-id-change-failed", error.Code);
+        Assert.IsTrue(harness.Session.Disposed);
+        Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
+        harness.RestartController();
+        Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
     }
 
     [TestMethod]
@@ -142,7 +198,7 @@ public sealed class GoogleCatalogueControllerTests
     public void Protected_credential_and_persisted_ready_selection_restore_without_browser_then_disconnect_clears_both()
     {
         using ControllerHarness harness = ConnectedHarness();
-        harness.Vault.Save(new("protected-refresh-token", DateTimeOffset.UtcNow));
+        harness.Vault.Save(new("protected-refresh-token", DateTimeOffset.UtcNow, ClientId));
         harness.Session.Inspection = InspectionWithRows(2, []);
         Assert.AreEqual("ready", harness.Controller.inspectGoogleWorkbook().State);
         int factoriesBeforeRestart = harness.SessionFactoryCalls;
@@ -191,7 +247,7 @@ public sealed class GoogleCatalogueControllerTests
         Assert.IsNull(status.SheetName);
         Assert.IsFalse(status.ToString()!.Contains(WorkbookId, StringComparison.Ordinal));
 
-        harness.Vault.Save(new("protected-refresh-token", DateTimeOffset.UtcNow));
+        harness.Vault.Save(new("protected-refresh-token", DateTimeOffset.UtcNow, ClientId));
         harness.RestartController();
         GoogleCatalogueStatusView consistentPair = harness.Controller.getGoogleCatalogueStatus();
         Assert.AreEqual("ready", consistentPair.State);
@@ -202,6 +258,32 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual("disconnected", credentialOnly.State);
         Assert.IsNull(credentialOnly.WorkbookName);
         Assert.IsNull(credentialOnly.SheetName);
+    }
+
+    [TestMethod]
+    public void Restart_rejects_and_removes_a_credential_minted_for_another_client()
+    {
+        using ControllerHarness harness = new();
+        harness.Store.SaveGoogleCatalogueWorkbook(WorkbookId, "Private catalogue");
+        harness.Store.SaveGoogleCatalogueProfile(
+            WorkbookId,
+            "1",
+            "2026 Video Catalogue",
+            "catalogue-v1",
+            true,
+            DateTimeOffset.UtcNow
+        );
+        harness.Vault.Save(new(
+            "protected-refresh-token",
+            DateTimeOffset.UtcNow,
+            OtherClientId
+        ));
+
+        harness.RestartController();
+
+        Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
+        Assert.IsNull(harness.Vault.Load());
+        Assert.AreEqual(0, harness.SessionFactoryCalls);
     }
 
     [TestMethod]
@@ -305,7 +387,8 @@ public sealed class GoogleCatalogueControllerTests
         FakeConnection newConnection = harness.Connection;
         GoogleRefreshCredential expected = new(
             "refresh-token-b",
-            new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero)
+            new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero),
+            ClientId
         );
 
         newConnection.Complete(
@@ -314,7 +397,7 @@ public sealed class GoogleCatalogueControllerTests
         );
         oldConnection.Complete(
             new("workbook-a", "Workbook A", DateTimeOffset.UtcNow),
-            new("refresh-token-a", DateTimeOffset.UtcNow)
+            new("refresh-token-a", DateTimeOffset.UtcNow, ClientId)
         );
 
         GoogleRefreshCredential credential = harness.Vault.Load()!;
@@ -334,7 +417,7 @@ public sealed class GoogleCatalogueControllerTests
         harness.Controller.startGoogleCatalogueConnection();
         Task completion = Task.Run(() => harness.Connection.Complete(
             new(WorkbookId, "Private catalogue", DateTimeOffset.UtcNow),
-            new("final-refresh-token", DateTimeOffset.UtcNow)
+            new("final-refresh-token", DateTimeOffset.UtcNow, ClientId)
         ));
         await vault.SaveEntered;
 
@@ -346,6 +429,28 @@ public sealed class GoogleCatalogueControllerTests
 
         Assert.IsNull(vault.Load());
         Assert.AreEqual("disconnected", harness.Controller.getGoogleCatalogueStatus().State);
+    }
+
+    [TestMethod]
+    public void OAuth_completion_uses_the_shared_catalogue_dispatcher_before_store_access()
+    {
+        List<Action> queued = [];
+        using ControllerHarness harness = new(
+            completionDispatcher: action =>
+            {
+                queued.Add(action);
+                return Task.CompletedTask;
+            }
+        );
+        harness.Controller.startGoogleCatalogueConnection();
+
+        harness.Connection.Complete(new(WorkbookId, "Private catalogue", DateTimeOffset.UtcNow));
+
+        Assert.AreEqual(1, queued.Count);
+        Assert.IsNull(harness.Store.GetGoogleCatalogueSelection());
+        queued.Single()();
+        Assert.AreEqual(WorkbookId, harness.Store.GetGoogleCatalogueSelection()?.WorkbookId);
+        Assert.AreEqual("needsInspection", harness.Controller.getGoogleCatalogueStatus().State);
     }
 
     [TestMethod]
@@ -387,6 +492,49 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(1, status.PendingCount);
         Assert.AreEqual(1, status.ConflictCount);
         Assert.AreEqual(SyncOutboxState.Pending, harness.Store.GetSyncOperation(preservedPending.OperationId).State);
+    }
+
+    [TestMethod]
+    public void Restart_restores_attempted_and_unresolved_counts_as_recovery_state()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Session.Inspection = InspectionWithRows(1, []);
+        harness.Controller.inspectGoogleWorkbook();
+        string itemId = harness.Store.GetCatalogue().Items.Single().ItemId;
+        SyncOutboxItem attempted = harness.Store.EnqueueProjection(Projection(
+            itemId,
+            "selected-attempted",
+            WorkbookId
+        ));
+        harness.Store.MarkSyncAttempted(attempted.OperationId, DateTimeOffset.UtcNow);
+        SyncOutboxItem unresolved = harness.Store.EnqueueProjection(Projection(
+            itemId,
+            "selected-unresolved",
+            WorkbookId
+        ));
+        harness.Store.MarkSyncAttempted(unresolved.OperationId, DateTimeOffset.UtcNow);
+        harness.Store.MarkSyncUnresolved(
+            unresolved.OperationId,
+            "sync-readback-unavailable",
+            DateTimeOffset.UtcNow
+        );
+
+        harness.RestartController();
+        GoogleCatalogueStatusView status = harness.Controller.getGoogleCatalogueStatus();
+        string json = System.Text.Json.JsonSerializer.Serialize(
+            status,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            }
+        );
+
+        Assert.AreEqual("conflict", status.State);
+        Assert.AreEqual("google-sync-unresolved", status.ErrorCode);
+        StringAssert.Contains(json, "\"attemptedCount\":1");
+        StringAssert.Contains(json, "\"unresolvedCount\":1");
+        Assert.AreEqual(SyncOutboxState.Attempted, harness.Store.GetSyncOperation(attempted.OperationId).State);
+        Assert.AreEqual(SyncOutboxState.Unresolved, harness.Store.GetSyncOperation(unresolved.OperationId).State);
     }
 
     [TestMethod]
@@ -442,7 +590,7 @@ public sealed class GoogleCatalogueControllerTests
     public void Disconnect_deletes_credentials_and_bindings_but_preserves_catalogue_and_outbox()
     {
         using ControllerHarness harness = ConnectedHarness();
-        harness.Vault.Save(new("refresh-token", DateTimeOffset.UtcNow));
+        harness.Vault.Save(new("refresh-token", DateTimeOffset.UtcNow, ClientId));
         WorkbookCatalogueItem row = new(
             2,
             "episode-1",
@@ -508,7 +656,7 @@ public sealed class GoogleCatalogueControllerTests
     public async Task Refresh_token_source_caches_access_tokens_and_force_refreshes_without_a_secret()
     {
         MemoryGoogleTokenVault vault = new();
-        vault.Save(new("private-refresh-token", DateTimeOffset.UtcNow.AddMinutes(-1)));
+        vault.Save(new("private-refresh-token", DateTimeOffset.UtcNow.AddMinutes(-1), ClientId));
         RecordingTokenHandler handler = new();
         using HttpClient http = new(handler);
         GoogleRefreshAccessTokenSource source = new(ClientId, http, vault);
@@ -526,6 +674,27 @@ public sealed class GoogleCatalogueControllerTests
         await Assert.ThrowsExceptionAsync<ObjectDisposedException>(async () =>
             await source.GetAccessTokenAsync(false, CancellationToken.None)
         );
+    }
+
+    [TestMethod]
+    public async Task Refresh_token_source_rejects_a_credential_for_another_client_without_http()
+    {
+        MemoryGoogleTokenVault vault = new();
+        vault.Save(new(
+            "private-refresh-token",
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            OtherClientId
+        ));
+        RecordingTokenHandler handler = new();
+        using HttpClient http = new(handler);
+        using GoogleRefreshAccessTokenSource source = new(ClientId, http, vault);
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(async () =>
+            await source.GetAccessTokenAsync(false, CancellationToken.None)
+        );
+
+        Assert.AreEqual("google-authorization-required", error.Code);
+        Assert.AreEqual(0, handler.Calls);
     }
 
     [TestMethod]
@@ -552,9 +721,14 @@ public sealed class GoogleCatalogueControllerTests
         return harness;
     }
 
-    private static ControllerHarness ReadyHarness()
+    private static ControllerHarness ReadyHarness(IGoogleTokenVault? vault = null)
     {
-        ControllerHarness harness = ConnectedHarness();
+        ControllerHarness harness = vault is null ? ConnectedHarness() : new(vault: vault);
+        if (vault is not null)
+        {
+            harness.Controller.startGoogleCatalogueConnection();
+            harness.Connection.Complete(new(WorkbookId, "Private catalogue", DateTimeOffset.UtcNow));
+        }
         WorkbookInspection inspection = Inspection(alreadyMigrated: false);
         harness.Session.Inspection = inspection;
         harness.Session.Migration = new(
@@ -704,7 +878,11 @@ public sealed class GoogleCatalogueControllerTests
     {
         private readonly TestDirectory _temp = new();
 
-        internal ControllerHarness(bool configure = true, IGoogleTokenVault? vault = null)
+        internal ControllerHarness(
+            bool configure = true,
+            IGoogleTokenVault? vault = null,
+            Func<Action, Task>? completionDispatcher = null
+        )
         {
             Settings = new(Path.Combine(_temp.Path, "settings.json"));
             if (configure)
@@ -712,6 +890,7 @@ public sealed class GoogleCatalogueControllerTests
             Store = CatalogueStore.Open(Path.Combine(_temp.Path, "catalogue.db"));
             Vault = vault ?? new MemoryGoogleTokenVault();
             Session = new();
+            CompletionDispatcher = completionDispatcher;
             Controller = CreateController();
         }
 
@@ -729,12 +908,14 @@ public sealed class GoogleCatalogueControllerTests
                 {
                     SessionFactoryCalls++;
                     return Session;
-                }
+                },
+                CompletionDispatcher
             );
 
         internal DesktopSettingsStore Settings { get; }
         internal CatalogueStore Store { get; }
         internal IGoogleTokenVault Vault { get; }
+        internal Func<Action, Task>? CompletionDispatcher { get; }
         internal List<FakeConnection> Connections { get; } = [];
         internal FakeConnection Connection => Connections[^1];
         internal FakeSession Session { get; private set; }
@@ -789,7 +970,7 @@ public sealed class GoogleCatalogueControllerTests
             GoogleRefreshCredential? credential = null
         )
         {
-            _vault.Save(credential ?? new("fake-refresh-token", DateTimeOffset.UtcNow));
+            _vault.Save(credential ?? new("fake-refresh-token", DateTimeOffset.UtcNow, ClientId));
             Snapshot = new(GoogleConnectionState.NeedsInspection, null);
             Completed!(completion);
         }
@@ -893,5 +1074,23 @@ public sealed class GoogleCatalogueControllerTests
         public void Delete() => _inner.Delete();
 
         internal void ReleaseSave() => _saveRelease.TrySetResult();
+    }
+
+    private sealed class FailingDeleteTokenVault : IGoogleTokenVault
+    {
+        private readonly MemoryGoogleTokenVault _inner = new();
+
+        internal bool FailDelete { get; set; }
+
+        public GoogleRefreshCredential? Load() => _inner.Load();
+
+        public void Save(GoogleRefreshCredential credential) => _inner.Save(credential);
+
+        public void Delete()
+        {
+            if (FailDelete)
+                throw new InvalidOperationException("injected delete failure");
+            _inner.Delete();
+        }
     }
 }

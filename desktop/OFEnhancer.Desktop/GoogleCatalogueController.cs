@@ -54,6 +54,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         GoogleConnectionCompletion,
         IGoogleCatalogueSession
     > _sessionFactory;
+    private readonly Func<Action, Task> _completionDispatcher;
     private readonly CancellationTokenSource _lifetime = new();
     private IGoogleConnectionSession? _connection;
     private IGoogleCatalogueSession? _session;
@@ -73,7 +74,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         CatalogueStore store,
         IGoogleTokenVault tokenVault,
         Func<string, IGoogleTokenVault, Action<GoogleConnectionCompletion>, IGoogleConnectionSession> connectionFactory,
-        Func<string, GoogleConnectionCompletion, IGoogleCatalogueSession> sessionFactory
+        Func<string, GoogleConnectionCompletion, IGoogleCatalogueSession> sessionFactory,
+        Func<Action, Task>? completionDispatcher = null
     )
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -82,6 +84,11 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         _connectionFactory = connectionFactory
             ?? throw new ArgumentNullException(nameof(connectionFactory));
         _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory));
+        _completionDispatcher = completionDispatcher ?? (action =>
+        {
+            action();
+            return Task.CompletedTask;
+        });
         RestorePersistedSession();
     }
 
@@ -90,7 +97,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         CatalogueStore store,
         IGoogleTokenVault tokenVault,
         HttpClient httpClient,
-        Action<Uri> openBrowser
+        Action<Uri> openBrowser,
+        Func<Action, Task>? completionDispatcher = null
     )
         : this(
             settings,
@@ -109,7 +117,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 GoogleRefreshAccessTokenSource tokens = new(clientId, httpClient, tokenVault);
                 GoogleWorkspaceClient workspace = new(httpClient, tokens);
                 return new GoogleCatalogueSession(completion.WorkbookId, workspace, store, tokens);
-            }
+            },
+            completionDispatcher
         )
     {
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -127,6 +136,10 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 
     public GoogleCatalogueStatusView saveGoogleClientId(string clientId)
     {
+        IGoogleConnectionSession? previousConnection = null;
+        IGoogleCatalogueSession? previousSession = null;
+        GoogleCatalogueStatusView status;
+        bool cleanupFailed = false;
         lock (_gate)
         {
             ThrowIfDisposed();
@@ -139,8 +152,34 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             {
                 throw new GoogleCatalogueControllerException(exception.Code);
             }
-            return StatusLocked();
+            string? savedClientId = _settings.Load().GoogleOAuthClientId;
+            if (string.Equals(current.GoogleOAuthClientId, savedClientId, StringComparison.Ordinal))
+                return StatusLocked();
+            previousConnection = _connection;
+            previousSession = _session;
+            try { InvalidateConnectionEpochLocked(deleteCredential: true); }
+            catch { cleanupFailed = true; }
+            try { previousConnection?.Cancel(); }
+            catch { cleanupFailed = true; }
+            try { _store.ClearGoogleCatalogueSelection(); }
+            catch { cleanupFailed = true; }
+            _connection = null;
+            _session = null;
+            _completion = null;
+            _selection = null;
+            _inspection = null;
+            _connectionErrorCode = null;
+            _syncIssueCode = null;
+            _ready = false;
+            status = StatusLocked();
         }
+        try { previousConnection?.Dispose(); }
+        catch { cleanupFailed = true; }
+        try { previousSession?.Dispose(); }
+        catch { cleanupFailed = true; }
+        if (cleanupFailed)
+            throw new GoogleCatalogueControllerException("google-client-id-change-failed");
+        return status;
     }
 
     public GoogleCatalogueStatusView startGoogleCatalogueConnection()
@@ -173,7 +212,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             connection = _connectionFactory(
                 clientId,
                 new EpochGoogleTokenVault(this, epoch),
-                completion => CompleteConnection(epoch, clientId, completion)
+                completion => QueueConnectionCompletion(epoch, clientId, completion)
             );
             _connection = connection;
         }
@@ -511,6 +550,12 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
     }
 
+    private void QueueConnectionCompletion(
+        long epoch,
+        string clientId,
+        GoogleConnectionCompletion completion
+    ) => _ = _completionDispatcher(() => CompleteConnection(epoch, clientId, completion));
+
     private GoogleCatalogueStatusView StatusLocked()
     {
         DesktopSettings settings = _settings.Load();
@@ -525,22 +570,33 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             return View("error", errorCode: SafeCode(connection.ErrorCode));
         if (_session is null || _completion is null)
             return new("disconnected");
+        SyncOutboxCounts counts = CurrentCountsLocked();
         if (_inspection is null && !_ready)
-            return View("needsInspection");
+            return View("needsInspection", counts);
         if (_inspection?.Conflicts.Count > 0)
-            return View("conflict", errorCode: SafeCode(_inspection.Conflicts[0].Code));
-        if (_syncIssueCode is not null)
-            return View("conflict", errorCode: _syncIssueCode);
+            return View("conflict", counts, SafeCode(_inspection.Conflicts[0].Code));
         if (_syncing)
-            return View("syncing");
-        return View(_ready ? "ready" : "migrationReady");
+            return View("syncing", counts);
+        if (counts.Conflicts > 0)
+            return View("conflict", counts, "google-sync-conflict");
+        if (counts.Attempted > 0 || counts.Unresolved > 0)
+            return View("conflict", counts, "google-sync-unresolved");
+        if (_syncIssueCode is not null)
+            return View("conflict", counts, _syncIssueCode);
+        return View(_ready ? "ready" : "migrationReady", counts);
     }
 
-    private GoogleCatalogueStatusView View(string state, string? errorCode = null)
+    private SyncOutboxCounts CurrentCountsLocked() => _selection?.SheetId is null
+        ? new(0, 0, 0, 0)
+        : _store.GetSyncOperationCounts(_selection.WorkbookId, _selection.SheetId);
+
+    private GoogleCatalogueStatusView View(
+        string state,
+        SyncOutboxCounts? counts = null,
+        string? errorCode = null
+    )
     {
-        SyncOutboxCounts counts = _selection?.SheetId is null
-            ? new(0, 0, 0, 0)
-            : _store.GetSyncOperationCounts(_selection.WorkbookId, _selection.SheetId);
+        counts ??= CurrentCountsLocked();
         bool exposePlan = string.Equals(state, "migrationReady", StringComparison.Ordinal);
         return new(
             state,
@@ -552,7 +608,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             counts.Pending,
             counts.Conflicts,
             _selection?.LastSuccessfulSyncUtc,
-            errorCode
+            errorCode,
+            counts.Attempted,
+            counts.Unresolved
         );
     }
 
@@ -650,6 +708,11 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             GoogleCatalogueSelection? selection = _store.GetGoogleCatalogueSelection();
             if (clientId is null || credential is null || selection is null)
                 return;
+            if (!string.Equals(credential.ClientId, clientId, StringComparison.Ordinal))
+            {
+                _tokenVault.Delete();
+                return;
+            }
             if (selection.SheetId is not null
                 && !string.Equals(selection.Profile, CatalogueProfile, StringComparison.Ordinal))
             {
@@ -709,7 +772,9 @@ public sealed record GoogleCatalogueStatusView(
     int PendingCount = 0,
     int ConflictCount = 0,
     DateTimeOffset? LastVerifiedSync = null,
-    string? ErrorCode = null
+    string? ErrorCode = null,
+    int AttemptedCount = 0,
+    int UnresolvedCount = 0
 );
 
 internal sealed class GoogleCatalogueControllerException(string code) : Exception(code)
@@ -804,6 +869,8 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
 
             GoogleRefreshCredential credential = _vault.Load()
                 ?? throw new GoogleCatalogueException("google-authorization-required");
+            if (!string.Equals(credential.ClientId, _clientId, StringComparison.Ordinal))
+                throw new GoogleCatalogueException("google-authorization-required");
             using FormUrlEncodedContent content = new(new Dictionary<string, string>
             {
                 ["grant_type"] = "refresh_token",

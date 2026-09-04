@@ -23,13 +23,16 @@ public partial class MainWindow : Window, IDisposable
     {
         InitializeComponent();
         this.catalogue = catalogue;
+        WebMessageRouter? queuedRouter = null;
+        dispatcher = new WebMessageDispatcher(json => queuedRouter!.Handle(json));
         googleHttp = GoogleHttpClientFactory.Create();
         googleCatalogue = new(
             new DesktopSettingsStore(AppConfiguration.SettingsPath),
             catalogue,
             new DpapiGoogleTokenVault(AppConfiguration.GoogleTokenPath),
             googleHttp,
-            GoogleBrowserLauncher.Open
+            GoogleBrowserLauncher.Open,
+            dispatcher.EnqueueAsync
         );
         router = new WebMessageRouter(
             OpenChrome,
@@ -38,7 +41,7 @@ public partial class MainWindow : Window, IDisposable
             () => Dispatcher.Invoke(ChooseThumbnailRoot),
             googleCatalogue
         );
-        dispatcher = new WebMessageDispatcher(router.Handle);
+        queuedRouter = router;
         thumbnails = new ThumbnailResourceResolver(catalogue);
     }
 
@@ -89,7 +92,7 @@ public partial class MainWindow : Window, IDisposable
             CoreWebView2Deferral deferral = args.GetDeferral();
             try
             {
-                ThumbnailResource? resource = await Task.Run(
+                ThumbnailResource? resource = await dispatcher.EnqueueAsync(
                     () => thumbnails.Open(new Uri(args.Request.Uri))
                 );
                 if (resource is null)

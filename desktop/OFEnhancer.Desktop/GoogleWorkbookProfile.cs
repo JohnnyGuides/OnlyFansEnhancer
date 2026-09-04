@@ -56,15 +56,15 @@ internal static class GoogleWorkbookProfile
         [3] = "Title",
         [4] = "Description",
         [5] = "Season/Arc",
-        [6] = "Episode",
+        [7] = "Episode",
         [8] = "Pornhub Free",
         [10] = "OnlyFans",
         [11] = "Fansly",
         [12] = "ManyVids",
-        [14] = "X Teaser Count",
-        [15] = "X Links",
-        [17] = "Reddit Unique Teaser Count",
-        [18] = "Reddit Links",
+        [14] = "# teasers",
+        [15] = "Twitter Teaser(s)",
+        [19] = "# Reddit posts",
+        [20] = "Reddit Post(s)",
     };
     internal static string ColumnForDestination(string destination) => destination switch
     {
@@ -74,8 +74,8 @@ internal static class GoogleWorkbookProfile
         "manyvids" => "L",
         "xTeasers" => "N",
         "x" => "O",
-        "redditTeasers" => "Q",
-        "reddit" => "R",
+        "redditTeasers" => "S",
+        "reddit" => "T",
         "ofenhancerId" => "U",
         "pornhubPaid" => "V",
         "clips4sale" => "W",
@@ -89,6 +89,8 @@ internal static class GoogleWorkbookProfile
         ArgumentNullException.ThrowIfNull(store);
 
         GoogleSheetSnapshot selected = SelectCatalogueSheet(snapshot);
+        if (selected.RowCount > MaximumRows + 2)
+            throw new GoogleCatalogueException("workbook-row-limit");
         GoogleWorkbookRowSnapshot header = selected.Rows.SingleOrDefault(row => row.RowNumber == 1)
             ?? throw new GoogleCatalogueException("workbook-profile-not-found");
         GoogleWorkbookRowSnapshot[] bodyRows = selected.Rows
@@ -558,7 +560,7 @@ internal static class GoogleWorkbookProfile
             AddLink(links, "fansly", Link(row, 11));
             AddLink(links, "manyvids", Link(row, 12));
             AddLink(links, "x", Link(row, 15));
-            AddLink(links, "reddit", Link(row, 18));
+            AddLink(links, "reddit", Link(row, 20));
             if (ownedTechnicalColumns[1])
                 AddLink(links, "pornhubPaid", Link(row, 22));
             if (ownedTechnicalColumns[2])
@@ -570,9 +572,9 @@ internal static class GoogleWorkbookProfile
                 description: Cell(row, 4) ?? string.Empty,
                 plannedDate: plannedDate,
                 series: Cell(row, 5),
-                episode: Cell(row, 6),
+                episode: Cell(row, 7),
                 xTeasers: Count(row, 14),
-                redditTeasers: Count(row, 17),
+                redditTeasers: Count(row, 19),
                 platformLinks: links,
                 metadataId: metadataByRow.GetValueOrDefault(row.RowNumber)
             ));
@@ -781,7 +783,7 @@ internal static class GoogleWorkbookProfile
     }
 
     private static bool IsPopulated(GoogleWorkbookRowSnapshot row) =>
-        Enumerable.Range(1, 18).Any(column => Cell(row, column) is not null);
+        Enumerable.Range(1, 20).Any(column => Cell(row, column) is not null);
 
     private static string RequiredCell(
         GoogleWorkbookRowSnapshot row,

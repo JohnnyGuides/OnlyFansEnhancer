@@ -7,6 +7,9 @@ namespace OFEnhancer.Protocol.Tests;
 [TestClass]
 public sealed class GoogleTokenVaultTests
 {
+    private const string ClientId =
+        "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
+
     [TestMethod]
     public void SaveLoadAndDeleteUseOneAtomicCurrentUserFile()
     {
@@ -16,8 +19,8 @@ public sealed class GoogleTokenVaultTests
         File.WriteAllText(sibling, "keep");
         RecordingProtector protector = new();
         DpapiGoogleTokenVault vault = new(path, protector);
-        GoogleRefreshCredential first = new("refresh-first", DateTimeOffset.Parse("2026-09-04T12:00:00Z"));
-        GoogleRefreshCredential second = new("refresh-second", DateTimeOffset.Parse("2026-09-04T13:00:00Z"));
+        GoogleRefreshCredential first = new("refresh-first", DateTimeOffset.Parse("2026-09-04T12:00:00Z"), ClientId);
+        GoogleRefreshCredential second = new("refresh-second", DateTimeOffset.Parse("2026-09-04T13:00:00Z"), ClientId);
 
         try
         {
@@ -73,7 +76,7 @@ public sealed class GoogleTokenVaultTests
         try
         {
             Exception error = Assert.ThrowsException<InvalidOperationException>(() =>
-                vault.Save(new(secret, DateTimeOffset.Parse("2026-09-04T12:00:00Z")))
+                vault.Save(new(secret, DateTimeOffset.Parse("2026-09-04T12:00:00Z"), ClientId))
             );
             Assert.IsFalse(error.ToString().Contains(secret, StringComparison.Ordinal));
             Assert.AreEqual(0, Directory.GetFiles(root).Length);
@@ -88,7 +91,7 @@ public sealed class GoogleTokenVaultTests
     public void MemoryVaultSupportsTheSameCredentialLifecycle()
     {
         MemoryGoogleTokenVault vault = new();
-        GoogleRefreshCredential credential = new("refresh", DateTimeOffset.Parse("2026-09-04T12:00:00Z"));
+        GoogleRefreshCredential credential = new("refresh", DateTimeOffset.Parse("2026-09-04T12:00:00Z"), ClientId);
 
         Assert.IsNull(vault.Load());
         vault.Save(credential);

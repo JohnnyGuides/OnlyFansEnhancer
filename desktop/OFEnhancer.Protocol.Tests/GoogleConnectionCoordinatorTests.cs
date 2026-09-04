@@ -8,7 +8,8 @@ namespace OFEnhancer.Protocol.Tests;
 [TestClass]
 public sealed class GoogleConnectionCoordinatorTests
 {
-    private const string ClientId = "123456789-desktop.apps.googleusercontent.com";
+    private const string ClientId =
+        "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
     private static readonly Uri RedirectUri = new("http://127.0.0.1:53123/");
 
     [TestMethod]
@@ -115,7 +116,8 @@ public sealed class GoogleConnectionCoordinatorTests
         PausingDriveHandler handler = new();
         GoogleRefreshCredential existing = new(
             "existing-refresh-value",
-            DateTimeOffset.Parse("2026-09-04T10:00:00Z")
+            DateTimeOffset.Parse("2026-09-04T10:00:00Z"),
+            ClientId
         );
         TrackingTokenVault vault = new(existing);
         TaskCompletionSource<GoogleConnectionCompletion> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
