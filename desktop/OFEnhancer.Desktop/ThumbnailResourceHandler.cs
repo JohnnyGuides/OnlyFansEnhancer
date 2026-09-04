@@ -3,6 +3,16 @@ using OFEnhancer.Catalogue;
 
 namespace OFEnhancer.Desktop;
 
+internal static class WebMessageSourcePolicy
+{
+    internal static bool IsTrusted(string? source) =>
+        Uri.TryCreate(source, UriKind.Absolute, out Uri? uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && string.Equals(uri.Host, "app.ofenhancer.local", StringComparison.OrdinalIgnoreCase)
+        && uri.IsDefaultPort
+        && string.IsNullOrEmpty(uri.UserInfo);
+}
+
 public sealed record ThumbnailResource(string Path, string ContentType);
 
 public sealed class ThumbnailResourceResolver(CatalogueStore catalogue)

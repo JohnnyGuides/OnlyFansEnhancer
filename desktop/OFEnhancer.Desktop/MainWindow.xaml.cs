@@ -91,8 +91,15 @@ public partial class MainWindow : Window
         };
         Browser.CoreWebView2.WebMessageReceived += (_, message) =>
         {
+            if (!WebMessageSourcePolicy.IsTrusted(message.Source))
+                return;
             string response = router.Handle(message.TryGetWebMessageAsString());
             Browser.CoreWebView2.PostWebMessageAsJson(response);
+        };
+        Browser.CoreWebView2.NavigationStarting += (_, args) =>
+        {
+            if (!WebMessageSourcePolicy.IsTrusted(args.Uri))
+                args.Cancel = true;
         };
         Browser.Source = new Uri("https://app.ofenhancer.local/index.html");
     }

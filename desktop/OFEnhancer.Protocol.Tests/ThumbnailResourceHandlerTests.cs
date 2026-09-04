@@ -8,6 +8,18 @@ namespace OFEnhancer.Protocol.Tests;
 public sealed class ThumbnailResourceHandlerTests
 {
     [TestMethod]
+    public void WebMessagesAreAcceptedOnlyFromThePackagedAppOrigin()
+    {
+        Assert.IsTrue(WebMessageSourcePolicy.IsTrusted("https://app.ofenhancer.local/index.html"));
+        Assert.IsTrue(WebMessageSourcePolicy.IsTrusted("https://app.ofenhancer.local/catalogue"));
+        Assert.IsFalse(WebMessageSourcePolicy.IsTrusted("http://app.ofenhancer.local/index.html"));
+        Assert.IsFalse(WebMessageSourcePolicy.IsTrusted("https://app.ofenhancer.local:444/index.html"));
+        Assert.IsFalse(WebMessageSourcePolicy.IsTrusted("https://app.ofenhancer.local.example/index.html"));
+        Assert.IsFalse(WebMessageSourcePolicy.IsTrusted("https://user@app.ofenhancer.local/index.html"));
+        Assert.IsFalse(WebMessageSourcePolicy.IsTrusted("not a URI"));
+    }
+
+    [TestMethod]
     public void ResolverServesOnlyKnownAvailableAssetsInsideTheirScanRoot()
     {
         using TestDirectory temp = new();
