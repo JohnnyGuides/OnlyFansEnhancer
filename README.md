@@ -237,12 +237,14 @@ not included.
 3. Click **Load unpacked**.
 4. Select this repository folder.
 5. Open the extension’s **Details**, then **Extension options**.
-6. **Optional, only for catalogue reconciliation:** copy `apps-script/catalogue-bridge.gs` into
-   the Apps Script project attached to `Work`, set Script Property
-   `CREATOR_UPLOAD_SECRET`, deploy it as a web app executing as you with access
-   set to **Anyone**, then save the deployment URL and same long random secret
-   under **Video catalogue bridge**. The secret authorizes the otherwise
-   anonymous extension request; do not share either value.
+6. **Optional, only for catalogue reconciliation:** copy
+   `apps-script/catalogue-bridge.gs` into the Apps Script project attached to
+   `Work`. Set `CREATOR_UPLOAD_SECRET` to a long random value and set
+   `CREATOR_UPLOAD_SPREADSHEET_ID` to the ID of the target catalogue
+   spreadsheet. Deploy it as a web app executing as you with access set to
+   **Anyone**, then save the deployment URL and the same secret under **Video
+   catalogue bridge**. The secret authorizes the otherwise anonymous extension
+   request. Do not share the deployment URL or either property value.
 7. Confirm your own handle is listed and choose an avatar source.
 8. Open **Upload console → Settings** to turn helpers off or adjust advanced
    profile JSON. To record a workflow, open the creator-site tab, click the

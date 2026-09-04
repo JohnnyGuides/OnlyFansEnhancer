@@ -5,16 +5,15 @@ namespace OFEnhancer.Desktop;
 
 public static partial class AppConfiguration
 {
-    public static string SettingsPath =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "OFEnhancer",
-            "settings.json"
-        );
+    private const string DataRootEnvironmentVariable = "OFENHANCER_DATA_ROOT";
+    private const int MaximumDataRootLength = 1_024;
 
-    public static string CatalogueDatabasePath => Path.Combine(DataFolder, "catalogue.db");
+    public static string SettingsPath => Path.Combine(DataRoot, "settings.json");
 
-    public static string GoogleTokenPath => Path.Combine(DataFolder, "google-oauth-token.dat");
+    public static string CatalogueDatabasePath => Path.Combine(DataRoot, "data", "catalogue.db");
+
+    public static string GoogleTokenPath =>
+        Path.Combine(DataRoot, "data", "google-oauth-token.dat");
 
     public static string? ResolveExtensionId(IReadOnlyList<string> args, string settingsPath)
     {
@@ -46,20 +45,66 @@ public static partial class AppConfiguration
         return IsValidGoogleOAuthClientId(candidate) ? candidate : null;
     }
 
-    private static string DataFolder
+    private static string DataRoot
     {
         get
         {
-            string? overrideFolder = Environment.GetEnvironmentVariable("OFENHANCER_DATA_FOLDER");
-            return string.IsNullOrWhiteSpace(overrideFolder)
-                ? Path.Combine(
+            string? configuredRoot = Environment.GetEnvironmentVariable(DataRootEnvironmentVariable);
+            if (configuredRoot is null)
+            {
+                return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "OFEnhancer",
-                    "data"
+                    "OFEnhancer"
+                );
+            }
+            if (
+                string.IsNullOrWhiteSpace(configuredRoot)
+                || configuredRoot.Length > MaximumDataRootLength
+                || !string.Equals(configuredRoot, configuredRoot.Trim(), StringComparison.Ordinal)
+                || !Path.IsPathFullyQualified(configuredRoot)
+            )
+            {
+                throw InvalidDataRoot();
+            }
+
+            try
+            {
+                string fullRoot = Path.TrimEndingDirectorySeparator(
+                    Path.GetFullPath(configuredRoot)
+                );
+                string? volumeRoot = Path.GetPathRoot(fullRoot);
+                if (
+                    string.IsNullOrEmpty(volumeRoot)
+                    || string.Equals(
+                        fullRoot,
+                        Path.TrimEndingDirectorySeparator(volumeRoot),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || File.Exists(fullRoot)
                 )
-                : Path.GetFullPath(overrideFolder);
+                {
+                    throw InvalidDataRoot();
+                }
+                Directory.CreateDirectory(fullRoot);
+                return fullRoot;
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException
+                    or IOException
+                    or NotSupportedException
+                    or UnauthorizedAccessException
+            )
+            {
+                throw InvalidDataRoot(exception);
+            }
         }
     }
+
+    private static InvalidOperationException InvalidDataRoot(Exception? innerException = null) =>
+        new(
+            "OFENHANCER_DATA_ROOT must name an absolute, creatable directory below a volume root.",
+            innerException
+        );
 
     [GeneratedRegex("^[a-p]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex ExtensionIdPattern();

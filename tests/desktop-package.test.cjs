@@ -71,6 +71,59 @@ function expandArchive(archivePath, destination) {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 }
 
+function dotNetLocalApplicationData() {
+  const result = spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      "[Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)",
+    ],
+    { encoding: "utf8", timeout: 10000, windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const directory = result.stdout.trim();
+  assert.equal(
+    path.isAbsolute(directory),
+    true,
+    "invalid .NET local app-data path",
+  );
+  return directory;
+}
+
+function directoryMetadata(directory) {
+  if (!fs.existsSync(directory)) return null;
+  const entries = [];
+  function visit(current, relativeRoot) {
+    for (const entry of fs
+      .readdirSync(current, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      assert.ok(
+        entries.length < 10000,
+        "the user data metadata scan is unbounded",
+      );
+      const fullPath = path.join(current, entry.name);
+      const relativePath = path.join(relativeRoot, entry.name);
+      const stats = fs.lstatSync(fullPath);
+      entries.push({
+        pathHash: crypto
+          .createHash("sha256")
+          .update(relativePath)
+          .digest("hex"),
+        type: stats.isDirectory() ? "directory" : "file",
+        size: stats.size,
+        modified: stats.mtimeMs,
+      });
+      if (stats.isDirectory() && !stats.isSymbolicLink()) {
+        visit(fullPath, relativePath);
+      }
+    }
+  }
+  const rootStats = fs.lstatSync(directory);
+  visit(directory, "");
+  return { modified: rootStats.mtimeMs, entries };
+}
+
 function assertNoSensitiveContent(label, filePaths) {
   for (const filePath of filePaths) {
     const bytes = fs.readFileSync(filePath);
@@ -144,6 +197,16 @@ function delay(milliseconds) {
 }
 
 async function main() {
+  const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
+  const legacyBridgeSetup = readme.match(
+    /6\. \*\*Optional, only for catalogue reconciliation:\*\*[\s\S]*?(?=\n7\.)/,
+  )?.[0];
+  assert.ok(legacyBridgeSetup, "the legacy Apps Script setup step is missing");
+  assert.match(legacyBridgeSetup, /`CREATOR_UPLOAD_SECRET`/);
+  assert.match(legacyBridgeSetup, /`CREATOR_UPLOAD_SPREADSHEET_ID`/);
+  assert.match(legacyBridgeSetup, /target catalogue/i);
+  assert.match(legacyBridgeSetup, /deploy it as a web app/i);
+
   const register = fs.readFileSync(
     path.join(root, "scripts", "register-native-host.ps1"),
     "utf8",
@@ -183,17 +246,18 @@ async function main() {
   );
   let desktopProcess;
   try {
-    const configuredLocalAppData = path.join(
-      temporary,
-      "configured-local-app-data",
-    );
-    const configuredData = path.join(configuredLocalAppData, "OFEnhancer");
+    const configuredLocalAppData = path.join(temporary, "fake-local-app-data");
+    const configuredData = path.join(temporary, "explicit-data-root");
+    const seededSettings = JSON.stringify({
+      extensionId: "a".repeat(32),
+      googleOAuthClientId: configuredClientId,
+    });
     fs.mkdirSync(path.join(configuredData, "data", "Fixtures"), {
       recursive: true,
     });
     fs.writeFileSync(
       path.join(configuredData, "settings.json"),
-      JSON.stringify({ googleOAuthClientId: configuredClientId }),
+      seededSettings,
     );
     fs.writeFileSync(
       path.join(configuredData, "data", "google-oauth-token.dat"),
@@ -216,8 +280,9 @@ async function main() {
     const buildEnvironment = {
       ...process.env,
       LOCALAPPDATA: configuredLocalAppData,
-      OFENHANCER_DATA_FOLDER: path.join(configuredData, "data"),
+      OFENHANCER_DATA_ROOT: configuredData,
     };
+    delete buildEnvironment.OFENHANCER_DATA_FOLDER;
     const build = spawnSync(
       "powershell",
       [
@@ -283,6 +348,8 @@ async function main() {
     expandArchive(personalArchive, personalOutput);
     expandArchive(storeArchive, storeOutput);
 
+    sensitiveValues.push(configuredData, configuredData.replaceAll("\\", "/"));
+
     assertNoSensitiveContent("shipped source", shippedSourceFiles());
     assertNoSensitiveContent("personal package", filesBelow(personalOutput));
     assertNoPrivateFiles("personal package", personalOutput);
@@ -316,9 +383,17 @@ async function main() {
       );
     }
 
+    fs.rmSync(path.join(configuredData, "data"), {
+      recursive: true,
+      force: true,
+    });
+    const realUserRoot = path.join(dotNetLocalApplicationData(), "OFEnhancer");
+    const realUserRootBefore = directoryMetadata(realUserRoot);
+
     const status = spawnSync(desktopExe, ["--status-json"], {
       cwd: path.dirname(desktopExe),
       encoding: "utf8",
+      env: buildEnvironment,
       timeout: 10000,
       windowsHide: true,
     });
@@ -329,7 +404,7 @@ async function main() {
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
 
-    desktopProcess = spawn(desktopExe, ["--extension-id", "a".repeat(32)], {
+    desktopProcess = spawn(desktopExe, [], {
       cwd: path.dirname(desktopExe),
       env: {
         ...buildEnvironment,
@@ -337,7 +412,6 @@ async function main() {
           temporary,
           "webview-profile",
         ),
-        OFENHANCER_DATA_FOLDER: path.join(temporary, "catalogue-data"),
       },
       windowsHide: true,
       stdio: "ignore",
@@ -348,23 +422,18 @@ async function main() {
       null,
       "the staged desktop shell crashed on launch",
     );
-    const secondInstance = spawn(
-      desktopExe,
-      ["--extension-id", "a".repeat(32)],
-      {
-        cwd: path.dirname(desktopExe),
-        env: {
-          ...buildEnvironment,
-          OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: path.join(
-            temporary,
-            "webview-profile",
-          ),
-          OFENHANCER_DATA_FOLDER: path.join(temporary, "catalogue-data"),
-        },
-        windowsHide: true,
-        stdio: "ignore",
+    const secondInstance = spawn(desktopExe, [], {
+      cwd: path.dirname(desktopExe),
+      env: {
+        ...buildEnvironment,
+        OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: path.join(
+          temporary,
+          "webview-profile",
+        ),
       },
-    );
+      windowsHide: true,
+      stdio: "ignore",
+    });
     await Promise.race([
       new Promise((resolve) => secondInstance.once("exit", resolve)),
       delay(3000),
@@ -380,9 +449,19 @@ async function main() {
       "the first desktop authority stopped unexpectedly",
     );
     assert.equal(
-      fs.existsSync(path.join(temporary, "catalogue-data", "catalogue.db")),
+      fs.existsSync(path.join(configuredData, "data", "catalogue.db")),
       true,
       "the isolated desktop catalogue was not created",
+    );
+    assert.equal(
+      fs.readFileSync(path.join(configuredData, "settings.json"), "utf8"),
+      seededSettings,
+      "the staged desktop did not preserve settings at its explicit data root",
+    );
+    assert.equal(
+      fs.existsSync(path.join(configuredLocalAppData, "OFEnhancer")),
+      false,
+      "the staged desktop used the fake default local app-data root",
     );
 
     const closeWindow = spawnSync(
@@ -409,6 +488,11 @@ async function main() {
       desktopProcess.exitCode,
       null,
       "closing the window stopped the tray authority",
+    );
+    assert.deepEqual(
+      directoryMetadata(realUserRoot),
+      realUserRootBefore,
+      "the staged desktop touched the real user data root",
     );
 
     const manifest = JSON.parse(
