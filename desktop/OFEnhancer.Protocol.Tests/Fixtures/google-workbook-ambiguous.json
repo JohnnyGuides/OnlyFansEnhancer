@@ -1,0 +1,111 @@
+{
+  "spreadsheetId": "workbook-ambiguous",
+  "properties": { "title": "Ambiguous Work" },
+  "sheets": [
+    {
+      "properties": {
+        "sheetId": 101,
+        "title": "Catalogue Alpha",
+        "hidden": false,
+        "gridProperties": { "rowCount": 5002, "columnCount": 24 }
+      },
+      "data": [
+        {
+          "startRow": 0,
+          "startColumn": 0,
+          "rowData": [
+            {
+              "values": [
+                { "formattedValue": "ID" },
+                { "formattedValue": "Release Date" },
+                { "formattedValue": "Title" },
+                { "formattedValue": "Description" },
+                { "formattedValue": "Season/Arc" },
+                { "formattedValue": "Episode" },
+                {},
+                { "formattedValue": "Pornhub Free" },
+                {},
+                { "formattedValue": "OnlyFans" },
+                { "formattedValue": "Fansly" },
+                { "formattedValue": "ManyVids" },
+                {},
+                { "formattedValue": "X Teaser Count" },
+                { "formattedValue": "X Links" },
+                {},
+                { "formattedValue": "Reddit Unique Teaser Count" },
+                { "formattedValue": "Reddit Links" }
+              ]
+            },
+            {
+              "values": [
+                { "formattedValue": "alpha" },
+                { "formattedValue": "2026-09-11" },
+                { "formattedValue": "Alpha episode" },
+                { "formattedValue": "Description" },
+                { "formattedValue": "Alpha" },
+                { "formattedValue": "01" },
+                {}, {}, {}, {}, {}, {}, {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
+                {}, {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "properties": {
+        "sheetId": 102,
+        "title": "Catalogue Beta",
+        "hidden": false,
+        "gridProperties": { "rowCount": 5002, "columnCount": 24 }
+      },
+      "data": [
+        {
+          "startRow": 0,
+          "startColumn": 0,
+          "rowData": [
+            {
+              "values": [
+                { "formattedValue": "ID" },
+                { "formattedValue": "Release Date" },
+                { "formattedValue": "Title" },
+                { "formattedValue": "Description" },
+                { "formattedValue": "Season/Arc" },
+                { "formattedValue": "Episode" },
+                {},
+                { "formattedValue": "Pornhub Free" },
+                {},
+                { "formattedValue": "OnlyFans" },
+                { "formattedValue": "Fansly" },
+                { "formattedValue": "ManyVids" },
+                {},
+                { "formattedValue": "X Teaser Count" },
+                { "formattedValue": "X Links" },
+                {},
+                { "formattedValue": "Reddit Unique Teaser Count" },
+                { "formattedValue": "Reddit Links" }
+              ]
+            },
+            {
+              "values": [
+                { "formattedValue": "beta" },
+                { "formattedValue": "2026-09-18" },
+                { "formattedValue": "Beta episode" },
+                { "formattedValue": "Description" },
+                { "formattedValue": "Beta" },
+                { "formattedValue": "02" },
+                {}, {}, {}, {}, {}, {}, {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
+                {}, {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "developerMetadata": []
+}

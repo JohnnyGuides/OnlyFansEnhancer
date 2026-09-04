@@ -1,0 +1,132 @@
+{
+  "spreadsheetId": "workbook-legacy",
+  "properties": {
+    "title": "Work"
+  },
+  "sheets": [
+    {
+      "properties": {
+        "sheetId": 2126708696,
+        "title": "2026 Video Catalogue",
+        "hidden": false,
+        "gridProperties": {
+          "rowCount": 5002,
+          "columnCount": 24
+        }
+      },
+      "data": [
+        {
+          "startRow": 0,
+          "startColumn": 0,
+          "rowData": [
+            {
+              "values": [
+                { "formattedValue": "ID" },
+                { "formattedValue": "Release Date" },
+                { "formattedValue": "Title" },
+                { "formattedValue": "Description" },
+                { "formattedValue": "Season/Arc" },
+                { "formattedValue": "Episode" },
+                {},
+                { "formattedValue": "Pornhub Free" },
+                {},
+                { "formattedValue": "OnlyFans" },
+                { "formattedValue": "Fansly" },
+                { "formattedValue": "ManyVids" },
+                {},
+                { "formattedValue": "X Teaser Count" },
+                { "formattedValue": "X Links" },
+                {},
+                { "formattedValue": "Reddit Unique Teaser Count" },
+                { "formattedValue": "Reddit Links" }
+              ]
+            },
+            {
+              "values": [
+                { "formattedValue": "ashley" },
+                { "formattedValue": "2026-09-11" },
+                { "formattedValue": "Resident Evil Ashley" },
+                { "formattedValue": "Ashley episode" },
+                { "formattedValue": "Resident Evil" },
+                { "formattedValue": "04" },
+                {},
+                { "formattedValue": "https://www.pornhub.com/view_video.php?viewkey=phashley01" },
+                {},
+                { "formattedValue": "https://onlyfans.com/123456789/johnny_guides" },
+                { "formattedValue": "https://fansly.com/post/987654321" },
+                { "formattedValue": "https://www.manyvids.com/Video/1234567/Ashley" },
+                {},
+                { "effectiveValue": { "numberValue": 2 }, "formattedValue": "2" },
+                { "formattedValue": "https://x.com/Johnny_Guides/status/2094523397057237306" },
+                {},
+                { "effectiveValue": { "numberValue": 1 }, "formattedValue": "1" },
+                { "formattedValue": "https://www.reddit.com/r/cosplay/comments/abc123/ashley_teaser" }
+              ]
+            },
+            {
+              "values": [
+                { "formattedValue": "bianca" },
+                { "formattedValue": "2026-09-18" },
+                { "formattedValue": "Bianca episode" },
+                { "formattedValue": "Bianca description" },
+                { "formattedValue": "Bianca" },
+                { "formattedValue": "05" },
+                {},
+                {},
+                {},
+                { "formattedValue": "https://onlyfans.com/222222222/johnny_guides" },
+                {},
+                {},
+                {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" },
+                {},
+                {},
+                { "effectiveValue": { "numberValue": 0 }, "formattedValue": "0" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "properties": {
+        "sheetId": 73,
+        "title": "Creator Distribution Ledger",
+        "hidden": false,
+        "gridProperties": {
+          "rowCount": 1000,
+          "columnCount": 12
+        }
+      },
+      "data": [
+        {
+          "startRow": 0,
+          "startColumn": 0,
+          "rowData": [
+            {
+              "values": [
+                { "formattedValue": "Legacy ledger retained" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "developerMetadata": [
+    {
+      "metadataId": 7001,
+      "metadataKey": "ofenhancer.item_id.v1",
+      "metadataValue": "11111111-1111-4111-8111-111111111111",
+      "visibility": "DOCUMENT",
+      "location": {
+        "dimensionRange": {
+          "sheetId": 2126708696,
+          "dimension": "ROWS",
+          "startIndex": 2,
+          "endIndex": 3
+        }
+      }
+    }
+  ]
+}
