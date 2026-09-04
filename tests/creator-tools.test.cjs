@@ -36,7 +36,9 @@ test("personal manifest keeps every integrated creator helper active", () => {
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.17.1");
+  assert.equal(manifest.version, "0.18.0");
+  assert.ok(manifest.permissions.includes("debugger"));
+  assert.ok(manifest.permissions.includes("nativeMessaging"));
   assert.equal(
     fs.existsSync(path.join(toolsRoot, "catalogue-proposal.js")),
     true,
@@ -85,6 +87,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
     "catalogue-client.js",
     "catalogue-contract.js",
     "upload-file-bridge.js",
+    "local-file-attacher.js",
     "upload-platform-adapters.js",
     "upload-response-observer.js",
     "social-chrome-runtime.js",
@@ -93,6 +96,9 @@ test("personal manifest keeps every integrated creator helper active", () => {
     assert.ok(fs.existsSync(path.join(toolsRoot, fileName)));
     assert.match(personalBuild, new RegExp(fileName.replace(".", "\\.")));
   }
+  const background = read("background.js");
+  assert.match(background, /creator-tools\/local-file-attacher\.js/);
+  assert.doesNotMatch(background, /message\.(?:filePath|path)/);
   assert.ok(
     fs.existsSync(
       path.join(repositoryRoot, "apps-script", "catalogue-bridge.gs"),

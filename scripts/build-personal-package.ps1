@@ -97,6 +97,7 @@ $requiredArchiveEntries = @(
   "creator-tools/catalogue-contract.js",
   "creator-tools/subreddit-presets.js",
   "creator-tools/upload-file-bridge.js",
+  "creator-tools/local-file-attacher.js",
   "creator-tools/upload-platform-adapters.js",
   "creator-tools/upload-response-observer.js",
   "creator-tools/upload-session-store.js",

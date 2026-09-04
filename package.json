@@ -1,17 +1,18 @@
 {
   "name": "creator-workflow-toolkit",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "private": true,
   "description": "Development checks for the personal Creator Workflow Toolkit and store-safe Fan Identity Mask edition.",
   "scripts": {
     "test": "npm run test:personal && npm run test:store",
-    "test:personal": "node --test tests/master-uploader-social-ui.test.cjs tests/social-trace-contract.test.cjs tests/social-publisher-adapters.test.cjs tests/social-chrome-runtime.test.cjs tests/social-distribution-contract.test.cjs tests/social-distribution-session-store.test.cjs tests/social-distribution-orchestrator.test.cjs tests/subreddit-presets.test.cjs tests/x-teaser-contract.test.cjs tests/x-teaser-session-store.test.cjs tests/x-teaser-reconcile.test.cjs tests/x-teaser-tab-binding.test.cjs tests/x-teaser-native-host.test.cjs tests/x-teaser-chrome.test.cjs tests/x-teaser-package.test.cjs tests/background.test.cjs tests/realbooru-parser.test.cjs tests/creator-tools.test.cjs tests/creator-runtime.test.cjs tests/creator-adapters.test.cjs tests/upload-trace-recorder.test.cjs tests/upload-session-store.test.cjs tests/upload-coordinator.test.cjs tests/upload-milestone.test.cjs tests/catalogue-proposal.test.cjs tests/extension-load.test.cjs",
+    "test:personal": "node --test tests/master-uploader-social-ui.test.cjs tests/social-trace-contract.test.cjs tests/social-publisher-adapters.test.cjs tests/social-chrome-runtime.test.cjs tests/social-distribution-contract.test.cjs tests/social-distribution-session-store.test.cjs tests/social-distribution-orchestrator.test.cjs tests/subreddit-presets.test.cjs tests/x-teaser-contract.test.cjs tests/x-teaser-session-store.test.cjs tests/x-teaser-reconcile.test.cjs tests/x-teaser-tab-binding.test.cjs tests/x-teaser-native-host.test.cjs tests/x-teaser-chrome.test.cjs tests/x-teaser-package.test.cjs tests/background.test.cjs tests/realbooru-parser.test.cjs tests/creator-tools.test.cjs tests/creator-runtime.test.cjs tests/creator-adapters.test.cjs tests/upload-trace-recorder.test.cjs tests/upload-session-store.test.cjs tests/upload-coordinator.test.cjs tests/upload-milestone.test.cjs tests/catalogue-proposal.test.cjs tests/local-file-attacher.test.cjs tests/extension-load.test.cjs",
     "test:store": "node --test tests/store-edition.test.cjs",
     "test:snapshots": "node tests/saved-pages.test.cjs",
     "test:x-teaser-ui": "node tests/x-teaser-ui.test.cjs",
     "test:social-trace-ui": "node tests/social-trace-recorder-ui.test.cjs",
     "test:desktop-shell-ui": "node tests/desktop-shell-ui.test.cjs",
     "test:desktop-native-bridge": "node --test tests/desktop-native-bridge.test.cjs",
+    "test:local-file-attacher-chrome": "node tests/local-file-attacher-chrome.test.cjs",
     "build:personal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-personal-package.ps1",
     "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1",
     "build:x-teaser-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-x-teaser-native-host.ps1",
@@ -19,7 +20,7 @@
     "typecheck": "tsc -p jsconfig.json",
     "format": "prettier --write \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
     "format:check": "prettier --check \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-native-bridge && npm run build:personal && npm run build:store"
+    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-native-bridge && npm run test:local-file-attacher-chrome && npm run build:personal && npm run build:store"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

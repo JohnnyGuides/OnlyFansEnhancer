@@ -61,6 +61,8 @@ test("store package is remote-free and minimally scoped", () => {
   );
   assert.equal(manifest.version, "0.7.0");
   assert.deepEqual(manifest.permissions, ["storage"]);
+  assert.equal(manifest.permissions.includes("debugger"), false);
+  assert.equal(manifest.permissions.includes("nativeMessaging"), false);
   assert.deepEqual(manifest.host_permissions, ["https://onlyfans.com/*"]);
   assert.equal(manifest.optional_host_permissions, undefined);
   assert.equal(manifest.declarative_net_request, undefined);
@@ -77,7 +79,7 @@ test("store package is remote-free and minimally scoped", () => {
   assert.doesNotMatch(searchable, /\bfetch\s*\(|XMLHttpRequest|WebSocket/i);
   assert.doesNotMatch(
     searchable,
-    /upload-console|upload-capability-probe|file-bridge|catalogue-bridge|catalogue-proposal|upload-platform-adapters/i,
+    /upload-console|upload-capability-probe|file-bridge|local-file-attacher|catalogue-bridge|catalogue-proposal|upload-platform-adapters|OFEnhancerNativeBridge/i,
   );
 });
 

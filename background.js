@@ -1,5 +1,6 @@
 importScripts(
   "creator-tools/registry.js",
+  "creator-tools/local-file-attacher.js",
   "creator-tools/catalogue-contract.js",
   "creator-tools/catalogue-client.js",
   "creator-tools/subreddit-presets.js",
