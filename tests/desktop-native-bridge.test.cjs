@@ -119,7 +119,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.19.0",
+        productVersion: "0.20.0",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
@@ -148,7 +148,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.19.0",
+        productVersion: "0.20.0",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
@@ -207,6 +207,25 @@ async function main() {
     );
     assert.equal(
       `${unsupported.stdout}${unsupported.stderr}`.includes(unsupportedText),
+      false,
+    );
+
+    const webViewOnlyPath = path.join(temporary, "webview-only.json");
+    const webViewOnlyText = JSON.stringify({
+      ...request,
+      requestId: "a028726b-2e7b-468f-90e3-4f512f0dc2be",
+      operation: "getGoogleCatalogueStatus",
+    });
+    fs.writeFileSync(webViewOnlyPath, webViewOnlyText);
+    const webViewOnly = runBridge(absentPipe, webViewOnlyPath);
+    assert.notEqual(webViewOnly.status, 0);
+    assert.equal(
+      JSON.parse(webViewOnly.stdout).error.code,
+      "unsupported-operation",
+      "Google catalogue controls must stay on the desktop WebView boundary",
+    );
+    assert.equal(
+      `${webViewOnly.stdout}${webViewOnly.stderr}`.includes(webViewOnlyText),
       false,
     );
   } finally {

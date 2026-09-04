@@ -10,6 +10,25 @@ The personal edition is intentionally broader than the separately packaged
 Chrome Web Store edition. The store edition remains the narrow, display-only
 **Fan Identity Mask** product under `store/`.
 
+## Google catalogue sync (0.20.0)
+
+Version 0.20.0 lets the Windows app connect to one user-selected Google
+spreadsheet. It checks the workbook before making changes, shows one exact
+migration review, and requires **Yes, update the workbook** before it adds the
+owned catalogue structures. Later writes locate rows by stable item metadata,
+stop on conflicts, and complete only after readback.
+
+The desktop app requests `drive.file` access and keeps its protected refresh
+token outside the package and SQLite database. Packages contain no configured
+client ID, personal workbook ID, token, database, backup, or fake Google
+fixture. The legacy Apps Script bridge reads its workbook ID from the
+`CREATOR_UPLOAD_SPREADSHEET_ID` Script Property.
+
+Follow [Google catalogue setup](docs/GOOGLE_CATALOGUE_SETUP.md). The first real
+migration requires a disposable-copy acceptance before the live workbook. Use
+the [fake smoke test](docs/GOOGLE_CATALOGUE_FAKE_SMOKE.md) for local release
+checks.
+
 ## Local catalogue (0.19.0)
 
 Version 0.19.0 gives the Windows app its first real local catalogue. The
@@ -47,7 +66,7 @@ local path into one exact, allow-listed file control; it never clicks a submit
 button and always detaches.
 
 `npm run stage:desktop` creates a self-contained, allow-listed package under
-`dist/ofenhancer-desktop-v0.19.0/`. `npm run build:desktop` also compiles the
+`dist/ofenhancer-desktop-v0.20.0/`. `npm run build:desktop` also compiles the
 per-user installer when Inno Setup 6 is installed. The installer uses
 `%LocalAppData%`, offers update/reinstall or uninstall when it finds an existing
 copy, and opens a short Chrome connection guide. It does not edit Chrome
@@ -218,12 +237,14 @@ not included.
 3. Click **Load unpacked**.
 4. Select this repository folder.
 5. Open the extension’s **Details**, then **Extension options**.
-6. **Optional, only for catalogue reconciliation:** copy `apps-script/catalogue-bridge.gs` into
-   the Apps Script project attached to `Work`, set Script Property
-   `CREATOR_UPLOAD_SECRET`, deploy it as a web app executing as you with access
-   set to **Anyone**, then save the deployment URL and same long random secret
-   under **Video catalogue bridge**. The secret authorizes the otherwise
-   anonymous extension request; do not share either value.
+6. **Optional, only for catalogue reconciliation:** copy
+   `apps-script/catalogue-bridge.gs` into the Apps Script project attached to
+   `Work`. Set `CREATOR_UPLOAD_SECRET` to a long random value and set
+   `CREATOR_UPLOAD_SPREADSHEET_ID` to the ID of the target catalogue
+   spreadsheet. Deploy it as a web app executing as you with access set to
+   **Anyone**, then save the deployment URL and the same secret under **Video
+   catalogue bridge**. The secret authorizes the otherwise anonymous extension
+   request. Do not share the deployment URL or either property value.
 7. Confirm your own handle is listed and choose an avatar source.
 8. Open **Upload console → Settings** to turn helpers off or adjust advanced
    profile JSON. To record a workflow, open the creator-site tab, click the

@@ -1,31 +1,47 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using OFEnhancer.Catalogue;
 
 namespace OFEnhancer.Desktop;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisposable
 {
     private readonly WebMessageRouter router;
     private readonly WebMessageDispatcher dispatcher;
     private readonly ThumbnailResourceResolver thumbnails;
     private readonly CatalogueStore catalogue;
+    private readonly HttpClient googleHttp;
+    private readonly GoogleCatalogueController googleCatalogue;
     private bool exiting;
+    private bool disposed;
 
     public MainWindow(string? extensionId, CatalogueStore catalogue)
     {
         InitializeComponent();
         this.catalogue = catalogue;
+        WebMessageRouter? queuedRouter = null;
+        dispatcher = new WebMessageDispatcher(json => queuedRouter!.Handle(json));
+        googleHttp = GoogleHttpClientFactory.Create();
+        googleCatalogue = new(
+            new DesktopSettingsStore(AppConfiguration.SettingsPath),
+            catalogue,
+            new DpapiGoogleTokenVault(AppConfiguration.GoogleTokenPath),
+            googleHttp,
+            GoogleBrowserLauncher.Open,
+            dispatcher.EnqueueAsync
+        );
         router = new WebMessageRouter(
             OpenChrome,
             () => extensionId,
             catalogue,
-            () => Dispatcher.Invoke(ChooseThumbnailRoot)
+            () => Dispatcher.Invoke(ChooseThumbnailRoot),
+            googleCatalogue
         );
-        dispatcher = new WebMessageDispatcher(router.Handle);
+        queuedRouter = router;
         thumbnails = new ThumbnailResourceResolver(catalogue);
     }
 
@@ -33,7 +49,17 @@ public partial class MainWindow : Window
     {
         exiting = true;
         await dispatcher.DrainAsync();
+        Dispose();
         Close();
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+            return;
+        disposed = true;
+        googleCatalogue.Dispose();
+        googleHttp.Dispose();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs eventArgs)
@@ -66,7 +92,7 @@ public partial class MainWindow : Window
             CoreWebView2Deferral deferral = args.GetDeferral();
             try
             {
-                ThumbnailResource? resource = await Task.Run(
+                ThumbnailResource? resource = await dispatcher.EnqueueAsync(
                     () => thumbnails.Open(new Uri(args.Request.Uri))
                 );
                 if (resource is null)

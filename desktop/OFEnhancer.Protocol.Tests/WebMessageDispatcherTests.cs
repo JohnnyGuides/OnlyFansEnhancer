@@ -42,4 +42,50 @@ public sealed class WebMessageDispatcherTests
         Assert.AreEqual(1, maximumActive);
         await dispatcher.DrainAsync();
     }
+
+    [TestMethod]
+    public async Task Background_connection_start_does_not_hold_the_serial_dispatcher()
+    {
+        TaskCompletionSource browserFinished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        WebMessageDispatcher dispatcher = new(value =>
+        {
+            Interlocked.Increment(ref calls);
+            if (value == "start")
+                _ = Task.Run(() => browserFinished.Task);
+            return value;
+        });
+
+        Assert.AreEqual("start", await dispatcher.HandleAsync("start"));
+        Assert.AreEqual("status", await dispatcher.HandleAsync("status").WaitAsync(TimeSpan.FromSeconds(1)));
+        Assert.AreEqual(2, calls);
+        Assert.IsFalse(browserFinished.Task.IsCompleted);
+        browserFinished.SetResult();
+        await dispatcher.DrainAsync();
+    }
+
+    [TestMethod]
+    public async Task Background_completion_queues_behind_active_catalogue_request()
+    {
+        TaskCompletionSource requestEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseRequest = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        List<string> order = [];
+        WebMessageDispatcher dispatcher = new(value =>
+        {
+            order.Add(value);
+            requestEntered.SetResult();
+            releaseRequest.Task.GetAwaiter().GetResult();
+            return value;
+        });
+
+        Task<string> request = dispatcher.HandleAsync("request");
+        await requestEntered.Task;
+        Task completion = dispatcher.EnqueueAsync(() => order.Add("completion"));
+        await Task.Delay(100);
+
+        CollectionAssert.AreEqual(new[] { "request" }, order);
+        releaseRequest.SetResult();
+        await Task.WhenAll(request, completion);
+        CollectionAssert.AreEqual(new[] { "request", "completion" }, order);
+    }
 }

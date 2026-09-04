@@ -231,7 +231,7 @@ internal static class CatalogueSnapshotImporter
         return result;
     }
 
-    private static string? CanonicalPlatformLink(string platform, Uri uri) =>
+    internal static string? CanonicalPlatformLink(string platform, Uri uri) =>
         platform switch
         {
             "onlyfans" => CanonicalPath(

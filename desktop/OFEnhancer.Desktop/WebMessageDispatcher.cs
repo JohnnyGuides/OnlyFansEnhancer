@@ -6,10 +6,20 @@ internal sealed class WebMessageDispatcher(Func<string, string> handle)
     private Task tail = Task.CompletedTask;
 
     internal Task<string> HandleAsync(string json)
+        => EnqueueAsync(() => handle(json));
+
+    internal Task EnqueueAsync(Action action)
+        => EnqueueAsync(() =>
+        {
+            action();
+            return true;
+        });
+
+    internal Task<T> EnqueueAsync<T>(Func<T> action)
     {
         lock (sync)
         {
-            Task<string> work = RunAfterAsync(tail, json);
+            Task<T> work = RunAfterAsync(tail, action);
             tail = work;
             return work;
         }
@@ -21,7 +31,7 @@ internal sealed class WebMessageDispatcher(Func<string, string> handle)
             return tail;
     }
 
-    private async Task<string> RunAfterAsync(Task previous, string json)
+    private static async Task<T> RunAfterAsync<T>(Task previous, Func<T> action)
     {
         try
         {
@@ -31,6 +41,6 @@ internal sealed class WebMessageDispatcher(Func<string, string> handle)
         {
             // One failed request must not permanently block later queued work.
         }
-        return await Task.Run(() => handle(json)).ConfigureAwait(false);
+        return await Task.Run(action).ConfigureAwait(false);
     }
 }

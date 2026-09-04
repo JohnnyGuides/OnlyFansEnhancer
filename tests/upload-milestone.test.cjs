@@ -8,6 +8,11 @@ const vm = require("node:vm");
 const { chromium } = require("playwright");
 
 const repositoryRoot = path.resolve(__dirname, "..");
+const fakeLegacyWorkbookId = "fake-workbook-id-1234567890";
+const formerPersonalWorkbookId = [
+  "1Ninkxbv1SOvatcJ3AP4z",
+  "wKWxdc32imlIkP_IMUSTR9E",
+].join("");
 
 function loadScripts(...relativePaths) {
   const context = vm.createContext({
@@ -33,6 +38,18 @@ function loadScripts(...relativePaths) {
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function installScriptProperties(context, values = {}) {
+  context.PropertiesService = {
+    getScriptProperties() {
+      return {
+        getProperty(name) {
+          return Object.hasOwn(values, name) ? values[name] : null;
+        },
+      };
+    },
+  };
 }
 
 async function addUploadConsoleScripts(page, options = {}) {
@@ -1312,6 +1329,86 @@ test("only the MAIN-world response observer can authorize a catalogue post link"
   );
 });
 
+test("catalogue bridge source contains no personal workbook ID", () => {
+  const source = fs.readFileSync(
+    path.join(repositoryRoot, "apps-script", "catalogue-bridge.gs"),
+    "utf8",
+  );
+
+  assert.equal(source.includes(formerPersonalWorkbookId), false);
+});
+
+test("catalogue bridge fails clearly when its workbook Script Property is missing", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  let opens = 0;
+  installScriptProperties(context);
+  context.SpreadsheetApp = {
+    openById() {
+      opens += 1;
+      return { getSheetByName: () => null };
+    },
+  };
+
+  assert.throws(
+    () =>
+      context.CreatorCatalogueBridgeTest.handle(
+        "getSubredditPresetSnapshot",
+        {},
+      ),
+    /CREATOR_UPLOAD_SPREADSHEET_ID Script Property is not configured\./,
+  );
+  assert.equal(opens, 0);
+});
+
+test("catalogue bridge opens only the bounded workbook ID from Script Properties", () => {
+  const context = loadScripts("apps-script/catalogue-bridge.gs");
+  const opened = [];
+  installScriptProperties(context, {
+    CREATOR_UPLOAD_SPREADSHEET_ID: `  ${fakeLegacyWorkbookId}  `,
+  });
+  context.SpreadsheetApp = {
+    openById(workbookId) {
+      opened.push(workbookId);
+      return {
+        getSheetByName: () => ({
+          getLastRow: () => 1,
+          getRange: () => ({ getValues: () => [] }),
+        }),
+      };
+    },
+  };
+
+  const result = plain(
+    context.CreatorCatalogueBridgeTest.handle("getSubredditPresetSnapshot", {}),
+  );
+
+  assert.deepEqual(opened, [fakeLegacyWorkbookId]);
+  assert.deepEqual(result, { status: "snapshot", rows: [] });
+});
+
+test("catalogue bridge rejects malformed or overlong workbook Script Properties", () => {
+  for (const workbookId of ["too-short", "x".repeat(201)]) {
+    const context = loadScripts("apps-script/catalogue-bridge.gs");
+    installScriptProperties(context, {
+      CREATOR_UPLOAD_SPREADSHEET_ID: workbookId,
+    });
+    context.SpreadsheetApp = {
+      openById() {
+        throw new Error("The invalid workbook ID reached SpreadsheetApp.");
+      },
+    };
+
+    assert.throws(
+      () =>
+        context.CreatorCatalogueBridgeTest.handle(
+          "getSubredditPresetSnapshot",
+          {},
+        ),
+      /CREATOR_UPLOAD_SPREADSHEET_ID Script Property is invalid\./,
+    );
+  }
+});
+
 test("catalogue bridge chooses a credible existing Friday row or a unique empty-row proposal", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
   const bridge = context.CreatorCatalogueBridgeTest;
@@ -1683,6 +1780,9 @@ test("catalogue bridge appends one canonical Twitter teaser without touching exi
 
 test("Twitter teaser bridge writes column O only and verifies the updated row", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
+  installScriptProperties(context, {
+    CREATOR_UPLOAD_SPREADSHEET_ID: fakeLegacyWorkbookId,
+  });
   const bridge = context.CreatorCatalogueBridgeTest;
   const values = Array.from({ length: 125 }, () => Array(20).fill(""));
   values[123] = [
@@ -1973,6 +2073,9 @@ test("distribution ledger accepts one immutable public result event and replays 
 
 test("Reddit bridge writes only catalogue S:T and verifies count plus canonical URL", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
+  installScriptProperties(context, {
+    CREATOR_UPLOAD_SPREADSHEET_ID: fakeLegacyWorkbookId,
+  });
   const bridge = context.CreatorCatalogueBridgeTest;
   const values = Array.from({ length: 125 }, () => Array(20).fill(""));
   values[123][0] = "resident-evil-ashley";
@@ -2040,6 +2143,9 @@ test("Reddit bridge writes only catalogue S:T and verifies count plus canonical 
 
 test("preset snapshot reads only 2026 uploads Y:AA without mutating the workbook", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
+  installScriptProperties(context, {
+    CREATOR_UPLOAD_SPREADSHEET_ID: fakeLegacyWorkbookId,
+  });
   const ranges = [];
   const presetSheet = {
     getLastRow: () => 3,
@@ -2081,6 +2187,9 @@ test("preset snapshot reads only 2026 uploads Y:AA without mutating the workbook
 
 test("ledger bridge hides its sheet, appends one bounded row, and verifies readback", () => {
   const context = loadScripts("apps-script/catalogue-bridge.gs");
+  installScriptProperties(context, {
+    CREATOR_UPLOAD_SPREADSHEET_ID: fakeLegacyWorkbookId,
+  });
   const rows = [];
   let hidden = false;
   const ledgerSheet = {
