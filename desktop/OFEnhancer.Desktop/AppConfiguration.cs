@@ -1,6 +1,4 @@
 using System.IO;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace OFEnhancer.Desktop;
@@ -14,21 +12,9 @@ public static partial class AppConfiguration
             "settings.json"
         );
 
-    public static string CatalogueDatabasePath
-    {
-        get
-        {
-            string? overrideFolder = Environment.GetEnvironmentVariable("OFENHANCER_DATA_FOLDER");
-            string folder = string.IsNullOrWhiteSpace(overrideFolder)
-                ? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "OFEnhancer",
-                    "data"
-                )
-                : Path.GetFullPath(overrideFolder);
-            return Path.Combine(folder, "catalogue.db");
-        }
-    }
+    public static string CatalogueDatabasePath => Path.Combine(DataFolder, "catalogue.db");
+
+    public static string GoogleTokenPath => Path.Combine(DataFolder, "google-oauth-token.dat");
 
     public static string? ResolveExtensionId(IReadOnlyList<string> args, string settingsPath)
     {
@@ -39,29 +25,48 @@ public static partial class AppConfiguration
             return NormalizeExtensionId(args[index + 1]);
         }
 
-        if (!File.Exists(settingsPath))
-            return null;
-        try
-        {
-            Settings? settings = JsonSerializer.Deserialize<Settings>(
-                File.ReadAllText(settingsPath)
-            );
-            return NormalizeExtensionId(settings?.ExtensionId);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        return new DesktopSettingsStore(settingsPath).Load().ExtensionId;
     }
 
-    private static string? NormalizeExtensionId(string? value)
+    public static bool IsValidGoogleOAuthClientId(string? value)
+    {
+        string candidate = value?.Trim() ?? string.Empty;
+        return GoogleOAuthClientIdPattern().IsMatch(candidate);
+    }
+
+    internal static string? NormalizeExtensionId(string? value)
     {
         string candidate = value?.Trim() ?? string.Empty;
         return ExtensionIdPattern().IsMatch(candidate) ? candidate : null;
     }
 
+    internal static string? NormalizeGoogleOAuthClientId(string? value)
+    {
+        string candidate = value?.Trim() ?? string.Empty;
+        return IsValidGoogleOAuthClientId(candidate) ? candidate : null;
+    }
+
+    private static string DataFolder
+    {
+        get
+        {
+            string? overrideFolder = Environment.GetEnvironmentVariable("OFENHANCER_DATA_FOLDER");
+            return string.IsNullOrWhiteSpace(overrideFolder)
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "OFEnhancer",
+                    "data"
+                )
+                : Path.GetFullPath(overrideFolder);
+        }
+    }
+
     [GeneratedRegex("^[a-p]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex ExtensionIdPattern();
 
-    private sealed record Settings([property: JsonPropertyName("extensionId")] string? ExtensionId);
+    [GeneratedRegex(
+        "^[0-9]{6,30}-[a-z0-9]{8,128}\\.apps\\.googleusercontent\\.com$",
+        RegexOptions.CultureInvariant
+    )]
+    private static partial Regex GoogleOAuthClientIdPattern();
 }

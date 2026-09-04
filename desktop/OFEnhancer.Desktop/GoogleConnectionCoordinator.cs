@@ -7,7 +7,7 @@ using System.Text.Json;
 
 namespace OFEnhancer.Desktop;
 
-internal sealed class GoogleConnectionCoordinator
+internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
 {
     private const int ConnectionInactive = 0;
     private const int ConnectionActive = 1;
@@ -107,6 +107,28 @@ internal sealed class GoogleConnectionCoordinator
             _snapshot = new(GoogleConnectionState.Disconnected, null);
             _currentCancellation!.Cancel();
             _currentReceiver!.Close();
+        }
+    }
+
+    GoogleConnectionSnapshot IGoogleConnectionSession.Snapshot => Snapshot;
+
+    void IGoogleConnectionSession.Start() => Start();
+
+    void IGoogleConnectionSession.Cancel() => Cancel();
+
+    void IDisposable.Dispose()
+    {
+        Cancel();
+        Task? current;
+        lock (_gate)
+            current = _currentTask;
+        try
+        {
+            current?.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+            // Cancellation already closed the loopback receiver; completion owns final cleanup.
         }
     }
 

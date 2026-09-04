@@ -82,6 +82,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs eventArgs)
     {
+        window?.Dispose();
         tray?.Dispose();
         agent?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         catalogue?.Dispose();

@@ -11,7 +11,8 @@ public sealed partial class WebMessageRouter(
     Action<Uri> openUri,
     Func<string?> extensionId,
     CatalogueStore? catalogue = null,
-    Func<string?>? chooseThumbnailRoot = null
+    Func<string?>? chooseThumbnailRoot = null,
+    IGoogleCatalogueController? googleCatalogue = null
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -43,6 +44,46 @@ public sealed partial class WebMessageRouter(
                 "importCatalogueSnapshot" => WithCatalogue(requestId, request, ImportCatalogue),
                 "scanThumbnails" => WithCatalogue(requestId, request, ScanThumbnails),
                 "confirmAssetBinding" => WithCatalogue(requestId, request, ConfirmBinding),
+                "getGoogleCatalogueStatus" => WithGoogle(
+                    requestId,
+                    request,
+                    () => googleCatalogue!.getGoogleCatalogueStatus()
+                ),
+                "saveGoogleClientId" => WithGooglePayload(
+                    requestId,
+                    request,
+                    SaveGoogleClientId
+                ),
+                "startGoogleCatalogueConnection" => WithGoogle(
+                    requestId,
+                    request,
+                    () => googleCatalogue!.startGoogleCatalogueConnection()
+                ),
+                "cancelGoogleCatalogueConnection" => WithGoogle(
+                    requestId,
+                    request,
+                    () => googleCatalogue!.cancelGoogleCatalogueConnection()
+                ),
+                "inspectGoogleWorkbook" => WithGoogle(
+                    requestId,
+                    request,
+                    () => googleCatalogue!.inspectGoogleWorkbook()
+                ),
+                "applyGoogleWorkbookMigration" => WithGooglePayload(
+                    requestId,
+                    request,
+                    ApplyGoogleWorkbookMigration
+                ),
+                "syncGoogleCatalogue" => WithGoogle(
+                    requestId,
+                    request,
+                    () => googleCatalogue!.syncGoogleCatalogue()
+                ),
+                "disconnectGoogleCatalogue" => WithGoogle(
+                    requestId,
+                    request,
+                    () => googleCatalogue!.disconnectGoogleCatalogue()
+                ),
                 _ => Failure(requestId, "unsupported-operation"),
             };
         }
@@ -66,6 +107,10 @@ public sealed partial class WebMessageRouter(
         {
             return Failure(requestId, exception.Code);
         }
+        catch (GoogleCatalogueControllerException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
         catch (Exception)
         {
             return Failure(requestId, "internal-error");
@@ -82,6 +127,42 @@ public sealed partial class WebMessageRouter(
     {
         DeserializePayload<EmptyPayload>(request.Payload);
         return action();
+    }
+
+    private string WithGoogle(
+        string requestId,
+        WebRequest request,
+        Func<GoogleCatalogueStatusView> action
+    )
+    {
+        if (googleCatalogue is null)
+            return Failure(requestId, "google-catalogue-unavailable");
+        DeserializePayload<EmptyPayload>(request.Payload);
+        return Success(requestId, action());
+    }
+
+    private string WithGooglePayload(
+        string requestId,
+        WebRequest request,
+        Func<WebRequest, GoogleCatalogueStatusView> action
+    ) => googleCatalogue is null
+        ? Failure(requestId, "google-catalogue-unavailable")
+        : Success(requestId, action(request));
+
+    private GoogleCatalogueStatusView SaveGoogleClientId(WebRequest request)
+    {
+        GoogleClientIdPayload payload = DeserializePayload<GoogleClientIdPayload>(request.Payload);
+        if (payload.ClientId is null)
+            throw new WebPayloadException(new JsonException("Client ID is required."));
+        return googleCatalogue!.saveGoogleClientId(payload.ClientId);
+    }
+
+    private GoogleCatalogueStatusView ApplyGoogleWorkbookMigration(WebRequest request)
+    {
+        MigrationPayload payload = DeserializePayload<MigrationPayload>(request.Payload);
+        if (payload.PlanHash is null || !PlanHashPattern().IsMatch(payload.PlanHash))
+            throw new WebPayloadException(new JsonException("Plan hash is invalid."));
+        return googleCatalogue!.applyGoogleWorkbookMigration(payload.PlanHash);
     }
 
     private string GetCatalogue(WebRequest request)
@@ -157,6 +238,9 @@ public sealed partial class WebMessageRouter(
     [GeneratedRegex("^[a-p]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex ExtensionIdPattern();
 
+    [GeneratedRegex("^[a-f0-9]{64}$", RegexOptions.CultureInvariant)]
+    private static partial Regex PlanHashPattern();
+
     private sealed record WebRequest(string RequestId, string Operation, JsonElement Payload);
 
     private sealed record EmptyPayload;
@@ -166,6 +250,10 @@ public sealed partial class WebMessageRouter(
     private sealed record ScanPayload(string? Root);
 
     private sealed record BindingPayload(string? AssetId, string? ItemId);
+
+    private sealed record GoogleClientIdPayload(string? ClientId);
+
+    private sealed record MigrationPayload(string? PlanHash);
 
     private sealed class WebPayloadException(Exception innerException)
         : Exception("Web payload is invalid.", innerException);

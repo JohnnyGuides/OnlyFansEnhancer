@@ -42,4 +42,25 @@ public sealed class WebMessageDispatcherTests
         Assert.AreEqual(1, maximumActive);
         await dispatcher.DrainAsync();
     }
+
+    [TestMethod]
+    public async Task Background_connection_start_does_not_hold_the_serial_dispatcher()
+    {
+        TaskCompletionSource browserFinished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        WebMessageDispatcher dispatcher = new(value =>
+        {
+            Interlocked.Increment(ref calls);
+            if (value == "start")
+                _ = Task.Run(() => browserFinished.Task);
+            return value;
+        });
+
+        Assert.AreEqual("start", await dispatcher.HandleAsync("start"));
+        Assert.AreEqual("status", await dispatcher.HandleAsync("status").WaitAsync(TimeSpan.FromSeconds(1)));
+        Assert.AreEqual(2, calls);
+        Assert.IsFalse(browserFinished.Task.IsCompleted);
+        browserFinished.SetResult();
+        await dispatcher.DrainAsync();
+    }
 }

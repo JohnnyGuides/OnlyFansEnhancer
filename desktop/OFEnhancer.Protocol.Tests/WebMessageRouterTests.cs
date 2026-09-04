@@ -8,6 +8,9 @@ namespace OFEnhancer.Protocol.Tests;
 public sealed class WebMessageRouterTests
 {
     private const string RequestId = "18db3aac-b76f-445c-bbd1-4d7c6fb214c8";
+    private const string GoogleClientId =
+        "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
+    private static readonly string PlanHash = new('a', 64);
 
     [TestMethod]
     public void Get_status_returns_the_desktop_contract()
@@ -196,6 +199,130 @@ public sealed class WebMessageRouterTests
         CollectionAssert.AreEqual(new[] { "new.png" }, store.GetAssets().Select(asset => asset.FileName).ToArray());
     }
 
+    [TestMethod]
+    public void Google_catalogue_empty_operations_have_exact_payloads()
+    {
+        RecordingGoogleController google = new();
+        WebMessageRouter router = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            googleCatalogue: google
+        );
+        string[] operations =
+        [
+            "getGoogleCatalogueStatus",
+            "startGoogleCatalogueConnection",
+            "cancelGoogleCatalogueConnection",
+            "inspectGoogleWorkbook",
+            "syncGoogleCatalogue",
+            "disconnectGoogleCatalogue",
+        ];
+
+        foreach (string operation in operations)
+        {
+            AssertOk(router.Handle(Request(operation, new { })));
+            AssertError(
+                router.Handle(Request(operation, new { unexpected = true })),
+                "invalid-payload"
+            );
+        }
+
+        CollectionAssert.AreEqual(operations, google.Calls.ToArray());
+    }
+
+    [TestMethod]
+    public void Google_catalogue_value_operations_have_exact_payloads()
+    {
+        RecordingGoogleController google = new();
+        WebMessageRouter router = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            googleCatalogue: google
+        );
+
+        AssertOk(router.Handle(Request("saveGoogleClientId", new { clientId = GoogleClientId })));
+        AssertError(router.Handle(Request("saveGoogleClientId", new { })), "invalid-payload");
+        AssertError(
+            router.Handle(Request("saveGoogleClientId", new { clientId = GoogleClientId, extra = true })),
+            "invalid-payload"
+        );
+        AssertOk(router.Handle(Request("applyGoogleWorkbookMigration", new { planHash = PlanHash })));
+        AssertError(
+            router.Handle(Request("applyGoogleWorkbookMigration", new { planHash = "bad" })),
+            "invalid-payload"
+        );
+        AssertError(
+            router.Handle(Request("applyGoogleWorkbookMigration", new { planHash = PlanHash, extra = true })),
+            "invalid-payload"
+        );
+
+        Assert.AreEqual(GoogleClientId, google.SavedClientId);
+        Assert.AreEqual(PlanHash, google.AppliedPlanHash);
+    }
+
+    [TestMethod]
+    public void Google_catalogue_routes_are_truthful_when_unavailable_and_map_safe_errors()
+    {
+        WebMessageRouter unavailable = new(_ => throw new AssertFailedException(), () => null);
+        (string Operation, object Payload)[] operations =
+        [
+            ("getGoogleCatalogueStatus", new { }),
+            ("saveGoogleClientId", new { clientId = GoogleClientId }),
+            ("startGoogleCatalogueConnection", new { }),
+            ("cancelGoogleCatalogueConnection", new { }),
+            ("inspectGoogleWorkbook", new { }),
+            ("applyGoogleWorkbookMigration", new { planHash = PlanHash }),
+            ("syncGoogleCatalogue", new { }),
+            ("disconnectGoogleCatalogue", new { }),
+        ];
+        foreach ((string operation, object payload) in operations)
+        {
+            AssertError(
+                unavailable.Handle(Request(operation, payload)),
+                "google-catalogue-unavailable"
+            );
+        }
+
+        RecordingGoogleController failing = new() { ErrorCode = "stale-migration-plan" };
+        WebMessageRouter router = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            googleCatalogue: failing
+        );
+        string response = router.Handle(Request("inspectGoogleWorkbook", new { }));
+
+        AssertError(response, "stale-migration-plan");
+        Assert.IsFalse(response.Contains("stack", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(response.Contains("token", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void Google_status_serialization_has_no_secret_or_local_identity_fields()
+    {
+        RecordingGoogleController google = new();
+        WebMessageRouter router = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            googleCatalogue: google
+        );
+
+        string response = router.Handle(Request("getGoogleCatalogueStatus", new { }));
+
+        AssertOk(response);
+        string[] forbidden =
+        [
+            "accessToken",
+            "refreshToken",
+            "authorizationCode",
+            "workbookId",
+            "tokenPath",
+            "databasePath",
+            "rawPayload",
+        ];
+        foreach (string field in forbidden)
+            Assert.IsFalse(response.Contains(field, StringComparison.OrdinalIgnoreCase), field);
+    }
+
     private static string Request(string operation, object payload) =>
         JsonSerializer.Serialize(new { requestId = RequestId, operation, payload });
 
@@ -213,6 +340,60 @@ public sealed class WebMessageRouterTests
     }
 
     private static JsonDocument Parse(string value) => JsonDocument.Parse(value);
+
+    private sealed class RecordingGoogleController : IGoogleCatalogueController
+    {
+        internal List<string> Calls { get; } = [];
+        internal string? SavedClientId { get; private set; }
+        internal string? AppliedPlanHash { get; private set; }
+        internal string? ErrorCode { get; init; }
+
+        public GoogleCatalogueStatusView getGoogleCatalogueStatus() => Called(
+            "getGoogleCatalogueStatus"
+        );
+
+        public GoogleCatalogueStatusView saveGoogleClientId(string clientId)
+        {
+            SavedClientId = clientId;
+            return Called("saveGoogleClientId");
+        }
+
+        public GoogleCatalogueStatusView startGoogleCatalogueConnection() => Called(
+            "startGoogleCatalogueConnection"
+        );
+
+        public GoogleCatalogueStatusView cancelGoogleCatalogueConnection() => Called(
+            "cancelGoogleCatalogueConnection"
+        );
+
+        public GoogleCatalogueStatusView inspectGoogleWorkbook() => Called(
+            "inspectGoogleWorkbook"
+        );
+
+        public GoogleCatalogueStatusView applyGoogleWorkbookMigration(string planHash)
+        {
+            AppliedPlanHash = planHash;
+            return Called("applyGoogleWorkbookMigration");
+        }
+
+        public GoogleCatalogueStatusView syncGoogleCatalogue() => Called(
+            "syncGoogleCatalogue"
+        );
+
+        public GoogleCatalogueStatusView disconnectGoogleCatalogue() => Called(
+            "disconnectGoogleCatalogue"
+        );
+
+        public void Dispose() { }
+
+        private GoogleCatalogueStatusView Called(string operation)
+        {
+            if (ErrorCode is not null)
+                throw new GoogleCatalogueControllerException(ErrorCode);
+            Calls.Add(operation);
+            return new("disconnected");
+        }
+    }
 
     private sealed class TestDirectory : IDisposable
     {
