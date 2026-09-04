@@ -138,6 +138,12 @@
                 type="button"
               ></button>
               <button
+                id="googleSecondaryAction"
+                class="secondary-button"
+                type="button"
+                hidden
+              ></button>
+              <button
                 id="googleDisconnect"
                 class="quiet-button"
                 type="button"
@@ -287,7 +293,8 @@
         <div>
           <h2 id="googleMigrationTitle">Update Google Sheet?</h2>
           <p id="googleMigrationIntro">
-            Check the workbook and choose Yes or No.
+            Review what OFEnhancer will change and preserve, then choose Yes or
+            No.
           </p>
         </div>
       </div>
@@ -301,12 +308,19 @@
           <dd id="googleMigrationSheet"></dd>
         </div>
         <div>
-          <dt>Rows</dt>
-          <dd id="googleMigrationRows"></dd>
+          <dt>Add</dt>
+          <dd id="googleMigrationAdd"></dd>
         </div>
         <div>
-          <dt>Changes</dt>
-          <dd id="googleMigrationChanges"></dd>
+          <dt>Link</dt>
+          <dd id="googleMigrationLink"></dd>
+        </div>
+        <div>
+          <dt>Preserve</dt>
+          <dd id="googleMigrationPreserve">
+            Existing tabs, rows, formulas, links, formatting, and distribution
+            history
+          </dd>
         </div>
         <div>
           <dt>Conflicts</dt>

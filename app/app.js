@@ -37,6 +37,9 @@
     "#googleCatalogueStatus",
   );
   const googlePrimaryAction = document.querySelector("#googlePrimaryAction");
+  const googleSecondaryAction = document.querySelector(
+    "#googleSecondaryAction",
+  );
   const googleDisconnect = document.querySelector("#googleDisconnect");
   const googleSetup = document.querySelector("#googleSetup");
   const googleSetupForm = document.querySelector("#googleSetupForm");
@@ -49,10 +52,8 @@
     "#googleMigrationWorkbook",
   );
   const googleMigrationSheet = document.querySelector("#googleMigrationSheet");
-  const googleMigrationRows = document.querySelector("#googleMigrationRows");
-  const googleMigrationChanges = document.querySelector(
-    "#googleMigrationChanges",
-  );
+  const googleMigrationAdd = document.querySelector("#googleMigrationAdd");
+  const googleMigrationLink = document.querySelector("#googleMigrationLink");
   const googleMigrationConflicts = document.querySelector(
     "#googleMigrationConflicts",
   );
@@ -261,6 +262,11 @@
     catalogueNoMatches.hidden = total === 0 || items.length !== 0;
   }
 
+  function announceCatalogueResults() {
+    const count = visibleItems().length;
+    catalogueStatus.textContent = `${plural(count, "video")} shown.`;
+  }
+
   function renderCatalogueUnavailable() {
     catalogueLoading.hidden = true;
     catalogueUnavailable.hidden = false;
@@ -357,6 +363,14 @@
     googlePrimaryAction.className = className;
     googlePrimaryAction.hidden = false;
     setBusy(googlePrimaryAction, false);
+  }
+
+  function setGoogleSecondaryAction(label, action) {
+    googleSecondaryAction.textContent = label;
+    googleSecondaryAction.dataset.googleAction = action;
+    googleSecondaryAction.className = "secondary-button";
+    googleSecondaryAction.hidden = false;
+    setBusy(googleSecondaryAction, false);
   }
 
   function googleErrorPresentation(code) {
@@ -514,20 +528,58 @@
       pendingCount: Number.isInteger(view?.pendingCount)
         ? view.pendingCount
         : 0,
+      attemptedCount: Number.isInteger(view?.attemptedCount)
+        ? view.attemptedCount
+        : 0,
+      unresolvedCount: Number.isInteger(view?.unresolvedCount)
+        ? view.unresolvedCount
+        : 0,
       conflictCount: Number.isInteger(view?.conflictCount)
         ? view.conflictCount
         : 0,
       lastVerifiedSync: view?.lastVerifiedSync || null,
       errorCode: typeof view?.errorCode === "string" ? view.errorCode : "",
     };
-    const codePresentation = googleErrorPresentation(
-      googleStatusView.errorCode,
-    );
+    let codePresentation = googleErrorPresentation(googleStatusView.errorCode);
+    const verificationCount =
+      googleStatusView.attemptedCount + googleStatusView.unresolvedCount;
+    if (
+      codePresentation &&
+      googleStatusView.errorCode === "google-sync-conflict" &&
+      googleStatusView.conflictCount
+    ) {
+      const pendingCopy = googleStatusView.pendingCount
+        ? `${plural(googleStatusView.pendingCount, "update")} waiting. `
+        : "";
+      const conflictVerb =
+        googleStatusView.conflictCount === 1 ? "needs" : "need";
+      codePresentation = {
+        ...codePresentation,
+        message: `${pendingCopy}${plural(googleStatusView.conflictCount, "conflict")} ${conflictVerb} review.`,
+      };
+    }
+    if (
+      codePresentation &&
+      googleStatusView.errorCode === "google-sync-unresolved" &&
+      verificationCount
+    ) {
+      const verb = verificationCount === 1 ? "needs" : "need";
+      const pendingCopy = googleStatusView.pendingCount
+        ? ` ${plural(googleStatusView.pendingCount, "update")} waiting.`
+        : "";
+      codePresentation = {
+        ...codePresentation,
+        message: `${plural(verificationCount, "update")} ${verb} verification.${pendingCopy}`,
+        label: "Verify updates",
+      };
+    }
     const errorPresentation =
       codePresentation ||
       (state === "error" ? defaultGoogleErrorPresentation() : null);
 
     googleCatalogue.hidden = false;
+    googleSecondaryAction.hidden = true;
+    setBusy(googleSecondaryAction, false);
     googleDisconnect.hidden = true;
     setBusy(googleDisconnect, false);
     googleCatalogueStatus.setAttribute("aria-busy", "false");
@@ -573,6 +625,11 @@
         codePresentation.action,
         codePresentation.className,
       );
+      if (
+        googleStatusView.errorCode === "google-sync-conflict" &&
+        googleStatusView.pendingCount
+      )
+        setGoogleSecondaryAction("Sync pending updates", "sync");
       googleDisconnect.hidden = !codePresentation.allowDisconnect;
     } else if (state === "notConfigured") {
       setGooglePrimaryAction("Settings", "settings", "secondary-button");
@@ -587,11 +644,11 @@
       setGooglePrimaryAction("Review changes", "review");
       googleDisconnect.hidden = false;
     } else if (state === "ready") {
-      if (googleStatusView.conflictCount && googleStatusView.pendingCount)
-        setGooglePrimaryAction("Sync pending updates", "sync");
-      else if (googleStatusView.conflictCount)
+      if (googleStatusView.conflictCount) {
         setGooglePrimaryAction("Check workbook", "inspect");
-      else setGooglePrimaryAction("Sync now", "sync");
+        if (googleStatusView.pendingCount)
+          setGoogleSecondaryAction("Sync pending updates", "sync");
+      } else setGooglePrimaryAction("Sync now", "sync");
       googleDisconnect.hidden = false;
     } else if (state === "syncing") {
       setGooglePrimaryAction("Syncing…", "sync");
@@ -600,6 +657,8 @@
       googleDisconnect.disabled = true;
     } else if (state === "conflict") {
       setGooglePrimaryAction("Check workbook", "inspect");
+      if (googleStatusView.pendingCount)
+        setGoogleSecondaryAction("Sync pending updates", "sync");
       googleDisconnect.hidden = false;
     } else {
       setGooglePrimaryAction(
@@ -644,11 +703,8 @@
       frozenMigration.workbookName || "Selected workbook";
     googleMigrationSheet.textContent =
       frozenMigration.sheetName || "Catalogue sheet";
-    googleMigrationRows.textContent = plural(frozenMigration.rowsToBind, "row");
-    googleMigrationChanges.textContent = plural(
-      frozenMigration.migrationChanges,
-      "change",
-    );
+    googleMigrationAdd.textContent = `${plural(frozenMigration.migrationChanges, "workbook change")} for publishing, assets, and history`;
+    googleMigrationLink.textContent = `${plural(frozenMigration.rowsToBind, "catalogue row")} to OFEnhancer`;
     googleMigrationConflicts.textContent = plural(
       frozenMigration.conflictCount,
       "conflict",
@@ -668,6 +724,7 @@
     }
     if (action === "refresh") {
       setBusy(googlePrimaryAction, true);
+      if (!googleSecondaryAction.hidden) setBusy(googleSecondaryAction, true);
       googleDisconnect.disabled = true;
       googleCatalogueStatus.setAttribute("aria-busy", "true");
       googleCatalogueStatus.textContent = "Checking Google Sheet status…";
@@ -684,6 +741,7 @@
     if (!operation) return;
 
     setBusy(googlePrimaryAction, true);
+    if (!googleSecondaryAction.hidden) setBusy(googleSecondaryAction, true);
     googleDisconnect.disabled = true;
     googleCatalogueStatus.setAttribute("aria-busy", "true");
     const workingCopy = {
@@ -707,6 +765,7 @@
   async function disconnectGoogle() {
     setBusy(googleDisconnect, true);
     setBusy(googlePrimaryAction, true);
+    if (!googleSecondaryAction.hidden) setBusy(googleSecondaryAction, true);
     googleCatalogueStatus.setAttribute("aria-busy", "true");
     googleCatalogueStatus.textContent = "Disconnecting Google Sheet…";
     try {
@@ -836,12 +895,14 @@
       for (const option of filterButtons)
         option.setAttribute("aria-pressed", String(option === button));
       renderCatalogue();
+      announceCatalogueResults();
     });
   }
 
   catalogueSearch.addEventListener("input", () => {
     renderLimit = 100;
     renderCatalogue();
+    announceCatalogueResults();
   });
   loadMoreCatalogue.addEventListener("click", () => {
     renderLimit += 100;
@@ -895,6 +956,9 @@
 
   googlePrimaryAction.addEventListener("click", () =>
     runGoogleAction(googlePrimaryAction.dataset.googleAction),
+  );
+  googleSecondaryAction.addEventListener("click", () =>
+    runGoogleAction(googleSecondaryAction.dataset.googleAction),
   );
   googleDisconnect.addEventListener("click", disconnectGoogle);
 

@@ -100,12 +100,24 @@ const googleStates = Object.freeze({
     lastVerifiedSync: "2026-09-04T12:00:00Z",
   },
   readyWithConflicts: {
-    state: "ready",
+    state: "conflict",
     workbookName,
     sheetName,
     pendingCount: 2,
     conflictCount: 1,
     lastVerifiedSync: "2026-09-04T12:00:00Z",
+    errorCode: "google-sync-conflict",
+  },
+  readyWithUncertainUpdates: {
+    state: "conflict",
+    workbookName,
+    sheetName,
+    pendingCount: 1,
+    attemptedCount: 1,
+    unresolvedCount: 1,
+    conflictCount: 0,
+    lastVerifiedSync: "2026-09-04T12:00:00Z",
+    errorCode: "google-sync-unresolved",
   },
   syncing: {
     state: "syncing",
@@ -462,8 +474,29 @@ async function testGoogleStates(browser, port) {
     1,
   );
   assert.equal(await dialog.getByText(sheetName, { exact: true }).count(), 1);
-  assert.equal(await dialog.getByText("2 rows", { exact: true }).count(), 1);
-  assert.equal(await dialog.getByText("5 changes", { exact: true }).count(), 1);
+  assert.equal(
+    await dialog
+      .getByText("5 workbook changes for publishing, assets, and history", {
+        exact: true,
+      })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await dialog
+      .getByText("2 catalogue rows to OFEnhancer", { exact: true })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await dialog
+      .getByText(
+        "Existing tabs, rows, formulas, links, formatting, and distribution history",
+        { exact: true },
+      )
+      .count(),
+    1,
+  );
   assert.equal(
     await dialog.getByText("0 conflicts", { exact: true }).count(),
     1,
@@ -516,13 +549,32 @@ async function testGoogleStates(browser, port) {
     .waitFor();
   assert.equal(
     await strip
-      .getByRole("button", { name: "Sync pending updates", exact: true })
+      .getByRole("button", { name: "Check workbook", exact: true })
       .count(),
     1,
   );
   assert.equal(
-    await strip.getByRole("button", { name: "Sync now", exact: true }).count(),
+    await strip
+      .getByRole("button", { name: "Sync pending updates", exact: true })
+      .count(),
+    1,
+  );
+
+  await setGoogleState(page, googleStates.readyWithUncertainUpdates);
+  await strip
+    .getByText("2 updates need verification. 1 update waiting.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await strip.getByText("No updates waiting.", { exact: true }).count(),
     0,
+  );
+  assert.equal(
+    await strip
+      .getByRole("button", { name: "Verify updates", exact: true })
+      .count(),
+    1,
   );
 
   await setGoogleState(page, googleStates.conflict);
@@ -533,6 +585,12 @@ async function testGoogleStates(browser, port) {
     .waitFor();
   assert.equal(
     await strip.getByRole("button", { name: "Check workbook" }).count(),
+    1,
+  );
+  assert.equal(
+    await strip
+      .getByRole("button", { name: "Sync pending updates", exact: true })
+      .count(),
     1,
   );
 
@@ -697,9 +755,21 @@ async function testGoogleActionCalls(browser, port) {
     },
     {
       state: googleStates.readyWithConflicts,
+      button: "Check workbook",
+      operation: "inspectGoogleWorkbook",
+      options: { inspected: googleStates.readyWithConflicts },
+    },
+    {
+      state: googleStates.readyWithConflicts,
       button: "Sync pending updates",
       operation: "syncGoogleCatalogue",
       options: { synced: googleStates.readyWithConflicts },
+    },
+    {
+      state: googleStates.readyWithUncertainUpdates,
+      button: "Verify updates",
+      operation: "syncGoogleCatalogue",
+      options: { synced: googleStates.ready },
     },
     {
       state: googleStates.ready,
@@ -1207,6 +1277,21 @@ async function testGoogleResponsive(browser, port) {
     await page.getByRole("button", { name: "Catalogue" }).click();
     const sync = page.getByRole("button", { name: "Sync now" });
     await sync.waitFor();
+    const firstRow = await page
+      .locator("[data-catalogue-row]")
+      .first()
+      .boundingBox();
+    assert.ok(
+      firstRow.y < viewport.height,
+      `${viewport.name} catalogue content starts below the first viewport`,
+    );
+    for (const control of await page.locator("nav button").all()) {
+      const box = await control.boundingBox();
+      assert.ok(
+        box.height >= 44,
+        `${viewport.name} navigation target is too small`,
+      );
+    }
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -1225,6 +1310,37 @@ async function testGoogleResponsive(browser, port) {
     assert.deepEqual(errors, [], `${viewport.name} Google console errors`);
     await page.close();
   }
+}
+
+async function testCatalogueResultAnnouncements(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  const errors = captureErrors(page);
+  await installHost(page, populated, { initial: googleStates.conflict });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+
+  const googleStatus = page.locator("#googleCatalogueStatus");
+  const catalogueStatus = page.locator("#catalogueStatus");
+  await googleStatus
+    .getByText("The workbook changed. Check it before syncing.", {
+      exact: true,
+    })
+    .waitFor();
+
+  await page
+    .getByRole("searchbox", { name: "Search catalogue" })
+    .fill("episode 04");
+  await catalogueStatus.getByText("1 video shown.", { exact: true }).waitFor();
+
+  await page.getByRole("button", { name: "Bound" }).click();
+  await catalogueStatus.getByText("0 videos shown.", { exact: true }).waitFor();
+  assert.equal(
+    await googleStatus.textContent(),
+    "The workbook changed. Check it before syncing.",
+    "catalogue result announcement overwrote Google recovery status",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
 }
 
 async function testGoogleMobileDialogAndSettings(browser, port) {
@@ -1307,6 +1423,7 @@ async function main() {
       await testGoogleBusyStates(browser, port);
       await testGooglePolling(browser, port);
       await testGoogleResponsive(browser, port);
+      await testCatalogueResultAnnouncements(browser, port);
       await testGoogleMobileDialogAndSettings(browser, port);
 
       const page = await browser.newPage({
