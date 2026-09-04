@@ -75,24 +75,24 @@ internal static partial class SyncOutbox
     }
 
     internal static void MarkAttempted(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc) =>
-        Transition(connection, operationId, occurredUtc, "attempted", null, "pending", "attempted_utc = $occurredUtc, attempt_count = attempt_count + 1");
+        Transition(connection, operationId, occurredUtc, "attempted", null, "state = 'pending'", "attempted_utc = $occurredUtc, attempt_count = attempt_count + 1");
 
     internal static void MarkCompleted(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc) =>
-        Transition(connection, operationId, occurredUtc, "completed", null, "attempted", "completed_utc = $occurredUtc");
+        Transition(connection, operationId, occurredUtc, "completed", null, "state IN ('attempted', 'unresolved')", "error_code = NULL, completed_utc = $occurredUtc, resolved_utc = $occurredUtc");
 
     internal static void MarkConflict(SqliteConnection connection, string operationId, string errorCode, DateTimeOffset occurredUtc) =>
-        Transition(connection, operationId, occurredUtc, "conflict", ErrorCode(errorCode), "attempted", "error_code = $errorCode, resolved_utc = $occurredUtc");
+        Transition(connection, operationId, occurredUtc, "conflict", ErrorCode(errorCode), "state IN ('attempted', 'unresolved')", "error_code = $errorCode, resolved_utc = $occurredUtc");
 
     internal static void MarkUnresolved(SqliteConnection connection, string operationId, string errorCode, DateTimeOffset occurredUtc) =>
-        Transition(connection, operationId, occurredUtc, "unresolved", ErrorCode(errorCode), "attempted", "error_code = $errorCode, resolved_utc = $occurredUtc");
+        Transition(connection, operationId, occurredUtc, "unresolved", ErrorCode(errorCode), "state = 'attempted'", "error_code = $errorCode, resolved_utc = $occurredUtc");
 
-    private static void Transition(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc, string next, string? errorCode, string requiredCurrent, string assignments)
+    private static void Transition(SqliteConnection connection, string operationId, DateTimeOffset occurredUtc, string next, string? errorCode, string requiredCurrentSql, string assignments)
     {
         string id = GuidText(operationId, "operationId");
         using SqliteTransaction transaction = connection.BeginTransaction();
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"UPDATE sync_outbox SET state = '{next}', {assignments} WHERE operation_id = $operationId AND state = '{requiredCurrent}'";
+        command.CommandText = $"UPDATE sync_outbox SET state = '{next}', {assignments} WHERE operation_id = $operationId AND {requiredCurrentSql}";
         command.Parameters.AddWithValue("$operationId", id);
         command.Parameters.AddWithValue("$occurredUtc", Timestamp(occurredUtc));
         if (errorCode is not null)
