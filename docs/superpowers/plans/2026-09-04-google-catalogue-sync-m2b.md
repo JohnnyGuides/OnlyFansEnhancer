@@ -28,6 +28,7 @@
 ### Task 1: Schema 2, stable workbook bindings, and monotonic sync outbox
 
 **Files:**
+
 - Modify: `desktop/OFEnhancer.Catalogue/Migrations.cs`
 - Modify: `desktop/OFEnhancer.Catalogue/Models.cs`
 - Create: `desktop/OFEnhancer.Catalogue/WorkbookProjection.cs`
@@ -37,6 +38,7 @@
 - Create: `desktop/OFEnhancer.Catalogue.Tests/SyncOutboxTests.cs`
 
 **Interfaces:**
+
 - Produces: `WorkbookCatalogueItem`, `WorkbookProjection`, `GoogleRowBinding`, `SyncOutboxItem`, and `SyncOutboxState` records/enums in `OFEnhancer.Catalogue`.
 - Produces: `CatalogueStore.ImportWorkbookProjection(WorkbookProjection)`, `ReplaceGoogleBindings(...)`, `GetGoogleBindings(...)`, `EnqueueProjection(...)`, `GetOpenSyncOperations()`, `MarkSyncAttempted(...)`, `MarkSyncCompleted(...)`, `MarkSyncConflict(...)`, and `MarkSyncUnresolved(...)`.
 - Consumes: the existing one-writer `CatalogueStore.Connection`, verified migration backup, canonical URL validation, and item identity.
@@ -134,6 +136,7 @@ git commit -m "feat: add catalogue sync outbox"
 ### Task 2: OAuth protocol, protected token vault, and cancellable connection coordinator
 
 **Files:**
+
 - Modify: `desktop/OFEnhancer.Desktop/OFEnhancer.Desktop.csproj`
 - Create: `desktop/OFEnhancer.Desktop/GoogleOAuthProtocol.cs`
 - Create: `desktop/OFEnhancer.Desktop/GoogleTokenVault.cs`
@@ -143,6 +146,7 @@ git commit -m "feat: add catalogue sync outbox"
 - Create: `desktop/OFEnhancer.Protocol.Tests/GoogleConnectionCoordinatorTests.cs`
 
 **Interfaces:**
+
 - Produces: `GoogleOAuthStart CreateStart(string clientId, Uri redirectUri)`, `GoogleOAuthCallback ParseCallback(Uri, string expectedState)`, and `Task<GoogleTokenSet> ExchangeCodeAsync(...)`.
 - Produces: `IGoogleTokenVault` with `Load()`, `Save(GoogleRefreshCredential)`, and `Delete()`; production `DpapiGoogleTokenVault` and test `MemoryGoogleTokenVault`.
 - Produces: `GoogleConnectionCoordinator.Start()`, `Cancel()`, `Snapshot`, and a completion callback containing only selected workbook ID/title and credential expiry.
@@ -209,6 +213,7 @@ git commit -m "feat: add secure Google picker OAuth"
 ### Task 3: Allow-listed Google REST client and deterministic workbook inspection
 
 **Files:**
+
 - Create: `desktop/OFEnhancer.Desktop/GoogleWorkspaceClient.cs`
 - Create: `desktop/OFEnhancer.Desktop/GoogleWorkbookProfile.cs`
 - Create: `desktop/OFEnhancer.Protocol.Tests/GoogleWorkspaceClientTests.cs`
@@ -217,6 +222,7 @@ git commit -m "feat: add secure Google picker OAuth"
 - Create: `desktop/OFEnhancer.Protocol.Tests/Fixtures/google-workbook-ambiguous.json`
 
 **Interfaces:**
+
 - Produces: `ValidateSpreadsheetAsync(fileId)`, `ReadWorkbookAsync(fileId)`, `SearchItemMetadataAsync(...)`, `ReadProjectionCellAsync(...)`, `ApplyStructuralBatchAsync(...)`, and `UpdateValuesBatchAsync(...)`.
 - Produces: pure `GoogleWorkbookProfile.Inspect(GoogleWorkbookSnapshot, CatalogueStore)` returning `WorkbookInspection` with normalized projection, bindings, conflicts, `WorkbookMigrationPlan`, and `PlanHash`.
 - Consumes: `IGoogleAccessTokenSource`, injected `HttpClient`, `WorkbookProjection`, and existing canonical catalogue import rules.
@@ -276,11 +282,13 @@ git commit -m "feat: inspect Google catalogue workbooks"
 ### Task 4: Idempotent workbook migration and verified binding persistence
 
 **Files:**
+
 - Create: `desktop/OFEnhancer.Desktop/GoogleWorkbookMigrator.cs`
 - Create: `desktop/OFEnhancer.Protocol.Tests/GoogleWorkbookMigratorTests.cs`
 - Modify: `desktop/OFEnhancer.Protocol.Tests/Fixtures/google-workbook-legacy.json`
 
 **Interfaces:**
+
 - Produces: `Task<WorkbookMigrationResult> ApplyAsync(string expectedPlanHash, CancellationToken)`.
 - Consumes: fresh `GoogleWorkbookProfile.Inspect`, `GoogleWorkspaceClient`, `CatalogueStore.ReplaceGoogleBindings`, and the exact versioned companion-tab/header contracts.
 
@@ -329,10 +337,12 @@ git commit -m "feat: migrate Google catalogue safely"
 ### Task 5: Serialized outbox synchronization and reconciliation
 
 **Files:**
+
 - Create: `desktop/OFEnhancer.Desktop/GoogleCatalogueSyncWorker.cs`
 - Create: `desktop/OFEnhancer.Protocol.Tests/GoogleCatalogueSyncWorkerTests.cs`
 
 **Interfaces:**
+
 - Produces: `Task<GoogleSyncSummary> RunOnceAsync(CancellationToken)`.
 - Consumes: `CatalogueStore.GetOpenSyncOperations`, monotonic transition methods, exactly-one metadata row search, exact cell read/write, and canonical field-to-column mapping from `GoogleWorkbookProfile`.
 
@@ -387,6 +397,7 @@ git commit -m "feat: synchronize catalogue outbox safely"
 ### Task 6: Desktop configuration, controller, strict WebView operations, and system-browser wiring
 
 **Files:**
+
 - Modify: `desktop/OFEnhancer.Desktop/AppConfiguration.cs`
 - Create: `desktop/OFEnhancer.Desktop/DesktopSettingsStore.cs`
 - Create: `desktop/OFEnhancer.Desktop/GoogleCatalogueController.cs`
@@ -399,6 +410,7 @@ git commit -m "feat: synchronize catalogue outbox safely"
 - Modify: `desktop/OFEnhancer.Protocol.Tests/WebMessageDispatcherTests.cs`
 
 **Interfaces:**
+
 - Produces: atomic settings read/write for `extensionId` and `googleOAuthClientId`, plus `GoogleTokenPath` under the data folder.
 - Produces: controller methods named exactly after the eight spec operations, returning `GoogleCatalogueStatusView` only.
 - Consumes: coordinator, inspector, migrator, sync worker, catalogue store, system default-browser opener, and existing serialized dispatcher.
@@ -457,6 +469,7 @@ git commit -m "feat: expose Google catalogue sync to desktop UI"
 ### Task 7: Compact Catalogue sync UI and one Yes/No migration review
 
 **Files:**
+
 - Modify: `app/index.html`
 - Modify: `app/app.css`
 - Modify: `app/app.js`
@@ -464,6 +477,7 @@ git commit -m "feat: expose Google catalogue sync to desktop UI"
 - Modify: `tests/desktop-native-bridge.test.cjs`
 
 **Interfaces:**
+
 - Consumes: the eight strict host operations and `GoogleCatalogueStatusView` states from Task 6.
 - Produces: one `#googleCatalogue` status strip, `#googleMigrationDialog`, and collapsed `#googleSetup` settings group; no new top-level navigation.
 
@@ -532,6 +546,7 @@ git commit -m "feat: add Google catalogue sync controls"
 ### Task 8: Remove the personal bridge ID, bump 0.20.0, and harden package evidence
 
 **Files:**
+
 - Modify: `apps-script/catalogue-bridge.gs`
 - Modify: `tests/upload-milestone.test.cjs`
 - Modify: `tests/desktop-package.test.cjs`
@@ -547,6 +562,7 @@ git commit -m "feat: add Google catalogue sync controls"
 - Create: `docs/GOOGLE_CATALOGUE_FAKE_SMOKE.md`
 
 **Interfaces:**
+
 - Produces: version `0.20.0` across extension, desktop, protocol status, packages, tests, and docs.
 - Produces: legacy Apps Script `CREATOR_UPLOAD_SPREADSHEET_ID` lookup from Script Properties with an explicit missing-config failure; no literal personal ID.
 - Consumes: the completed desktop sync implementation and existing package/staging scripts.
@@ -598,10 +614,12 @@ git commit -m "chore: release Google catalogue sync 0.20.0"
 ### Task 9: Full verification, rendered audit, independent reviews, and local merge
 
 **Files:**
+
 - Modify only when a verification/reviewer finding requires a tested correction.
 - Create captures under ignored `.impeccable/review/`.
 
 **Interfaces:**
+
 - Consumes: the entire milestone branch.
 - Produces: verified local merge commit on `main`; no push, live Google action, extension installation, registry change, or media mutation.
 
