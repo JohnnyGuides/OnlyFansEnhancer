@@ -60,4 +60,33 @@ public sealed class AgentPipeTests
                 )
         );
     }
+
+    [TestMethod]
+    public async Task Server_rejects_a_recent_duplicate_request_without_rehandling_it()
+    {
+        string pipeName = $"ofenhancer-test-{Guid.NewGuid():N}";
+        using CancellationTokenSource stop = new(TimeSpan.FromSeconds(5));
+        int handled = 0;
+        AgentPipeServer server = new(pipeName);
+        Task serverTask = server.RunAsync(
+            request =>
+            {
+                handled++;
+                return AgentResponse.Success(request, AgentStatus.Current);
+            },
+            stop.Token
+        );
+        AgentPipeClient client = new(pipeName);
+        AgentRequest request = AgentRequest.CreateStatus();
+
+        AgentResponse first = await client.SendAsync(request, stop.Token);
+        AgentResponse duplicate = await client.SendAsync(request, stop.Token);
+        stop.Cancel();
+
+        Assert.IsTrue(first.Ok);
+        Assert.IsFalse(duplicate.Ok);
+        Assert.AreEqual("duplicate-request", duplicate.Error?.Code);
+        Assert.AreEqual(1, handled);
+        await Assert.ThrowsExceptionAsync<OperationCanceledException>(async () => await serverTask);
+    }
 }

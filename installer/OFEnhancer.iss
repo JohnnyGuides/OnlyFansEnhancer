@@ -31,6 +31,9 @@ Source: "{#StageSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 Name: "{group}\OFEnhancer"; Filename: "{app}\desktop\OFEnhancer.Desktop.exe"
 Name: "{group}\Connect Chrome"; Filename: "{app}\extension-setup.html"
 
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OFEnhancer"; ValueData: """{app}\desktop\OFEnhancer.Desktop.exe"""; Flags: uninsdeletevalue
+
 [Run]
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\extension-setup.html"; Description: "Connect the Chrome extension"; Flags: postinstall shellexec skipifsilent

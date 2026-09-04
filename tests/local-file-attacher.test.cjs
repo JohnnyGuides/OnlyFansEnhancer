@@ -17,6 +17,7 @@ const privatePath = "C:\\private\\episode.mp4";
 function createChrome(options = {}) {
   const calls = [];
   const fileInputs = [];
+  let frameRead = 0;
   const chrome = {
     runtime: { lastError: null },
     tabs: {
@@ -24,7 +25,10 @@ function createChrome(options = {}) {
         calls.push(["tabs.get", tabId]);
         return {
           id: tabId,
-          url: options.url || "https://onlyfans.com/my/home",
+          url:
+            options.url === undefined
+              ? "https://onlyfans.com/my/home"
+              : options.url,
         };
       },
     },
@@ -39,6 +43,20 @@ function createChrome(options = {}) {
           fileInputs.push([...parameters.files]);
         if (options.failAt === method) return reply(method, callback);
         const values = {
+          "Page.getFrameTree": {
+            frameTree: {
+              frame: {
+                id: "main-frame",
+                loaderId: `loader-${frameRead}`,
+                url:
+                  options.frameUrls?.[
+                    Math.min(frameRead++, options.frameUrls.length - 1)
+                  ] ||
+                  options.url ||
+                  "https://onlyfans.com/my/home",
+              },
+            },
+          },
           "DOM.getDocument": { root: { nodeId: 1 } },
           "DOM.querySelectorAll": { nodeIds: options.nodeIds || [7] },
           "DOM.describeNode": {
@@ -104,6 +122,34 @@ test("attaches one exact local file and dispatches the native events", async () 
     fake.calls.filter(([name]) => name === "debugger.detach").length,
     1,
   );
+});
+
+test("rejects navigation away from the authorized origin before attachment", async () => {
+  const attacher = load();
+  const fake = createChrome({
+    frameUrls: ["https://onlyfans.com/my/home", "https://example.com/upload"],
+  });
+
+  await assert.rejects(
+    attacher.attach(request(), fake.chrome),
+    /origin-not-allowed/,
+  );
+  assert.deepEqual(fake.fileInputs, []);
+  assert.equal(
+    fake.calls.filter(([name]) => name === "debugger.detach").length,
+    1,
+  );
+});
+
+test("validates the attached frame when Chrome hides the tab URL", async () => {
+  const attacher = load();
+  const fake = createChrome({ url: "" });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await attacher.attach(request(), fake.chrome))),
+    { attached: true },
+  );
+  assert.deepEqual(fake.fileInputs, [[privatePath]]);
 });
 
 for (const scenario of [

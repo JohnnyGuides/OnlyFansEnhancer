@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { chromium } = require("playwright");
@@ -34,19 +35,49 @@ async function main() {
   const profilePath = path.join(temporary, "profile");
   const filePath = path.join(temporary, "inert-proof.mp4");
   fs.writeFileSync(filePath, "inert local attachment proof");
-  const origin = "https://x.com";
-  const context = await chromium.launchPersistentContext(profilePath, {
-    executablePath: chromeExecutable(),
-    headless: false,
-    args: [
-      `--disable-extensions-except=${extensionRoot}`,
-      `--load-extension=${extensionRoot}`,
-      "--window-position=-32000,-32000",
-      "--window-size=1,1",
-    ],
+  const server = http.createServer((request, response) => {
+    if (request.url !== "/ofenhancer-local-file-proof") {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html>
+      <html><body>
+        <input id="upload" type="file">
+        <script>
+          globalThis.proof = { input: 0, change: 0 };
+          upload.addEventListener("input", () => { proof.input += 1; });
+          upload.addEventListener("change", () => { proof.change += 1; });
+        </script>
+      </body></html>`);
   });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  let context;
 
   try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(extensionRoot, "manifest.json"), "utf8"),
+    );
+    assert.equal(
+      [
+        ...(manifest.host_permissions || []),
+        ...(manifest.optional_host_permissions || []),
+      ].some((permission) => /(?:127\.0\.0\.1|localhost)/i.test(permission)),
+      false,
+      "the personal manifest grants the synthetic loopback origin",
+    );
+    context = await chromium.launchPersistentContext(profilePath, {
+      executablePath: chromeExecutable(),
+      headless: false,
+      args: [
+        `--disable-extensions-except=${extensionRoot}`,
+        `--load-extension=${extensionRoot}`,
+        "--window-position=-32000,-32000",
+        "--window-size=1,1",
+      ],
+    });
     let workers = context.serviceWorkers();
     if (workers.length === 0) {
       await context.waitForEvent("serviceworker", { timeout: 10000 });
@@ -59,29 +90,15 @@ async function main() {
     );
     const worker = workers[0];
     const page = await context.newPage();
-    await page.route(`${origin}/ofenhancer-local-file-proof`, async (route) => {
-      await route.fulfill({
-        contentType: "text/html; charset=utf-8",
-        body: `<!doctype html>
-          <html><body>
-            <input id="upload" type="file">
-            <script>
-              globalThis.proof = { input: 0, change: 0 };
-              upload.addEventListener("input", () => { proof.input += 1; });
-              upload.addEventListener("change", () => { proof.change += 1; });
-            </script>
-          </body></html>`,
-      });
-    });
     await page.goto(`${origin}/ofenhancer-local-file-proof`);
     await page.bringToFront();
-    const tabId = await worker.evaluate(async (pageOrigin) => {
-      const tabs = await chrome.tabs.query({});
-      return (
-        tabs.find((tab) => String(tab.url || "").startsWith(pageOrigin))?.id ||
-        0
-      );
-    }, origin);
+    const tabId = await worker.evaluate(async () => {
+      const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      return tabs[0]?.id || 0;
+    });
     assert.ok(
       tabId > 0,
       "the isolated loopback tab was not visible to the extension",
@@ -153,7 +170,8 @@ async function main() {
       "a failed selector left the extension debugger attached",
     );
   } finally {
-    await context.close();
+    await context?.close();
+    await new Promise((resolve) => server.close(resolve));
     fs.rmSync(temporary, { recursive: true, force: true });
   }
 

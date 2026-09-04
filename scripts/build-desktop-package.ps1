@@ -68,11 +68,28 @@ try {
   $archive.Dispose()
 }
 $expectedEntries = @(Get-Content -LiteralPath (Join-Path $repositoryRoot "installer\personal-extension-files.txt") | Where-Object { $_.Trim() } | Sort-Object)
-$difference = @(Compare-Object -ReferenceObject $expectedEntries -DifferenceObject $actualEntries)
+$desktopExcludedEntries = @("apps-script/catalogue-bridge.gs")
+$permittedArchiveEntries = @(($expectedEntries + $desktopExcludedEntries) | Sort-Object)
+$difference = @(Compare-Object -ReferenceObject $permittedArchiveEntries -DifferenceObject $actualEntries)
 if ($difference.Count -ne 0) {
   throw "The personal extension contents differ from the installer allow-list."
 }
-[System.IO.Compression.ZipFile]::ExtractToDirectory($extensionArchive, $extensionDirectory)
+$extensionPrefix = $extensionDirectory.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+$archive = [System.IO.Compression.ZipFile]::OpenRead($extensionArchive)
+try {
+  foreach ($entryName in $expectedEntries) {
+    $entry = $archive.GetEntry($entryName)
+    if (-not $entry) { throw "The personal extension entry is missing: $entryName" }
+    $destination = [System.IO.Path]::GetFullPath((Join-Path $extensionDirectory $entryName.Replace("/", "\")))
+    if (-not $destination.StartsWith($extensionPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "The personal extension entry escapes its stage directory."
+    }
+    [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destination)) | Out-Null
+    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $false)
+  }
+} finally {
+  $archive.Dispose()
+}
 
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "native-host\ofenhancer-native-host.json.template") -Destination $nativeDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "finalLogo.png") -Destination $assetsDirectory

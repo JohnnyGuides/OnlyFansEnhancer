@@ -3,7 +3,6 @@ app/app.js
 app/finalLogo.png
 app/host-bridge.js
 app/index.html
-apps-script/catalogue-bridge.gs
 background.js
 content.css
 content.js

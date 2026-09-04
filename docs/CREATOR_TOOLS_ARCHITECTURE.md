@@ -21,8 +21,10 @@ Version 0.18.0 adds a Windows authority beside the working personal extension:
   sample catalogue rows or pretend later milestones exist.
 - `creator-tools/local-file-attacher.js` is an internal service-worker
   primitive. It validates the tab's exact origin and one exact
-  `input[type=file]`, uses `DOM.setFileInputFiles`, verifies the result, and
-  detaches in every attached outcome. No runtime message accepts a local path.
+  `input[type=file]`, binds the operation to the attached main-frame loader,
+  rechecks that origin immediately before `DOM.setFileInputFiles`, verifies the
+  result, and detaches in every attached outcome. No runtime message accepts a
+  local path.
 
 The personal extension alone has Chrome's `debugger` and `nativeMessaging`
 permissions. The store edition contains neither the desktop bridge nor local
@@ -33,6 +35,12 @@ The current unpacked Chrome extension has no manifest key. Its ID therefore
 cannot be recreated when the installed extension moves to a different folder.
 Setup treats that ID as migration input and requires one explicit load-and-copy
 step; it never edits a Chrome profile or installs enterprise policy.
+
+The per-user installer owns the HKCU startup entry and removes it on uninstall.
+Native-host registration remains a guided step because Chrome reveals an
+unpacked extension's ID only after the installed extension folder is loaded.
+The desktop stage extracts an explicit runtime allow-list and excludes the Apps
+Script deployment source, so the configured workbook ID is not shipped.
 
 Milestone 1 proves the process boundary and local file attachment only. The
 existing extension remains the upload authority until later milestones move

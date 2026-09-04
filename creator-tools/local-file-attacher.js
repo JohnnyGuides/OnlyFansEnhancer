@@ -98,6 +98,27 @@
     return result;
   }
 
+  function mainFrame(frameTree, allowedOrigins, expectedFrame) {
+    const frame = frameTree?.frameTree?.frame;
+    let origin;
+    try {
+      origin = new URL(frame?.url || "").origin;
+    } catch {
+      throw fail("origin-not-allowed");
+    }
+    if (
+      !allowedOrigins.includes(origin) ||
+      !frame?.id ||
+      !frame?.loaderId ||
+      (expectedFrame &&
+        (frame.id !== expectedFrame.id ||
+          frame.loaderId !== expectedFrame.loaderId))
+    ) {
+      throw fail("origin-not-allowed");
+    }
+    return { id: frame.id, loaderId: frame.loaderId };
+  }
+
   async function attach(request, chromeApi = globalThis.chrome) {
     const prepared = validate(request);
     if (!chromeApi?.tabs?.get || !chromeApi?.debugger)
@@ -109,14 +130,16 @@
     } catch {
       throw fail("tab-unavailable");
     }
-    let origin;
-    try {
-      origin = new URL(tab?.url || "").origin;
-    } catch {
-      throw fail("origin-not-allowed");
+    if (tab?.url) {
+      let origin;
+      try {
+        origin = new URL(tab.url).origin;
+      } catch {
+        throw fail("origin-not-allowed");
+      }
+      if (!prepared.allowedOrigins.includes(origin))
+        throw fail("origin-not-allowed");
     }
-    if (!prepared.allowedOrigins.includes(origin))
-      throw fail("origin-not-allowed");
 
     const target = { tabId: prepared.tabId };
     let attached = false;
@@ -132,6 +155,10 @@
         "debugger-attach-failed",
       );
       attached = true;
+      const attachedFrame = mainFrame(
+        await command(chromeApi, target, "Page.getFrameTree", {}),
+        prepared.allowedOrigins,
+      );
       const documentResult = await command(
         chromeApi,
         target,
@@ -171,6 +198,11 @@
       ) {
         throw fail("file-control-invalid");
       }
+      mainFrame(
+        await command(chromeApi, target, "Page.getFrameTree", {}),
+        prepared.allowedOrigins,
+        attachedFrame,
+      );
       await command(chromeApi, target, "DOM.setFileInputFiles", {
         files: [prepared.filePath],
         nodeId,

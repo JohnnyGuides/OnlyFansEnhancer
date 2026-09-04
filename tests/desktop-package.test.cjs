@@ -50,6 +50,11 @@ async function main() {
   assert.match(installer, /PrivilegesRequired=lowest/);
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
+  assert.match(
+    installer,
+    /Root:\s*HKCU;\s*Subkey:\s*"Software\\Microsoft\\Windows\\CurrentVersion\\Run"/,
+  );
+  assert.match(installer, /ValueName:\s*"OFEnhancer".*uninsdeletevalue/);
   for (const source of [register, unregister, installer]) {
     assert.doesNotMatch(
       source,
@@ -220,6 +225,25 @@ async function main() {
         `forbidden staged file matched ${forbidden}`,
       );
     }
+    const catalogueBridge = fs.readFileSync(
+      path.join(root, "apps-script", "catalogue-bridge.gs"),
+      "utf8",
+    );
+    const workbookId = catalogueBridge.match(
+      /CREATOR_UPLOAD_SPREADSHEET_ID\s*=\s*"([^"]+)"/,
+    )?.[1];
+    assert.ok(workbookId, "the source workbook ID could not be identified");
+    const stagedText = filesBelow(stage)
+      .filter((filePath) =>
+        /\.(?:css|gs|html|js|json|md|ps1|txt)$/i.test(filePath),
+      )
+      .map((filePath) => fs.readFileSync(filePath, "utf8"))
+      .join("\n");
+    assert.equal(
+      stagedText.includes(workbookId),
+      false,
+      "the staged package exposes the configured workbook ID",
+    );
     assert.match(build.stdout, /MANIFEST_SHA256=[A-F0-9]{64}/);
     console.log(`PASS: staged desktop package ${stage}`);
   } finally {

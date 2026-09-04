@@ -51,7 +51,10 @@ public static class AgentPipeFrame
 
 public sealed partial class AgentPipeServer
 {
+    private const int RememberedRequestLimit = 1024;
     private readonly string pipeName;
+    private readonly Queue<Guid> requestOrder = new();
+    private readonly HashSet<Guid> recentRequests = [];
 
     public AgentPipeServer(string pipeName) => this.pipeName = ValidatePipeName(pipeName);
 
@@ -88,7 +91,9 @@ public sealed partial class AgentPipeServer
             AgentRequest request = AgentRequest.Parse(
                 await AgentPipeFrame.ReadAsync(pipe, stop).ConfigureAwait(false)
             );
-            response = handle(request);
+            response = TryRemember(request.RequestId)
+                ? handle(request)
+                : AgentResponse.Failure(request.RequestId.ToString(), "duplicate-request");
         }
         catch (AgentProtocolException error)
         {
@@ -108,6 +113,19 @@ public sealed partial class AgentPipeServer
         if (string.IsNullOrWhiteSpace(value) || !PipeNamePattern().IsMatch(value))
             throw new ArgumentException("The pipe name is invalid.", nameof(value));
         return value;
+    }
+
+    private bool TryRemember(Guid requestId)
+    {
+        lock (recentRequests)
+        {
+            if (!recentRequests.Add(requestId))
+                return false;
+            requestOrder.Enqueue(requestId);
+            if (requestOrder.Count > RememberedRequestLimit)
+                recentRequests.Remove(requestOrder.Dequeue());
+            return true;
+        }
     }
 
     [GeneratedRegex("^[A-Za-z0-9._-]{1,120}$", RegexOptions.CultureInvariant)]

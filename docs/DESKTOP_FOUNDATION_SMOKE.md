@@ -26,7 +26,7 @@ The gate must prove all of the following:
 - the stage-only package checks `--status-json`, launches the real WebView2
   shell, rejects a second authority, survives a window close in the tray,
   verifies every staged hash, and contains no test traces, private settings,
-  tokens, media roots, or repository metadata;
+  tokens, workbook IDs, media roots, or repository metadata;
 - the personal and store ZIPs both validate, while the store manifest still
   excludes `debugger`, `nativeMessaging`, desktop code, and the local file
   attacher.
