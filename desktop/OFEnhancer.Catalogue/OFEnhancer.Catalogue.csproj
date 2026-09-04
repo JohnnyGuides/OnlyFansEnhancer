@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.20" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OFEnhancer.Desktop" />
+    <InternalsVisibleTo Include="OFEnhancer.Catalogue.Tests" />
+    <InternalsVisibleTo Include="OFEnhancer.Protocol.Tests" />
+  </ItemGroup>
+
+</Project>

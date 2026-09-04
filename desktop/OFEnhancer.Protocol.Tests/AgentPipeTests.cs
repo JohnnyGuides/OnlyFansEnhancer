@@ -23,12 +23,12 @@ public sealed class AgentPipeTests
 
         Assert.IsTrue(response.Ok);
         Assert.AreEqual(request.RequestId.ToString(), response.RequestId);
-        Assert.AreEqual("0.18.0", response.Status?.ProductVersion);
+        Assert.AreEqual("0.19.0", response.Status?.ProductVersion);
         CollectionAssert.AreEqual(
             new[] { "desktop-shell", "local-file-attach", "native-bridge" },
             response.Status?.Capabilities.ToArray()
         );
-        await Assert.ThrowsExceptionAsync<OperationCanceledException>(async () => await serverTask);
+        await AssertCancelled(serverTask);
     }
 
     [TestMethod]
@@ -87,6 +87,19 @@ public sealed class AgentPipeTests
         Assert.IsFalse(duplicate.Ok);
         Assert.AreEqual("duplicate-request", duplicate.Error?.Code);
         Assert.AreEqual(1, handled);
-        await Assert.ThrowsExceptionAsync<OperationCanceledException>(async () => await serverTask);
+        await AssertCancelled(serverTask);
+    }
+
+    private static async Task AssertCancelled(Task task)
+    {
+        try
+        {
+            await task;
+            Assert.Fail("The server task completed without cancellation.");
+        }
+        catch (OperationCanceledException)
+        {
+            // TaskCanceledException and OperationCanceledException both represent the contract.
+        }
     }
 }

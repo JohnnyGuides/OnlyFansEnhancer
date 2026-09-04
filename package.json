@@ -1,6 +1,6 @@
 {
   "name": "creator-workflow-toolkit",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "description": "Development checks for the personal Creator Workflow Toolkit and store-safe Fan Identity Mask edition.",
   "scripts": {
@@ -11,6 +11,7 @@
     "test:x-teaser-ui": "node tests/x-teaser-ui.test.cjs",
     "test:social-trace-ui": "node tests/social-trace-recorder-ui.test.cjs",
     "test:desktop-shell-ui": "node tests/desktop-shell-ui.test.cjs",
+    "test:desktop-catalogue-ui": "node tests/desktop-catalogue-ui.test.cjs",
     "test:desktop-native-bridge": "node --test tests/desktop-native-bridge.test.cjs",
     "test:local-file-attacher-chrome": "node tests/local-file-attacher-chrome.test.cjs",
     "test:desktop-package": "node --test tests/desktop-package.test.cjs",
@@ -23,7 +24,7 @@
     "typecheck": "tsc -p jsconfig.json",
     "format": "prettier --write \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
     "format:check": "prettier --check \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-native-bridge && npm run test:local-file-attacher-chrome && npm run test:desktop-package && npm run build:personal && npm run build:store"
+    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-catalogue-ui && npm run test:desktop-native-bridge && npm run test:local-file-attacher-chrome && npm run test:desktop-package && npm run build:personal && npm run build:store"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

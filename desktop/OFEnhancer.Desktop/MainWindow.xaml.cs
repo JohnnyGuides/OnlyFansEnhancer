@@ -3,23 +3,36 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
+using OFEnhancer.Catalogue;
 
 namespace OFEnhancer.Desktop;
 
 public partial class MainWindow : Window
 {
     private readonly WebMessageRouter router;
+    private readonly WebMessageDispatcher dispatcher;
+    private readonly ThumbnailResourceResolver thumbnails;
+    private readonly CatalogueStore catalogue;
     private bool exiting;
 
-    public MainWindow(string? extensionId)
+    public MainWindow(string? extensionId, CatalogueStore catalogue)
     {
         InitializeComponent();
-        router = new WebMessageRouter(OpenChrome, () => extensionId);
+        this.catalogue = catalogue;
+        router = new WebMessageRouter(
+            OpenChrome,
+            () => extensionId,
+            catalogue,
+            () => Dispatcher.Invoke(ChooseThumbnailRoot)
+        );
+        dispatcher = new WebMessageDispatcher(router.Handle);
+        thumbnails = new ThumbnailResourceResolver(catalogue);
     }
 
-    public void Exit()
+    public async Task ExitAsync()
     {
         exiting = true;
+        await dispatcher.DrainAsync();
         Close();
     }
 
@@ -44,10 +57,67 @@ public partial class MainWindow : Window
         );
         Browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
         Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-        Browser.CoreWebView2.WebMessageReceived += (_, message) =>
+        Browser.CoreWebView2.AddWebResourceRequestedFilter(
+            "https://thumbs.ofenhancer.local/*",
+            CoreWebView2WebResourceContext.Image
+        );
+        Browser.CoreWebView2.WebResourceRequested += async (_, args) =>
         {
-            string response = router.Handle(message.TryGetWebMessageAsString());
-            Browser.CoreWebView2.PostWebMessageAsJson(response);
+            CoreWebView2Deferral deferral = args.GetDeferral();
+            try
+            {
+                ThumbnailResource? resource = await Task.Run(
+                    () => thumbnails.Open(new Uri(args.Request.Uri))
+                );
+                if (resource is null)
+                {
+                    SetThumbnailNotFound(args);
+                    return;
+                }
+                try
+                {
+                    args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+                        resource.Stream,
+                        200,
+                        "OK",
+                        $"Content-Type: {resource.ContentType}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff"
+                    );
+                }
+                catch
+                {
+                    resource.Dispose();
+                    throw;
+                }
+            }
+            catch (IOException)
+            {
+                SetThumbnailNotFound(args);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetThumbnailNotFound(args);
+            }
+            catch (UriFormatException)
+            {
+                SetThumbnailNotFound(args);
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        };
+        Browser.CoreWebView2.WebMessageReceived += async (_, message) =>
+        {
+            if (exiting || !WebMessageSourcePolicy.IsTrusted(message.Source))
+                return;
+            string response = await dispatcher.HandleAsync(message.TryGetWebMessageAsString());
+            if (!exiting)
+                Browser.CoreWebView2.PostWebMessageAsJson(response);
+        };
+        Browser.CoreWebView2.NavigationStarting += (_, args) =>
+        {
+            if (!WebMessageSourcePolicy.IsTrusted(args.Uri))
+                args.Cancel = true;
         };
         Browser.Source = new Uri("https://app.ofenhancer.local/index.html");
     }
@@ -68,5 +138,31 @@ public partial class MainWindow : Window
         ProcessStartInfo start = new("chrome.exe") { UseShellExecute = true };
         start.ArgumentList.Add(uri.AbsoluteUri);
         Process.Start(start);
+    }
+
+    private string? ChooseThumbnailRoot()
+    {
+        using System.Windows.Forms.FolderBrowserDialog dialog = new()
+        {
+            Description = "Choose your curated thumbnail folder",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+        };
+        string? configured = catalogue.ConfiguredThumbnailRoot;
+        if (configured is not null && Directory.Exists(configured))
+            dialog.SelectedPath = configured;
+        return dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK
+            ? dialog.SelectedPath
+            : null;
+    }
+
+    private void SetThumbnailNotFound(CoreWebView2WebResourceRequestedEventArgs args)
+    {
+        args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+            new MemoryStream([]),
+            404,
+            "Not Found",
+            "Content-Type: text/plain\r\nCache-Control: no-store"
+        );
     }
 }

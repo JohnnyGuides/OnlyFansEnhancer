@@ -10,6 +10,32 @@ The personal edition is intentionally broader than the separately packaged
 Chrome Web Store edition. The store edition remains the narrow, display-only
 **Fan Identity Mask** product under `store/`.
 
+## Local catalogue (0.19.0)
+
+Version 0.19.0 gives the Windows app its first real local catalogue. The
+desktop process is the only SQLite writer. It imports a bounded JSON snapshot,
+keeps permanent opaque video IDs across later imports, inventories curated
+PNG/JPEG/WebP thumbnails by SHA-256, and remembers one explicit thumbnail-to-
+video choice across file renames. Filename, title, series, episode, and date
+evidence only rank candidates; they never create a binding on their own.
+The first scan opens a native folder picker, then remembers that folder locally;
+no creator-specific absolute path is compiled into the package.
+
+The Catalogue screen shows compact video rows with release date, platform
+coverage, X count, Reddit count, and thumbnail state. An uncertain image opens
+a short visual picker. Local image URLs contain only opaque asset IDs; the UI
+never receives an absolute disk path.
+
+The database is `%LocalAppData%\OFEnhancer\data\catalogue.db`. Before changing
+an existing schema, OFEnhancer creates and verifies a sibling SQLite backup.
+A failed migration restores that backup and refuses to continue. Catalogue
+snapshot imports are whole transactions: malformed, duplicate, over-limit, or
+unsafe data changes nothing. See [Catalogue core smoke test](docs/CATALOGUE_CORE_SMOKE.md).
+
+This milestone is intentionally offline. It does not authenticate to Google,
+write the live workbook, inspect authenticated creator sites, post, move media,
+or generate artwork. Those remain later milestones and explicit live tests.
+
 ## Desktop foundation (0.18.0)
 
 Version 0.18.0 adds the first desktop foundation without replacing the working
@@ -21,7 +47,7 @@ local path into one exact, allow-listed file control; it never clicks a submit
 button and always detaches.
 
 `npm run stage:desktop` creates a self-contained, allow-listed package under
-`dist/ofenhancer-desktop-v0.18.0/`. `npm run build:desktop` also compiles the
+`dist/ofenhancer-desktop-v0.19.0/`. `npm run build:desktop` also compiles the
 per-user installer when Inno Setup 6 is installed. The installer uses
 `%LocalAppData%`, offers update/reinstall or uninstall when it finds an existing
 copy, and opens a short Chrome connection guide. It does not edit Chrome

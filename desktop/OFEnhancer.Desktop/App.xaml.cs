@@ -2,6 +2,7 @@ using System.Security.Principal;
 using System.IO;
 using System.Windows;
 using System.Windows.Forms;
+using OFEnhancer.Catalogue;
 using OFEnhancer.Protocol;
 
 namespace OFEnhancer.Desktop;
@@ -12,6 +13,7 @@ public partial class App : System.Windows.Application
     private DesktopAgent? agent;
     private NotifyIcon? tray;
     private MainWindow? window;
+    private CatalogueStore? catalogue;
 
     protected override void OnStartup(StartupEventArgs eventArgs)
     {
@@ -47,7 +49,22 @@ public partial class App : System.Windows.Application
             eventArgs.Args,
             AppConfiguration.SettingsPath
         );
-        window = new MainWindow(extensionId);
+        try
+        {
+            catalogue = CatalogueStore.Open(AppConfiguration.CatalogueDatabasePath);
+        }
+        catch (Exception exception) when (exception is CatalogueMigrationException or IOException)
+        {
+            System.Windows.MessageBox.Show(
+                "OFEnhancer could not open the local catalogue. No publishing action was started.",
+                "Catalogue unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error
+            );
+            Shutdown();
+            return;
+        }
+        window = new MainWindow(extensionId, catalogue);
         MainWindow = window;
         window.Show();
 
@@ -67,6 +84,7 @@ public partial class App : System.Windows.Application
     {
         tray?.Dispose();
         agent?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        catalogue?.Dispose();
         if (instanceLock is not null)
         {
             instanceLock.ReleaseMutex();
@@ -84,9 +102,10 @@ public partial class App : System.Windows.Application
         window.Activate();
     }
 
-    private void ExitApp()
+    private async void ExitApp()
     {
-        window?.Exit();
+        if (window is not null)
+            await window.ExitAsync();
         Shutdown();
     }
 

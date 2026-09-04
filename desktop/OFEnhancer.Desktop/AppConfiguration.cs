@@ -14,6 +14,22 @@ public static partial class AppConfiguration
             "settings.json"
         );
 
+    public static string CatalogueDatabasePath
+    {
+        get
+        {
+            string? overrideFolder = Environment.GetEnvironmentVariable("OFENHANCER_DATA_FOLDER");
+            string folder = string.IsNullOrWhiteSpace(overrideFolder)
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "OFEnhancer",
+                    "data"
+                )
+                : Path.GetFullPath(overrideFolder);
+            return Path.Combine(folder, "catalogue.db");
+        }
+    }
+
     public static string? ResolveExtensionId(IReadOnlyList<string> args, string settingsPath)
     {
         for (int index = 0; index < args.Count - 1; index++)

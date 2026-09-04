@@ -65,14 +65,106 @@
         <section data-panel="catalogue" hidden>
           <header class="page-heading">
             <h1 tabindex="-1">Catalogue</h1>
-            <p>The desktop catalogue is not connected yet.</p>
+            <p id="catalogueSummary">Loading your videos…</p>
           </header>
-          <div class="empty-state">
-            <h2>No catalogue data</h2>
+
+          <div class="catalogue-controls">
+            <label class="catalogue-search" for="catalogueSearch">
+              <span>Search catalogue</span>
+              <input
+                id="catalogueSearch"
+                name="catalogue-search"
+                type="search"
+                autocomplete="off"
+                placeholder="Ashley, episode 04…"
+              />
+            </label>
+            <div class="filter-group" aria-label="Filter catalogue">
+              <button
+                type="button"
+                data-catalogue-filter="all"
+                aria-pressed="true"
+              >
+                All
+              </button>
+              <button type="button" data-catalogue-filter="missing">
+                Needs thumbnail
+              </button>
+              <button type="button" data-catalogue-filter="bound">Bound</button>
+            </div>
+            <div class="catalogue-actions">
+              <input
+                id="catalogueFile"
+                class="visually-hidden"
+                type="file"
+                accept="application/json,.json"
+              />
+              <button
+                id="importCatalogue"
+                class="secondary-button"
+                type="button"
+              >
+                Import catalogue
+              </button>
+              <button
+                id="scanThumbnails"
+                class="secondary-button"
+                type="button"
+              >
+                Scan thumbnails
+              </button>
+            </div>
+          </div>
+
+          <p id="catalogueStatus" class="action-status" role="status"></p>
+
+          <div
+            id="catalogueLoading"
+            class="catalogue-loading"
+            aria-label="Loading catalogue"
+          >
+            <span></span><span></span><span></span>
+          </div>
+
+          <div id="catalogueUnavailable" class="empty-state" hidden>
+            <h2>Open the desktop app</h2>
+            <p>The local catalogue is available in OFEnhancer for Windows.</p>
+          </div>
+
+          <div id="catalogueEmpty" class="empty-state" hidden>
+            <h2>No videos yet</h2>
             <p>
-              Your Sheet and thumbnail library will appear here after the
-              catalogue migration.
+              Import a catalogue snapshot, then scan your curated thumbnails.
             </p>
+          </div>
+
+          <section id="thumbnailReview" class="thumbnail-review" hidden>
+            <div class="section-heading">
+              <div>
+                <h2>Needs a match</h2>
+                <p>Choose once. OFEnhancer will remember the file.</p>
+              </div>
+              <span id="thumbnailReviewCount" class="count-badge"></span>
+            </div>
+            <ul id="thumbnailReviewList" class="review-list"></ul>
+          </section>
+
+          <ul
+            id="catalogueList"
+            class="catalogue-list"
+            aria-label="Video catalogue"
+          ></ul>
+          <button
+            id="loadMoreCatalogue"
+            class="secondary-button load-more"
+            type="button"
+            hidden
+          >
+            Show more videos
+          </button>
+          <div id="catalogueNoMatches" class="empty-state compact-empty" hidden>
+            <h2>No matching videos</h2>
+            <p>Try a different search or filter.</p>
           </div>
         </section>
 
@@ -126,5 +218,23 @@
         </section>
       </main>
     </div>
+
+    <dialog id="matchDialog" aria-labelledby="matchDialogTitle">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="matchDialogTitle">Match thumbnail</h2>
+          <p id="matchDialogFile"></p>
+        </div>
+        <button id="closeMatchDialog" class="quiet-button" type="button">
+          Close
+        </button>
+      </div>
+      <div class="match-source">
+        <div id="matchDialogImage"></div>
+        <p>Which catalogue video is this?</p>
+      </div>
+      <div id="candidateList" class="candidate-list"></div>
+      <p id="matchDialogStatus" class="action-status" role="status"></p>
+    </dialog>
   </body>
 </html>
