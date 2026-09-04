@@ -169,6 +169,46 @@ public sealed class SyncOutboxTests
         );
     }
 
+    [TestMethod]
+    public void OpenOperationsAndCountsAreScopedToTheSelectedWorkbookAndSheet()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = OpenWithItem(temp.Path, out string itemId);
+        SyncOutboxItem preserved = store.EnqueueProjection(Request(
+            itemId,
+            "idempotency-workbook-a",
+            workbookId: "workbook-a",
+            sheetId: "11"
+        ));
+        SyncOutboxItem selectedPending = store.EnqueueProjection(Request(
+            itemId,
+            "idempotency-workbook-b-pending",
+            workbookId: "workbook-b",
+            sheetId: "22"
+        ));
+        SyncOutboxItem selectedConflict = store.EnqueueProjection(Request(
+            itemId,
+            "idempotency-workbook-b-conflict",
+            createdUtc: Clock.AddMinutes(1),
+            workbookId: "workbook-b",
+            sheetId: "22"
+        ));
+        store.MarkSyncPendingConflict(selectedConflict.OperationId, "remote-value-not-empty", Clock);
+
+        IReadOnlyList<SyncOutboxItem> selected = store.GetOpenSyncOperations("workbook-b", "22");
+        SyncOutboxCounts counts = store.GetSyncOperationCounts("workbook-b", "22");
+
+        CollectionAssert.AreEqual(
+            new[] { selectedPending.OperationId, selectedConflict.OperationId },
+            selected.Select(item => item.OperationId).ToArray()
+        );
+        Assert.AreEqual(1, counts.Pending);
+        Assert.AreEqual(0, counts.Attempted);
+        Assert.AreEqual(1, counts.Conflicts);
+        Assert.AreEqual(0, counts.Unresolved);
+        Assert.AreEqual(SyncOutboxState.Pending, store.GetSyncOperation(preserved.OperationId).State);
+    }
+
     private static CatalogueStore OpenWithItem(string directory, out string itemId)
     {
         CatalogueStore store = CatalogueStore.Open(Path.Combine(directory, "catalogue.db"));
@@ -185,13 +225,13 @@ public sealed class SyncOutboxTests
         return store;
     }
 
-    private static SyncOutboxItem Request(string itemId, string idempotencyKey, string payloadValue = CanonicalOnlyFans, string? operationId = null, DateTimeOffset? createdUtc = null, string destination = "onlyfans") =>
+    private static SyncOutboxItem Request(string itemId, string idempotencyKey, string payloadValue = CanonicalOnlyFans, string? operationId = null, DateTimeOffset? createdUtc = null, string destination = "onlyfans", string workbookId = "workbook-1", string sheetId = "2126708696") =>
         new(
             operationId ?? Guid.NewGuid().ToString("D"),
             idempotencyKey,
             itemId,
-            "workbook-1",
-            "2126708696",
+            workbookId,
+            sheetId,
             "ofenhancer.item_id.v1",
             itemId,
             destination,

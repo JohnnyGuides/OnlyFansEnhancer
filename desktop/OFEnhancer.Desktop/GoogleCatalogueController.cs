@@ -32,11 +32,12 @@ internal interface IGoogleCatalogueSession : IDisposable
         string planHash,
         CancellationToken cancellationToken
     );
-    Task<GoogleSyncSummary> SyncAsync(CancellationToken cancellationToken);
+    Task<GoogleSyncSummary> SyncAsync(string sheetId, CancellationToken cancellationToken);
 }
 
 internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 {
+    private const string CatalogueProfile = "catalogue-v1";
     private readonly object _gate = new();
     private readonly DesktopSettingsStore _settings;
     private readonly CatalogueStore _store;
@@ -55,6 +56,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     private IGoogleConnectionSession? _connection;
     private IGoogleCatalogueSession? _session;
     private GoogleConnectionCompletion? _completion;
+    private GoogleCatalogueSelection? _selection;
     private WorkbookInspection? _inspection;
     private string? _connectionErrorCode;
     private string? _syncIssueCode;
@@ -62,6 +64,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     private bool _syncing;
     private bool _disposed;
     private int _catalogueOperationActive;
+    private long _connectionEpoch;
 
     internal GoogleCatalogueController(
         DesktopSettingsStore settings,
@@ -77,6 +80,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         _connectionFactory = connectionFactory
             ?? throw new ArgumentNullException(nameof(connectionFactory));
         _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory));
+        RestorePersistedSession();
     }
 
     internal GoogleCatalogueController(
@@ -141,21 +145,39 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     {
         string clientId;
         IGoogleConnectionSession connection;
+        IGoogleConnectionSession? previousConnection;
+        IGoogleCatalogueSession? previousSession;
+        long epoch;
         lock (_gate)
         {
             ThrowIfDisposed();
             clientId = _settings.Load().GoogleOAuthClientId
                 ?? throw new GoogleCatalogueControllerException("google-client-id-not-configured");
+            if (Volatile.Read(ref _catalogueOperationActive) != 0)
+                throw new GoogleCatalogueControllerException("google-operation-in-progress");
             if (_connection?.Snapshot.State == GoogleConnectionState.Connecting)
                 throw new GoogleCatalogueControllerException("google-connection-in-progress");
-            _connection?.Dispose();
+            epoch = ++_connectionEpoch;
+            previousConnection = _connection;
+            previousSession = _session;
+            _connection = null;
+            _session = null;
+            _completion = null;
+            _selection = null;
+            _inspection = null;
+            _ready = false;
+            _syncIssueCode = null;
             _connectionErrorCode = null;
             connection = _connectionFactory(
                 clientId,
-                completion => CompleteConnection(clientId, completion)
+                completion => CompleteConnection(epoch, clientId, completion)
             );
             _connection = connection;
         }
+
+        previousConnection?.Cancel();
+        previousConnection?.Dispose();
+        previousSession?.Dispose();
 
         try
         {
@@ -168,6 +190,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 if (ReferenceEquals(_connection, connection))
                 {
                     _connection = null;
+                    _connectionEpoch++;
                     connection.Dispose();
                 }
             }
@@ -181,7 +204,16 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         lock (_gate)
         {
             ThrowIfDisposed();
+            _connectionEpoch++;
             _connection?.Cancel();
+            try
+            {
+                _tokenVault.Delete();
+            }
+            catch
+            {
+                throw new GoogleCatalogueControllerException("google-connection-cancel-failed");
+            }
             _connectionErrorCode = null;
             return StatusLocked();
         }
@@ -189,8 +221,14 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 
     public GoogleCatalogueStatusView inspectGoogleWorkbook()
     {
-        IGoogleCatalogueSession session = RequiredSession();
-        EnterCatalogueOperation();
+        IGoogleCatalogueSession session;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            session = _session
+                ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+            EnterCatalogueOperationLocked();
+        }
         try
         {
             WorkbookInspection inspection = session
@@ -200,8 +238,31 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             lock (_gate)
             {
                 ThrowIfDisposed();
+                DateTimeOffset inspectedUtc = DateTimeOffset.UtcNow;
+                bool ready = inspection.AlreadyMigrated && inspection.Conflicts.Count == 0;
+                if (ready)
+                {
+                    _store.ImportWorkbookProjection(inspection.Projection);
+                    GoogleRowBinding[] verifiedBindings = inspection.Bindings
+                        .Select(binding => binding with { VerifiedUtc = inspectedUtc })
+                        .ToArray();
+                    _store.ReplaceGoogleBindings(inspection.Projection.WorkbookId, verifiedBindings);
+                    inspection = inspection with { Bindings = verifiedBindings };
+                }
+                if (inspection.Conflicts.Count == 0)
+                {
+                    _store.SaveGoogleCatalogueProfile(
+                        inspection.Projection.WorkbookId,
+                        inspection.Projection.SheetId,
+                        inspection.CatalogueSheetTitle,
+                        CatalogueProfile,
+                        ready,
+                        inspectedUtc
+                    );
+                    _selection = _store.GetGoogleCatalogueSelection();
+                }
                 _inspection = inspection;
-                _ready = false;
+                _ready = ready;
                 _syncIssueCode = null;
                 return StatusLocked();
             }
@@ -229,9 +290,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             {
                 throw new GoogleCatalogueControllerException("stale-migration-plan");
             }
+            EnterCatalogueOperationLocked();
         }
 
-        EnterCatalogueOperation();
         try
         {
             WorkbookMigrationResult result = session
@@ -247,6 +308,17 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 ThrowIfDisposed();
                 _inspection = result.Inspection ?? _inspection;
                 _ready = true;
+                WorkbookInspection readyInspection = _inspection
+                    ?? throw new GoogleCatalogueControllerException("google-migration-failed");
+                _store.SaveGoogleCatalogueProfile(
+                    readyInspection.Projection.WorkbookId,
+                    readyInspection.Projection.SheetId,
+                    readyInspection.CatalogueSheetTitle,
+                    CatalogueProfile,
+                    ready: true,
+                    DateTimeOffset.UtcNow
+                );
+                _selection = _store.GetGoogleCatalogueSelection();
                 _syncIssueCode = null;
                 return StatusLocked();
             }
@@ -264,6 +336,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     public GoogleCatalogueStatusView syncGoogleCatalogue()
     {
         IGoogleCatalogueSession session;
+        string workbookId;
+        string sheetId;
         lock (_gate)
         {
             ThrowIfDisposed();
@@ -271,20 +345,33 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
             if (!_ready)
                 throw new GoogleCatalogueControllerException("google-workbook-not-ready");
+            if (_selection?.SheetId is null)
+                throw new GoogleCatalogueControllerException("google-workbook-not-ready");
+            workbookId = _selection.WorkbookId;
+            sheetId = _selection.SheetId;
+            EnterCatalogueOperationLocked();
         }
 
-        EnterCatalogueOperation();
         lock (_gate)
             _syncing = true;
         try
         {
             GoogleSyncSummary summary = session
-                .SyncAsync(_lifetime.Token)
+                .SyncAsync(sheetId, _lifetime.Token)
                 .GetAwaiter()
                 .GetResult();
             lock (_gate)
             {
                 ThrowIfDisposed();
+                if (summary.Conflicts == 0 && summary.Unresolved == 0 && summary.Pending == 0)
+                {
+                    _store.MarkGoogleCatalogueSync(
+                        workbookId,
+                        sheetId,
+                        DateTimeOffset.UtcNow
+                    );
+                    _selection = _store.GetGoogleCatalogueSelection();
+                }
                 _syncIssueCode = summary.Conflicts > 0
                     ? "google-sync-conflict"
                     : summary.Unresolved > 0
@@ -308,18 +395,17 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 
     public GoogleCatalogueStatusView disconnectGoogleCatalogue()
     {
-        if (Volatile.Read(ref _catalogueOperationActive) != 0)
-            throw new GoogleCatalogueControllerException("google-operation-in-progress");
-
         lock (_gate)
         {
             ThrowIfDisposed();
+            if (Volatile.Read(ref _catalogueOperationActive) != 0)
+                throw new GoogleCatalogueControllerException("google-operation-in-progress");
+            _connectionEpoch++;
             try
             {
                 _connection?.Cancel();
                 _tokenVault.Delete();
-                if (_completion is not null)
-                    _store.ReplaceGoogleBindings(_completion.WorkbookId, []);
+                _store.ClearGoogleCatalogueSelection();
             }
             catch
             {
@@ -330,6 +416,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             _connection = null;
             _session = null;
             _completion = null;
+            _selection = null;
             _inspection = null;
             _connectionErrorCode = null;
             _syncIssueCode = null;
@@ -347,6 +434,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             if (_disposed)
                 return;
             _disposed = true;
+            _connectionEpoch++;
             _lifetime.Cancel();
             connection = _connection;
             session = _session;
@@ -359,20 +447,38 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         _lifetime.Dispose();
     }
 
-    private void CompleteConnection(string clientId, GoogleConnectionCompletion completion)
+    private void CompleteConnection(
+        long epoch,
+        string clientId,
+        GoogleConnectionCompletion completion
+    )
     {
+        lock (_gate)
+        {
+            if (_disposed || epoch != _connectionEpoch)
+            {
+                DeleteStaleCredential();
+                return;
+            }
+        }
+
         IGoogleCatalogueSession? session = null;
         try
         {
             session = _sessionFactory(clientId, completion);
             lock (_gate)
             {
-                if (_disposed)
+                if (_disposed || epoch != _connectionEpoch)
+                {
+                    DeleteStaleCredential();
                     return;
+                }
+                _store.SaveGoogleCatalogueWorkbook(completion.WorkbookId, completion.WorkbookTitle);
                 _session?.Dispose();
                 _session = session;
                 session = null;
                 _completion = completion;
+                _selection = _store.GetGoogleCatalogueSelection();
                 _inspection = null;
                 _ready = false;
                 _syncIssueCode = null;
@@ -382,21 +488,26 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         catch
         {
             lock (_gate)
-                _connectionErrorCode = "google-session-failed";
+            {
+                if (!_disposed && epoch == _connectionEpoch)
+                {
+                    DeleteStaleCredential();
+                    try
+                    {
+                        _store.ClearGoogleCatalogueSelection();
+                    }
+                    catch
+                    {
+                        // The safe status remains disconnected/error even if local cleanup needs retrying.
+                    }
+                    _selection = null;
+                    _connectionErrorCode = "google-session-failed";
+                }
+            }
         }
         finally
         {
             session?.Dispose();
-        }
-    }
-
-    private IGoogleCatalogueSession RequiredSession()
-    {
-        lock (_gate)
-        {
-            ThrowIfDisposed();
-            return _session
-                ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
         }
     }
 
@@ -414,9 +525,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             return View("error", errorCode: SafeCode(connection.ErrorCode));
         if (_session is null || _completion is null)
             return new("disconnected");
-        if (_inspection is null)
+        if (_inspection is null && !_ready)
             return View("needsInspection");
-        if (_inspection.Conflicts.Count > 0)
+        if (_inspection?.Conflicts.Count > 0)
             return View("conflict", errorCode: SafeCode(_inspection.Conflicts[0].Code));
         if (_syncIssueCode is not null)
             return View("conflict", errorCode: _syncIssueCode);
@@ -427,31 +538,32 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 
     private GoogleCatalogueStatusView View(string state, string? errorCode = null)
     {
-        IReadOnlyList<SyncOutboxItem> open = _store.GetOpenSyncOperations();
-        int pending = open.Count(operation => operation.State == SyncOutboxState.Pending);
-        int conflicts = open.Count(operation => operation.State == SyncOutboxState.Conflict);
-        DateTimeOffset? lastVerified = _completion is null
-            ? null
-            : _store
-                .GetGoogleBindings(_completion.WorkbookId)
-                .Select(binding => (DateTimeOffset?)binding.VerifiedUtc)
-                .Max();
+        SyncOutboxCounts counts = _selection?.SheetId is null
+            ? new(0, 0, 0, 0)
+            : _store.GetSyncOperationCounts(_selection.WorkbookId, _selection.SheetId);
         bool exposePlan = string.Equals(state, "migrationReady", StringComparison.Ordinal);
         return new(
             state,
-            _completion?.WorkbookTitle,
-            _inspection?.CatalogueSheetTitle,
+            _selection?.WorkbookTitle ?? _completion?.WorkbookTitle,
+            _inspection?.CatalogueSheetTitle ?? _selection?.SheetTitle,
             exposePlan ? _inspection?.PlanHash : null,
-            _inspection?.Bindings.Count ?? 0,
+            RowsToBind(),
             _inspection?.MigrationPlan.Operations.Count ?? 0,
-            pending,
-            conflicts,
-            lastVerified,
+            counts.Pending,
+            counts.Conflicts,
+            _selection?.LastSuccessfulSyncUtc,
             errorCode
         );
     }
 
-    private void EnterCatalogueOperation()
+    private int RowsToBind() => _inspection?.MigrationPlan.Operations
+        .Where(operation => operation.Kind is "add-metadata" or "set-stable-id")
+        .Select(operation => operation.RowNumber)
+        .Where(row => row.HasValue)
+        .Distinct()
+        .Count() ?? 0;
+
+    private void EnterCatalogueOperationLocked()
     {
         if (Interlocked.CompareExchange(ref _catalogueOperationActive, 1, 0) != 0)
             throw new GoogleCatalogueControllerException("google-operation-in-progress");
@@ -463,6 +575,55 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     {
         if (_disposed)
             throw new GoogleCatalogueControllerException("google-catalogue-unavailable");
+    }
+
+    private void DeleteStaleCredential()
+    {
+        try
+        {
+            _tokenVault.Delete();
+        }
+        catch
+        {
+            // A stale completion must never become visible; disconnect can be retried explicitly.
+        }
+    }
+
+    private void RestorePersistedSession()
+    {
+        try
+        {
+            string? clientId = _settings.Load().GoogleOAuthClientId;
+            GoogleRefreshCredential? credential = _tokenVault.Load();
+            GoogleCatalogueSelection? selection = _store.GetGoogleCatalogueSelection();
+            if (clientId is null || credential is null || selection is null)
+                return;
+            if (selection.SheetId is not null
+                && !string.Equals(selection.Profile, CatalogueProfile, StringComparison.Ordinal))
+            {
+                return;
+            }
+            GoogleConnectionCompletion completion = new(
+                selection.WorkbookId,
+                selection.WorkbookTitle,
+                credential.AccessTokenExpiresAt
+            );
+            _session = _sessionFactory(clientId, completion);
+            _completion = completion;
+            _selection = selection;
+            _ready = selection.Ready
+                && selection.SheetId is not null
+                && selection.SheetTitle is not null
+                && string.Equals(selection.Profile, CatalogueProfile, StringComparison.Ordinal);
+        }
+        catch
+        {
+            _session?.Dispose();
+            _session = null;
+            _completion = null;
+            _selection = null;
+            _ready = false;
+        }
     }
 
     private static GoogleCatalogueControllerException SafeException(Exception exception) =>
@@ -542,8 +703,8 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
         CancellationToken cancellationToken
     ) => _migrator.ApplyAsync(planHash, cancellationToken);
 
-    public Task<GoogleSyncSummary> SyncAsync(CancellationToken cancellationToken) =>
-        _syncWorker.RunOnceAsync(cancellationToken);
+    public Task<GoogleSyncSummary> SyncAsync(string sheetId, CancellationToken cancellationToken) =>
+        _syncWorker.RunOnceAsync(_workbookId, sheetId, cancellationToken);
 
     public void Dispose() => _authorization?.Dispose();
 }

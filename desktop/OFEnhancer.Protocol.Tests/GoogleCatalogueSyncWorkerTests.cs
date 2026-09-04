@@ -32,7 +32,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
             fixture.Google.SetCell(Range(94), IntendedValue);
         };
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Completed);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
@@ -54,7 +54,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetCell("'Catalogue Copy'!J93", null);
         fixture.Google.SetCell(Range(93), ForeignValue);
 
-        await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        await fixture.RunSelectedAsync();
 
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual(2, fixture.Google.SheetPropertyReads);
@@ -74,7 +74,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), IntendedValue);
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Completed);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
@@ -90,7 +90,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), null);
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Conflicts);
         Assert.AreEqual("remote-fingerprint-changed", fixture.Store.GetSyncOperation(operationId).ErrorCode);
@@ -106,7 +106,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), ForeignValue);
 
-        await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        await fixture.RunSelectedAsync();
 
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual("remote-value-not-empty", fixture.Store.GetSyncOperation(operationId).ErrorCode);
@@ -122,7 +122,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), null);
 
-        await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        await fixture.RunSelectedAsync();
 
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual("intended-fingerprint-invalid", fixture.Store.GetSyncOperation(operationId).ErrorCode);
@@ -139,7 +139,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetCell(Range(93), null);
         fixture.Google.SetCell(Range(94), null);
 
-        await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        await fixture.RunSelectedAsync();
 
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
         Assert.AreEqual("metadata-row-ambiguous", fixture.Store.GetSyncOperation(operationId).ErrorCode);
@@ -158,7 +158,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("claire"), 94);
         fixture.Google.SetCell(Range(94), null);
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         CollectionAssert.AreEqual(
             new[] { fixture.ItemId("ashley"), fixture.ItemId("claire"), fixture.ItemId("claire") },
@@ -171,6 +171,33 @@ public sealed class GoogleCatalogueSyncWorkerTests
     }
 
     [TestMethod]
+    public async Task SelectedWorkbookRunNeverReadsOrMutatesPreservedWorkbookOperations()
+    {
+        using SyncFixture fixture = SyncFixture.Create("ashley", "claire");
+        string preservedId = fixture.Enqueue("claire", Clock, workbookId: "workbook-one");
+        string selectedId = fixture.Enqueue("ashley", Clock.AddMinutes(1), workbookId: "workbook-two");
+        fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
+        fixture.Google.SetCell(Range(93), IntendedValue);
+
+        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(
+            "workbook-two",
+            CatalogueSheetId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            CancellationToken.None
+        );
+
+        Assert.AreEqual(SyncOutboxState.Pending, fixture.Store.GetSyncOperation(preservedId).State);
+        SyncOutboxItem selected = fixture.Store.GetSyncOperation(selectedId);
+        Assert.AreEqual(SyncOutboxState.Completed, selected.State, selected.ErrorCode);
+        CollectionAssert.AreEqual(
+            new[] { fixture.ItemId("ashley") },
+            fixture.Google.MetadataSearches.ToArray()
+        );
+        Assert.AreEqual(0, fixture.Google.Mutations.Count);
+        Assert.AreEqual(1, summary.Completed);
+        Assert.AreEqual(0, summary.Pending);
+    }
+
+    [TestMethod]
     public async Task ConcurrentRunsAreSerializedAndCannotWriteOneOperationTwice()
     {
         using SyncFixture fixture = SyncFixture.Create();
@@ -179,9 +206,9 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetCell(Range(93), null);
         fixture.Google.PauseNextMetadataSearch();
 
-        Task<GoogleSyncSummary> first = fixture.Worker.RunOnceAsync(CancellationToken.None);
+        Task<GoogleSyncSummary> first = fixture.RunSelectedAsync();
         await fixture.Google.MetadataSearchPaused;
-        Task<GoogleSyncSummary> second = fixture.Worker.RunOnceAsync(CancellationToken.None);
+        Task<GoogleSyncSummary> second = fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, fixture.Google.MetadataSearches.Count);
         fixture.Google.ReleaseMetadataSearch();
@@ -199,7 +226,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), IntendedValue);
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Completed);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
@@ -214,7 +241,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), ForeignValue);
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Conflicts);
         Assert.AreEqual(SyncOutboxState.Conflict, fixture.Store.GetSyncOperation(operationId).State);
@@ -229,14 +256,14 @@ public sealed class GoogleCatalogueSyncWorkerTests
         string operationId = fixture.EnqueueAttempted("ashley", Clock);
         fixture.Google.SetRow(fixture.ItemId("ashley"), null);
 
-        GoogleSyncSummary first = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary first = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, first.Unresolved);
         Assert.AreEqual(SyncOutboxState.Unresolved, fixture.Store.GetSyncOperation(operationId).State);
         fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
         fixture.Google.SetCell(Range(93), IntendedValue);
 
-        GoogleSyncSummary second = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary second = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, second.Completed);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
@@ -251,7 +278,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Store.MarkSyncUnresolved(operationId, "network-uncertain", Clock.AddMinutes(1));
         fixture.Google.SetRow(fixture.ItemId("ashley"), null);
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Unresolved);
         Assert.AreEqual(SyncOutboxState.Unresolved, fixture.Store.GetSyncOperation(operationId).State);
@@ -268,7 +295,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         fixture.Google.SetCell(Range(93), null);
         fixture.Google.ThrowAfterAcceptingMutation = true;
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.AreEqual(1, summary.Completed);
         Assert.AreEqual(SyncOutboxState.Completed, fixture.Store.GetSyncOperation(operationId).State);
@@ -296,7 +323,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
             rejection = exception;
         }
 
-        GoogleSyncSummary summary = await fixture.Worker.RunOnceAsync(CancellationToken.None);
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
 
         Assert.IsNotNull(rejection);
         Assert.AreEqual(0, summary.Pending);
@@ -376,13 +403,20 @@ public sealed class GoogleCatalogueSyncWorkerTests
 
         public string ItemId(string sourceKey) => _items[sourceKey];
 
+        public Task<GoogleSyncSummary> RunSelectedAsync() => Worker.RunOnceAsync(
+            "workbook-one",
+            CatalogueSheetId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            CancellationToken.None
+        );
+
         public string Enqueue(
             string sourceKey,
             DateTimeOffset createdUtc,
             string expectedFingerprint = EmptyFingerprint,
             string intendedFingerprint = IntendedFingerprint,
             string destination = "onlyfans",
-            string payloadValue = IntendedValue
+            string payloadValue = IntendedValue,
+            string workbookId = "workbook-one"
         )
         {
             string itemId = ItemId(sourceKey);
@@ -390,7 +424,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
                 Guid.NewGuid().ToString("D"),
                 $"sync-{sourceKey}-{Guid.NewGuid():N}",
                 itemId,
-                "workbook-one",
+                workbookId,
                 CatalogueSheetId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 "ofenhancer.item_id.v1",
                 itemId,
@@ -482,10 +516,12 @@ public sealed class GoogleCatalogueSyncWorkerTests
                 }
                 return Json(request, MetadataJson(itemId));
             }
-            if (request.Method == HttpMethod.Get && path.EndsWith("/spreadsheets/workbook-one", StringComparison.Ordinal))
+            if (request.Method == HttpMethod.Get
+                && path.Contains("/spreadsheets/workbook-", StringComparison.Ordinal)
+                && !path.Contains("/values/", StringComparison.Ordinal))
             {
                 SheetPropertyReads++;
-                return Json(request, SheetPropertiesJson());
+                return Json(request, SheetPropertiesJson(path[(path.LastIndexOf('/') + 1)..]));
             }
             if (request.Method == HttpMethod.Get && path.Contains("/values/", StringComparison.Ordinal))
             {
@@ -543,7 +579,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
             });
         }
 
-        private string SheetPropertiesJson()
+        private string SheetPropertiesJson(string workbookId)
         {
             List<object> sheets =
             [
@@ -573,7 +609,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
             }
             return JsonSerializer.Serialize(new
             {
-                spreadsheetId = "workbook-one",
+                spreadsheetId = workbookId,
                 properties = new { title = "Work" },
                 sheets,
             });

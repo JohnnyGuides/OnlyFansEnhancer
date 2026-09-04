@@ -62,6 +62,50 @@ internal static partial class SyncOutbox
     internal static IReadOnlyList<SyncOutboxItem> GetOpen(SqliteConnection connection) =>
         Read(connection, "WHERE state <> 'completed' ORDER BY created_utc, operation_id");
 
+    internal static IReadOnlyList<SyncOutboxItem> GetOpen(
+        SqliteConnection connection,
+        string workbookId,
+        string sheetId
+    )
+    {
+        (string workbook, string sheet) = Scope(workbookId, sheetId);
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = SelectSql + " WHERE workbook_id = $workbookId AND sheet_id = $sheetId AND state <> 'completed' ORDER BY created_utc, operation_id";
+        command.Parameters.AddWithValue("$workbookId", workbook);
+        command.Parameters.AddWithValue("$sheetId", sheet);
+        return Read(command);
+    }
+
+    internal static SyncOutboxCounts GetCounts(
+        SqliteConnection connection,
+        string workbookId,
+        string sheetId
+    )
+    {
+        (string workbook, string sheet) = Scope(workbookId, sheetId);
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT
+                SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'attempted' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'conflict' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN state = 'unresolved' THEN 1 ELSE 0 END)
+            FROM sync_outbox
+            WHERE workbook_id = $workbookId AND sheet_id = $sheetId
+            """;
+        command.Parameters.AddWithValue("$workbookId", workbook);
+        command.Parameters.AddWithValue("$sheetId", sheet);
+        using SqliteDataReader reader = command.ExecuteReader();
+        reader.Read();
+        return new(
+            reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
+            reader.IsDBNull(1) ? 0 : reader.GetInt32(1),
+            reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+            reader.IsDBNull(3) ? 0 : reader.GetInt32(3)
+        );
+    }
+
     internal static SyncOutboxItem Get(SqliteConnection connection, string operationId)
     {
         string id = GuidText(operationId, "operationId");
@@ -112,12 +156,20 @@ internal static partial class SyncOutbox
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = SelectSql + " " + clause;
+        return Read(command);
+    }
+
+    private static IReadOnlyList<SyncOutboxItem> Read(SqliteCommand command)
+    {
         using SqliteDataReader reader = command.ExecuteReader();
         List<SyncOutboxItem> result = [];
         while (reader.Read())
             result.Add(ReadItem(reader));
         return result;
     }
+
+    private static (string WorkbookId, string SheetId) Scope(string workbookId, string sheetId) =>
+        (Required(workbookId, 256, "workbookId"), Required(sheetId, 64, "sheetId"));
 
     private static SyncOutboxItem? ReadByIdempotencyKey(SqliteConnection connection, SqliteTransaction transaction, string idempotencyKey)
     {
@@ -263,6 +315,8 @@ public sealed partial class CatalogueStore
 {
     public SyncOutboxItem EnqueueProjection(SyncOutboxItem projection) => SyncOutbox.Enqueue(connection, projection);
     public IReadOnlyList<SyncOutboxItem> GetOpenSyncOperations() => SyncOutbox.GetOpen(connection);
+    public IReadOnlyList<SyncOutboxItem> GetOpenSyncOperations(string workbookId, string sheetId) => SyncOutbox.GetOpen(connection, workbookId, sheetId);
+    public SyncOutboxCounts GetSyncOperationCounts(string workbookId, string sheetId) => SyncOutbox.GetCounts(connection, workbookId, sheetId);
     public SyncOutboxItem GetSyncOperation(string operationId) => SyncOutbox.Get(connection, operationId);
     public void MarkSyncAttempted(string operationId, DateTimeOffset occurredUtc) => SyncOutbox.MarkAttempted(connection, operationId, occurredUtc);
     public void MarkSyncPendingCompleted(string operationId, DateTimeOffset occurredUtc) => SyncOutbox.MarkPendingCompleted(connection, operationId, occurredUtc);
@@ -271,3 +325,5 @@ public sealed partial class CatalogueStore
     public void MarkSyncConflict(string operationId, string errorCode, DateTimeOffset occurredUtc) => SyncOutbox.MarkConflict(connection, operationId, errorCode, occurredUtc);
     public void MarkSyncUnresolved(string operationId, string errorCode, DateTimeOffset occurredUtc) => SyncOutbox.MarkUnresolved(connection, operationId, errorCode, occurredUtc);
 }
+
+public sealed record SyncOutboxCounts(int Pending, int Attempted, int Conflicts, int Unresolved);

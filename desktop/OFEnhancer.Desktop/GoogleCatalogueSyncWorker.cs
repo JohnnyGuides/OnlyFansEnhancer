@@ -30,55 +30,70 @@ internal sealed class GoogleCatalogueSyncWorker
         _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
     }
 
-    internal async Task<GoogleSyncSummary> RunOnceAsync(CancellationToken cancellationToken)
+    internal async Task<GoogleSyncSummary> RunOnceAsync(
+        string workbookId,
+        string sheetId,
+        CancellationToken cancellationToken
+    )
     {
         await _runGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            int completed = 0;
-            int conflicts = 0;
-            int unresolved = 0;
-            foreach (SyncOutboxItem operation in _store.GetOpenSyncOperations())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (operation.State == SyncOutboxState.Conflict)
-                    continue;
-                try
-                {
-                    SyncOutcome outcome = operation.State == SyncOutboxState.Pending
-                        ? await ProcessPendingAsync(operation, cancellationToken).ConfigureAwait(false)
-                        : await ReconcileReadOnlyAsync(operation, cancellationToken).ConfigureAwait(false);
-                    switch (outcome)
-                    {
-                        case SyncOutcome.Completed:
-                            completed++;
-                            break;
-                        case SyncOutcome.Conflict:
-                            conflicts++;
-                            break;
-                        case SyncOutcome.Unresolved:
-                            unresolved++;
-                            break;
-                    }
-                }
-                catch (GoogleCatalogueException)
-                {
-                    // A read-only preflight failure leaves pending work eligible for a later manual run.
-                }
-                catch (SyncOutboxException)
-                {
-                    // Another serialized owner may have resolved this immutable operation.
-                }
-            }
-
-            int pending = _store.GetOpenSyncOperations().Count(operation =>
-                operation.State == SyncOutboxState.Pending);
-            return new(completed, conflicts, unresolved, pending);
+            return await RunOperationsAsync(
+                _store.GetOpenSyncOperations(workbookId, sheetId),
+                () => _store.GetSyncOperationCounts(workbookId, sheetId).Pending,
+                cancellationToken
+            ).ConfigureAwait(false);
         }
         finally
         {
             _runGate.Release();
         }
+    }
+
+    private async Task<GoogleSyncSummary> RunOperationsAsync(
+        IReadOnlyList<SyncOutboxItem> operations,
+        Func<int> pendingCount,
+        CancellationToken cancellationToken
+    )
+    {
+        int completed = 0;
+        int conflicts = 0;
+        int unresolved = 0;
+        foreach (SyncOutboxItem operation in operations)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (operation.State == SyncOutboxState.Conflict)
+                continue;
+            try
+            {
+                SyncOutcome outcome = operation.State == SyncOutboxState.Pending
+                    ? await ProcessPendingAsync(operation, cancellationToken).ConfigureAwait(false)
+                    : await ReconcileReadOnlyAsync(operation, cancellationToken).ConfigureAwait(false);
+                switch (outcome)
+                {
+                    case SyncOutcome.Completed:
+                        completed++;
+                        break;
+                    case SyncOutcome.Conflict:
+                        conflicts++;
+                        break;
+                    case SyncOutcome.Unresolved:
+                        unresolved++;
+                        break;
+                }
+            }
+            catch (GoogleCatalogueException)
+            {
+                // A read-only preflight failure leaves pending work eligible for a later manual run.
+            }
+            catch (SyncOutboxException)
+            {
+                // Another serialized owner may have resolved this immutable operation.
+            }
+        }
+
+        return new(completed, conflicts, unresolved, pendingCount());
     }
 
     private async Task<SyncOutcome> ProcessPendingAsync(
