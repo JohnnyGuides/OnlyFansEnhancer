@@ -14,6 +14,9 @@ const registrationScript = path.join(
   "register-native-host.ps1",
 );
 const extensionId = "a".repeat(32);
+const previousExtensionId = "b".repeat(32);
+const googleOAuthClientId =
+  "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
 
 function powershellQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -35,7 +38,31 @@ function runRegistration({
   localAppData,
   dataRoot,
   registryProbe,
+  settingsCommitFailure,
 }) {
+  const settingsCommit =
+    settingsCommitFailure === undefined
+      ? { declaration: "", argument: "" }
+      : {
+          declaration: `
+$settingsCommit = {
+  param([string]$Source, [string]$Destination, [bool]$DestinationExists)
+  if (${settingsCommitFailure === "after" ? "$true" : "$false"}) {
+    if ($DestinationExists) {
+      [System.IO.File]::Replace(
+        $Source,
+        $Destination,
+        [System.Management.Automation.Language.NullString]::Value
+      )
+    } else {
+      [System.IO.File]::Move($Source, $Destination)
+    }
+  }
+  throw "injected settings commit failure"
+}
+`,
+          argument: " -SettingsCommit $settingsCommit",
+        };
   const command = `
 $writer = {
   param([string]$Path, [string]$Value)
@@ -45,7 +72,8 @@ $writer = {
     [System.Text.UTF8Encoding]::new($false)
   )
 }
-& ${powershellQuote(registrationScript)} -InstallRoot ${powershellQuote(installRoot)} -ExtensionId ${powershellQuote(extensionId)} -RegistryWriter $writer
+${settingsCommit.declaration}
+& ${powershellQuote(registrationScript)} -InstallRoot ${powershellQuote(installRoot)} -ExtensionId ${powershellQuote(extensionId)} -RegistryWriter $writer${settingsCommit.argument}
 `;
   const environment = { ...process.env, LOCALAPPDATA: localAppData };
   delete environment.OFENHANCER_DATA_ROOT;
@@ -71,7 +99,7 @@ test("package test never resolves or enumerates the real user data root", () => 
   );
 });
 
-test("registration writes settings under the explicit bounded data root", () => {
+test("registration creates extension-only settings when no settings exist", () => {
   const temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "ofenhancer-register-"),
   );
@@ -101,6 +129,145 @@ test("registration writes settings under the explicit bounded data root", () => 
     );
     assert.equal(fs.existsSync(registryProbe), true);
     assert.match(result.stdout, /REGISTERED=com\.johnnyguides\.ofenhancer/);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("registration preserves an existing valid Google OAuth client ID", () => {
+  const temporary = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ofenhancer-register-"),
+  );
+  try {
+    const installRoot = createInstallRoot(temporary);
+    const explicitRoot = path.join(temporary, "explicit", "OFEnhancer");
+    const settingsPath = path.join(explicitRoot, "settings.json");
+    const registryProbe = path.join(temporary, "registry-probe.txt");
+    fs.mkdirSync(explicitRoot, { recursive: true });
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        extensionId: previousExtensionId,
+        googleOAuthClientId,
+      }),
+    );
+
+    const result = runRegistration({
+      installRoot,
+      localAppData: path.join(temporary, "default-local-app-data"),
+      dataRoot: explicitRoot,
+      registryProbe,
+    });
+
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, "utf8")), {
+      extensionId,
+      googleOAuthClientId,
+    });
+    assert.equal(fs.existsSync(registryProbe), true);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("registration rejects malformed or unknown settings before mutation", () => {
+  const temporary = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ofenhancer-register-"),
+  );
+  try {
+    const invalidSettings = [
+      "not-json",
+      JSON.stringify({
+        extensionId: previousExtensionId,
+        googleOAuthClientId,
+        unknown: true,
+      }),
+      "[]",
+      JSON.stringify({ googleOAuthClientId: "invalid" }),
+      `${JSON.stringify({ googleOAuthClientId })}${" ".repeat(64 * 1024)}`,
+    ];
+
+    for (const [index, originalSettings] of invalidSettings.entries()) {
+      const caseRoot = path.join(temporary, `case-${index}`);
+      const installRoot = createInstallRoot(caseRoot);
+      const explicitRoot = path.join(caseRoot, "explicit", "OFEnhancer");
+      const settingsPath = path.join(explicitRoot, "settings.json");
+      const registryProbe = path.join(caseRoot, "registry-probe.txt");
+      const nativeManifest = path.join(
+        installRoot,
+        "native",
+        "com.johnnyguides.ofenhancer.json",
+      );
+      fs.mkdirSync(explicitRoot, { recursive: true });
+      fs.writeFileSync(settingsPath, originalSettings);
+
+      const result = runRegistration({
+        installRoot,
+        localAppData: path.join(caseRoot, "default-local-app-data"),
+        dataRoot: explicitRoot,
+        registryProbe,
+      });
+
+      assert.notEqual(result.status, 0, `case ${index}`);
+      assert.match(result.stdout + result.stderr, /settings/i);
+      assert.equal(fs.readFileSync(settingsPath, "utf8"), originalSettings);
+      assert.equal(fs.existsSync(nativeManifest), false);
+      assert.equal(fs.existsSync(registryProbe), false);
+    }
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("failed atomic settings commit leaves valid old or new settings", () => {
+  const temporary = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ofenhancer-register-"),
+  );
+  try {
+    for (const settingsCommitFailure of ["before", "after"]) {
+      const caseRoot = path.join(temporary, settingsCommitFailure);
+      const installRoot = createInstallRoot(caseRoot);
+      const explicitRoot = path.join(caseRoot, "explicit", "OFEnhancer");
+      const settingsPath = path.join(explicitRoot, "settings.json");
+      const registryProbe = path.join(caseRoot, "registry-probe.txt");
+      const nativeManifest = path.join(
+        installRoot,
+        "native",
+        "com.johnnyguides.ofenhancer.json",
+      );
+      fs.mkdirSync(explicitRoot, { recursive: true });
+      fs.writeFileSync(
+        settingsPath,
+        JSON.stringify({
+          extensionId: previousExtensionId,
+          googleOAuthClientId,
+        }),
+      );
+
+      const result = runRegistration({
+        installRoot,
+        localAppData: path.join(caseRoot, "default-local-app-data"),
+        dataRoot: explicitRoot,
+        registryProbe,
+        settingsCommitFailure,
+      });
+
+      assert.notEqual(result.status, 0, settingsCommitFailure);
+      assert.match(result.stdout + result.stderr, /settings/i);
+      assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, "utf8")), {
+        extensionId:
+          settingsCommitFailure === "before"
+            ? previousExtensionId
+            : extensionId,
+        googleOAuthClientId,
+      });
+      assert.deepEqual(
+        fs.readdirSync(explicitRoot).filter((entry) => entry.endsWith(".tmp")),
+        [],
+      );
+      assert.equal(fs.existsSync(nativeManifest), false);
+      assert.equal(fs.existsSync(registryProbe), false);
+    }
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
