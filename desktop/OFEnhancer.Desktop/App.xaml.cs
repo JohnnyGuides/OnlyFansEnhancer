@@ -1,0 +1,83 @@
+using System.Security.Principal;
+using System.Windows;
+using System.Windows.Forms;
+using OFEnhancer.Protocol;
+
+namespace OFEnhancer.Desktop;
+
+public partial class App : System.Windows.Application
+{
+    private Mutex? instanceLock;
+    private DesktopAgent? agent;
+    private NotifyIcon? tray;
+    private MainWindow? window;
+
+    protected override void OnStartup(StartupEventArgs eventArgs)
+    {
+        base.OnStartup(eventArgs);
+        if (eventArgs.Args.Contains("--status-json", StringComparer.Ordinal))
+        {
+            Console.Out.Write(AgentProtocol.Serialize(AgentStatus.Current));
+            Shutdown();
+            return;
+        }
+
+        string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        instanceLock = new Mutex(true, $"Local\\OFEnhancer.Desktop.{userKey}", out bool first);
+        if (!first)
+        {
+            Shutdown();
+            return;
+        }
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        agent = new DesktopAgent(DesktopAgent.DefaultPipeName(userKey));
+        agent.Start();
+
+        string? extensionId = AppConfiguration.ResolveExtensionId(
+            eventArgs.Args,
+            AppConfiguration.SettingsPath
+        );
+        window = new MainWindow(extensionId);
+        MainWindow = window;
+        window.Show();
+
+        tray = new NotifyIcon
+        {
+            Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!),
+            Text = "OFEnhancer",
+            Visible = true,
+            ContextMenuStrip = new ContextMenuStrip(),
+        };
+        tray.ContextMenuStrip.Items.Add("Open", null, (_, _) => ShowWindow());
+        tray.ContextMenuStrip.Items.Add("Exit", null, (_, _) => ExitApp());
+        tray.DoubleClick += (_, _) => ShowWindow();
+    }
+
+    protected override void OnExit(ExitEventArgs eventArgs)
+    {
+        tray?.Dispose();
+        agent?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (instanceLock is not null)
+        {
+            instanceLock.ReleaseMutex();
+            instanceLock.Dispose();
+        }
+        base.OnExit(eventArgs);
+    }
+
+    private void ShowWindow()
+    {
+        if (window is null)
+            return;
+        window.Show();
+        window.WindowState = WindowState.Normal;
+        window.Activate();
+    }
+
+    private void ExitApp()
+    {
+        window?.Exit();
+        Shutdown();
+    }
+}

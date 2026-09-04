@@ -10,14 +10,15 @@
     "test:snapshots": "node tests/saved-pages.test.cjs",
     "test:x-teaser-ui": "node tests/x-teaser-ui.test.cjs",
     "test:social-trace-ui": "node tests/social-trace-recorder-ui.test.cjs",
+    "test:desktop-shell-ui": "node tests/desktop-shell-ui.test.cjs",
     "build:personal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-personal-package.ps1",
     "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1",
     "build:x-teaser-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-x-teaser-native-host.ps1",
     "lint": "eslint creator-tools options.js realbooru-parser.js upload-console.js x-teaser.js",
     "typecheck": "tsc -p jsconfig.json",
-    "format": "prettier --write \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "format:check": "prettier --check \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run build:personal && npm run build:store"
+    "format": "prettier --write \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
+    "format:check": "prettier --check \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
+    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run build:personal && npm run build:store"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

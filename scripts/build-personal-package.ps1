@@ -37,6 +37,10 @@ $relativeFiles += Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "creator
   ForEach-Object {
     $_.FullName.Substring($repositoryRoot.Length + 1)
   }
+$relativeFiles += Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "app") -Recurse -File |
+  ForEach-Object {
+    $_.FullName.Substring($repositoryRoot.Length + 1)
+  }
 
 foreach ($relativePath in $relativeFiles) {
   if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $relativePath))) {
@@ -115,7 +119,12 @@ $requiredArchiveEntries = @(
   "creator-tools/sheer-tags.js",
   "creator-tools/onlyfans-auto-select.js",
   "creator-tools/onlyfans-auto-follow.js",
-  "creator-tools/reddit-banner-censor.js"
+  "creator-tools/reddit-banner-censor.js",
+  "app/index.html",
+  "app/app.css",
+  "app/app.js",
+  "app/host-bridge.js",
+  "app/finalLogo.png"
 )
 
 $validationArchive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)

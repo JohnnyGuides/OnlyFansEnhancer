@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#090b10" />
+    <title>OFEnhancer</title>
+    <link rel="stylesheet" href="app.css" />
+    <script src="host-bridge.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="finalLogo.png" alt="" width="44" height="44" />
+          <div>
+            <strong>OFEnhancer</strong>
+            <span id="versionLabel">Starting…</span>
+          </div>
+        </div>
+
+        <nav aria-label="Workspace">
+          <button type="button" data-view="catalogue">Catalogue</button>
+          <button type="button" data-view="uploads" aria-current="page">
+            Uploads
+          </button>
+          <button type="button" data-view="teasers">Teasers</button>
+          <button type="button" data-view="attention">Attention</button>
+          <button type="button" data-view="settings">Settings</button>
+        </nav>
+
+        <div class="connection" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connectionLabel">Connecting…</span>
+        </div>
+      </aside>
+
+      <main id="workspace" tabindex="-1">
+        <section data-panel="uploads">
+          <header class="page-heading">
+            <h1>Uploads</h1>
+            <p>
+              Keep using the working Chrome uploader while the desktop controls
+              move here.
+            </p>
+          </header>
+          <div class="primary-action">
+            <div>
+              <h2>Chrome uploader</h2>
+              <p>
+                Your current OnlyFans, Fansly, ManyVids, Pornhub, X, and Reddit
+                tools stay in Chrome.
+              </p>
+            </div>
+            <button id="openUploader" class="action-button" type="button">
+              Open Chrome uploader
+            </button>
+          </div>
+          <p id="actionStatus" class="action-status" role="status"></p>
+        </section>
+
+        <section data-panel="catalogue" hidden>
+          <header class="page-heading">
+            <h1>Catalogue</h1>
+            <p>The desktop catalogue is not connected yet.</p>
+          </header>
+          <div class="empty-state">
+            <h2>No catalogue data</h2>
+            <p>
+              Your Sheet and thumbnail library will appear here after the
+              catalogue migration.
+            </p>
+          </div>
+        </section>
+
+        <section data-panel="teasers" hidden>
+          <header class="page-heading">
+            <h1>Teasers</h1>
+            <p>There are no desktop teaser jobs yet.</p>
+          </header>
+          <div class="empty-state">
+            <h2>Chrome still handles teaser posts</h2>
+            <p>
+              Open the uploader to prepare X and Reddit distribution with the
+              current workflow.
+            </p>
+          </div>
+        </section>
+
+        <section data-panel="attention" hidden>
+          <header class="page-heading">
+            <h1>Attention</h1>
+            <p>
+              Problems and decisions will collect here without sensitive desktop
+              notifications.
+            </p>
+          </header>
+          <div class="empty-state">
+            <h2>Nothing needs attention</h2>
+            <p>
+              The desktop agent is connected and has not reported a problem.
+            </p>
+          </div>
+        </section>
+
+        <section data-panel="settings" hidden>
+          <header class="page-heading">
+            <h1>Settings</h1>
+            <p>Desktop and Chrome connection details.</p>
+          </header>
+          <dl class="settings-list">
+            <div>
+              <dt>Desktop agent</dt>
+              <dd id="agentSetting">Checking…</dd>
+            </div>
+            <div>
+              <dt>Chrome uploader</dt>
+              <dd id="extensionSetting">
+                Uses the extension ID saved on this PC.
+              </dd>
+            </div>
+          </dl>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
