@@ -107,6 +107,45 @@ public sealed class GoogleConnectionCoordinatorTests
         Assert.IsNull(vault.Load());
     }
 
+    [TestMethod]
+    public async Task CancelDuringFinalCredentialCommitRollsBackAndSuppressesCompletion()
+    {
+        FakeCallbackReceiver receiver = new(RedirectUri);
+        SequenceHandler handler = new(
+            Json(HttpStatusCode.OK, """{"access_token":"access-value","refresh_token":"refresh-value","expires_in":3600}"""),
+            Json(HttpStatusCode.OK, """{"id":"sheet-123","name":"2026 Video Catalogue","mimeType":"application/vnd.google-apps.spreadsheet","capabilities":{"canEdit":true}}""")
+        );
+        PausingTokenVault vault = new();
+        TaskCompletionSource<GoogleConnectionCompletion> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        GoogleConnectionCoordinator coordinator = CreateCoordinator(
+            receiver,
+            handler,
+            vault,
+            _ => { },
+            value => completed.TrySetResult(value)
+        );
+
+        coordinator.Start();
+        await WaitUntilAsync(() => receiver.AuthorizationUri is not null);
+        string state = QueryValue(receiver.AuthorizationUri!, "state");
+        receiver.Complete(new($"{RedirectUri}?state={state}&code=authorization-code&picked_file_ids=sheet-123"));
+        await vault.SaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        coordinator.Cancel();
+        vault.ReleaseSave();
+
+        Task winner = await Task.WhenAny(
+            vault.Deleted.Task,
+            completed.Task,
+            Task.Delay(TimeSpan.FromSeconds(2))
+        );
+        Assert.AreSame(vault.Deleted.Task, winner, "cancel lost to credential commit/completion");
+        Assert.IsNull(vault.Load());
+        Assert.IsFalse(completed.Task.IsCompleted);
+        Assert.AreEqual(GoogleConnectionState.Disconnected, coordinator.Snapshot.State);
+        Assert.IsNull(coordinator.Snapshot.ErrorCode);
+    }
+
     private static GoogleConnectionCoordinator CreateCoordinator(
         FakeCallbackReceiver receiver,
         HttpMessageHandler handler,
@@ -204,6 +243,32 @@ public sealed class GoogleConnectionCoordinatorTests
             response.RequestMessage = request;
             return response;
         }
+    }
+
+    private sealed class PausingTokenVault : IGoogleTokenVault
+    {
+        private readonly MemoryGoogleTokenVault _inner = new();
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource SaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Deleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public GoogleRefreshCredential? Load() => _inner.Load();
+
+        public void Save(GoogleRefreshCredential credential)
+        {
+            SaveEntered.TrySetResult();
+            _release.Task.GetAwaiter().GetResult();
+            _inner.Save(credential);
+        }
+
+        public void Delete()
+        {
+            _inner.Delete();
+            Deleted.TrySetResult();
+        }
+
+        public void ReleaseSave() => _release.TrySetResult();
     }
 
     private sealed record RequestRecord(HttpMethod Method, Uri Uri, string? Authorization, string Body);

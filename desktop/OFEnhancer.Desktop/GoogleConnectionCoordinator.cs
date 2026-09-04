@@ -9,6 +9,11 @@ namespace OFEnhancer.Desktop;
 
 internal sealed class GoogleConnectionCoordinator
 {
+    private const int ConnectionInactive = 0;
+    private const int ConnectionActive = 1;
+    private const int ConnectionCancelled = 2;
+    private const int ConnectionFinalizing = 3;
+    private const int ConnectionFinished = 4;
     private const string SpreadsheetMimeType = "application/vnd.google-apps.spreadsheet";
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromMinutes(5);
     private readonly object _gate = new();
@@ -21,6 +26,7 @@ internal sealed class GoogleConnectionCoordinator
     private CancellationTokenSource? _currentCancellation;
     private IGoogleOAuthCallbackReceiver? _currentReceiver;
     private Task? _currentTask;
+    private int _connectionPhase = ConnectionInactive;
     private GoogleConnectionSnapshot _snapshot = new(GoogleConnectionState.Disconnected, null);
 
     internal GoogleConnectionCoordinator(
@@ -76,6 +82,7 @@ internal sealed class GoogleConnectionCoordinator
             CancellationTokenSource cancellation = new(ConnectionTimeout);
             _currentReceiver = receiver;
             _currentCancellation = cancellation;
+            Volatile.Write(ref _connectionPhase, ConnectionActive);
             _snapshot = new(GoogleConnectionState.Connecting, null);
             _currentTask = Task.Run(() => RunAsync(start, receiver, cancellation));
         }
@@ -86,6 +93,14 @@ internal sealed class GoogleConnectionCoordinator
         lock (_gate)
         {
             if (_currentTask is null)
+            {
+                return;
+            }
+            if (Interlocked.CompareExchange(
+                ref _connectionPhase,
+                ConnectionCancelled,
+                ConnectionActive
+            ) != ConnectionActive)
             {
                 return;
             }
@@ -125,11 +140,29 @@ internal sealed class GoogleConnectionCoordinator
                 cancellation.Token
             ).ConfigureAwait(false);
             GoogleRefreshCredential credential = new(tokens.RefreshToken, tokens.ExpiresAt);
+            if (Volatile.Read(ref _connectionPhase) != ConnectionActive
+                || cancellation.IsCancellationRequested)
+            {
+                SetSnapshot(new(GoogleConnectionState.Disconnected, null));
+                return;
+            }
             _tokenVault.Save(credential);
+            if (cancellation.IsCancellationRequested
+                || Interlocked.CompareExchange(
+                    ref _connectionPhase,
+                    ConnectionFinalizing,
+                    ConnectionActive
+                ) != ConnectionActive)
+            {
+                _tokenVault.Delete();
+                SetSnapshot(new(GoogleConnectionState.Disconnected, null));
+                return;
+            }
 
             GoogleConnectionCompletion completion = new(workbook.Id, workbook.Title, credential.AccessTokenExpiresAt);
             SetSnapshot(new(GoogleConnectionState.NeedsInspection, null));
             _completed(completion);
+            Volatile.Write(ref _connectionPhase, ConnectionFinished);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
