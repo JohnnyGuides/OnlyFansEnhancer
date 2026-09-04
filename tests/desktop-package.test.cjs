@@ -254,6 +254,17 @@ async function main() {
       false,
       "the staged package exposes the configured workbook ID",
     );
+    const creatorThumbnailRoot =
+      "D:\\MEDIA - SELFMADE\\Youtube2\\.DONE_DEEDS\\.thumbs";
+    for (const filePath of filesBelow(stage)) {
+      const bytes = fs.readFileSync(filePath);
+      assert.equal(
+        bytes.includes(Buffer.from(creatorThumbnailRoot, "utf8")) ||
+          bytes.includes(Buffer.from(creatorThumbnailRoot, "utf16le")),
+        false,
+        `the staged package embeds the creator thumbnail root in ${path.relative(stage, filePath)}`,
+      );
+    }
     assert.equal(
       relativeFiles.some((file) => /(?:^|\/)e_sqlite3\.dll$/i.test(file)),
       true,

@@ -18,6 +18,8 @@ keeps permanent opaque video IDs across later imports, inventories curated
 PNG/JPEG/WebP thumbnails by SHA-256, and remembers one explicit thumbnail-to-
 video choice across file renames. Filename, title, series, episode, and date
 evidence only rank candidates; they never create a binding on their own.
+The first scan opens a native folder picker, then remembers that folder locally;
+no creator-specific absolute path is compiled into the package.
 
 The Catalogue screen shows compact video rows with release date, platform
 coverage, X count, Reddit count, and thumbnail state. An uncertain image opens

@@ -44,6 +44,7 @@
     reddit: "Reddit",
     redgifs: "Redgifs",
   });
+  const maximumCatalogueBytes = 5 * 1024 * 1024;
 
   let catalogue = null;
   let cataloguePromise = null;
@@ -263,6 +264,7 @@
       "snapshot-too-large": "That catalogue file is too large.",
       "invalid-snapshot": "That file is not a valid catalogue snapshot.",
       "thumbnail-root-missing": "Thumbnail folder was not found.",
+      "thumbnail-folder-not-selected": "No thumbnail folder was selected.",
       "unsafe-thumbnail-root": "That thumbnail folder is not safe to scan.",
       "too-many-thumbnails": "That folder contains too many thumbnails.",
       "thumbnail-scan-failed": "The thumbnail scan could not finish.",
@@ -358,6 +360,11 @@
   catalogueFile.addEventListener("change", async () => {
     const file = catalogueFile.files?.[0];
     if (!file) return;
+    if (file.size > maximumCatalogueBytes) {
+      catalogueStatus.textContent = "That catalogue file is too large.";
+      catalogueFile.value = "";
+      return;
+    }
     setBusy(importCatalogue, true);
     catalogueStatus.textContent = "Importing catalogue…";
     try {

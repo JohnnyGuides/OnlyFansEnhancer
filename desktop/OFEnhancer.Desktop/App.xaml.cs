@@ -102,9 +102,10 @@ public partial class App : System.Windows.Application
         window.Activate();
     }
 
-    private void ExitApp()
+    private async void ExitApp()
     {
-        window?.Exit();
+        if (window is not null)
+            await window.ExitAsync();
         Shutdown();
     }
 

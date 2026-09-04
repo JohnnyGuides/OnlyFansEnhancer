@@ -31,14 +31,22 @@ public sealed class ThumbnailResourceHandlerTests
         string assetId = store.GetAssets().Single().AssetId;
         ThumbnailResourceResolver resolver = new(store);
 
-        ThumbnailResource? known = resolver.Resolve(new Uri($"https://thumbs.ofenhancer.local/{assetId}"));
-
-        Assert.IsNotNull(known);
-        Assert.AreEqual(image, known.Path);
-        Assert.AreEqual("image/png", known.ContentType);
-        Assert.IsNull(resolver.Resolve(new Uri("https://thumbs.ofenhancer.local/../settings.json")));
-        Assert.IsNull(resolver.Resolve(new Uri($"https://other.invalid/{assetId}")));
-        Assert.IsNull(resolver.Resolve(new Uri($"https://thumbs.ofenhancer.local/{Guid.NewGuid():D}")));
+        using (
+            ThumbnailResource? known = resolver.Open(
+                new Uri($"https://thumbs.ofenhancer.local/{assetId}")
+            )
+        )
+        {
+            Assert.IsNotNull(known);
+            Assert.AreEqual("image/png", known.ContentType);
+            CollectionAssert.AreEqual(
+                new byte[] { 0x89, 0x50, 0x4e, 0x47 },
+                ReadAll(known.Stream)
+            );
+        }
+        Assert.IsNull(resolver.Open(new Uri("https://thumbs.ofenhancer.local/../settings.json")));
+        Assert.IsNull(resolver.Open(new Uri($"https://other.invalid/{assetId}")));
+        Assert.IsNull(resolver.Open(new Uri($"https://thumbs.ofenhancer.local/{Guid.NewGuid():D}")));
 
         string outside = Path.Combine(temp.Path, "outside.png");
         File.WriteAllBytes(outside, [1, 2, 3]);
@@ -49,7 +57,25 @@ public sealed class ThumbnailResourceHandlerTests
             command.Parameters.AddWithValue("$assetId", assetId);
             command.ExecuteNonQuery();
         }
-        Assert.IsNull(resolver.Resolve(new Uri($"https://thumbs.ofenhancer.local/{assetId}")));
+        Assert.IsNull(resolver.Open(new Uri($"https://thumbs.ofenhancer.local/{assetId}")));
+
+        using SqliteCommand restore = store.Connection.CreateCommand();
+        restore.CommandText = "UPDATE media_assets SET absolute_path = $image WHERE asset_id = $assetId";
+        restore.Parameters.AddWithValue("$image", image);
+        restore.Parameters.AddWithValue("$assetId", assetId);
+        restore.ExecuteNonQuery();
+        File.WriteAllBytes(image, [1, 2, 3, 4]);
+        Assert.IsNull(
+            resolver.Open(new Uri($"https://thumbs.ofenhancer.local/{assetId}")),
+            "changed bytes must be rescanned before the opaque resource can serve them"
+        );
+    }
+
+    private static byte[] ReadAll(Stream stream)
+    {
+        using MemoryStream copy = new();
+        stream.CopyTo(copy);
+        return copy.ToArray();
     }
 
     private sealed class TestDirectory : IDisposable

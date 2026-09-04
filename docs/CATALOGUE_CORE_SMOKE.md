@@ -42,8 +42,9 @@ Expected results:
 
 2. Open **Catalogue**. With no import, it must say **No videos yet** rather
    than showing sample data.
-3. Import a small fixture snapshot and scan a disposable thumbnail folder.
-   Check the rows, X/Reddit counts, platform badges, and missing-match list.
+3. Import a small fixture snapshot, click **Scan thumbnails**, and choose a
+   disposable folder in the native picker. Check the rows, X/Reddit counts,
+   platform badges, and missing-match list.
 4. Open **Choose video**. Escape must close the picker and restore focus. Reopen
    it, choose one candidate, and verify the match persists after renaming the
    fixture image and rescanning.

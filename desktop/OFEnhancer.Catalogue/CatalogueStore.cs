@@ -163,10 +163,25 @@ public sealed partial class CatalogueStore : IDisposable
             VerifyIntegrity(backup);
         }
 
-        File.Copy(backupPath, databasePath, overwrite: true);
-        using SqliteConnection restored = CreateConnection(databasePath);
-        restored.Open();
-        VerifyIntegrity(restored);
+        string restorePath = $"{databasePath}.restore-{Guid.NewGuid():N}.sqlite";
+        try
+        {
+            File.Copy(backupPath, restorePath, overwrite: false);
+            using (SqliteConnection staged = CreateConnection(restorePath))
+            {
+                staged.Open();
+                VerifyIntegrity(staged);
+            }
+            File.Replace(restorePath, databasePath, null, ignoreMetadataErrors: true);
+            using SqliteConnection restored = CreateConnection(databasePath);
+            restored.Open();
+            VerifyIntegrity(restored);
+        }
+        finally
+        {
+            if (File.Exists(restorePath))
+                File.Delete(restorePath);
+        }
     }
 
     private static void VerifyIntegrity(SqliteConnection connection)

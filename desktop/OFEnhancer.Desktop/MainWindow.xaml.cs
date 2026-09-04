@@ -10,19 +10,29 @@ namespace OFEnhancer.Desktop;
 public partial class MainWindow : Window
 {
     private readonly WebMessageRouter router;
+    private readonly WebMessageDispatcher dispatcher;
     private readonly ThumbnailResourceResolver thumbnails;
+    private readonly CatalogueStore catalogue;
     private bool exiting;
 
     public MainWindow(string? extensionId, CatalogueStore catalogue)
     {
         InitializeComponent();
-        router = new WebMessageRouter(OpenChrome, () => extensionId, catalogue);
+        this.catalogue = catalogue;
+        router = new WebMessageRouter(
+            OpenChrome,
+            () => extensionId,
+            catalogue,
+            () => Dispatcher.Invoke(ChooseThumbnailRoot)
+        );
+        dispatcher = new WebMessageDispatcher(router.Handle);
         thumbnails = new ThumbnailResourceResolver(catalogue);
     }
 
-    public void Exit()
+    public async Task ExitAsync()
     {
         exiting = true;
+        await dispatcher.DrainAsync();
         Close();
     }
 
@@ -51,30 +61,33 @@ public partial class MainWindow : Window
             "https://thumbs.ofenhancer.local/*",
             CoreWebView2WebResourceContext.Image
         );
-        Browser.CoreWebView2.WebResourceRequested += (_, args) =>
+        Browser.CoreWebView2.WebResourceRequested += async (_, args) =>
         {
+            CoreWebView2Deferral deferral = args.GetDeferral();
             try
             {
-                ThumbnailResource? resource = thumbnails.Resolve(new Uri(args.Request.Uri));
+                ThumbnailResource? resource = await Task.Run(
+                    () => thumbnails.Open(new Uri(args.Request.Uri))
+                );
                 if (resource is null)
                 {
                     SetThumbnailNotFound(args);
                     return;
                 }
-                FileStream stream = new(
-                    resource.Path,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.Read,
-                    bufferSize: 64 * 1024,
-                    FileOptions.SequentialScan
-                );
-                args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
-                    stream,
-                    200,
-                    "OK",
-                    $"Content-Type: {resource.ContentType}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff"
-                );
+                try
+                {
+                    args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+                        resource.Stream,
+                        200,
+                        "OK",
+                        $"Content-Type: {resource.ContentType}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff"
+                    );
+                }
+                catch
+                {
+                    resource.Dispose();
+                    throw;
+                }
             }
             catch (IOException)
             {
@@ -88,13 +101,18 @@ public partial class MainWindow : Window
             {
                 SetThumbnailNotFound(args);
             }
+            finally
+            {
+                deferral.Complete();
+            }
         };
-        Browser.CoreWebView2.WebMessageReceived += (_, message) =>
+        Browser.CoreWebView2.WebMessageReceived += async (_, message) =>
         {
-            if (!WebMessageSourcePolicy.IsTrusted(message.Source))
+            if (exiting || !WebMessageSourcePolicy.IsTrusted(message.Source))
                 return;
-            string response = router.Handle(message.TryGetWebMessageAsString());
-            Browser.CoreWebView2.PostWebMessageAsJson(response);
+            string response = await dispatcher.HandleAsync(message.TryGetWebMessageAsString());
+            if (!exiting)
+                Browser.CoreWebView2.PostWebMessageAsJson(response);
         };
         Browser.CoreWebView2.NavigationStarting += (_, args) =>
         {
@@ -120,6 +138,22 @@ public partial class MainWindow : Window
         ProcessStartInfo start = new("chrome.exe") { UseShellExecute = true };
         start.ArgumentList.Add(uri.AbsoluteUri);
         Process.Start(start);
+    }
+
+    private string? ChooseThumbnailRoot()
+    {
+        using System.Windows.Forms.FolderBrowserDialog dialog = new()
+        {
+            Description = "Choose your curated thumbnail folder",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+        };
+        string? configured = catalogue.ConfiguredThumbnailRoot;
+        if (configured is not null && Directory.Exists(configured))
+            dialog.SelectedPath = configured;
+        return dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK
+            ? dialog.SelectedPath
+            : null;
     }
 
     private void SetThumbnailNotFound(CoreWebView2WebResourceRequestedEventArgs args)

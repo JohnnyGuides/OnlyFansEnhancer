@@ -104,6 +104,7 @@ async function installHost(page, initialState = null) {
         inventoryStatus: "not-scanned",
       };
       let failNextScan = true;
+      globalThis.__catalogueImportCalls = 0;
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
@@ -115,6 +116,7 @@ async function installHost(page, initialState = null) {
         }
         if (operation === "getCatalogue") return structuredClone(catalogue);
         if (operation === "importCatalogueSnapshot") {
+          globalThis.__catalogueImportCalls += 1;
           JSON.parse(payload.json);
           catalogue = structuredClone(populatedState);
           return { activeItems: 2, archivedItems: 0, unchanged: false };
@@ -186,6 +188,16 @@ async function main() {
         await page.getByRole("button", { name: "Import catalogue" }).count(),
         1,
       );
+
+      await page.locator("#catalogueFile").setInputFiles({
+        name: "too-large.json",
+        mimeType: "application/json",
+        buffer: Buffer.alloc(5 * 1024 * 1024 + 1, 0x20),
+      });
+      await page
+        .getByText("That catalogue file is too large.", { exact: true })
+        .waitFor();
+      assert.equal(await page.evaluate(() => __catalogueImportCalls), 0);
 
       await page.locator("#catalogueFile").setInputFiles({
         name: "catalogue.json",

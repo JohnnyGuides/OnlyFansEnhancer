@@ -92,9 +92,13 @@ stores raw workbook data outside the normalized local projection.
 
 ## Thumbnail inventory and identity
 
-The configured default source is:
+Johnny's current source is:
 
 `D:\MEDIA - SELFMADE\Youtube2\.DONE_DEEDS\.thumbs`
+
+The first scan chooses this (or another creator's folder) through a native
+folder picker and stores that choice in the local database. The absolute path
+is not compiled into or shipped with the package.
 
 The scanner is recursive, skips reparse points, accepts PNG, JPEG, and WebP,
 and stops at 20,000 files. It records file name, absolute path, length, last

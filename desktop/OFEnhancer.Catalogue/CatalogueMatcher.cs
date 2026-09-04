@@ -41,11 +41,11 @@ internal static partial class CatalogueMatcher
     )
     {
         HashSet<string> fileTokens = Tokens(Path.GetFileNameWithoutExtension(fileName));
+        DateOnly? fileDate = ExtractDate(fileName);
         return items
-            .Select(item => new { Item = item, Score = Score(fileTokens, item) })
+            .Select(item => new { Item = item, Score = Score(fileTokens, fileDate, item) })
             .Where(result => result.Score > 0)
             .OrderByDescending(result => result.Score)
-            .ThenBy(result => result.Item.Title, StringComparer.OrdinalIgnoreCase)
             .ThenBy(result => result.Item.ItemId, StringComparer.Ordinal)
             .Take(5)
             .Select(result =>
@@ -60,7 +60,11 @@ internal static partial class CatalogueMatcher
             .ToArray();
     }
 
-    private static int Score(HashSet<string> fileTokens, CatalogueItemSummary item)
+    private static int Score(
+        HashSet<string> fileTokens,
+        DateOnly? fileDate,
+        CatalogueItemSummary item
+    )
     {
         int score = 0;
         HashSet<string> sourceTokens = Tokens(item.SourceKey);
@@ -76,8 +80,39 @@ internal static partial class CatalogueMatcher
             string compactDate = item.PlannedDate.Replace("-", "", StringComparison.Ordinal);
             if (fileTokens.Contains(item.PlannedDate) || fileTokens.Contains(compactDate))
                 score += 10;
+            if (
+                fileDate is not null
+                && DateOnly.TryParseExact(
+                    item.PlannedDate,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out DateOnly plannedDate
+                )
+            )
+            {
+                int distance = Math.Abs(plannedDate.DayNumber - fileDate.Value.DayNumber);
+                score += Math.Max(0, 30 - distance);
+            }
         }
         return score;
+    }
+
+    private static DateOnly? ExtractDate(string fileName)
+    {
+        Match match = DatePattern().Match(Path.GetFileNameWithoutExtension(fileName));
+        if (!match.Success)
+            return null;
+        string value = $"{match.Groups[1].Value}-{match.Groups[2].Value}-{match.Groups[3].Value}";
+        return DateOnly.TryParseExact(
+            value,
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out DateOnly date
+        )
+            ? date
+            : null;
     }
 
     private static HashSet<string> Tokens(string? value)
@@ -124,6 +159,9 @@ internal static partial class CatalogueMatcher
 
     [GeneratedRegex("[a-z0-9]+", RegexOptions.CultureInvariant)]
     private static partial Regex TokenPattern();
+
+    [GeneratedRegex(@"(?<!\d)(\d{4})[-_]?([01]\d)[-_]?([0-3]\d)(?!\d)", RegexOptions.CultureInvariant)]
+    private static partial Regex DatePattern();
 }
 
 public sealed partial class CatalogueStore

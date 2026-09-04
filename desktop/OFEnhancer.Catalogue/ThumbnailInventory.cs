@@ -8,8 +8,7 @@ namespace OFEnhancer.Catalogue;
 internal static class ThumbnailInventory
 {
     internal const int DefaultMaximumFiles = 20_000;
-    internal const string DefaultRoot = @"D:\MEDIA - SELFMADE\Youtube2\.DONE_DEEDS\.thumbs";
-    private const string RootSetting = "thumbnails.root";
+    internal const string RootSetting = "thumbnails.root";
     private static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg",
@@ -308,8 +307,6 @@ public sealed partial class CatalogueStore
     internal ThumbnailScanSummary ScanThumbnails(string root, int maximumFiles) =>
         ThumbnailInventory.Scan(connection, root, maximumFiles);
 
-    public string DefaultThumbnailRoot => ThumbnailInventory.DefaultRoot;
-
     public string? ConfiguredThumbnailRoot => ThumbnailInventory.ReadConfiguredRoot(connection);
 
     public IReadOnlyList<MediaAssetSummary> GetAssets(bool includeUnavailable = false)
@@ -342,19 +339,39 @@ public sealed partial class CatalogueStore
         return assets;
     }
 
-    internal string? ResolveAvailableAssetPath(string assetId)
+    internal AvailableAssetLocation? ResolveAvailableAssetLocation(string assetId)
     {
         if (!Guid.TryParse(assetId, out _))
             return null;
-        using SqliteCommand command = connection.CreateCommand();
+        using SqliteConnection readConnection = new(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = DatabasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Cache = SqliteCacheMode.Private,
+                Pooling = false,
+            }.ToString()
+        );
+        readConnection.Open();
+        using SqliteCommand command = readConnection.CreateCommand();
         command.CommandText =
-            "SELECT absolute_path, scan_root FROM media_assets WHERE asset_id = $assetId AND available = 1";
+            """
+            SELECT a.absolute_path, a.scan_root, a.sha256
+            FROM media_assets a
+            JOIN settings s ON s.key = $rootKey AND s.value = a.scan_root
+            WHERE a.asset_id = $assetId AND a.available = 1
+            """;
         command.Parameters.AddWithValue("$assetId", assetId);
+        command.Parameters.AddWithValue("$rootKey", ThumbnailInventory.RootSetting);
         using SqliteDataReader reader = command.ExecuteReader();
         if (!reader.Read())
             return null;
         string path = reader.GetString(0);
         string root = reader.GetString(1);
-        return ThumbnailInventory.IsContainedPath(root, path) && File.Exists(path) ? path : null;
+        return ThumbnailInventory.IsContainedPath(root, path) && File.Exists(path)
+            ? new AvailableAssetLocation(path, root, reader.GetString(2))
+            : null;
     }
 }
+
+internal sealed record AvailableAssetLocation(string Path, string ScanRoot, string Sha256);

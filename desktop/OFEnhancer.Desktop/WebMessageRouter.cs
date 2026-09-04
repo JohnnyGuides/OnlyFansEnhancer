@@ -9,7 +9,8 @@ namespace OFEnhancer.Desktop;
 public sealed partial class WebMessageRouter(
     Action<Uri> openUri,
     Func<string?> extensionId,
-    CatalogueStore? catalogue = null
+    CatalogueStore? catalogue = null,
+    Func<string?>? chooseThumbnailRoot = null
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -99,9 +100,11 @@ public sealed partial class WebMessageRouter(
     private string ScanThumbnails(WebRequest request)
     {
         ScanPayload payload = DeserializePayload<ScanPayload>(request.Payload);
-        string root = string.IsNullOrWhiteSpace(payload.Root)
-            ? catalogue!.ConfiguredThumbnailRoot ?? catalogue.DefaultThumbnailRoot
+        string? root = string.IsNullOrWhiteSpace(payload.Root)
+            ? catalogue!.ConfiguredThumbnailRoot ?? chooseThumbnailRoot?.Invoke()
             : payload.Root;
+        if (string.IsNullOrWhiteSpace(root))
+            return Failure(request.RequestId, "thumbnail-folder-not-selected");
         return Success(request.RequestId, catalogue!.ScanThumbnails(root));
     }
 

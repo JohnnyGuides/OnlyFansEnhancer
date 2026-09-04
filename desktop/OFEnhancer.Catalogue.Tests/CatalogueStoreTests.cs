@@ -53,6 +53,7 @@ public sealed class CatalogueStoreTests
         Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
         Assert.AreEqual("ok", ReadIntegrity(databasePath));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);
+        Assert.AreEqual(0, Directory.GetFiles(temp.Path, "catalogue.db.restore-*.sqlite").Length);
     }
 
     private static string[] ReadUserTables(string path)

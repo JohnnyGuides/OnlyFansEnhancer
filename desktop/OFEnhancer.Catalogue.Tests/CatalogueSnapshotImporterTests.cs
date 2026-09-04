@@ -49,6 +49,9 @@ public sealed class CatalogueSnapshotImporterTests
             """{"version":1,"items":[{"sourceKey":"bad-date","sourceRow":1,"title":"Bad","description":"","plannedDate":"Friday","series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{}}]}""",
             """{"version":1,"items":[{"sourceKey":"bad-count","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":-1,"redditTeasers":0,"platformLinks":{}}]}""",
             """{"version":1,"items":[{"sourceKey":"bad-link","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"onlyfans":"http://example.com/post"}}]}""",
+            """{"version":1,"items":[{"sourceKey":"wrong-host","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"onlyfans":"https://example.com/post"}}]}""",
+            """{"version":1,"items":[{"sourceKey":"missing-count","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"redditTeasers":0,"platformLinks":{}}]}""",
+            """{"version":1,"items":[{"sourceKey":"duplicate-field","sourceRow":1,"title":"First","title":"Second","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{}}]}""",
             """{"version":1,"items":[],"unexpected":true}""",
         ];
 

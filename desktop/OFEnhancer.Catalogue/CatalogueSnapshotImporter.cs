@@ -24,6 +24,39 @@ internal static class CatalogueSnapshotImporter
         "reddit",
         "redgifs",
     ];
+    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> PlatformHosts =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+        {
+            ["onlyfans"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "onlyfans.com" },
+            ["fansly"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "fansly.com" },
+            ["manyvids"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "www.manyvids.com",
+            },
+            ["pornhubFree"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "www.pornhub.com",
+            },
+            ["pornhubPaid"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "www.pornhub.com",
+            },
+            ["clips4sale"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "clips4sale.com",
+                "www.clips4sale.com",
+            },
+            ["x"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "x.com" },
+            ["reddit"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "www.reddit.com",
+            },
+            ["redgifs"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "redgifs.com",
+                "www.redgifs.com",
+            },
+        };
 
     private static readonly JsonSerializerOptions InputJson = new()
     {
@@ -50,6 +83,8 @@ internal static class CatalogueSnapshotImporter
         SnapshotEnvelope envelope;
         try
         {
+            using JsonDocument document = JsonDocument.Parse(json);
+            RejectDuplicateProperties(document.RootElement);
             envelope = JsonSerializer.Deserialize<SnapshotEnvelope>(json, InputJson)
                 ?? throw new CatalogueSnapshotException("invalid-snapshot", "Catalogue snapshot is empty.");
         }
@@ -178,9 +213,11 @@ internal static class CatalogueSnapshotImporter
                 throw Invalid("plannedDate must use YYYY-MM-DD.");
             string? series = OptionalText(item.Series, 200, "series");
             string? episode = OptionalText(item.Episode, 100, "episode");
-            if (item.XTeasers < 0 || item.RedditTeasers < 0)
+            if (item.XTeasers is null || item.RedditTeasers is null)
+                throw Invalid("Teaser counts are required.");
+            if (item.XTeasers.Value < 0 || item.RedditTeasers.Value < 0)
                 throw Invalid("Teaser counts cannot be negative.");
-            if (item.XTeasers > 1_000_000 || item.RedditTeasers > 1_000_000)
+            if (item.XTeasers.Value > 1_000_000 || item.RedditTeasers.Value > 1_000_000)
                 throw Invalid("Teaser counts are unreasonably large.");
             if (item.PlatformLinks is null || item.PlatformLinks.Count > SupportedPlatforms.Count)
                 throw Invalid("platformLinks is missing or too large.");
@@ -196,8 +233,12 @@ internal static class CatalogueSnapshotImporter
                     || parsed.Scheme != Uri.UriSchemeHttps
                     || !string.IsNullOrEmpty(parsed.UserInfo)
                     || string.IsNullOrWhiteSpace(parsed.Host)
+                    || !parsed.IsDefaultPort
+                    || !PlatformHosts[platform].Contains(parsed.IdnHost)
                 )
-                    throw Invalid($"Platform link for {platform} must be a credential-free HTTPS URL.");
+                    throw Invalid(
+                        $"Platform link for {platform} must use its canonical credential-free HTTPS host."
+                    );
                 links.Add(platform, parsed.AbsoluteUri);
             }
 
@@ -210,8 +251,8 @@ internal static class CatalogueSnapshotImporter
                     plannedDate,
                     series,
                     episode,
-                    item.XTeasers,
-                    item.RedditTeasers,
+                    item.XTeasers.Value,
+                    item.RedditTeasers.Value,
                     links
                 )
             );
@@ -269,6 +310,25 @@ internal static class CatalogueSnapshotImporter
 
     private static CatalogueSnapshotException Invalid(string message) =>
         new("invalid-snapshot", message);
+
+    private static void RejectDuplicateProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            HashSet<string> names = new(StringComparer.Ordinal);
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name))
+                    throw Invalid($"Duplicate JSON property: {property.Name}");
+                RejectDuplicateProperties(property.Value);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+                RejectDuplicateProperties(item);
+        }
+    }
 
     private static string? ReadSetting(SqliteConnection connection, string key)
     {
@@ -333,8 +393,8 @@ internal static class CatalogueSnapshotImporter
         string? PlannedDate,
         string? Series,
         string? Episode,
-        int XTeasers,
-        int RedditTeasers,
+        int? XTeasers,
+        int? RedditTeasers,
         IReadOnlyDictionary<string, string?>? PlatformLinks
     );
 

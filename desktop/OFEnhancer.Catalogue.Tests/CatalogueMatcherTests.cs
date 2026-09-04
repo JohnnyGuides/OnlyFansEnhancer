@@ -67,12 +67,65 @@ public sealed class CatalogueMatcherTests
         CollectionAssert.AreEqual(first, second);
     }
 
+    [TestMethod]
+    public void PlannedDateProximityRanksBeforeStableItemIdTieBreak()
+    {
+        CatalogueItemSummary near = Item(
+            "22222222-2222-2222-2222-222222222222",
+            "Near",
+            "2026-09-18"
+        );
+        CatalogueItemSummary far = Item(
+            "11111111-1111-1111-1111-111111111111",
+            "Far",
+            "2026-09-11"
+        );
+
+        IReadOnlyList<CatalogueCandidate> proximity = CatalogueMatcher.Rank(
+            "release_2026-09-17.png",
+            [far, near]
+        );
+        Assert.AreEqual(near.ItemId, proximity[0].ItemId);
+
+        CatalogueItemSummary tieFirst = Item(
+            "11111111-1111-1111-1111-111111111111",
+            "Zulu",
+            "2026-09-18"
+        );
+        CatalogueItemSummary tieSecond = Item(
+            "22222222-2222-2222-2222-222222222222",
+            "Alpha",
+            "2026-09-18"
+        );
+        IReadOnlyList<CatalogueCandidate> tied = CatalogueMatcher.Rank(
+            "release_20260917.png",
+            [tieSecond, tieFirst]
+        );
+        Assert.AreEqual(tieFirst.ItemId, tied[0].ItemId);
+    }
+
     private static long ScalarLong(SqliteConnection connection, string sql)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = sql;
         return Convert.ToInt64(command.ExecuteScalar());
     }
+
+    private static CatalogueItemSummary Item(string itemId, string title, string date) =>
+        new(
+            itemId,
+            $"source-{itemId}",
+            null,
+            title,
+            "",
+            date,
+            null,
+            null,
+            0,
+            0,
+            new Dictionary<string, string>(),
+            false
+        );
 
     private static string MultiSnapshot() =>
         """

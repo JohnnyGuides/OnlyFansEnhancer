@@ -125,6 +125,47 @@ public sealed class WebMessageRouterTests
         AssertError(unavailable.Handle(Request("getCatalogue", new { })), "catalogue-unavailable");
     }
 
+    [TestMethod]
+    public void First_thumbnail_scan_chooses_and_remembers_a_folder_without_exposing_its_path()
+    {
+        using TestDirectory temp = new();
+        string thumbnailRoot = Directory.CreateDirectory(Path.Combine(temp.Path, "thumbs")).FullName;
+        File.WriteAllBytes(Path.Combine(thumbnailRoot, "one.png"), [1]);
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        int choices = 0;
+        WebMessageRouter router = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            store,
+            () =>
+            {
+                choices++;
+                return thumbnailRoot;
+            }
+        );
+
+        string first = router.Handle(Request("scanThumbnails", new { }));
+        string second = router.Handle(Request("scanThumbnails", new { }));
+
+        AssertOk(first);
+        AssertOk(second);
+        Assert.AreEqual(1, choices);
+        Assert.AreEqual(thumbnailRoot, store.ConfiguredThumbnailRoot);
+        Assert.IsFalse(first.Contains(thumbnailRoot, StringComparison.OrdinalIgnoreCase));
+
+        using CatalogueStore cancelledStore = CatalogueStore.Open(Path.Combine(temp.Path, "cancelled.db"));
+        WebMessageRouter cancelled = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            cancelledStore,
+            () => null
+        );
+        AssertError(
+            cancelled.Handle(Request("scanThumbnails", new { })),
+            "thumbnail-folder-not-selected"
+        );
+    }
+
     private static string Request(string operation, object payload) =>
         JsonSerializer.Serialize(new { requestId = RequestId, operation, payload });
 

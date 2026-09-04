@@ -89,7 +89,7 @@ public sealed class ThumbnailInventoryTests
         Assert.AreEqual(1, second.AvailableAssets);
         Assert.AreEqual(1, second.UnavailableAssets);
         Assert.IsFalse(assets.Single(asset => asset.AssetId == firstAssetId).Available);
-        Assert.IsNull(store.ResolveAvailableAssetPath(firstAssetId));
+        Assert.IsNull(store.ResolveAvailableAssetLocation(firstAssetId));
         Assert.AreEqual(secondRoot, store.ConfiguredThumbnailRoot);
     }
 
