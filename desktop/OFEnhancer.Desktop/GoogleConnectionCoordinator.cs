@@ -146,18 +146,16 @@ internal sealed class GoogleConnectionCoordinator
                 SetSnapshot(new(GoogleConnectionState.Disconnected, null));
                 return;
             }
-            _tokenVault.Save(credential);
-            if (cancellation.IsCancellationRequested
-                || Interlocked.CompareExchange(
-                    ref _connectionPhase,
-                    ConnectionFinalizing,
-                    ConnectionActive
-                ) != ConnectionActive)
+            if (Interlocked.CompareExchange(
+                ref _connectionPhase,
+                ConnectionFinalizing,
+                ConnectionActive
+            ) != ConnectionActive)
             {
-                _tokenVault.Delete();
                 SetSnapshot(new(GoogleConnectionState.Disconnected, null));
                 return;
             }
+            _tokenVault.Save(credential);
 
             GoogleConnectionCompletion completion = new(workbook.Id, workbook.Title, credential.AccessTokenExpiresAt);
             SetSnapshot(new(GoogleConnectionState.NeedsInspection, null));

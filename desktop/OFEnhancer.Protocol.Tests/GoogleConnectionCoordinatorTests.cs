@@ -53,6 +53,7 @@ public sealed class GoogleConnectionCoordinatorTests
         GoogleConnectionCoordinator coordinator = CreateCoordinator(receiver, handler, vault, _ => { }, value => completed.TrySetResult(value));
 
         coordinator.Start();
+        await WaitUntilAsync(() => receiver.AuthorizationUri is not null);
         string state = QueryValue(receiver.AuthorizationUri!, "state");
         receiver.Complete(new($"{RedirectUri}?state={state}&code=authorization-code&picked_file_ids=sheet-123"));
 
@@ -108,7 +109,44 @@ public sealed class GoogleConnectionCoordinatorTests
     }
 
     [TestMethod]
-    public async Task CancelDuringFinalCredentialCommitRollsBackAndSuppressesCompletion()
+    public async Task CancelBeforeFinalizationPreservesExistingCredentialWithoutVaultMutation()
+    {
+        FakeCallbackReceiver receiver = new(RedirectUri);
+        PausingDriveHandler handler = new();
+        GoogleRefreshCredential existing = new(
+            "existing-refresh-value",
+            DateTimeOffset.Parse("2026-09-04T10:00:00Z")
+        );
+        TrackingTokenVault vault = new(existing);
+        TaskCompletionSource<GoogleConnectionCompletion> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        GoogleConnectionCoordinator coordinator = CreateCoordinator(
+            receiver,
+            handler,
+            vault,
+            _ => { },
+            value => completed.TrySetResult(value)
+        );
+
+        coordinator.Start();
+        await WaitUntilAsync(() => receiver.AuthorizationUri is not null);
+        string state = QueryValue(receiver.AuthorizationUri!, "state");
+        receiver.Complete(new($"{RedirectUri}?state={state}&code=authorization-code&picked_file_ids=sheet-123"));
+        await handler.DriveRequestEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        coordinator.Cancel();
+        handler.ReleaseDriveResponse();
+        await receiver.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.AreEqual(existing, vault.Load());
+        Assert.AreEqual(0, vault.SaveCalls);
+        Assert.AreEqual(0, vault.DeleteCalls);
+        Assert.IsFalse(completed.Task.IsCompleted);
+        Assert.AreEqual(GoogleConnectionState.Disconnected, coordinator.Snapshot.State);
+        Assert.IsNull(coordinator.Snapshot.ErrorCode);
+    }
+
+    [TestMethod]
+    public async Task CancelAfterFinalizationTransitionCannotRollbackCommittedCredential()
     {
         FakeCallbackReceiver receiver = new(RedirectUri);
         SequenceHandler handler = new(
@@ -134,15 +172,11 @@ public sealed class GoogleConnectionCoordinatorTests
         coordinator.Cancel();
         vault.ReleaseSave();
 
-        Task winner = await Task.WhenAny(
-            vault.Deleted.Task,
-            completed.Task,
-            Task.Delay(TimeSpan.FromSeconds(2))
-        );
-        Assert.AreSame(vault.Deleted.Task, winner, "cancel lost to credential commit/completion");
-        Assert.IsNull(vault.Load());
-        Assert.IsFalse(completed.Task.IsCompleted);
-        Assert.AreEqual(GoogleConnectionState.Disconnected, coordinator.Snapshot.State);
+        await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.AreEqual("refresh-value", vault.Load()?.RefreshToken);
+        Assert.AreEqual(1, vault.SaveCalls);
+        Assert.AreEqual(0, vault.DeleteCalls);
+        Assert.AreEqual(GoogleConnectionState.NeedsInspection, coordinator.Snapshot.State);
         Assert.IsNull(coordinator.Snapshot.ErrorCode);
     }
 
@@ -198,6 +232,7 @@ public sealed class GoogleConnectionCoordinatorTests
         public Uri? AuthorizationUri { get; set; }
         public int ReceiveCalls { get; private set; }
         public int CloseCalls { get; private set; }
+        public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<Uri> ReceiveAsync(CancellationToken cancellationToken)
         {
@@ -217,7 +252,11 @@ public sealed class GoogleConnectionCoordinatorTests
             }
         }
 
-        public void Dispose() => Close();
+        public void Dispose()
+        {
+            Close();
+            Disposed.TrySetResult();
+        }
     }
 
     private sealed class ThrowingHandler : HttpMessageHandler
@@ -251,7 +290,8 @@ public sealed class GoogleConnectionCoordinatorTests
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource SaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Deleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int SaveCalls { get; private set; }
+        public int DeleteCalls { get; private set; }
 
         public GoogleRefreshCredential? Load() => _inner.Load();
 
@@ -260,15 +300,73 @@ public sealed class GoogleConnectionCoordinatorTests
             SaveEntered.TrySetResult();
             _release.Task.GetAwaiter().GetResult();
             _inner.Save(credential);
+            SaveCalls++;
         }
 
         public void Delete()
         {
             _inner.Delete();
-            Deleted.TrySetResult();
+            DeleteCalls++;
         }
 
         public void ReleaseSave() => _release.TrySetResult();
+    }
+
+    private sealed class TrackingTokenVault(GoogleRefreshCredential existing) : IGoogleTokenVault
+    {
+        private GoogleRefreshCredential? _credential = existing;
+
+        public int SaveCalls { get; private set; }
+        public int DeleteCalls { get; private set; }
+
+        public GoogleRefreshCredential? Load() => _credential;
+
+        public void Save(GoogleRefreshCredential credential)
+        {
+            _credential = credential;
+            SaveCalls++;
+        }
+
+        public void Delete()
+        {
+            _credential = null;
+            DeleteCalls++;
+        }
+    }
+
+    private sealed class PausingDriveHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _requestIndex;
+
+        public TaskCompletionSource DriveRequestEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void ReleaseDriveResponse() => _release.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (Interlocked.Increment(ref _requestIndex) == 1)
+            {
+                HttpResponseMessage token = Json(
+                    HttpStatusCode.OK,
+                    """{"access_token":"access-value","refresh_token":"refresh-value","expires_in":3600}"""
+                );
+                token.RequestMessage = request;
+                return token;
+            }
+
+            DriveRequestEntered.TrySetResult();
+            await _release.Task;
+            HttpResponseMessage drive = Json(
+                HttpStatusCode.OK,
+                """{"id":"sheet-123","name":"2026 Video Catalogue","mimeType":"application/vnd.google-apps.spreadsheet","capabilities":{"canEdit":true}}"""
+            );
+            drive.RequestMessage = request;
+            return drive;
+        }
     }
 
     private sealed record RequestRecord(HttpMethod Method, Uri Uri, string? Authorization, string Body);
