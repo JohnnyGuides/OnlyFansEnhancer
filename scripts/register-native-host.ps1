@@ -1,9 +1,60 @@
 param(
   [Parameter(Mandatory = $true)][string]$InstallRoot,
-  [Parameter(Mandatory = $true)][string]$ExtensionId
+  [Parameter(Mandatory = $true)][string]$ExtensionId,
+  [Parameter(DontShow = $true)][scriptblock]$RegistryWriter = {
+    param([string]$Path, [string]$Value)
+    New-Item -Path $Path -Force | Out-Null
+    Set-Item -Path $Path -Value $Value
+  }
 )
 
 $ErrorActionPreference = "Stop"
+function Resolve-DataRoot([AllowNull()]$ConfiguredRoot, [string]$LocalAppData) {
+  if ($null -eq $ConfiguredRoot) {
+    return Join-Path $LocalAppData "OFEnhancer"
+  }
+  if (
+    [string]::IsNullOrWhiteSpace($ConfiguredRoot) -or
+    $ConfiguredRoot.Length -gt 1024 -or
+    $ConfiguredRoot -ne $ConfiguredRoot.Trim()
+  ) {
+    throw "OFENHANCER_DATA_ROOT must name an absolute, creatable directory below a volume root."
+  }
+  try {
+    $pathRoot = [System.IO.Path]::GetPathRoot($ConfiguredRoot)
+    if (
+      -not [System.IO.Path]::IsPathRooted($ConfiguredRoot) -or
+      [string]::IsNullOrEmpty($pathRoot) -or
+      $pathRoot -eq [System.IO.Path]::DirectorySeparatorChar -or
+      $pathRoot -match '^[A-Za-z]:$'
+    ) {
+      throw "invalid"
+    }
+    $fullRoot = [System.IO.Path]::GetFullPath($ConfiguredRoot).TrimEnd(
+      [char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+      )
+    )
+    $volumeRoot = [System.IO.Path]::GetPathRoot($fullRoot).TrimEnd(
+      [char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+      )
+    )
+    if (
+      $fullRoot.Equals($volumeRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+      (Test-Path -LiteralPath $fullRoot -PathType Leaf)
+    ) {
+      throw "invalid"
+    }
+    [System.IO.Directory]::CreateDirectory($fullRoot) | Out-Null
+    return $fullRoot
+  } catch {
+    throw "OFENHANCER_DATA_ROOT must name an absolute, creatable directory below a volume root."
+  }
+}
+
 if ($ExtensionId -notmatch '^[a-p]{32}$') {
   throw "The Chrome extension ID must contain exactly 32 letters from a to p."
 }
@@ -13,6 +64,7 @@ $rootPrefix = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.
 if (-not $hostPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
   throw "The installed native bridge is missing."
 }
+$settingsDirectory = Resolve-DataRoot $env:OFENHANCER_DATA_ROOT $env:LOCALAPPDATA
 
 $nativeManifestPath = Join-Path $root "native\com.johnnyguides.ofenhancer.json"
 $nativeManifest = [ordered]@{
@@ -30,10 +82,8 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 )
 
 $registryPath = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.johnnyguides.ofenhancer"
-New-Item -Path $registryPath -Force | Out-Null
-Set-Item -Path $registryPath -Value $nativeManifestPath
+& $RegistryWriter $registryPath $nativeManifestPath
 
-$settingsDirectory = Join-Path $env:LOCALAPPDATA "OFEnhancer"
 New-Item -ItemType Directory -Path $settingsDirectory -Force | Out-Null
 [System.IO.File]::WriteAllText(
   (Join-Path $settingsDirectory "settings.json"),

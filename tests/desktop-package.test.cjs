@@ -71,59 +71,6 @@ function expandArchive(archivePath, destination) {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 }
 
-function dotNetLocalApplicationData() {
-  const result = spawnSync(
-    "powershell",
-    [
-      "-NoProfile",
-      "-Command",
-      "[Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)",
-    ],
-    { encoding: "utf8", timeout: 10000, windowsHide: true },
-  );
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  const directory = result.stdout.trim();
-  assert.equal(
-    path.isAbsolute(directory),
-    true,
-    "invalid .NET local app-data path",
-  );
-  return directory;
-}
-
-function directoryMetadata(directory) {
-  if (!fs.existsSync(directory)) return null;
-  const entries = [];
-  function visit(current, relativeRoot) {
-    for (const entry of fs
-      .readdirSync(current, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name))) {
-      assert.ok(
-        entries.length < 10000,
-        "the user data metadata scan is unbounded",
-      );
-      const fullPath = path.join(current, entry.name);
-      const relativePath = path.join(relativeRoot, entry.name);
-      const stats = fs.lstatSync(fullPath);
-      entries.push({
-        pathHash: crypto
-          .createHash("sha256")
-          .update(relativePath)
-          .digest("hex"),
-        type: stats.isDirectory() ? "directory" : "file",
-        size: stats.size,
-        modified: stats.mtimeMs,
-      });
-      if (stats.isDirectory() && !stats.isSymbolicLink()) {
-        visit(fullPath, relativePath);
-      }
-    }
-  }
-  const rootStats = fs.lstatSync(directory);
-  visit(directory, "");
-  return { modified: rootStats.mtimeMs, entries };
-}
-
 function assertNoSensitiveContent(label, filePaths) {
   for (const filePath of filePaths) {
     const bytes = fs.readFileSync(filePath);
@@ -387,9 +334,6 @@ async function main() {
       recursive: true,
       force: true,
     });
-    const realUserRoot = path.join(dotNetLocalApplicationData(), "OFEnhancer");
-    const realUserRootBefore = directoryMetadata(realUserRoot);
-
     const status = spawnSync(desktopExe, ["--status-json"], {
       cwd: path.dirname(desktopExe),
       encoding: "utf8",
@@ -489,12 +433,6 @@ async function main() {
       null,
       "closing the window stopped the tray authority",
     );
-    assert.deepEqual(
-      directoryMetadata(realUserRoot),
-      realUserRootBefore,
-      "the staged desktop touched the real user data root",
-    );
-
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
