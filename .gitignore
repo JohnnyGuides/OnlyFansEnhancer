@@ -1,7 +1,9 @@
 node_modules/
+dist/
 playwright-report/
 test-results/
 .worktrees/
+.impeccable/review/
 native-host/**/bin/
 native-host/**/obj/
 _metadata/
