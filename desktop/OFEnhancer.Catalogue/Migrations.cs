@@ -60,5 +60,44 @@ internal static class Migrations
         """
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne];
+    internal static readonly MigrationStep VersionTwo = new(
+        2,
+        """
+        CREATE TABLE google_row_bindings (
+            workbook_id TEXT NOT NULL,
+            sheet_id TEXT NOT NULL,
+            item_id TEXT NOT NULL REFERENCES catalogue_items(item_id) ON DELETE RESTRICT,
+            metadata_id TEXT NOT NULL,
+            last_observed_row INTEGER NOT NULL CHECK (last_observed_row > 0),
+            verified_remote_fingerprint TEXT NOT NULL,
+            verified_utc TEXT NOT NULL,
+            PRIMARY KEY (workbook_id, sheet_id, item_id),
+            UNIQUE (workbook_id, metadata_id)
+        );
+
+        CREATE TABLE sync_outbox (
+            operation_id TEXT PRIMARY KEY NOT NULL,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            item_id TEXT NOT NULL REFERENCES catalogue_items(item_id) ON DELETE RESTRICT,
+            workbook_id TEXT NOT NULL,
+            sheet_id TEXT NOT NULL,
+            metadata_key TEXT NOT NULL,
+            metadata_value TEXT NOT NULL,
+            destination_field TEXT NOT NULL,
+            payload_value TEXT NOT NULL,
+            expected_remote_fingerprint TEXT NOT NULL,
+            intended_value_fingerprint TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('pending', 'attempted', 'completed', 'conflict', 'unresolved')),
+            attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+            error_code TEXT,
+            created_utc TEXT NOT NULL,
+            attempted_utc TEXT,
+            completed_utc TEXT,
+            resolved_utc TEXT
+        );
+        CREATE INDEX sync_outbox_open_order ON sync_outbox(state, created_utc, operation_id);
+        """
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo];
 }

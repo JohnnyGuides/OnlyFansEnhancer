@@ -63,6 +63,106 @@ public sealed record CatalogueView(
 
 public sealed record BindingSummary(string AssetId, string ItemId, bool Changed);
 
+public sealed record WorkbookCatalogueItem
+{
+    public WorkbookCatalogueItem(
+        int sourceRow,
+        string sourceKey,
+        string title,
+        string description,
+        string? plannedDate,
+        string? series,
+        string? episode,
+        int xTeasers,
+        int redditTeasers,
+        IReadOnlyDictionary<string, string> platformLinks,
+        string? metadataId
+    )
+    {
+        SourceRow = sourceRow;
+        SourceKey = sourceKey;
+        Title = title;
+        Description = description;
+        PlannedDate = plannedDate;
+        Series = series;
+        Episode = episode;
+        XTeasers = xTeasers;
+        RedditTeasers = redditTeasers;
+        PlatformLinks = platformLinks;
+        MetadataId = metadataId;
+    }
+
+    public int SourceRow { get; }
+    public string SourceKey { get; }
+    public string Title { get; }
+    public string Description { get; }
+    public string? PlannedDate { get; }
+    public string? Series { get; }
+    public string? Episode { get; }
+    public int XTeasers { get; }
+    public int RedditTeasers { get; }
+    public IReadOnlyDictionary<string, string> PlatformLinks { get; }
+    public string? MetadataId { get; }
+}
+
+public sealed record WorkbookProjection(string WorkbookId, string SheetId, bool Complete, IReadOnlyList<WorkbookCatalogueItem> Items);
+
+public sealed record GoogleRowBinding(
+    string WorkbookId,
+    string SheetId,
+    string ItemId,
+    string MetadataId,
+    int LastObservedRow,
+    string VerifiedRemoteFingerprint,
+    DateTimeOffset VerifiedUtc
+);
+
+public sealed class WorkbookProjectionException : Exception
+{
+    public WorkbookProjectionException(string code, string message)
+        : base(message) => Code = code;
+
+    public string Code { get; }
+}
+
+public enum SyncOutboxState
+{
+    Pending,
+    Attempted,
+    Completed,
+    Conflict,
+    Unresolved,
+}
+
+public sealed record SyncOutboxItem(
+    string OperationId,
+    string IdempotencyKey,
+    string ItemId,
+    string WorkbookId,
+    string SheetId,
+    string MetadataKey,
+    string MetadataValue,
+    string DestinationField,
+    string PayloadValue,
+    string ExpectedRemoteFingerprint,
+    string IntendedValueFingerprint,
+    SyncOutboxState State,
+    int AttemptCount,
+    string? ErrorCode,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? AttemptedUtc,
+    DateTimeOffset? CompletedUtc,
+    DateTimeOffset? ResolvedUtc
+);
+
+public sealed class SyncOutboxException : Exception
+{
+    public SyncOutboxException(string code, string message)
+        : base(message) => Code = code;
+
+    public string Code { get; }
+}
+
 public sealed class CatalogueSnapshotException : Exception
 {
     public CatalogueSnapshotException(string code, string message)

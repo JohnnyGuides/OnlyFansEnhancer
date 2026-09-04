@@ -6,22 +6,24 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class CatalogueStoreTests
 {
     [TestMethod]
-    public void OpenFreshStoreCreatesOnlyTheVersionOneCoreTables()
+    public void VersionTwoAddsOnlyBindingsAndOutbox()
     {
         using TempDirectory temp = new();
         string databasePath = Path.Combine(temp.Path, "catalogue.db");
 
         using CatalogueStore store = CatalogueStore.Open(databasePath);
 
-        Assert.AreEqual(1, store.SchemaVersion);
+        Assert.AreEqual(2, store.SchemaVersion);
         CollectionAssert.AreEqual(
             new[]
             {
                 "asset_bindings",
                 "audit_events",
                 "catalogue_items",
+                "google_row_bindings",
                 "media_assets",
                 "settings",
+                "sync_outbox",
             },
             ReadUserTables(databasePath)
         );
@@ -29,7 +31,26 @@ public sealed class CatalogueStoreTests
     }
 
     [TestMethod]
-    public void FailedMigrationRestoresTheVerifiedOriginalDatabase()
+    public void VersionOneFixtureMigratesWithVerifiedSiblingBackup()
+    {
+        using TempDirectory temp = new();
+        string databasePath = Path.Combine(temp.Path, "catalogue.db");
+        using (CatalogueStore store = CatalogueStore.OpenForTesting(databasePath, [Migrations.VersionOne]))
+        {
+            using SqliteCommand command = store.Connection.CreateCommand();
+            command.CommandText = "INSERT INTO settings(key, value) VALUES ('sentinel', 'kept')";
+            command.ExecuteNonQuery();
+        }
+
+        using CatalogueStore migrated = CatalogueStore.Open(databasePath);
+        Assert.AreEqual(2, ReadVersion(databasePath));
+        Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
+        Assert.AreEqual("ok", ReadIntegrity(databasePath));
+        Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);
+    }
+
+    [TestMethod]
+    public void FailedVersionThreeMigrationRestoresExactSchemaTwoRows()
     {
         using TempDirectory temp = new();
         string databasePath = Path.Combine(temp.Path, "catalogue.db");
@@ -41,18 +62,19 @@ public sealed class CatalogueStoreTests
         }
 
         CatalogueMigrationException exception = Assert.ThrowsException<CatalogueMigrationException>(
-            () =>
-                CatalogueStore.OpenForTesting(
-                    databasePath,
-                    [Migrations.VersionOne, new MigrationStep(2, "CREATE TABLE broken(")]
-                )
+            () => CatalogueStore.OpenForTesting(
+                databasePath,
+                [.. Migrations.All, new MigrationStep(3, "CREATE TABLE broken(")]
+            )
         );
 
         StringAssert.Contains(exception.Message, "restored");
-        Assert.AreEqual(1, ReadVersion(databasePath));
+        Assert.AreEqual(2, ReadVersion(databasePath));
         Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
+        CollectionAssert.Contains(ReadUserTables(databasePath), "google_row_bindings");
+        CollectionAssert.Contains(ReadUserTables(databasePath), "sync_outbox");
         Assert.AreEqual("ok", ReadIntegrity(databasePath));
-        Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);
+        Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v2-*.sqlite").Length);
         Assert.AreEqual(0, Directory.GetFiles(temp.Path, "catalogue.db.restore-*.sqlite").Length);
     }
 
