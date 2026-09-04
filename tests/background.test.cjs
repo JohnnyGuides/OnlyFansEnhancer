@@ -1414,7 +1414,20 @@ function send(message) {
     tabId: openFanslyTab.id,
     url: "https://onlyfans.com/posts/create",
   };
-  await permissionAddedListener({ origins: ["https://fansly.com/*"] });
+  const originalWarn = console.warn;
+  const expectedMountWarnings = [];
+  console.warn = (...args) => expectedMountWarnings.push(args);
+  try {
+    await permissionAddedListener({ origins: ["https://fansly.com/*"] });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(expectedMountWarnings.length, 1);
+  assert.match(String(expectedMountWarnings[0][0]), /Could not mount .*fansly/);
+  assert.match(
+    String(expectedMountWarnings[0][1]?.message),
+    /target document no longer exists/,
+  );
   assert.equal(
     recorderInjectionTabs.includes(openFanslyTab.id),
     false,

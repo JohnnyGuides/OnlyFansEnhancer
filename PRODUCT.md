@@ -18,10 +18,12 @@ ambiguous catalogue match may ask for one thumbnail choice.
 
 ## Product Purpose
 
-OFEnhancer coordinates a video from local media through preparation,
-publishing, link capture, catalogue updates, social monitoring, and later
-re-release suggestions. It replaces repeated form filling and link copying
-without hiding uncertainty or publishing twice.
+OFEnhancer is intended to coordinate a video from local media through
+preparation, publishing, link capture, catalogue updates, social monitoring,
+and later re-release suggestions. The current release ships the local
+catalogue, desktop shell, Google catalogue flow, and trace-backed Chrome
+workflows. It replaces repeated form filling and link copying without hiding
+uncertainty or publishing twice.
 
 Success means the user can start from a local video or teaser, review one exact
 plan, authorize it once, and later see a truthful record of what is live,
@@ -49,22 +51,33 @@ identity.
   visual identity for catalogue items.
 - Friday at 15:00 UTC is the default release time.
 
-## Capabilities and Constraints
+## Current release
 
-- OnlyFans, Fansly, ManyVids, Pornhub Free/Paid, Clips4Sale variants, X,
-  Redgifs, and Reddit are publishing destinations.
+- The Windows app provides the desktop shell, local catalogue, thumbnail
+  matching, and explicit Google Sheet inspection and migration flow.
+- Chrome owns authenticated website interaction and exact page verification.
+- Sanitized traces and tested adapters cover OnlyFans, Fansly, ManyVids, and X
+  publishing/reply behavior. Live account behavior still requires the matching
+  current trace and an authenticated session.
+- Catalogue matching is deterministic: confirmed bindings and exact hashes
+  come first, perceptual evidence ranks candidates, and a thumbnail picker
+  resolves genuine ambiguity. An LLM is optional copy/paste assistance only.
+- An uncertain submit is reconciled and never blindly repeated.
+
+## Planned and trace-gated
+
+- The intended publishing destinations include OnlyFans, Fansly, ManyVids,
+  Pornhub Free/Paid, Clips4Sale variants, X, Redgifs, and Reddit. They are not
+  all autonomous in the current release.
 - Platform automation requires a sanitized successful trace and exact
   postconditions. A changed or ambiguous page stops the affected job.
 - One plan-level Yes may authorize supported final controls. A changed plan,
   replacement post, retry, deletion, or re-upload requires a new Yes.
-- An uncertain submit is reconciled and never blindly repeated.
-- Catalogue matching is deterministic: confirmed bindings and exact hashes
-  come first, perceptual evidence ranks candidates, and a thumbnail picker
-  resolves genuine ambiguity. An LLM is optional copy/paste assistance only.
-- X and Reddit posts are monitored politely when supported access is
-  configured. Deletion never triggers automatic reposting.
-- Social performance is compared with the creator's own age-matched history,
-  not a fixed like threshold.
+- X and Reddit monitoring, social performance comparison, and re-release
+  suggestions are planned behavior, not current-release UI or automation.
+- Complete current traces are still required before claiming autonomous
+  Redgifs, Reddit, Pornhub Free/Paid, Clips4Sale four-version, or remote
+  thumbnail-edit support.
 - OFEnhancer owns its media recipes. JohnnyTools is reference behavior, not a
   runtime dependency.
 - The Chrome Web Store identity-mask edition remains separate and does not

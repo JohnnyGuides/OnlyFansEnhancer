@@ -8,6 +8,7 @@
   const agentSetting = document.querySelector("#agentSetting");
   const openUploader = document.querySelector("#openUploader");
   const actionStatus = document.querySelector("#actionStatus");
+  const attentionStatus = document.querySelector("#attentionStatus");
   const catalogueSummary = document.querySelector("#catalogueSummary");
   const catalogueStatus = document.querySelector("#catalogueStatus");
   const catalogueLoading = document.querySelector("#catalogueLoading");
@@ -490,7 +491,17 @@
     return null;
   }
 
-  function defaultGoogleErrorPresentation() {
+  function defaultGoogleErrorPresentation(code) {
+    if (
+      code === "OFEnhancer is not connected." ||
+      code === "Chrome could not reach OFEnhancer."
+    )
+      return {
+        message:
+          "Desktop app is not connected. Start OFEnhancer, then try again.",
+        label: "Try again",
+        action: "refresh",
+      };
     return {
       message:
         "OFEnhancer could not finish the Google Sheet action. Try again.",
@@ -575,7 +586,9 @@
     }
     const errorPresentation =
       codePresentation ||
-      (state === "error" ? defaultGoogleErrorPresentation() : null);
+      (state === "error"
+        ? defaultGoogleErrorPresentation(googleStatusView.errorCode)
+        : null);
 
     googleCatalogue.hidden = false;
     googleSecondaryAction.hidden = true;
@@ -1044,6 +1057,8 @@
       connectionLabel.textContent = "Connected";
       versionLabel.textContent = `v${status.productVersion}`;
       agentSetting.textContent = `Connected · protocol ${status.protocolVersion}`;
+      attentionStatus.textContent =
+        "The desktop agent is connected and has not reported a problem.";
     })
     .catch(() => {
       document.body.dataset.connected = "false";
@@ -1052,5 +1067,7 @@
       agentSetting.textContent = "Not connected";
       openUploader.disabled = true;
       actionStatus.textContent = "Restart OFEnhancer to reconnect.";
+      attentionStatus.textContent =
+        "Desktop agent unavailable. Start OFEnhancer to reconnect.";
     });
 })(globalThis);

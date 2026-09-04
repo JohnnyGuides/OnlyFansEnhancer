@@ -42,6 +42,7 @@ async function main() {
   const address = server.address();
   const browser = await chromium.launch({ headless: true });
   try {
+    await testOfflineBridgeRecovery(browser, address.port);
     for (const viewport of viewports) {
       const page = await browser.newPage({ viewport });
       const errors = [];
@@ -113,6 +114,37 @@ async function main() {
   console.log(
     "PASS: shared desktop shell rendered at desktop, compact, and mobile widths",
   );
+}
+
+async function testOfflineBridgeRecovery(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByText("Desktop agent unavailable", { exact: true }).waitFor();
+
+  await page.getByRole("button", { name: "Attention" }).click();
+  await page
+    .getByText("Desktop agent unavailable. Start OFEnhancer to reconnect.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByText("The desktop agent is connected", { exact: false })
+      .count(),
+    0,
+  );
+
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page
+    .locator("#googleCatalogue")
+    .getByText(
+      "Desktop app is not connected. Start OFEnhancer, then try again.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  await page.close();
 }
 
 main().catch((error) => {
