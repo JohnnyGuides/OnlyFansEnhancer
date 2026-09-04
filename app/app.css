@@ -1071,7 +1071,7 @@ dialog::backdrop {
 
   .dialog-actions {
     align-items: stretch;
-    flex-direction: column-reverse;
+    flex-direction: column;
   }
 
   .dialog-actions button {

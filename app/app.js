@@ -359,6 +359,112 @@
     setBusy(googlePrimaryAction, false);
   }
 
+  function googleErrorPresentation(code) {
+    if (code === "google-catalogue-unavailable")
+      return {
+        message:
+          "Google Sheet is unavailable. Restart OFEnhancer, then try again.",
+        label: "Try again",
+        action: "refresh",
+      };
+    if (code === "google-client-id-not-configured")
+      return {
+        message: "Add your Google setup in Settings.",
+        label: "Settings",
+        action: "settings",
+        className: "secondary-button",
+      };
+    if (
+      code === "google-operation-in-progress" ||
+      code === "google-connection-in-progress"
+    )
+      return {
+        message: "Google Sheet is busy. Wait for the current action to finish.",
+        label: "Check status",
+        action: "refresh",
+        className: "secondary-button",
+      };
+    if (code === "stale-migration-plan")
+      return {
+        message: "The workbook changed. Check it again before reviewing.",
+        label: "Check workbook",
+        action: "inspect",
+        allowDisconnect: true,
+      };
+    if (
+      code === "google-sync-unresolved" ||
+      code === "google-migration-unresolved"
+    )
+      return {
+        message:
+          "OFEnhancer could not confirm the last workbook update. Check the workbook before trying again.",
+        label: "Check workbook",
+        action: "inspect",
+        allowDisconnect: true,
+      };
+    if (
+      code === "google-authorization-required" ||
+      code === "google-token-refresh-failed"
+    )
+      return {
+        message:
+          "Your Google connection expired or is no longer valid. Reconnect to continue.",
+        label: "Reconnect",
+        action: "connect",
+        allowDisconnect: true,
+      };
+    if (code === "google-session-failed" || code === "google-connection-failed")
+      return {
+        message:
+          "OFEnhancer could not connect to Google Sheet. Reconnect to try again.",
+        label: "Reconnect",
+        action: "connect",
+      };
+    if (code === "google-connection-cancel-failed")
+      return {
+        message:
+          "OFEnhancer could not cancel the browser connection. Check its status before trying again.",
+        label: "Check status",
+        action: "refresh",
+        className: "secondary-button",
+        allowDisconnect: true,
+      };
+    if (code === "google-catalogue-disconnected")
+      return {
+        message: "Connect Google Sheet to continue.",
+        label: "Connect Google Sheet",
+        action: "connect",
+      };
+    if (
+      code === "google-workbook-not-ready" ||
+      code === "google-sync-conflict" ||
+      code === "google-migration-failed"
+    )
+      return {
+        message: "Check the workbook before trying that action again.",
+        label: "Check workbook",
+        action: "inspect",
+        allowDisconnect: true,
+      };
+    if (
+      code === "google-connection-not-in-progress" ||
+      code === "google-operation-cancelled" ||
+      code === "google-disconnect-failed"
+    )
+      return {
+        message: "Google Sheet changed state. Check its current status.",
+        label: "Check status",
+        action: "refresh",
+        className: "secondary-button",
+      };
+    return {
+      message:
+        "OFEnhancer could not finish the Google Sheet action. Try again.",
+      label: "Try again",
+      action: "refresh",
+    };
+  }
+
   function renderGoogleCatalogue(view, notice = "") {
     const knownStates = new Set([
       "notConfigured",
@@ -391,6 +497,10 @@
       lastVerifiedSync: view?.lastVerifiedSync || null,
       errorCode: typeof view?.errorCode === "string" ? view.errorCode : "",
     };
+    const errorPresentation =
+      state === "error"
+        ? googleErrorPresentation(googleStatusView.errorCode)
+        : null;
 
     googleCatalogue.hidden = false;
     googleDisconnect.hidden = true;
@@ -413,21 +523,21 @@
       const changeVerb = googleStatusView.migrationChanges === 1 ? "is" : "are";
       googleCatalogueStatus.textContent = `${plural(googleStatusView.rowsToBind, "row")} ${rowVerb} linking. ${plural(googleStatusView.migrationChanges, "workbook change")} ${changeVerb} ready.`;
     } else if (state === "ready") {
-      googleCatalogueStatus.textContent = `${plural(googleStatusView.pendingCount, "update")} waiting. ${formatGoogleDate(googleStatusView.lastVerifiedSync)}`;
+      const pendingCopy = googleStatusView.pendingCount
+        ? `${plural(googleStatusView.pendingCount, "update")} waiting.`
+        : "No updates waiting.";
+      const conflictCopy = googleStatusView.conflictCount
+        ? ` ${plural(googleStatusView.conflictCount, "conflict")} ${googleStatusView.conflictCount === 1 ? "needs" : "need"} review.`
+        : "";
+      googleCatalogueStatus.textContent = `${pendingCopy}${conflictCopy} ${formatGoogleDate(googleStatusView.lastVerifiedSync)}`;
     } else if (state === "syncing") {
       googleCatalogueStatus.textContent = "Syncing Google Sheet…";
       googleCatalogueStatus.setAttribute("aria-busy", "true");
     } else if (state === "conflict") {
       googleCatalogueStatus.textContent =
         "The workbook changed. Check it before syncing.";
-    } else if (
-      googleStatusView.errorCode.includes("authorization") ||
-      googleStatusView.errorCode.includes("token")
-    ) {
-      googleCatalogueStatus.textContent = "Reconnect Google Sheet to continue.";
     } else {
-      googleCatalogueStatus.textContent =
-        "OFEnhancer could not finish that Google Sheet action.";
+      googleCatalogueStatus.textContent = errorPresentation.message;
     }
 
     if (state === "notConfigured") {
@@ -443,7 +553,11 @@
       setGooglePrimaryAction("Review changes", "review");
       googleDisconnect.hidden = false;
     } else if (state === "ready") {
-      setGooglePrimaryAction("Sync now", "sync");
+      if (googleStatusView.conflictCount && googleStatusView.pendingCount)
+        setGooglePrimaryAction("Sync pending updates", "sync");
+      else if (googleStatusView.conflictCount)
+        setGooglePrimaryAction("Check workbook", "inspect");
+      else setGooglePrimaryAction("Sync now", "sync");
       googleDisconnect.hidden = false;
     } else if (state === "syncing") {
       setGooglePrimaryAction("Syncing…", "sync");
@@ -453,17 +567,13 @@
     } else if (state === "conflict") {
       setGooglePrimaryAction("Check workbook", "inspect");
       googleDisconnect.hidden = false;
-    } else if (
-      googleStatusView.errorCode.includes("authorization") ||
-      googleStatusView.errorCode.includes("token")
-    ) {
-      setGooglePrimaryAction("Reconnect", "connect");
-      googleDisconnect.hidden = false;
-    } else if (googleStatusView.workbookName) {
-      setGooglePrimaryAction("Check workbook", "inspect");
-      googleDisconnect.hidden = false;
     } else {
-      setGooglePrimaryAction("Connect Google Sheet", "connect");
+      setGooglePrimaryAction(
+        errorPresentation.label,
+        errorPresentation.action,
+        errorPresentation.className,
+      );
+      googleDisconnect.hidden = !errorPresentation.allowDisconnect;
     }
 
     scheduleGooglePolling(state);
@@ -520,6 +630,14 @@
     }
     if (action === "review") {
       openGoogleMigrationReview();
+      return;
+    }
+    if (action === "refresh") {
+      setBusy(googlePrimaryAction, true);
+      googleDisconnect.disabled = true;
+      googleCatalogueStatus.setAttribute("aria-busy", "true");
+      googleCatalogueStatus.textContent = "Checking Google Sheet status…";
+      await refreshGoogleCatalogue();
       return;
     }
     const operations = {
@@ -594,7 +712,9 @@
           );
           renderGoogleCatalogue(
             status,
-            "The workbook changed. Review the updated changes.",
+            status?.state === "migrationReady"
+              ? "The workbook changed. Review the updated changes."
+              : "",
           );
         } catch (inspectionError) {
           renderGoogleCatalogue({
@@ -763,6 +883,8 @@
     googleClientId.setAttribute("aria-invalid", "false");
     googleClientId.value = clientId;
     const submit = googleSetupForm.querySelector('[type="submit"]');
+    googleClientId.readOnly = true;
+    setBusy(googleClientId, true);
     setBusy(submit, true);
     googleSetupForm.setAttribute("aria-busy", "true");
     googleSetupStatus.textContent = "Saving Google setup…";
@@ -771,10 +893,15 @@
         "saveGoogleClientId",
         { clientId },
       );
-      googleSetupStatus.textContent = "Google setup saved.";
+      googleSetupStatus.textContent =
+        googleClientId.value.trim() === clientId
+          ? "Google setup saved."
+          : "Google setup changed while saving. Save the current value again.";
     } catch {
       googleSetupStatus.textContent = "OFEnhancer could not save Google setup.";
     } finally {
+      googleClientId.readOnly = false;
+      setBusy(googleClientId, false);
       setBusy(submit, false);
       googleSetupForm.setAttribute("aria-busy", "false");
     }
