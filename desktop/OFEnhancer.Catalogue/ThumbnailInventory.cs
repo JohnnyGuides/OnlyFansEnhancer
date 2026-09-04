@@ -1,7 +1,11 @@
+using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.Win32.SafeHandles;
 
 namespace OFEnhancer.Catalogue;
 
@@ -20,7 +24,8 @@ internal static class ThumbnailInventory
     internal static ThumbnailScanSummary Scan(
         SqliteConnection connection,
         string root,
-        int maximumFiles
+        int maximumFiles,
+        Action<string>? beforeOpenFile = null
     )
     {
         if (maximumFiles <= 0 || maximumFiles > DefaultMaximumFiles)
@@ -40,7 +45,7 @@ internal static class ThumbnailInventory
         if ((File.GetAttributes(fullRoot) & FileAttributes.ReparsePoint) != 0)
             throw new CatalogueInventoryException("unsafe-thumbnail-root", "Thumbnail folder cannot be a reparse point.");
 
-        IReadOnlyList<ScannedFile> files = ReadFiles(fullRoot, maximumFiles);
+        IReadOnlyList<ScannedFile> files = ReadFiles(fullRoot, maximumFiles, beforeOpenFile);
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         int newAssets = 0;
         using SqliteTransaction transaction = connection.BeginTransaction();
@@ -136,8 +141,19 @@ internal static class ThumbnailInventory
         return command.ExecuteScalar() as string;
     }
 
-    private static IReadOnlyList<ScannedFile> ReadFiles(string root, int maximumFiles)
+    private static IReadOnlyList<ScannedFile> ReadFiles(
+        string root,
+        int maximumFiles,
+        Action<string>? beforeOpenFile
+    )
     {
+        using SafeFileHandle rootHandle = WindowsFinalPath.OpenDirectory(root);
+        string finalRoot = WindowsFinalPath.Read(rootHandle);
+        if (!WindowsFinalPath.IsSamePath(root, finalRoot))
+            throw new CatalogueInventoryException(
+                "unsafe-thumbnail-root",
+                "Thumbnail folder cannot resolve through a reparse point."
+            );
         List<string> paths = [];
         Stack<string> directories = new();
         directories.Push(root);
@@ -175,7 +191,8 @@ internal static class ThumbnailInventory
         {
             throw;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception)
+            when (exception is IOException or UnauthorizedAccessException or Win32Exception)
         {
             throw new CatalogueInventoryException(
                 "thumbnail-scan-failed",
@@ -188,10 +205,9 @@ internal static class ThumbnailInventory
         List<ScannedFile> result = new(paths.Count);
         foreach (string path in paths)
         {
-            FileInfo info = new(path);
-            string sha256;
             try
             {
+                beforeOpenFile?.Invoke(path);
                 using FileStream stream = new(
                     path,
                     FileMode.Open,
@@ -200,26 +216,39 @@ internal static class ThumbnailInventory
                     bufferSize: 128 * 1024,
                     FileOptions.SequentialScan
                 );
-                sha256 = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+                string finalPath = WindowsFinalPath.Read(stream.SafeFileHandle);
+                if (!IsContainedPath(finalRoot, finalPath))
+                    throw new CatalogueInventoryException(
+                        "thumbnail-path-escape",
+                        "A thumbnail resolved outside the configured folder."
+                    );
+                string sha256 = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+                string fileName = Path.GetFileName(path);
+                result.Add(
+                    new ScannedFile(
+                        fileName,
+                        path,
+                        stream.Length,
+                        File.GetLastWriteTimeUtc(stream.SafeFileHandle)
+                            .ToString("O", CultureInfo.InvariantCulture),
+                        sha256,
+                        ClassifyRole(Path.GetFileNameWithoutExtension(fileName))
+                    )
+                );
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (CatalogueInventoryException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+                when (exception is IOException or UnauthorizedAccessException or Win32Exception)
             {
                 throw new CatalogueInventoryException(
                     "thumbnail-read-failed",
-                    $"Thumbnail could not be read: {info.Name}",
+                    $"Thumbnail could not be read: {Path.GetFileName(path)}",
                     exception
                 );
             }
-            result.Add(
-                new ScannedFile(
-                    info.Name,
-                    path,
-                    info.Length,
-                    info.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
-                    sha256,
-                    ClassifyRole(Path.GetFileNameWithoutExtension(info.Name))
-                )
-            );
         }
         return result;
     }
@@ -307,6 +336,12 @@ public sealed partial class CatalogueStore
     internal ThumbnailScanSummary ScanThumbnails(string root, int maximumFiles) =>
         ThumbnailInventory.Scan(connection, root, maximumFiles);
 
+    internal ThumbnailScanSummary ScanThumbnails(
+        string root,
+        int maximumFiles,
+        Action<string> beforeOpenFile
+    ) => ThumbnailInventory.Scan(connection, root, maximumFiles, beforeOpenFile);
+
     public string? ConfiguredThumbnailRoot => ThumbnailInventory.ReadConfiguredRoot(connection);
 
     public IReadOnlyList<MediaAssetSummary> GetAssets(bool includeUnavailable = false)
@@ -375,3 +410,74 @@ public sealed partial class CatalogueStore
 }
 
 internal sealed record AvailableAssetLocation(string Path, string ScanRoot, string Sha256);
+
+internal static class WindowsFinalPath
+{
+    private const uint FileFlagBackupSemantics = 0x02000000;
+
+    internal static SafeFileHandle OpenDirectory(string path)
+    {
+        SafeFileHandle handle = CreateFile(
+            path,
+            0,
+            FileShare.Read | FileShare.Write | FileShare.Delete,
+            IntPtr.Zero,
+            FileMode.Open,
+            FileFlagBackupSemantics,
+            IntPtr.Zero
+        );
+        if (!handle.IsInvalid)
+            return handle;
+        int error = Marshal.GetLastPInvokeError();
+        handle.Dispose();
+        throw new Win32Exception(error);
+    }
+
+    internal static string Read(SafeFileHandle handle)
+    {
+        int capacity = 512;
+        while (true)
+        {
+            StringBuilder buffer = new(capacity);
+            uint result = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+            if (result == 0)
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
+            if (result < buffer.Capacity)
+                return Normalize(buffer.ToString());
+            capacity = checked((int)result + 1);
+        }
+    }
+
+    internal static bool IsSamePath(string left, string right) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            StringComparison.OrdinalIgnoreCase
+        );
+
+    private static string Normalize(string path) =>
+        path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
+            ? @"\\" + path[8..]
+            : path.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)
+                ? path[4..]
+                : path;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string fileName,
+        uint desiredAccess,
+        FileShare shareMode,
+        IntPtr securityAttributes,
+        FileMode creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile
+    );
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(
+        SafeFileHandle file,
+        [Out] StringBuilder filePath,
+        uint filePathLength,
+        uint flags
+    );
+}

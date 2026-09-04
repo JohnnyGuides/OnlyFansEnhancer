@@ -50,6 +50,10 @@ public sealed class CatalogueSnapshotImporterTests
             """{"version":1,"items":[{"sourceKey":"bad-count","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":-1,"redditTeasers":0,"platformLinks":{}}]}""",
             """{"version":1,"items":[{"sourceKey":"bad-link","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"onlyfans":"http://example.com/post"}}]}""",
             """{"version":1,"items":[{"sourceKey":"wrong-host","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"onlyfans":"https://example.com/post"}}]}""",
+            """{"version":1,"items":[{"sourceKey":"wrong-path","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"x":"https://x.com/home"}}]}""",
+            """{"version":1,"items":[{"sourceKey":"secret-query","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"onlyfans":"https://onlyfans.com/123/johnny_guides?token=secret"}}]}""",
+            """{"version":1,"items":[{"sourceKey":"fragment","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"redgifs":"https://www.redgifs.com/watch/ashley-demo#private"}}]}""",
+            """{"version":1,"items":[{"sourceKey":"extra-pornhub-parameter","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"pornhubFree":"https://www.pornhub.com/view_video.php?viewkey=phabc123&token=secret"}}]}""",
             """{"version":1,"items":[{"sourceKey":"missing-count","sourceRow":1,"title":"Bad","description":"","plannedDate":null,"series":null,"episode":null,"redditTeasers":0,"platformLinks":{}}]}""",
             """{"version":1,"items":[{"sourceKey":"duplicate-field","sourceRow":1,"title":"First","title":"Second","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{}}]}""",
             """{"version":1,"items":[],"unexpected":true}""",
@@ -79,6 +83,37 @@ public sealed class CatalogueSnapshotImporterTests
         Assert.AreEqual(0, store.GetItems(includeArchived: true).Count);
     }
 
+    [TestMethod]
+    public void PlatformLinksUseCanonicalPostShapes()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        string snapshot =
+            """
+            {"version":1,"items":[{"sourceKey":"links","sourceRow":1,"title":"Links","description":"","plannedDate":null,"series":null,"episode":null,"xTeasers":0,"redditTeasers":0,"platformLinks":{"onlyfans":"https://onlyfans.com/123/johnny_guides/","fansly":"https://fansly.com/post/456/","manyvids":"https://www.manyvids.com/Video/789/ashley-preview/","pornhubFree":"https://www.pornhub.com/view_video.php?viewkey=phabc123","pornhubPaid":"https://www.pornhub.com/view_video.php?viewkey=phpaid456","clips4sale":"https://www.clips4sale.com/studio/1234/5678/ashley-preview/","x":"https://x.com/johnny_guides/status/123456789","reddit":"https://www.reddit.com/r/example/comments/abc123/ashley_preview/","redgifs":"https://www.redgifs.com/watch/ashley-preview/"}}]}
+            """;
+
+        store.ImportSnapshot(snapshot);
+
+        IReadOnlyDictionary<string, string> links = store.GetItems().Single().PlatformLinks;
+        Assert.AreEqual("https://onlyfans.com/123/johnny_guides", links["onlyfans"]);
+        Assert.AreEqual("https://fansly.com/post/456", links["fansly"]);
+        Assert.AreEqual("https://www.manyvids.com/Video/789", links["manyvids"]);
+        Assert.AreEqual(
+            "https://www.pornhub.com/view_video.php?viewkey=phabc123",
+            links["pornhubFree"]
+        );
+        Assert.AreEqual(
+            "https://www.clips4sale.com/studio/1234/5678/ashley-preview",
+            links["clips4sale"]
+        );
+        Assert.AreEqual(
+            "https://www.reddit.com/r/example/comments/abc123/ashley_preview",
+            links["reddit"]
+        );
+        Assert.AreEqual("https://www.redgifs.com/watch/ashley-preview", links["redgifs"]);
+    }
+
     private static string Snapshot(string sourceKey, string title, string date) =>
         $$"""
         {
@@ -95,7 +130,7 @@ public sealed class CatalogueSnapshotImporterTests
               "xTeasers": 2,
               "redditTeasers": 1,
               "platformLinks": {
-                "onlyfans": "https://onlyfans.com/example/post/1",
+                "onlyfans": "https://onlyfans.com/123456789/johnny_guides",
                 "fansly": "https://fansly.com/post/1"
               }
             }

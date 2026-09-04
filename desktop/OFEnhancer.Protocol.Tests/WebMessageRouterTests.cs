@@ -166,6 +166,36 @@ public sealed class WebMessageRouterTests
         );
     }
 
+    [TestMethod]
+    public void MissingRememberedThumbnailFolderPromptsForAReplacement()
+    {
+        using TestDirectory temp = new();
+        string missing = Directory.CreateDirectory(Path.Combine(temp.Path, "missing")).FullName;
+        string replacement = Directory.CreateDirectory(Path.Combine(temp.Path, "replacement")).FullName;
+        File.WriteAllBytes(Path.Combine(missing, "old.png"), [1]);
+        File.WriteAllBytes(Path.Combine(replacement, "new.png"), [2]);
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.ScanThumbnails(missing);
+        Directory.Delete(missing, recursive: true);
+        int choices = 0;
+        WebMessageRouter router = new(
+            _ => throw new AssertFailedException(),
+            () => null,
+            store,
+            () =>
+            {
+                choices++;
+                return replacement;
+            }
+        );
+
+        AssertOk(router.Handle(Request("scanThumbnails", new { })));
+
+        Assert.AreEqual(1, choices);
+        Assert.AreEqual(replacement, store.ConfiguredThumbnailRoot);
+        CollectionAssert.AreEqual(new[] { "new.png" }, store.GetAssets().Select(asset => asset.FileName).ToArray());
+    }
+
     private static string Request(string operation, object payload) =>
         JsonSerializer.Serialize(new { requestId = RequestId, operation, payload });
 

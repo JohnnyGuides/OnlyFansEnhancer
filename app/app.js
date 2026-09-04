@@ -397,6 +397,7 @@
 
   closeMatchDialog.addEventListener("click", () => matchDialog.close());
   matchDialog.addEventListener("close", () => {
+    if (matchDialog.open) return;
     currentAsset = null;
     matchDialogStatus.textContent = "";
   });

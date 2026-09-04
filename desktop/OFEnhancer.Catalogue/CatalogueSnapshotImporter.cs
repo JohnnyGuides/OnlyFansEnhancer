@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
 namespace OFEnhancer.Catalogue;
@@ -24,40 +25,6 @@ internal static class CatalogueSnapshotImporter
         "reddit",
         "redgifs",
     ];
-    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> PlatformHosts =
-        new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
-        {
-            ["onlyfans"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "onlyfans.com" },
-            ["fansly"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "fansly.com" },
-            ["manyvids"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "www.manyvids.com",
-            },
-            ["pornhubFree"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "www.pornhub.com",
-            },
-            ["pornhubPaid"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "www.pornhub.com",
-            },
-            ["clips4sale"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "clips4sale.com",
-                "www.clips4sale.com",
-            },
-            ["x"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "x.com" },
-            ["reddit"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "www.reddit.com",
-            },
-            ["redgifs"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "redgifs.com",
-                "www.redgifs.com",
-            },
-        };
-
     private static readonly JsonSerializerOptions InputJson = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -234,12 +201,16 @@ internal static class CatalogueSnapshotImporter
                     || !string.IsNullOrEmpty(parsed.UserInfo)
                     || string.IsNullOrWhiteSpace(parsed.Host)
                     || !parsed.IsDefaultPort
-                    || !PlatformHosts[platform].Contains(parsed.IdnHost)
                 )
                     throw Invalid(
-                        $"Platform link for {platform} must use its canonical credential-free HTTPS host."
+                        $"Platform link for {platform} must use its canonical credential-free HTTPS post URL."
                     );
-                links.Add(platform, parsed.AbsoluteUri);
+                string? canonical = CanonicalPlatformLink(platform, parsed);
+                if (canonical is null)
+                    throw Invalid(
+                        $"Platform link for {platform} must use its canonical credential-free HTTPS post URL."
+                    );
+                links.Add(platform, canonical);
             }
 
             result.Add(
@@ -258,6 +229,112 @@ internal static class CatalogueSnapshotImporter
             );
         }
         return result;
+    }
+
+    private static string? CanonicalPlatformLink(string platform, Uri uri) =>
+        platform switch
+        {
+            "onlyfans" => CanonicalPath(
+                uri,
+                "onlyfans.com",
+                @"^/(?<id>[0-9]{1,30})(?:/(?<handle>[A-Za-z0-9._]{1,64}))?/?$",
+                match =>
+                    $"https://onlyfans.com/{match.Groups["id"].Value}"
+                    + (match.Groups["handle"].Success ? $"/{match.Groups["handle"].Value}" : "")
+            ),
+            "fansly" => CanonicalPath(
+                uri,
+                "fansly.com",
+                @"^/post/(?<id>[0-9]{1,30})/?$",
+                match => $"https://fansly.com/post/{match.Groups["id"].Value}"
+            ),
+            "manyvids" => CanonicalPath(
+                uri,
+                "www.manyvids.com",
+                @"^/Video/(?<id>[0-9]{1,30})(?:/[A-Za-z0-9_-]+)?/?$",
+                match => $"https://www.manyvids.com/Video/{match.Groups["id"].Value}",
+                ignoreCase: true
+            ),
+            "pornhubFree" or "pornhubPaid" => CanonicalPornhub(uri),
+            "clips4sale" => CanonicalPath(
+                uri,
+                ["clips4sale.com", "www.clips4sale.com"],
+                @"^/studio/(?<studio>[0-9]{1,20})/(?<clip>[0-9]{1,20})(?:/(?<slug>[A-Za-z0-9_-]+))?/?$",
+                match =>
+                    $"https://www.clips4sale.com/studio/{match.Groups["studio"].Value}/{match.Groups["clip"].Value}"
+                    + (match.Groups["slug"].Success ? $"/{match.Groups["slug"].Value}" : ""),
+                ignoreCase: true
+            ),
+            "x" => CanonicalPath(
+                uri,
+                "x.com",
+                @"^/(?<handle>[A-Za-z0-9_]{1,15})/status/(?<id>[0-9]{1,30})/?$",
+                match =>
+                    string.Equals(match.Groups["handle"].Value, "i", StringComparison.OrdinalIgnoreCase)
+                        ? null
+                        : $"https://x.com/{match.Groups["handle"].Value}/status/{match.Groups["id"].Value}"
+            ),
+            "reddit" => CanonicalPath(
+                uri,
+                "www.reddit.com",
+                @"^/r/(?<subreddit>[A-Za-z0-9_]{2,21})/comments/(?<id>[A-Za-z0-9]{3,12})/(?<slug>[A-Za-z0-9_-]+)/?$",
+                match =>
+                    $"https://www.reddit.com/r/{match.Groups["subreddit"].Value}/comments/{match.Groups["id"].Value.ToLowerInvariant()}/{match.Groups["slug"].Value}"
+            ),
+            "redgifs" => CanonicalPath(
+                uri,
+                ["redgifs.com", "www.redgifs.com"],
+                @"^/watch/(?<slug>[A-Za-z0-9-]{2,100})/?$",
+                match => $"https://www.redgifs.com/watch/{match.Groups["slug"].Value}"
+            ),
+            _ => null,
+        };
+
+    private static string? CanonicalPornhub(Uri uri)
+    {
+        if (
+            !string.Equals(uri.IdnHost, "www.pornhub.com", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.AbsolutePath, "/view_video.php", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(uri.Fragment)
+        )
+            return null;
+        Match match = Regex.Match(
+            uri.Query,
+            @"^\?viewkey=(?<id>[A-Za-z0-9_-]{1,100})$",
+            RegexOptions.CultureInvariant
+        );
+        return match.Success
+            ? $"https://www.pornhub.com/view_video.php?viewkey={match.Groups["id"].Value}"
+            : null;
+    }
+
+    private static string? CanonicalPath(
+        Uri uri,
+        string host,
+        string pattern,
+        Func<Match, string?> format,
+        bool ignoreCase = false
+    ) => CanonicalPath(uri, [host], pattern, format, ignoreCase);
+
+    private static string? CanonicalPath(
+        Uri uri,
+        IReadOnlyList<string> hosts,
+        string pattern,
+        Func<Match, string?> format,
+        bool ignoreCase = false
+    )
+    {
+        if (
+            !hosts.Any(host => string.Equals(uri.IdnHost, host, StringComparison.OrdinalIgnoreCase))
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+        )
+            return null;
+        RegexOptions options = RegexOptions.CultureInvariant;
+        if (ignoreCase)
+            options |= RegexOptions.IgnoreCase;
+        Match match = Regex.Match(uri.AbsolutePath, pattern, options);
+        return match.Success ? format(match) : null;
     }
 
     private static string Fingerprint(IReadOnlyList<ValidatedSnapshotItem> items)

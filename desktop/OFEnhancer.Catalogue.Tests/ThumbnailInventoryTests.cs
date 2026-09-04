@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace OFEnhancer.Catalogue.Tests;
 
 [TestClass]
@@ -91,6 +93,74 @@ public sealed class ThumbnailInventoryTests
         Assert.IsFalse(assets.Single(asset => asset.AssetId == firstAssetId).Available);
         Assert.IsNull(store.ResolveAvailableAssetLocation(firstAssetId));
         Assert.AreEqual(secondRoot, store.ConfiguredThumbnailRoot);
+    }
+
+    [TestMethod]
+    public void ScanRejectsAQueuedDirectoryThatIsReplacedByAnOutsideLink()
+    {
+        using TestDirectory temp = new();
+        string root = Directory.CreateDirectory(Path.Combine(temp.Path, "thumbs")).FullName;
+        string queued = Directory.CreateDirectory(Path.Combine(root, "queued")).FullName;
+        string moved = Path.Combine(root, "moved");
+        string outside = Directory.CreateDirectory(Path.Combine(temp.Path, "outside")).FullName;
+        File.WriteAllBytes(Path.Combine(queued, "cover.png"), [1, 2, 3]);
+        File.WriteAllBytes(Path.Combine(outside, "cover.png"), [9, 8, 7]);
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        CatalogueInventoryException exception = Assert.ThrowsException<CatalogueInventoryException>(
+            () =>
+                store.ScanThumbnails(
+                    root,
+                    ThumbnailInventory.DefaultMaximumFiles,
+                    path =>
+                    {
+                        if (!path.EndsWith("cover.png", StringComparison.OrdinalIgnoreCase))
+                            return;
+                        Directory.Move(queued, moved);
+                        CreateJunction(queued, outside);
+                    }
+                )
+        );
+
+        Assert.AreEqual("thumbnail-path-escape", exception.Code, exception.ToString());
+        Assert.AreEqual(0, store.GetAssets(includeUnavailable: true).Count);
+        Directory.Delete(queued);
+    }
+
+    [TestMethod]
+    public void ScanRejectsAJunctionAsTheSelectedRoot()
+    {
+        using TestDirectory temp = new();
+        string target = Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName;
+        string junction = Path.Combine(temp.Path, "junction");
+        File.WriteAllBytes(Path.Combine(target, "cover.png"), [1, 2, 3]);
+        CreateJunction(junction, target);
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+
+        CatalogueInventoryException exception = Assert.ThrowsException<CatalogueInventoryException>(
+            () => store.ScanThumbnails(junction)
+        );
+
+        Assert.AreEqual("unsafe-thumbnail-root", exception.Code);
+        Assert.AreEqual(0, store.GetAssets(includeUnavailable: true).Count);
+        Directory.Delete(junction);
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        using Process process = Process.Start(
+            new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/d /c mklink /J \"{link}\" \"{target}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }
+        )!;
+        process.WaitForExit();
+        Assert.AreEqual(0, process.ExitCode, process.StandardError.ReadToEnd());
     }
 
     private static string Snapshot(string sourceKey, string title) =>

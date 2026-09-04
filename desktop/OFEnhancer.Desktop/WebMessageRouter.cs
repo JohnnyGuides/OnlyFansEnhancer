@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -100,8 +101,11 @@ public sealed partial class WebMessageRouter(
     private string ScanThumbnails(WebRequest request)
     {
         ScanPayload payload = DeserializePayload<ScanPayload>(request.Payload);
+        string? configuredRoot = catalogue!.ConfiguredThumbnailRoot;
         string? root = string.IsNullOrWhiteSpace(payload.Root)
-            ? catalogue!.ConfiguredThumbnailRoot ?? chooseThumbnailRoot?.Invoke()
+            ? !string.IsNullOrWhiteSpace(configuredRoot) && Directory.Exists(configuredRoot)
+                ? configuredRoot
+                : chooseThumbnailRoot?.Invoke()
             : payload.Root;
         if (string.IsNullOrWhiteSpace(root))
             return Failure(request.RequestId, "thumbnail-folder-not-selected");

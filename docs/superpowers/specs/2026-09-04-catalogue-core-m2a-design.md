@@ -82,6 +82,11 @@ Unknown fields, duplicate source keys, invalid dates, negative counts,
 unsupported platforms, non-HTTPS links, overlong text, and over-limit snapshots
 reject the entire import. The transaction does not partially apply.
 
+Platform coverage accepts canonical post URLs only. Hosts and post-path shapes
+must match the named platform; query strings and fragments are rejected except
+for Pornhub's single bounded `viewkey`. The importer stores a normalized URL,
+never arbitrary navigation URLs or credential-like parameters.
+
 The first import creates an opaque GUID for each source key. Later imports
 update the projection by source key while retaining the GUID and every confirmed
 asset binding. Missing source keys become `archived` locally rather than being
@@ -98,11 +103,15 @@ Johnny's current source is:
 
 The first scan chooses this (or another creator's folder) through a native
 folder picker and stores that choice in the local database. The absolute path
-is not compiled into or shipped with the package.
+is not compiled into or shipped with the package. If the remembered folder is
+moved or removed, the next scan opens the picker again instead of trapping the
+user on a dead path.
 
 The scanner is recursive, skips reparse points, accepts PNG, JPEG, and WebP,
-and stops at 20,000 files. It records file name, absolute path, length, last
-write time, SHA-256, and a role hint:
+and stops at 20,000 files. It holds the selected root open and verifies each
+opened file's final handle path before hashing it, so a root or queued child
+swapped for a junction cannot escape the selected tree. It records file name,
+absolute path, length, last write time, SHA-256, and a role hint:
 
 - `_33` -> Pornhub 640x360 artwork;
 - `_4K` -> Clips4Sale 4K artwork;

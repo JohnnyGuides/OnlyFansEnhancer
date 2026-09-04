@@ -20,9 +20,10 @@ Expected results:
 
 - a fresh database contains only the approved v1 catalogue tables;
 - failed migrations restore a verified sibling backup;
-- malformed, duplicate, unsafe, or over-limit snapshots change nothing;
+- malformed, duplicate, unsafe, non-canonical, or over-limit snapshots change
+  nothing;
 - thumbnail scans retain SHA-256 identity across renames and never leave their
-  configured root;
+  configured root, including if a queued directory is replaced by a junction;
 - filename and catalogue wording rank at most five choices but never bind by
   themselves;
 - the UI exposes only opaque thumbnail URLs and remains usable at desktop,
@@ -45,10 +46,12 @@ Expected results:
 3. Import a small fixture snapshot, click **Scan thumbnails**, and choose a
    disposable folder in the native picker. Check the rows, X/Reddit counts,
    platform badges, and missing-match list.
-4. Open **Choose video**. Escape must close the picker and restore focus. Reopen
+4. Rename or remove that disposable folder, scan again, and confirm the native
+   picker lets you choose its replacement.
+5. Open **Choose video**. Escape must close the picker and restore focus. Reopen
    it, choose one candidate, and verify the match persists after renaming the
    fixture image and rescanning.
-5. Stop if the UI reveals an absolute path, silently binds an uncertain image,
+6. Stop if the UI reveals an absolute path, silently binds an uncertain image,
    reports false success, or logs an uncaught browser error.
 
 Delete only the temporary folders created for this check when finished.

@@ -21,7 +21,7 @@ const populated = {
       xTeasers: 2,
       redditTeasers: 1,
       platformLinks: {
-        onlyfans: "https://onlyfans.com/example/post/1",
+        onlyfans: "https://onlyfans.com/123/johnny_guides",
         fansly: "https://fansly.com/post/1",
       },
       archived: false,
@@ -105,6 +105,7 @@ async function installHost(page, initialState = null) {
       };
       let failNextScan = true;
       globalThis.__catalogueImportCalls = 0;
+      globalThis.__catalogueConfirmCalls = 0;
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
@@ -154,6 +155,7 @@ async function installHost(page, initialState = null) {
           return { availableAssets: 1, newAssets: 1, unavailableAssets: 0 };
         }
         if (operation === "confirmAssetBinding") {
+          globalThis.__catalogueConfirmCalls += 1;
           catalogue.items[0].thumbnailAssetId = payload.assetId;
           catalogue.items[0].thumbnailStatus = "bound";
           catalogue.unmatchedAssets = [];
@@ -262,6 +264,7 @@ async function main() {
         "keyboard did not reach the first candidate",
       );
       await page.keyboard.press("Enter");
+      await page.waitForFunction(() => __catalogueConfirmCalls === 1);
       await page.getByText("Thumbnail matched.", { exact: true }).waitFor();
       assert.equal(
         await page.locator("#catalogueStatus").getAttribute("role"),
