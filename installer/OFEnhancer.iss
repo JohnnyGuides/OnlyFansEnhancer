@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.3
+AppVersion=0.20.4
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.3
+OutputBaseFilename=OFEnhancer-Setup-0.20.4
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -40,10 +40,10 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Win
 #endif
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent
 #ifdef PersonalExtensionId
-Filename: "{app}\extension-reload.html"; Description: "Show the required Chrome reload"; Flags: postinstall shellexec skipifsilent
+Filename: "chrome.exe"; Parameters: """{app}\extension-reload.html"""; Description: "Show the required Chrome reload"; Flags: postinstall shellexec nowait skipifsilent
 #endif
 #ifndef PersonalExtensionId
-Filename: "{app}\extension-setup.html"; Description: "Connect the Chrome extension"; Flags: postinstall shellexec skipifsilent
+Filename: "chrome.exe"; Parameters: """{app}\extension-setup.html"""; Description: "Connect the Chrome extension"; Flags: postinstall shellexec nowait skipifsilent
 #endif
 
 [UninstallRun]

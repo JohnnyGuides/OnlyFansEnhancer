@@ -44,7 +44,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.20.3");
+  assert.equal(manifest.version, "0.20.4");
   assert.ok(manifest.permissions.includes("debugger"));
   assert.ok(manifest.permissions.includes("nativeMessaging"));
   assert.equal(

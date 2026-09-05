@@ -181,6 +181,21 @@ async function main() {
   assert.match(installer, /extension-reload\.html/);
   assert.match(
     installer,
+    /Filename:\s*"chrome\.exe";\s*Parameters:\s*"""\{app\}\\extension-reload\.html""";.*Flags:.*postinstall.*shellexec.*nowait.*skipifsilent/i,
+    "the post-update guide must open in Chrome instead of the default browser",
+  );
+  assert.match(
+    installer,
+    /Filename:\s*"chrome\.exe";\s*Parameters:\s*"""\{app\}\\extension-setup\.html""";.*Flags:.*postinstall.*shellexec.*nowait.*skipifsilent/i,
+    "the first-install guide must open in Chrome instead of the default browser",
+  );
+  assert.doesNotMatch(
+    installer,
+    /Filename:\s*"\{app\}\\extension-(?:reload|setup)\.html";.*postinstall/i,
+    "the installer must not delegate either Chrome guide to the Windows file association",
+  );
+  assert.match(
+    installer,
     /Root:\s*HKCU;\s*Subkey:\s*"Software\\Microsoft\\Windows\\CurrentVersion\\Run"/,
   );
   assert.match(installer, /ValueName:\s*"OFEnhancer".*uninsdeletevalue/);
@@ -425,7 +440,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.3",
+      productVersion: "0.20.4",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -525,7 +540,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.3");
+    assert.equal(manifest.productVersion, "0.20.4");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));
