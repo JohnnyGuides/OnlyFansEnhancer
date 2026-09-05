@@ -14,7 +14,7 @@
     "test:desktop-catalogue-ui": "node tests/desktop-catalogue-ui.test.cjs",
     "test:desktop-native-bridge": "node --test tests/desktop-native-bridge.test.cjs",
     "test:local-file-attacher-chrome": "node tests/local-file-attacher-chrome.test.cjs",
-    "test:desktop-package": "node --test tests/register-native-host.test.cjs tests/desktop-package.test.cjs",
+    "test:desktop-package": "node --test tests/register-native-host.test.cjs tests/release-output-cleanup.test.cjs tests/desktop-package.test.cjs",
     "build:personal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-personal-package.ps1",
     "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1",
     "build:x-teaser-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-x-teaser-native-host.ps1",

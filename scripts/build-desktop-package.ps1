@@ -59,7 +59,7 @@ dotnet publish (Join-Path $repositoryRoot "native-host\OFEnhancerNativeBridge\OF
   -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false
 if ($LASTEXITCODE -ne 0) { throw "The native bridge publish failed." }
 
-$personalBuildOutput = & (Join-Path $repositoryRoot "scripts\build-personal-package.ps1")
+$personalBuildOutput = & (Join-Path $repositoryRoot "scripts\build-personal-package.ps1") -OutputRoot $outputFull
 if ($LASTEXITCODE -ne 0) { throw "The personal extension package failed." }
 $packageLine = @($personalBuildOutput) | Where-Object { $_ -like "PACKAGE=*" } | Select-Object -Last 1
 if (-not $packageLine) { throw "The personal extension package path is missing." }
@@ -138,6 +138,10 @@ $packageManifestPath = Join-Path $stage "package-manifest.json"
   $utf8
 )
 $manifestHash = (Get-Sha256 $packageManifestPath).ToUpperInvariant()
+& (Join-Path $PSScriptRoot "remove-stale-release-output.ps1") `
+  -OutputRoot $outputFull `
+  -Family DesktopStage `
+  -CurrentVersion $version
 Write-Output "STAGE=$stage"
 Write-Output "MANIFEST_SHA256=$manifestHash"
 Write-Output $(if ($ExtensionId) { "INSTALL_PROFILE=personal" } else { "INSTALL_PROFILE=generic" })
@@ -164,3 +168,7 @@ if ($ExtensionId) {
 $compilerArguments += (Join-Path $repositoryRoot "installer\OFEnhancer.iss")
 & $compiler @compilerArguments
 if ($LASTEXITCODE -ne 0) { throw "The installer compile failed." }
+& (Join-Path $PSScriptRoot "remove-stale-release-output.ps1") `
+  -OutputRoot $outputFull `
+  -Family DesktopInstaller `
+  -CurrentVersion $version

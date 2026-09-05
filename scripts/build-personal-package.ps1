@@ -1,10 +1,14 @@
+param(
+  [string]$OutputRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) "dist")
+)
+
 $ErrorActionPreference = "Stop"
 Import-Module Microsoft.PowerShell.Utility
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = Join-Path $repositoryRoot "manifest.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-$distRoot = Join-Path $repositoryRoot "dist"
+$distRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $zipPath = Join-Path $distRoot "creator-workflow-toolkit-personal-v$($manifest.version).zip"
 
 $relativeFiles = @(
@@ -174,6 +178,10 @@ try {
   try { $hashValue = ([System.BitConverter]::ToString($sha.ComputeHash($hashStream))).Replace("-", "") }
   finally { $sha.Dispose() }
 } finally { $hashStream.Dispose() }
+& (Join-Path $PSScriptRoot "remove-stale-release-output.ps1") `
+  -OutputRoot $distRoot `
+  -Family PersonalExtension `
+  -CurrentVersion $manifest.version
 Write-Output "PACKAGE=$zipPath"
 Write-Output "SHA256=$hashValue"
 Write-Output "VALIDATED_ENTRIES=$($requiredArchiveEntries.Count)"

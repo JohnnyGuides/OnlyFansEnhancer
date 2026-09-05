@@ -1,3 +1,7 @@
+param(
+  [string]$OutputRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) "dist")
+)
+
 $ErrorActionPreference = "Stop"
 Import-Module Microsoft.PowerShell.Utility
 
@@ -5,7 +9,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $storeRoot = Join-Path $repositoryRoot "store"
 $manifestPath = Join-Path $storeRoot "manifest.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-$distRoot = Join-Path $repositoryRoot "dist"
+$distRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $zipPath = Join-Path $distRoot "fan-identity-mask-store-v$($manifest.version).zip"
 
 if (-not (Test-Path -LiteralPath (Join-Path $storeRoot "icons\icon128.png"))) {
@@ -56,5 +60,9 @@ try {
   try { $hashValue = ([System.BitConverter]::ToString($sha.ComputeHash($hashStream))).Replace("-", "") }
   finally { $sha.Dispose() }
 } finally { $hashStream.Dispose() }
+& (Join-Path $PSScriptRoot "remove-stale-release-output.ps1") `
+  -OutputRoot $distRoot `
+  -Family StoreExtension `
+  -CurrentVersion $manifest.version
 Write-Output "PACKAGE=$zipPath"
 Write-Output "SHA256=$hashValue"

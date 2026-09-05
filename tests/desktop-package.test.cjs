@@ -276,6 +276,15 @@ async function main() {
       /32 letters from a to p/i,
     );
 
+    const staleDesktopStage = path.join(temporary, "ofenhancer-desktop-v0.0.1");
+    fs.mkdirSync(staleDesktopStage);
+    fs.writeFileSync(path.join(staleDesktopStage, "stale.txt"), "stale");
+    const stalePersonalArchive = path.join(
+      temporary,
+      "creator-workflow-toolkit-personal-v0.0.1.zip",
+    );
+    fs.writeFileSync(stalePersonalArchive, "stale");
+
     const build = spawnSync(
       "powershell",
       [
@@ -300,6 +309,8 @@ async function main() {
     );
     assert.equal(build.status, 0, build.stdout + build.stderr);
     assert.match(build.stdout, /INSTALL_PROFILE=personal/);
+    assert.equal(fs.existsSync(staleDesktopStage), false);
+    assert.equal(fs.existsSync(stalePersonalArchive), false);
     const stageLine = build.stdout
       .split(/\r?\n/)
       .find((line) => line.startsWith("STAGE="));
@@ -312,10 +323,14 @@ async function main() {
       fs.readFileSync(path.join(root, "store", "manifest.json"), "utf8"),
     ).version;
     const personalArchive = path.join(
-      root,
-      "dist",
+      temporary,
       `creator-workflow-toolkit-personal-v${personalVersion}.zip`,
     );
+    const staleStoreArchive = path.join(
+      temporary,
+      "fan-identity-mask-store-v0.0.1.zip",
+    );
+    fs.writeFileSync(staleStoreArchive, "stale");
     const storeBuild = spawnSync(
       "powershell",
       [
@@ -324,6 +339,8 @@ async function main() {
         "Bypass",
         "-File",
         "scripts/build-store-package.ps1",
+        "-OutputRoot",
+        temporary,
       ],
       {
         cwd: root,
@@ -334,9 +351,9 @@ async function main() {
       },
     );
     assert.equal(storeBuild.status, 0, storeBuild.stdout + storeBuild.stderr);
+    assert.equal(fs.existsSync(staleStoreArchive), false);
     const storeArchive = path.join(
-      root,
-      "dist",
+      temporary,
       `fan-identity-mask-store-v${storeVersion}.zip`,
     );
     const personalOutput = path.join(temporary, "personal-output");
