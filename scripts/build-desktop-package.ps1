@@ -27,8 +27,8 @@ function Get-Sha256([string]$Path) {
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot "manifest.json") -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-if ($version -ne "0.20.1") {
-  throw "The desktop package requires personal extension version 0.20.1."
+if ($version -ne "0.20.2") {
+  throw "The desktop package requires personal extension version 0.20.2."
 }
 
 $outputFull = [System.IO.Path]::GetFullPath($OutputRoot)
@@ -100,6 +100,7 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot "native-host\ofenhancer-native
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "finalLogo.png") -Destination $assetsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "desktop\OFEnhancer.Desktop\Assets\ofenhancer.ico") -Destination $assetsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "installer\extension-setup.html") -Destination $stage
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "installer\extension-reload.html") -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\register-native-host.ps1") -Destination $toolsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "scripts\unregister-native-host.ps1") -Destination $toolsDirectory
 

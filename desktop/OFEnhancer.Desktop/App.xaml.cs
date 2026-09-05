@@ -34,12 +34,18 @@ public partial class App : System.Windows.Application
         }
 
         string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
-        instanceLock = new Mutex(true, $"Local\\OFEnhancer.Desktop.{userKey}", out bool first);
+        Mutex candidateLock = new(
+            true,
+            $"Local\\OFEnhancer.Desktop.{userKey}",
+            out bool first
+        );
         if (!first)
         {
+            candidateLock.Dispose();
             Shutdown();
             return;
         }
+        instanceLock = candidateLock;
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         agent = new DesktopAgent(DesktopAgent.DefaultPipeName(userKey));

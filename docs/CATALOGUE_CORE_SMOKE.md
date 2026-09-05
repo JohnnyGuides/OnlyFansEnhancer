@@ -38,7 +38,7 @@ Expected results:
    ```powershell
    $env:OFENHANCER_DATA_ROOT = Join-Path $env:TEMP "ofenhancer-catalogue-smoke"
    $env:OFENHANCER_WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:TEMP "ofenhancer-webview-smoke"
-   .\dist\ofenhancer-desktop-v0.20.1\desktop\OFEnhancer.Desktop.exe
+   .\dist\ofenhancer-desktop-v0.20.2\desktop\OFEnhancer.Desktop.exe
    ```
 
 2. Open **Catalogue**. With no import, it must say **No videos yet** rather

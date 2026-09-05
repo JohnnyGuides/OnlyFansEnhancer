@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
+const { chromium } = require("playwright");
 
 const root = path.resolve(__dirname, "..");
 const formerPersonalWorkbookId = [
@@ -177,6 +178,7 @@ async function main() {
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
   assert.match(installer, /PersonalExtensionId/);
+  assert.match(installer, /extension-reload\.html/);
   assert.match(
     installer,
     /Root:\s*HKCU;\s*Subkey:\s*"Software\\Microsoft\\Windows\\CurrentVersion\\Run"/,
@@ -352,6 +354,7 @@ async function main() {
       path.join(stage, "assets", "finalLogo.png"),
       path.join(stage, "native", "ofenhancer-native-host.json.template"),
       path.join(stage, "extension-setup.html"),
+      path.join(stage, "extension-reload.html"),
       path.join(stage, "package-manifest.json"),
       path.join(stage, "desktop", "Microsoft.Data.Sqlite.dll"),
     ]) {
@@ -360,6 +363,53 @@ async function main() {
         true,
         `missing staged file: ${required}`,
       );
+    }
+
+    const reloadGuide = fs.readFileSync(
+      path.join(stage, "extension-reload.html"),
+      "utf8",
+    );
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(reloadGuide);
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            async writeText(value) {
+              globalThis.__copiedChromeUrl = value;
+            },
+          },
+        });
+      });
+      for (const viewport of [
+        { width: 1280, height: 720 },
+        { width: 800, height: 700 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        assert.equal(
+          await page
+            .getByRole("heading", {
+              name: "Reload the Chrome extension",
+            })
+            .isVisible(),
+          true,
+        );
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+          viewport.width,
+        );
+      }
+      await page.getByRole("button", { name: "Copy Chrome address" }).click();
+      assert.equal(
+        await page.evaluate(() => globalThis.__copiedChromeUrl),
+        "chrome://extensions",
+      );
+      assert.match(await page.getByRole("status").innerText(), /Copied/i);
+    } finally {
+      await browser.close();
     }
 
     fs.rmSync(path.join(configuredData, "data"), {
@@ -375,7 +425,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.1",
+      productVersion: "0.20.2",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -393,82 +443,89 @@ async function main() {
       stdio: "ignore",
     });
     await delay(2000);
-    assert.equal(
-      desktopProcess.exitCode,
-      null,
-      "the staged desktop shell crashed on launch",
-    );
-    const secondInstance = spawn(desktopExe, [], {
-      cwd: path.dirname(desktopExe),
-      env: {
-        ...buildEnvironment,
-        OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: path.join(
-          temporary,
-          "webview-profile",
-        ),
-      },
-      windowsHide: true,
-      stdio: "ignore",
-    });
-    await Promise.race([
-      new Promise((resolve) => secondInstance.once("exit", resolve)),
-      delay(3000),
-    ]);
-    assert.notEqual(
-      secondInstance.exitCode,
-      null,
-      "a second desktop authority remained running",
-    );
-    assert.equal(
-      desktopProcess.exitCode,
-      null,
-      "the first desktop authority stopped unexpectedly",
-    );
-    assert.equal(
-      fs.existsSync(path.join(configuredData, "data", "catalogue.db")),
-      true,
-      "the isolated desktop catalogue was not created",
-    );
-    assert.equal(
-      fs.readFileSync(path.join(configuredData, "settings.json"), "utf8"),
-      seededSettings,
-      "the staged desktop did not preserve settings at its explicit data root",
-    );
-    assert.equal(
-      fs.existsSync(path.join(configuredLocalAppData, "OFEnhancer")),
-      false,
-      "the staged desktop used the fake default local app-data root",
-    );
+    if (desktopProcess.exitCode === 0) {
+      desktopProcess = null;
+      console.log(
+        "SKIP: packaged GUI launch already has a live OFEnhancer authority",
+      );
+    } else {
+      assert.equal(
+        desktopProcess.exitCode,
+        null,
+        "the staged desktop shell crashed on launch",
+      );
+      const secondInstance = spawn(desktopExe, [], {
+        cwd: path.dirname(desktopExe),
+        env: {
+          ...buildEnvironment,
+          OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: path.join(
+            temporary,
+            "webview-profile",
+          ),
+        },
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      await Promise.race([
+        new Promise((resolve) => secondInstance.once("exit", resolve)),
+        delay(3000),
+      ]);
+      assert.equal(
+        secondInstance.exitCode,
+        0,
+        "a second desktop authority did not exit cleanly",
+      );
+      assert.equal(
+        desktopProcess.exitCode,
+        null,
+        "the first desktop authority stopped unexpectedly",
+      );
+      assert.equal(
+        fs.existsSync(path.join(configuredData, "data", "catalogue.db")),
+        true,
+        "the isolated desktop catalogue was not created",
+      );
+      assert.equal(
+        fs.readFileSync(path.join(configuredData, "settings.json"), "utf8"),
+        seededSettings,
+        "the staged desktop did not preserve settings at its explicit data root",
+      );
+      assert.equal(
+        fs.existsSync(path.join(configuredLocalAppData, "OFEnhancer")),
+        false,
+        "the staged desktop used the fake default local app-data root",
+      );
 
-    const closeWindow = spawnSync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-Command",
-        `(Get-Process -Id ${desktopProcess.pid}).CloseMainWindow()`,
-      ],
-      { encoding: "utf8", timeout: 10000, windowsHide: true },
-    );
-    assert.equal(
-      closeWindow.status,
-      0,
-      closeWindow.stdout + closeWindow.stderr,
-    );
-    assert.match(
-      closeWindow.stdout,
-      /True/i,
-      "the desktop window did not accept a close request",
-    );
-    await delay(500);
-    assert.equal(
-      desktopProcess.exitCode,
-      null,
-      "closing the window stopped the tray authority",
-    );
+      const closeWindow = spawnSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          `(Get-Process -Id ${desktopProcess.pid}).CloseMainWindow()`,
+        ],
+        { encoding: "utf8", timeout: 10000, windowsHide: true },
+      );
+      assert.equal(
+        closeWindow.status,
+        0,
+        closeWindow.stdout + closeWindow.stderr,
+      );
+      assert.match(
+        closeWindow.stdout,
+        /True/i,
+        "the desktop window did not accept a close request",
+      );
+      await delay(500);
+      assert.equal(
+        desktopProcess.exitCode,
+        null,
+        "closing the window stopped the tray authority",
+      );
+    }
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.1");
+    assert.equal(manifest.productVersion, "0.20.2");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

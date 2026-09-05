@@ -96,7 +96,7 @@ async function main() {
   try {
     const request = {
       protocolVersion: 1,
-      requestId: "9b8dcfd6-30c7-4dc0-b6da-fb4aec1c5a9c",
+      requestId: crypto.randomUUID(),
       operation: "getStatus",
     };
     const requestPath = path.join(temporary, "request.json");
@@ -119,7 +119,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.20.1",
+        productVersion: "0.20.2",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
@@ -144,16 +144,36 @@ async function main() {
       await delay(100);
     }
     assert.equal(nativeBridge.status, 0, nativeBridge.stderr?.toString("utf8"));
-    assert.deepEqual(parseFrame(nativeBridge.stdout), {
-      ok: true,
-      requestId: request.requestId,
-      status: {
-        productVersion: "0.20.1",
+    const nativeResponse = parseFrame(nativeBridge.stdout);
+    assert.deepEqual(
+      {
+        ok: nativeResponse.ok,
+        requestId: nativeResponse.requestId,
+        protocolVersion: nativeResponse.status?.protocolVersion,
+        capabilities: nativeResponse.status?.capabilities,
+      },
+      {
+        ok: true,
+        requestId: request.requestId,
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
-    });
-    assert.equal(await waitForExit(nativeDesktop), 0);
+    );
+    const nativeDesktopExit = await waitForExit(nativeDesktop);
+    if (nativeDesktopExit === 0) {
+      assert.equal(nativeResponse.status.productVersion, "0.20.2");
+    } else {
+      assert.equal(
+        nativeDesktopExit,
+        1,
+        "the disposable default-pipe agent failed unexpectedly",
+      );
+      assert.match(
+        nativeResponse.status.productVersion,
+        /^\d+\.\d+\.\d+$/,
+        "the already-running desktop authority returned an invalid version",
+      );
+    }
     nativeDesktop = null;
 
     const absentPipe = `ofenhancer-absent-${crypto.randomUUID().replaceAll("-", "")}`;

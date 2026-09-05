@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.1
+AppVersion=0.20.2
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.1
+OutputBaseFilename=OFEnhancer-Setup-0.20.2
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -39,6 +39,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\tools\register-native-host.ps1"" -InstallRoot ""{app}"" -ExtensionId ""{#PersonalExtensionId}"""; StatusMsg: "Connecting Chrome..."; Flags: runhidden waituntilterminated
 #endif
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent
+#ifdef PersonalExtensionId
+Filename: "{app}\extension-reload.html"; Description: "Show the required Chrome reload"; Flags: postinstall shellexec skipifsilent
+#endif
 #ifndef PersonalExtensionId
 Filename: "{app}\extension-setup.html"; Description: "Connect the Chrome extension"; Flags: postinstall shellexec skipifsilent
 #endif

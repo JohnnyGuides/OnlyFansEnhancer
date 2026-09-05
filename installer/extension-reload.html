@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#090b10" />
+    <link rel="icon" href="assets/finalLogo.png" />
+    <title>Reload Creator Workflow Toolkit</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #090b10;
+        color: #f4f5f7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      ::selection {
+        background: #18b8ec;
+        color: #041016;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+      }
+      main {
+        width: min(680px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 64px 0;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 38px;
+      }
+      img {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+      }
+      h1,
+      p {
+        margin-top: 0;
+      }
+      h1 {
+        margin-bottom: 6px;
+        font-size: clamp(2rem, 7vw, 3.5rem);
+        letter-spacing: -0.04em;
+        text-wrap: balance;
+      }
+      p,
+      li {
+        color: #b5bdc9;
+        line-height: 1.6;
+      }
+      ol {
+        margin: 30px 0;
+        padding-left: 1.5rem;
+      }
+      li {
+        margin: 16px 0;
+      }
+      code {
+        display: inline-block;
+        margin-right: 12px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #151b26;
+        color: #e6f5fc;
+        overflow-wrap: anywhere;
+      }
+      button {
+        min-height: 44px;
+        padding: 10px 16px;
+        border: 0;
+        border-radius: 10px;
+        background: #18b8ec;
+        color: #041016;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+      button:hover {
+        background: #51ccf3;
+      }
+      button:active {
+        background: #86dcf7;
+      }
+      :focus-visible {
+        outline: 3px solid #77d9f8;
+        outline-offset: 3px;
+      }
+      [role="status"] {
+        display: block;
+        min-height: 1.5em;
+        margin-top: 14px;
+        color: #9fe4fa;
+      }
+      @media (max-width: 520px) {
+        main {
+          padding: 36px 0;
+        }
+        code,
+        button {
+          width: 100%;
+        }
+        code {
+          margin: 0 0 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img
+          src="assets/finalLogo.png"
+          alt=""
+          width="56"
+          height="56"
+          fetchpriority="high"
+        />
+        <div>
+          <h1>Reload the Chrome extension</h1>
+          <p>Chrome is still running the previous extension files.</p>
+        </div>
+      </header>
+      <ol>
+        <li>Open the address below in Chrome.</li>
+        <li>Find <strong>Creator Workflow Toolkit</strong>.</li>
+        <li>
+          Click <strong>Reload</strong>, then check that it shows version
+          <strong>0.20.2</strong>.
+        </li>
+      </ol>
+      <code id="chrome-address" translate="no">chrome://extensions</code>
+      <button id="copy-address" type="button">Copy Chrome address</button>
+      <span role="status" aria-live="polite"></span>
+    </main>
+    <script>
+      const address = document.querySelector("#chrome-address");
+      const status = document.querySelector('[role="status"]');
+      document
+        .querySelector("#copy-address")
+        .addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(address.textContent);
+            status.textContent = "Copied. Paste it into Chrome's address bar.";
+          } catch {
+            const range = document.createRange();
+            range.selectNodeContents(address);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            status.textContent = "Address selected. Press Ctrl+C to copy it.";
+          }
+        });
+    </script>
+  </body>
+</html>
