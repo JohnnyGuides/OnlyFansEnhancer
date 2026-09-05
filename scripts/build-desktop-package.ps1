@@ -27,8 +27,8 @@ function Get-Sha256([string]$Path) {
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot "manifest.json") -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-if ($version -ne "0.20.4") {
-  throw "The desktop package requires personal extension version 0.20.4."
+if ($version -ne "0.20.5") {
+  throw "The desktop package requires personal extension version 0.20.5."
 }
 
 $outputFull = [System.IO.Path]::GetFullPath($OutputRoot)

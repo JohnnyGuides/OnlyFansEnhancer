@@ -50,8 +50,8 @@ test("release cleanup removes only older artifacts from the selected family", ()
     const fixtures = [
       {
         family: "PersonalExtension",
-        version: "0.20.4",
-        current: ["creator-workflow-toolkit-personal-v0.20.4.zip"],
+        version: "0.20.5",
+        current: ["creator-workflow-toolkit-personal-v0.20.5.zip"],
         stale: ["creator-workflow-toolkit-personal-v0.20.3.zip"],
       },
       {
@@ -62,23 +62,23 @@ test("release cleanup removes only older artifacts from the selected family", ()
       },
       {
         family: "DesktopStage",
-        version: "0.20.4",
-        current: ["ofenhancer-desktop-v0.20.4"],
+        version: "0.20.5",
+        current: ["ofenhancer-desktop-v0.20.5"],
         stale: ["ofenhancer-desktop-v0.20.3"],
         directories: true,
       },
       {
         family: "DesktopInstaller",
-        version: "0.20.4",
-        current: ["OFEnhancer-Setup-0.20.4.exe"],
+        version: "0.20.5",
+        current: ["OFEnhancer-Setup-0.20.5.exe"],
         stale: ["OFEnhancer-Setup-0.20.3.exe"],
       },
       {
         family: "TeaserHost",
-        version: "0.20.4",
+        version: "0.20.5",
         current: [
-          "x-teaser-native-host-v0.20.4",
-          "x-teaser-native-host-v0.20.4.zip",
+          "x-teaser-native-host-v0.20.5",
+          "x-teaser-native-host-v0.20.5.zip",
         ],
         stale: [
           "x-teaser-native-host-v0.20.3",

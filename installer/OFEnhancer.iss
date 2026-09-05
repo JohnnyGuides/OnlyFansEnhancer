@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.4
+AppVersion=0.20.5
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.4
+OutputBaseFilename=OFEnhancer-Setup-0.20.5
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -21,7 +21,7 @@ SetupIconFile={#StageSource}\assets\ofenhancer.ico
 UninstallDisplayIcon={app}\desktop\OFEnhancer.Desktop.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-CloseApplications=yes
+CloseApplications=force
 RestartApplications=no
 
 [Files]
