@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using OFEnhancer.Catalogue;
 
@@ -18,6 +19,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly GoogleCatalogueController googleCatalogue;
     private bool exiting;
     private bool disposed;
+    private HwndSource? windowSource;
 
     public MainWindow(string? extensionId, CatalogueStore catalogue)
     {
@@ -58,8 +60,17 @@ public partial class MainWindow : Window, IDisposable
         if (disposed)
             return;
         disposed = true;
+        windowSource?.RemoveHook(HandleWindowMessage);
+        windowSource = null;
         googleCatalogue.Dispose();
         googleHttp.Dispose();
+    }
+
+    protected override void OnSourceInitialized(EventArgs eventArgs)
+    {
+        base.OnSourceInitialized(eventArgs);
+        windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+        windowSource?.AddHook(HandleWindowMessage);
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs eventArgs)
@@ -157,6 +168,26 @@ public partial class MainWindow : Window, IDisposable
             return;
         eventArgs.Cancel = true;
         Hide();
+    }
+
+    private nint HandleWindowMessage(
+        nint window,
+        int message,
+        nint wParam,
+        nint lParam,
+        ref bool handled
+    )
+    {
+        RestartManagerDecision decision = RestartManagerMessage.Decide(message, wParam, lParam);
+        if (!decision.Handled)
+            return nint.Zero;
+        handled = true;
+        if (decision.Shutdown)
+        {
+            exiting = true;
+            System.Windows.Application.Current.Shutdown();
+        }
+        return decision.Result;
     }
 
     private static void OpenChrome(Uri uri)

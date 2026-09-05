@@ -12,7 +12,7 @@ test("personal Chrome manifest exposes the recorder without Firefox metadata", (
   const manifest = JSON.parse(
     fs.readFileSync(path.join(root, "manifest.json"), "utf8"),
   );
-  assert.equal(manifest.version, "0.20.2");
+  assert.equal(manifest.version, "0.20.3");
   assert.ok(manifest.permissions.includes("nativeMessaging"));
   assert.ok(manifest.host_permissions.includes("https://x.com/*"));
   assert.equal(

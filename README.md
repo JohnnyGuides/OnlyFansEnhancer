@@ -10,9 +10,9 @@ The personal edition is intentionally broader than the separately packaged
 Chrome Web Store edition. The store edition remains the narrow, display-only
 **Fan Identity Mask** product under `store/`.
 
-## Google catalogue sync (0.20.2)
+## Google catalogue sync (0.20.3)
 
-Version 0.20.2 lets the Windows app connect to one user-selected Google
+Version 0.20.3 lets the Windows app connect to one user-selected Google
 spreadsheet. It checks the workbook before making changes, shows one exact
 migration review, and requires **Yes, update the workbook** before it adds the
 owned catalogue structures. Later writes locate rows by stable item metadata,
@@ -66,7 +66,7 @@ local path into one exact, allow-listed file control; it never clicks a submit
 button and always detaches.
 
 `npm run stage:desktop` creates a self-contained, allow-listed package under
-`dist/ofenhancer-desktop-v0.20.2/`. `npm run build:desktop` also compiles the
+`dist/ofenhancer-desktop-v0.20.3/`. `npm run build:desktop` also compiles the
 per-user installer when Inno Setup 6 is installed. The installer uses
 `%LocalAppData%`, offers update/reinstall or uninstall when it finds an existing
 copy, and opens a short Chrome connection guide. A personal build can pass
@@ -74,6 +74,11 @@ copy, and opens a short Chrome connection guide. A personal build can pass
 installation. It does not edit Chrome profiles or enterprise policy. The
 current unpacked extension ID cannot be reproduced in a different folder, so
 Chrome must keep and reload the existing extension when preserving its ID.
+
+During an update, OFEnhancer accepts Windows Restart Manager's update-only
+shutdown request and exits cleanly before the installer replaces its files.
+Older builds may need one manual tray-menu **Exit**, which the update wizard
+explains before continuing.
 
 This milestone proves the desktop shell, pipe, native relay, package, and local
 file attachment. It does not yet move the catalogue, media generation, posting,
