@@ -119,13 +119,17 @@ async function main() {
 async function testOfflineBridgeRecovery(browser, port) {
   const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
   await page.goto(`http://127.0.0.1:${port}/index.html`);
-  await page.getByText("Desktop agent unavailable", { exact: true }).waitFor();
+  await page
+    .locator("#connectionLabel")
+    .getByText("Desktop agent unavailable", { exact: true })
+    .waitFor();
 
   await page.getByRole("button", { name: "Attention" }).click();
   await page
-    .getByText("Desktop agent unavailable. Start OFEnhancer to reconnect.", {
-      exact: true,
-    })
+    .getByRole("heading", { name: "Desktop agent unavailable", exact: true })
+    .waitFor();
+  await page
+    .getByText("Start OFEnhancer to reconnect.", { exact: true })
     .waitFor();
   assert.equal(
     await page

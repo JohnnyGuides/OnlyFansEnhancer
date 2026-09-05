@@ -8,6 +8,7 @@
   const agentSetting = document.querySelector("#agentSetting");
   const openUploader = document.querySelector("#openUploader");
   const actionStatus = document.querySelector("#actionStatus");
+  const attentionHeading = document.querySelector("#attentionHeading");
   const attentionStatus = document.querySelector("#attentionStatus");
   const catalogueSummary = document.querySelector("#catalogueSummary");
   const catalogueStatus = document.querySelector("#catalogueStatus");
@@ -1057,6 +1058,7 @@
       connectionLabel.textContent = "Connected";
       versionLabel.textContent = `v${status.productVersion}`;
       agentSetting.textContent = `Connected · protocol ${status.protocolVersion}`;
+      attentionHeading.textContent = "Nothing needs attention";
       attentionStatus.textContent =
         "The desktop agent is connected and has not reported a problem.";
     })
@@ -1067,7 +1069,7 @@
       agentSetting.textContent = "Not connected";
       openUploader.disabled = true;
       actionStatus.textContent = "Restart OFEnhancer to reconnect.";
-      attentionStatus.textContent =
-        "Desktop agent unavailable. Start OFEnhancer to reconnect.";
+      attentionHeading.textContent = "Desktop agent unavailable";
+      attentionStatus.textContent = "Start OFEnhancer to reconnect.";
     });
 })(globalThis);
