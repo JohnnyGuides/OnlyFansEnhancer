@@ -209,56 +209,6 @@
     };
   }
 
-  async function mount({ signal, profile }) {
-    const panel = toolkit.createToolPanel({
-      id: "fanslyPrefill",
-      title: "Fansly composer assistant",
-      description:
-        "Operates only on one visible composer after preview. It never focuses or clicks Post.",
-    });
-    const runner = toolkit.createActionRunner({
-      toolId: "fanslyPrefill",
-      panel,
-      lifecycleSignal: signal,
-      maxActions: 10,
-      maxDurationMs: 30000,
-    });
-
-    async function preview() {
-      const composer = activeComposer();
-      const plan = inspectComposer(composer, profile);
-      panel.showPlan({
-        summary: "Review the Fansly composer plan.",
-        items: plan.items,
-        confirmLabel: "Apply to this composer",
-        onConfirm: () =>
-          runner.run("Applying Fansly composer plan", ({ signal, budget }) =>
-            applyPlan(plan, profile, signal, budget),
-          ),
-      });
-      panel.setStatus("Preview ready. Nothing has changed.", "neutral");
-    }
-
-    panel.addAction({
-      id: "preview",
-      label: "Preview composer",
-      variant: "primary",
-      onClick: preview,
-    });
-    panel.addAction({
-      id: "stop",
-      label: "Stop",
-      variant: "danger",
-      allowWhileRunning: true,
-      onClick: () => runner.stop(),
-    });
-
-    return () => {
-      runner.stop("Fansly tool disposed.");
-      panel.destroy();
-    };
-  }
-
   globalThis.CreatorToolkitAdapters ||= {};
   globalThis.CreatorToolkitAdapters.fanslyPrefill = Object.freeze({
     activeComposer,
@@ -268,12 +218,4 @@
     inspectComposer,
     applyPlan,
   });
-
-  if (!globalThis.CreatorToolkitMasterRun) {
-    toolkit.mountTool({
-      id: "fanslyPrefill",
-      match: (location) => location.origin === "https://fansly.com",
-      mount,
-    });
-  }
 })();

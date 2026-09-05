@@ -349,54 +349,6 @@
     };
   }
 
-  async function mount({ signal, profile }) {
-    const panel = toolkit.createToolPanel({
-      id: "phUploader",
-      title: "Pornhub uploader presets",
-      description:
-        "Previewed append-only presets with exact fresh autocomplete matches.",
-    });
-    const runner = toolkit.createActionRunner({
-      toolId: "phUploader",
-      panel,
-      lifecycleSignal: signal,
-      maxActions: 100,
-      maxDurationMs: 180000,
-    });
-
-    for (const [name, preset] of Object.entries(profile.presets)) {
-      panel.addAction({
-        id: `preset-${toolkit.normalizeText(name).replace(/\W+/g, "-")}`,
-        label: name,
-        onClick: () => {
-          const plan = inspectPreset(name, preset);
-          panel.showPlan({
-            summary: `Review Pornhub preset “${name}”.`,
-            items: plan.items,
-            confirmLabel: `Apply ${name}`,
-            onConfirm: () =>
-              runner.run(`Applying ${name} preset`, ({ signal, budget }) =>
-                applyPreset(plan, signal, budget),
-              ),
-          });
-          panel.setStatus("Preview ready. Nothing has changed.", "neutral");
-        },
-      });
-    }
-    panel.addAction({
-      id: "stop",
-      label: "Stop",
-      variant: "danger",
-      allowWhileRunning: true,
-      onClick: () => runner.stop(),
-    });
-
-    return () => {
-      runner.stop("Pornhub tool disposed.");
-      panel.destroy();
-    };
-  }
-
   globalThis.CreatorToolkitAdapters ||= {};
   globalThis.CreatorToolkitAdapters.phUploader = Object.freeze({
     selectedTokenLabels,
@@ -408,14 +360,4 @@
     applyPreset,
     failedResult,
   });
-
-  if (!globalThis.CreatorToolkitMasterRun) {
-    toolkit.mountTool({
-      id: "phUploader",
-      match: (location) =>
-        location.origin === "https://pornhub.mainhub.com" &&
-        location.pathname.startsWith("/upload/uploader"),
-      mount,
-    });
-  }
 })();

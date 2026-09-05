@@ -1,6 +1,6 @@
 # Google catalogue setup
 
-OFEnhancer 0.20.0 connects the Windows app to one Google spreadsheet. Complete
+OFEnhancer 0.20.1 connects the Windows app to one Google spreadsheet. Complete
 this setup in the desktop app.
 
 ## Create Google access

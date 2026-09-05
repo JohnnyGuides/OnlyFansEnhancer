@@ -90,6 +90,19 @@ async function waitForPanel(page, toolId) {
   }, toolId);
 }
 
+async function assertNoStandalonePanel(page, adapterId) {
+  await page.waitForFunction(
+    (id) => typeof globalThis.CreatorToolkitAdapters?.[id] === "object",
+    adapterId,
+  );
+  await page.waitForTimeout(100);
+  assert.equal(
+    await page.locator("#creator-toolkit-panel-stack").count(),
+    0,
+    `${adapterId} must stay inside the Master Uploader`,
+  );
+}
+
 async function clickPanelButton(page, toolId, label) {
   await page.evaluate(
     ({ id, text }) => {
@@ -180,7 +193,7 @@ test("Sheer works without jQuery, appends exact tags, and refuses incomplete rep
   }
 });
 
-test("Fansly preserves existing text, applies independent toggles, and never focuses Post", async () => {
+test("Fansly stays inside the Master Uploader, preserves text, applies toggles, and never focuses Post", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const { context, page } = await preparePage(browser, {
@@ -213,36 +226,7 @@ test("Fansly preserves existing text, applies independent toggles, and never foc
       }),
       scripts: ["fansly-prefill.js"],
     });
-    await waitForPanel(page, "fanslyPrefill");
-    await clickPanelButton(page, "fanslyPrefill", "Preview composer");
-    await clickPanelButton(page, "fanslyPrefill", "Apply to this composer");
-    await page.waitForFunction(() =>
-      Array.from(document.querySelectorAll(".post-option"))
-        .find((row) => row.textContent.includes("Post to Walls"))
-        .querySelector(".checkbox")
-        .classList.contains("selected"),
-    );
-    const state = await page.evaluate(() => ({
-      text: document.querySelector("textarea").value,
-      fyp: document
-        .querySelectorAll(".checkbox")[0]
-        .classList.contains("selected"),
-      walls: document
-        .querySelectorAll(".checkbox")[1]
-        .classList.contains("selected"),
-      replies: document
-        .querySelectorAll(".checkbox")[2]
-        .classList.contains("selected"),
-      postFocused:
-        document.activeElement === document.querySelector(".new-post-btn"),
-    }));
-    assert.deepEqual(state, {
-      text: "My existing draft",
-      fyp: false,
-      walls: true,
-      replies: false,
-      postFocused: false,
-    });
+    await assertNoStandalonePanel(page, "fanslyPrefill");
     const master = await page.evaluate(async () => {
       const api = CreatorToolkitAdapters.fanslyPrefill;
       const profile = {
@@ -274,6 +258,17 @@ test("Fansly preserves existing text, applies independent toggles, and never foc
         ),
         caption: composer.querySelector("textarea").value,
         status: result.status,
+        fyp: composer
+          .querySelectorAll(".checkbox")[0]
+          .classList.contains("selected"),
+        walls: composer
+          .querySelectorAll(".checkbox")[1]
+          .classList.contains("selected"),
+        replies: composer
+          .querySelectorAll(".checkbox")[2]
+          .classList.contains("selected"),
+        postFocused:
+          document.activeElement === composer.querySelector(".new-post-btn"),
       };
     });
     assert.deepEqual(master, {
@@ -281,6 +276,10 @@ test("Fansly preserves existing text, applies independent toggles, and never foc
       deduplicated: "Episode description\n\n#one #two",
       caption: "Master caption",
       status: "success",
+      fyp: false,
+      walls: true,
+      replies: false,
+      postFocused: false,
     });
     await context.close();
   } finally {
@@ -401,7 +400,7 @@ test("OnlyFans selection Stop prevents the next mutation and Follow obeys its ca
   }
 });
 
-test("Pornhub and ManyVids select only fresh exact autocomplete values", async () => {
+test("Pornhub and ManyVids stay inside the Master Uploader and select only fresh exact autocomplete values", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const ph = await preparePage(browser, {
@@ -434,7 +433,7 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
       settings: rawSettings("phUploader"),
       scripts: ["ph-uploader.js"],
     });
-    await waitForPanel(ph.page, "phUploader");
+    await assertNoStandalonePanel(ph.page, "phUploader");
     const phResult = await ph.page.evaluate(async () => {
       const controller = new AbortController();
       const result = await CreatorToolkitAdapters.phUploader.selectExactToken({
@@ -535,7 +534,7 @@ test("Pornhub and ManyVids select only fresh exact autocomplete values", async (
       }),
       scripts: ["manyvids-autofill.js"],
     });
-    await waitForPanel(mv.page, "manyvidsAutofill");
+    await assertNoStandalonePanel(mv.page, "manyvidsAutofill");
     const mvResult = await mv.page.evaluate(async () => {
       const form = document.querySelector("form");
       const result = await CreatorToolkitAdapters.manyvidsAutofill.addExactTag(

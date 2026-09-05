@@ -10,9 +10,9 @@ The personal edition is intentionally broader than the separately packaged
 Chrome Web Store edition. The store edition remains the narrow, display-only
 **Fan Identity Mask** product under `store/`.
 
-## Google catalogue sync (0.20.0)
+## Google catalogue sync (0.20.1)
 
-Version 0.20.0 lets the Windows app connect to one user-selected Google
+Version 0.20.1 lets the Windows app connect to one user-selected Google
 spreadsheet. It checks the workbook before making changes, shows one exact
 migration review, and requires **Yes, update the workbook** before it adds the
 owned catalogue structures. Later writes locate rows by stable item metadata,
@@ -66,13 +66,14 @@ local path into one exact, allow-listed file control; it never clicks a submit
 button and always detaches.
 
 `npm run stage:desktop` creates a self-contained, allow-listed package under
-`dist/ofenhancer-desktop-v0.20.0/`. `npm run build:desktop` also compiles the
+`dist/ofenhancer-desktop-v0.20.1/`. `npm run build:desktop` also compiles the
 per-user installer when Inno Setup 6 is installed. The installer uses
 `%LocalAppData%`, offers update/reinstall or uninstall when it finds an existing
-copy, and opens a short Chrome connection guide. It does not edit Chrome
-profiles or enterprise policy. The current unpacked extension ID cannot be
-reproduced in a different folder, so moving from this repository to the
-installed copy is an explicit one-time Chrome step.
+copy, and opens a short Chrome connection guide. A personal build can pass
+`-ExtensionId` to register the helper for an existing unpacked extension during
+installation. It does not edit Chrome profiles or enterprise policy. The
+current unpacked extension ID cannot be reproduced in a different folder, so
+Chrome must keep and reload the existing extension when preserving its ID.
 
 This milestone proves the desktop shell, pipe, native relay, package, and local
 file attachment. It does not yet move the catalogue, media generation, posting,
@@ -101,17 +102,13 @@ replacement. All masked avatars are forced into the same circular frame.
 
 ## Creator workflow helpers
 
-All integrated helpers are available by default. Their toggles, versioned
-profiles, and local history live under **Upload console → Settings**. Opening a
-supported site never starts a state-changing helper: its panel still requires
-the helper's own **preview → confirm → verified result** flow. The Master
-Uploader is the deliberate exception: after
-one exact Yes confirmation, it may drive the observed OnlyFans, Fansly, and
-ManyVids upload/schedule controls and reconcile the resulting links. It calls
-the same saved-profile recipes as the standalone Fansly, ManyVids, and Pornhub
-helpers, so their metadata rules cannot drift into separate implementations.
-The Yes card spells out the exact saved Fansly toggles, ManyVids commercial
-recipe, and Pornhub orientation/tags/categories being authorized.
+All integrated helper recipes are available by default. Their settings and
+local history live under **Upload console → Settings**. Fansly, ManyVids, and
+Pornhub no longer open separate page cards. The Master Uploader calls those
+adapters after one exact Yes confirmation, then verifies the result. The Yes
+card lists the saved Fansly toggles, ManyVids commercial recipe, and Pornhub
+orientation, tags, and categories. Clips4Sale and the non-upload utilities keep
+their separate surfaces until their workflows move into the uploader.
 
 - **Master Uploader** keeps the full video, shared Fansly/ManyVids teaser,
   optional ManyVids thumbnail, and optional Pornhub video only in its open tab

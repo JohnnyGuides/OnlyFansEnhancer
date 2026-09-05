@@ -20,6 +20,14 @@ const EXPECTED_TOOLS = Object.freeze({
   "reddit-banner-censor.js": "redditBannerCensor",
 });
 
+const STANDALONE_TOOLS = new Set([
+  "c4s-upload.js",
+  "sheer-tags.js",
+  "onlyfans-auto-select.js",
+  "onlyfans-auto-follow.js",
+  "reddit-banner-censor.js",
+]);
+
 function read(relativePath) {
   return fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
 }
@@ -36,7 +44,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
   const manifest = JSON.parse(read("manifest.json"));
   const personalBuild = read("scripts/build-personal-package.ps1");
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.20.0");
+  assert.equal(manifest.version, "0.20.1");
   assert.ok(manifest.permissions.includes("debugger"));
   assert.ok(manifest.permissions.includes("nativeMessaging"));
   assert.equal(
@@ -140,13 +148,15 @@ test("personal manifest keeps every integrated creator helper active", () => {
   );
 });
 
-test("every adapter parses, mounts through the lifecycle, and is dynamically registered", () => {
+test("every adapter parses and remains dynamically registered", () => {
   const background = read("background.js");
   for (const [fileName, settingKey] of Object.entries(EXPECTED_TOOLS)) {
     const source = read(`creator-tools/${fileName}`);
     assert.doesNotThrow(() => new vm.Script(source, { filename: fileName }));
-    assert.match(source, /toolkit\.mountTool\(\{/);
-    assert.match(source, new RegExp(`id:\\s*"${settingKey}"`));
+    if (STANDALONE_TOOLS.has(fileName)) {
+      assert.match(source, /toolkit\.mountTool\(\{/);
+      assert.match(source, new RegExp(`id:\\s*"${settingKey}"`));
+    }
     assert.match(
       background,
       new RegExp(`creator-tools/${fileName.replace(".", "\\.")}`),

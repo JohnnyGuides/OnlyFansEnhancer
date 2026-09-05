@@ -227,7 +227,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.0",
+            productVersion: "0.20.1",
             protocolVersion: 1,
             capabilities: ["desktop-shell"],
             testData: true,

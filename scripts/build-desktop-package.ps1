@@ -1,10 +1,15 @@
 param(
   [string]$OutputRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) "dist"),
-  [switch]$StageOnly
+  [switch]$StageOnly,
+  [string]$ExtensionId = ""
 )
 
 $ErrorActionPreference = "Stop"
 Import-Module Microsoft.PowerShell.Utility
+
+if ($ExtensionId -and $ExtensionId -notmatch '^[a-p]{32}$') {
+  throw "The Chrome extension ID must contain exactly 32 letters from a to p."
+}
 
 function Get-Sha256([string]$Path) {
   $stream = [System.IO.File]::OpenRead($Path)
@@ -22,8 +27,8 @@ function Get-Sha256([string]$Path) {
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot "manifest.json") -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-if ($version -ne "0.20.0") {
-  throw "The desktop package requires personal extension version 0.20.0."
+if ($version -ne "0.20.1") {
+  throw "The desktop package requires personal extension version 0.20.1."
 }
 
 $outputFull = [System.IO.Path]::GetFullPath($OutputRoot)
@@ -134,10 +139,12 @@ $packageManifestPath = Join-Path $stage "package-manifest.json"
 $manifestHash = (Get-Sha256 $packageManifestPath).ToUpperInvariant()
 Write-Output "STAGE=$stage"
 Write-Output "MANIFEST_SHA256=$manifestHash"
+Write-Output $(if ($ExtensionId) { "INSTALL_PROFILE=personal" } else { "INSTALL_PROFILE=generic" })
 
 if ($StageOnly) { exit 0 }
 
 $compilerCandidates = @(
+  (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
   (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
   (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
@@ -146,5 +153,13 @@ if (-not $compiler) {
   Write-Output "INNO_COMPILER_MISSING=https://jrsoftware.org/isdl.php"
   exit 3
 }
-& $compiler "/DStageSource=$stage" "/DOutputRoot=$outputFull" (Join-Path $repositoryRoot "installer\OFEnhancer.iss")
+$compilerArguments = @(
+  "/DStageSource=$stage",
+  "/DOutputRoot=$outputFull"
+)
+if ($ExtensionId) {
+  $compilerArguments += "/DPersonalExtensionId=$ExtensionId"
+}
+$compilerArguments += (Join-Path $repositoryRoot "installer\OFEnhancer.iss")
+& $compiler @compilerArguments
 if ($LASTEXITCODE -ne 0) { throw "The installer compile failed." }

@@ -176,6 +176,7 @@ async function main() {
   assert.match(installer, /PrivilegesRequired=lowest/);
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
+  assert.match(installer, /PersonalExtensionId/);
   assert.match(
     installer,
     /Root:\s*HKCU;\s*Subkey:\s*"Software\\Microsoft\\Windows\\CurrentVersion\\Run"/,
@@ -230,6 +231,34 @@ async function main() {
       OFENHANCER_DATA_ROOT: configuredData,
     };
     delete buildEnvironment.OFENHANCER_DATA_FOLDER;
+    const invalidProfileBuild = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/build-desktop-package.ps1",
+        "-OutputRoot",
+        path.join(temporary, "invalid-profile"),
+        "-StageOnly",
+        "-ExtensionId",
+        "q".repeat(32),
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: buildEnvironment,
+        timeout: 30000,
+        windowsHide: true,
+      },
+    );
+    assert.notEqual(invalidProfileBuild.status, 0);
+    assert.match(
+      invalidProfileBuild.stdout + invalidProfileBuild.stderr,
+      /32 letters from a to p/i,
+    );
+
     const build = spawnSync(
       "powershell",
       [
@@ -241,6 +270,8 @@ async function main() {
         "-OutputRoot",
         temporary,
         "-StageOnly",
+        "-ExtensionId",
+        "a".repeat(32),
       ],
       {
         cwd: root,
@@ -251,6 +282,7 @@ async function main() {
       },
     );
     assert.equal(build.status, 0, build.stdout + build.stderr);
+    assert.match(build.stdout, /INSTALL_PROFILE=personal/);
     const stageLine = build.stdout
       .split(/\r?\n/)
       .find((line) => line.startsWith("STAGE="));
@@ -343,7 +375,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.0",
+      productVersion: "0.20.1",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -436,7 +468,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.0");
+    assert.equal(manifest.productVersion, "0.20.1");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

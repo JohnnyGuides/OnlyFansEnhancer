@@ -509,67 +509,6 @@
     };
   }
 
-  async function mount({ signal, profile }) {
-    const panel = toolkit.createToolPanel({
-      id: "manyvidsAutofill",
-      title: "ManyVids edit assistant",
-      description:
-        "Manual before/after plan. Exact values only; nonempty fields change only after confirmation.",
-    });
-    const runner = toolkit.createActionRunner({
-      toolId: "manyvidsAutofill",
-      panel,
-      lifecycleSignal: signal,
-      maxActions: 40,
-      maxDurationMs: 90000,
-    });
-
-    async function preview() {
-      const form = activeForm();
-      const plan = inspectForm(form, profile);
-      panel.showPlan({
-        summary: "Review every ManyVids edit before applying.",
-        items: plan.items,
-        confirmLabel: "Apply reviewed changes",
-        onConfirm: () =>
-          runner.run("Applying ManyVids plan", ({ signal, budget }) =>
-            applyPlan(plan, signal, budget),
-          ),
-      });
-      const unsafeModes = [
-        plan.priceMode,
-        plan.launchMode,
-        plan.membership,
-        plan.premium,
-      ].filter((mode) => !mode.safe).length;
-      panel.setStatus(
-        unsafeModes
-          ? `${unsafeModes} unverified mode control(s) will remain unchanged. Configure their exact labels in the workflow profile if needed.`
-          : "Preview ready. Nothing has changed.",
-        unsafeModes ? "warning" : "neutral",
-      );
-    }
-
-    panel.addAction({
-      id: "preview",
-      label: "Preview edit plan",
-      variant: "primary",
-      onClick: preview,
-    });
-    panel.addAction({
-      id: "stop",
-      label: "Stop",
-      variant: "danger",
-      allowWhileRunning: true,
-      onClick: () => runner.stop(),
-    });
-
-    return () => {
-      runner.stop("ManyVids tool disposed.");
-      panel.destroy();
-    };
-  }
-
   globalThis.CreatorToolkitAdapters ||= {};
   globalThis.CreatorToolkitAdapters.manyvidsAutofill = Object.freeze({
     activeForm,
@@ -581,14 +520,4 @@
     applyPlan,
     failedResult,
   });
-
-  if (!globalThis.CreatorToolkitMasterRun) {
-    toolkit.mountTool({
-      id: "manyvidsAutofill",
-      match: (location) =>
-        location.origin === "https://www.manyvids.com" &&
-        location.pathname.startsWith("/Edit-vid/"),
-      mount,
-    });
-  }
 })();
