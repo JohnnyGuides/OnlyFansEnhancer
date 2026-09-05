@@ -17,6 +17,8 @@ const extensionId = "a".repeat(32);
 const previousExtensionId = "b".repeat(32);
 const googleOAuthClientId =
   "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
+const secondGoogleOAuthClientId =
+  "987654321098-zyxwvutsrqponmlkjihgfedcba654321.apps.googleusercontent.com";
 
 function powershellQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -37,6 +39,7 @@ function runRegistration({
   installRoot,
   localAppData,
   dataRoot,
+  googleOAuthClientId: configuredGoogleOAuthClientId,
   registryProbe,
   settingsCommitFailure,
 }) {
@@ -73,7 +76,7 @@ $writer = {
   )
 }
 ${settingsCommit.declaration}
-& ${powershellQuote(registrationScript)} -InstallRoot ${powershellQuote(installRoot)} -ExtensionId ${powershellQuote(extensionId)} -RegistryWriter $writer${settingsCommit.argument}
+& ${powershellQuote(registrationScript)} -InstallRoot ${powershellQuote(installRoot)} -ExtensionId ${powershellQuote(extensionId)}${configuredGoogleOAuthClientId === undefined ? "" : ` -GoogleOAuthClientId ${powershellQuote(configuredGoogleOAuthClientId)}`} -RegistryWriter $writer${settingsCommit.argument}
 `;
   const environment = { ...process.env, LOCALAPPDATA: localAppData };
   delete environment.OFENHANCER_DATA_ROOT;
@@ -134,6 +137,36 @@ test("registration creates extension-only settings when no settings exist", () =
   }
 });
 
+test("registration seeds the personalized Google OAuth client ID", () => {
+  const temporary = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ofenhancer-register-"),
+  );
+  try {
+    const installRoot = createInstallRoot(temporary);
+    const explicitRoot = path.join(temporary, "explicit", "OFEnhancer");
+    const registryProbe = path.join(temporary, "registry-probe.txt");
+
+    const result = runRegistration({
+      installRoot,
+      localAppData: path.join(temporary, "default-local-app-data"),
+      dataRoot: explicitRoot,
+      googleOAuthClientId,
+      registryProbe,
+    });
+
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(
+      JSON.parse(
+        fs.readFileSync(path.join(explicitRoot, "settings.json"), "utf8"),
+      ),
+      { extensionId, googleOAuthClientId },
+    );
+    assert.equal(fs.existsSync(registryProbe), true);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
 test("registration preserves an existing valid Google OAuth client ID", () => {
   const temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "ofenhancer-register-"),
@@ -156,6 +189,7 @@ test("registration preserves an existing valid Google OAuth client ID", () => {
       installRoot,
       localAppData: path.join(temporary, "default-local-app-data"),
       dataRoot: explicitRoot,
+      googleOAuthClientId: secondGoogleOAuthClientId,
       registryProbe,
     });
 

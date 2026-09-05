@@ -3,6 +3,7 @@ dist/
 playwright-report/
 test-results/
 .worktrees/
+.local/
 .impeccable/review/
 native-host/**/bin/
 native-host/**/obj/

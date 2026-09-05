@@ -26,7 +26,6 @@ const fakeRefreshToken = ["1//", "package_refresh_token_fixture_123456"].join(
 const fakeClientSecret = ["GOCSPX-", "package_client_secret_fixture"].join("");
 const sensitiveValues = [
   formerPersonalWorkbookId,
-  configuredClientId,
   fakeAccessToken,
   fakeRefreshToken,
   fakeClientSecret,
@@ -183,6 +182,27 @@ async function main() {
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
   assert.match(installer, /PersonalExtensionId/);
+  assert.match(installer, /PersonalGoogleOAuthClientId/);
+  assert.match(
+    installer,
+    /Keep settings, catalogue, and history/,
+    "uninstall must default to preserving user data",
+  );
+  assert.match(
+    installer,
+    /Exec\(\s*'>'\s*,\s*ExistingUninstaller \+ ' \/SILENT \/NORESTART'/s,
+    "Setup must execute the registered uninstall command without reparsing it",
+  );
+  assert.match(
+    installer,
+    /\[UninstallDelete\][\s\S]*Name:\s*"\{localappdata\}\\OFEnhancer";\s*Check:\s*ShouldDeleteUserData/,
+    "direct uninstall must target only the dedicated user-data directory",
+  );
+  assert.match(
+    installer,
+    /UninstallSilent[\s\S]*Keep my data \(recommended\)[\s\S]*Remove my data[\s\S]*TaskDialogMsgBox/,
+    "interactive uninstall must offer a native keep-or-remove choice",
+  );
   assert.match(installer, /extension-reload\.html/);
   assert.match(
     installer,
@@ -281,6 +301,72 @@ async function main() {
       /32 letters from a to p/i,
     );
 
+    const invalidGoogleBuild = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/build-desktop-package.ps1",
+        "-OutputRoot",
+        path.join(temporary, "invalid-google-profile"),
+        "-StageOnly",
+        "-ExtensionId",
+        "a".repeat(32),
+        "-GoogleOAuthClientId",
+        "not-a-client-id",
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: buildEnvironment,
+        timeout: 30000,
+        windowsHide: true,
+      },
+    );
+    assert.notEqual(invalidGoogleBuild.status, 0);
+    assert.match(
+      invalidGoogleBuild.stdout + invalidGoogleBuild.stderr,
+      /Google OAuth client ID is invalid/i,
+    );
+
+    const invalidProfileTypePath = path.join(
+      temporary,
+      "invalid-profile-type.json",
+    );
+    fs.writeFileSync(
+      invalidProfileTypePath,
+      JSON.stringify({ extensionId: ["a".repeat(32)] }),
+    );
+    const invalidProfileTypeBuild = spawnSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/build-desktop-package.ps1",
+        "-OutputRoot",
+        path.join(temporary, "invalid-profile-type"),
+        "-StageOnly",
+        "-PersonalProfilePath",
+        invalidProfileTypePath,
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: buildEnvironment,
+        timeout: 30000,
+        windowsHide: true,
+      },
+    );
+    assert.notEqual(invalidProfileTypeBuild.status, 0);
+    assert.match(
+      invalidProfileTypeBuild.stdout + invalidProfileTypeBuild.stderr,
+      /extensionId must be a string/i,
+    );
+
     const staleDesktopStage = path.join(temporary, "ofenhancer-desktop-v0.0.1");
     fs.mkdirSync(staleDesktopStage);
     fs.writeFileSync(path.join(staleDesktopStage, "stale.txt"), "stale");
@@ -289,6 +375,15 @@ async function main() {
       "creator-workflow-toolkit-personal-v0.0.1.zip",
     );
     fs.writeFileSync(stalePersonalArchive, "stale");
+
+    const personalProfilePath = path.join(temporary, "personal-profile.json");
+    fs.writeFileSync(
+      personalProfilePath,
+      JSON.stringify({
+        extensionId: "a".repeat(32),
+        googleOAuthClientId: configuredClientId,
+      }),
+    );
 
     const build = spawnSync(
       "powershell",
@@ -301,8 +396,8 @@ async function main() {
         "-OutputRoot",
         temporary,
         "-StageOnly",
-        "-ExtensionId",
-        "a".repeat(32),
+        "-PersonalProfilePath",
+        personalProfilePath,
       ],
       {
         cwd: root,
@@ -314,6 +409,7 @@ async function main() {
     );
     assert.equal(build.status, 0, build.stdout + build.stderr);
     assert.match(build.stdout, /INSTALL_PROFILE=personal/);
+    assert.match(build.stdout, /GOOGLE_PROFILE=configured/);
     assert.equal(fs.existsSync(staleDesktopStage), false);
     assert.equal(fs.existsSync(stalePersonalArchive), false);
     const stageLine = build.stdout
@@ -462,7 +558,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.5",
+      productVersion: "0.20.6",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -562,7 +658,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.5");
+    assert.equal(manifest.productVersion, "0.20.6");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

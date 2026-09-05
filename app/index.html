@@ -250,13 +250,27 @@
                 Uses the extension ID saved on this PC.
               </dd>
             </div>
+            <div>
+              <dt>Google Sheet</dt>
+              <dd class="setting-action">
+                <span id="googleSettingStatus" role="status" aria-live="polite">
+                  Checking…
+                </span>
+                <button
+                  id="googleSettingsAction"
+                  class="secondary-button"
+                  type="button"
+                  hidden
+                ></button>
+              </dd>
+            </div>
           </dl>
-          <details id="googleSetup" class="settings-disclosure">
-            <summary>Google setup</summary>
+          <details id="googleSetup" class="settings-disclosure" hidden>
+            <summary>Developer setup</summary>
             <form id="googleSetupForm" class="settings-form" novalidate>
               <label for="googleClientId">Google client ID</label>
               <p id="googleClientIdHelp">
-                Paste the client ID for this desktop app.
+                Only needed when building your own installer.
               </p>
               <input
                 id="googleClientId"

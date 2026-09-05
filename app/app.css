@@ -772,6 +772,17 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 
+.settings-list .setting-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setting-action .secondary-button {
+  flex: 0 0 auto;
+}
+
 .settings-disclosure {
   max-width: 720px;
   border-bottom: 1px solid #303744;
@@ -990,6 +1001,15 @@ dialog::backdrop {
 
   .settings-list dd {
     margin-top: 5px;
+  }
+
+  .settings-list .setting-action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .setting-action .secondary-button {
+    width: 100%;
   }
 
   .settings-form {

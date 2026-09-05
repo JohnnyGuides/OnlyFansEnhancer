@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$InstallRoot,
   [Parameter(Mandatory = $true)][string]$ExtensionId,
+  [string]$GoogleOAuthClientId = "",
   [Parameter(DontShow = $true)][scriptblock]$RegistryWriter = {
     param([string]$Path, [string]$Value)
     New-Item -Path $Path -Force | Out-Null
@@ -165,6 +166,12 @@ function Write-SettingsAtomically(
 if ($ExtensionId -notmatch '^[a-p]{32}$') {
   throw "The Chrome extension ID must contain exactly 32 letters from a to p."
 }
+if (
+  $GoogleOAuthClientId -and
+  $GoogleOAuthClientId -notmatch '^[0-9]{6,30}-[a-z0-9]{8,128}\.apps\.googleusercontent\.com$'
+) {
+  throw "The Google OAuth client ID is invalid."
+}
 $root = [System.IO.Path]::GetFullPath($InstallRoot)
 $hostPath = [System.IO.Path]::GetFullPath((Join-Path $root "native\OFEnhancerNativeBridge.exe"))
 $rootPrefix = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -175,10 +182,14 @@ $settingsDirectory = Resolve-DataRoot $env:OFENHANCER_DATA_ROOT $env:LOCALAPPDAT
 [System.IO.Directory]::CreateDirectory($settingsDirectory) | Out-Null
 $settingsPath = Join-Path $settingsDirectory "settings.json"
 $existingSettings = Read-ExistingSettings $settingsPath
+$effectiveGoogleOAuthClientId = $existingSettings.GoogleOAuthClientId
+if ($null -eq $effectiveGoogleOAuthClientId -and $GoogleOAuthClientId) {
+  $effectiveGoogleOAuthClientId = $GoogleOAuthClientId
+}
 Write-SettingsAtomically `
   $settingsPath `
   $ExtensionId `
-  $existingSettings.GoogleOAuthClientId `
+  $effectiveGoogleOAuthClientId `
   $SettingsCommit
 
 $nativeManifestPath = Join-Path $root "native\com.johnnyguides.ofenhancer.json"

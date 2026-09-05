@@ -47,6 +47,8 @@
   const googleSetupForm = document.querySelector("#googleSetupForm");
   const googleClientId = document.querySelector("#googleClientId");
   const googleSetupStatus = document.querySelector("#googleSetupStatus");
+  const googleSettingStatus = document.querySelector("#googleSettingStatus");
+  const googleSettingsAction = document.querySelector("#googleSettingsAction");
   const googleMigrationDialog = document.querySelector(
     "#googleMigrationDialog",
   );
@@ -97,8 +99,8 @@
     }
     for (const panel of panels) panel.hidden = panel.dataset.panel !== name;
     document.querySelector(`[data-panel="${name}"] h1`)?.focus?.();
-    if (name === "catalogue") {
-      loadCatalogue();
+    if (name === "catalogue") loadCatalogue();
+    if (name === "catalogue" || name === "settings") {
       refreshGoogleCatalogue();
     } else stopGooglePolling();
   }
@@ -326,8 +328,10 @@
     control.setAttribute("aria-busy", String(busy));
   }
 
-  function cataloguePanelIsVisible() {
-    return !document.querySelector('[data-panel="catalogue"]')?.hidden;
+  function googleControlsAreVisible() {
+    return ["catalogue", "settings"].some(
+      (name) => !document.querySelector(`[data-panel="${name}"]`)?.hidden,
+    );
   }
 
   function stopGooglePolling() {
@@ -338,7 +342,7 @@
   function scheduleGooglePolling(state) {
     stopGooglePolling();
     if (
-      cataloguePanelIsVisible() &&
+      googleControlsAreVisible() &&
       (state === "connecting" || state === "syncing")
     ) {
       googlePollTimer = global.setTimeout(refreshGoogleCatalogue, 1500);
@@ -385,9 +389,9 @@
       };
     if (code === "google-client-id-not-configured")
       return {
-        message: "Add your Google setup in Settings.",
-        label: "Settings",
-        action: "settings",
+        message: "This copy needs Google setup.",
+        label: "Developer setup",
+        action: "developer",
         className: "secondary-button",
       };
     if (
@@ -603,7 +607,7 @@
     } else if (notice) {
       googleCatalogueStatus.textContent = notice;
     } else if (state === "notConfigured") {
-      googleCatalogueStatus.textContent = "Add your Google setup in Settings.";
+      googleCatalogueStatus.textContent = "This copy needs Google setup.";
     } else if (state === "disconnected") {
       googleCatalogueStatus.textContent =
         "Connect the workbook you use for your catalogue.";
@@ -646,7 +650,11 @@
         setGoogleSecondaryAction("Sync pending updates", "sync");
       googleDisconnect.hidden = !codePresentation.allowDisconnect;
     } else if (state === "notConfigured") {
-      setGooglePrimaryAction("Settings", "settings", "secondary-button");
+      setGooglePrimaryAction(
+        "Developer setup",
+        "developer",
+        "secondary-button",
+      );
     } else if (state === "disconnected") {
       setGooglePrimaryAction("Connect Google Sheet", "connect");
     } else if (state === "connecting") {
@@ -683,25 +691,71 @@
       googleDisconnect.hidden = !errorPresentation.allowDisconnect;
     }
 
+    renderGoogleSettings();
     scheduleGooglePolling(state);
+  }
+
+  function setGoogleSettingsAction(label, action) {
+    googleSettingsAction.textContent = label;
+    googleSettingsAction.dataset.googleAction = action;
+    googleSettingsAction.hidden = false;
+    setBusy(googleSettingsAction, false);
+  }
+
+  function renderGoogleSettings() {
+    const state = googleStatusView?.state || "error";
+    const needsDeveloperSetup =
+      state === "notConfigured" ||
+      googleStatusView?.errorCode === "google-client-id-not-configured";
+    googleSetup.hidden = !needsDeveloperSetup;
+
+    if (needsDeveloperSetup) {
+      googleSettingStatus.textContent = "Developer setup required.";
+      setGoogleSettingsAction("Developer setup", "developer");
+    } else if (state === "disconnected") {
+      googleSettingStatus.textContent = "Not connected.";
+      setGoogleSettingsAction("Connect Google Sheet", "connect");
+    } else if (state === "connecting") {
+      googleSettingStatus.textContent = "Finish in your browser.";
+      setGoogleSettingsAction("Cancel", "cancel");
+    } else if (
+      state === "needsInspection" ||
+      state === "migrationReady" ||
+      state === "ready" ||
+      state === "syncing" ||
+      state === "conflict"
+    ) {
+      googleSettingStatus.textContent = `${googleStatusView.workbookName || "Your workbook"} is connected.`;
+      setGoogleSettingsAction("Open catalogue", "catalogue");
+    } else if (
+      googleStatusView?.errorCode === "google-authorization-required" ||
+      googleStatusView?.errorCode === "google-token-refresh-failed"
+    ) {
+      googleSettingStatus.textContent = "Connection expired.";
+      setGoogleSettingsAction("Reconnect", "connect");
+    } else {
+      googleSettingStatus.textContent = "Check the catalogue connection.";
+      setGoogleSettingsAction("Open catalogue", "catalogue");
+    }
   }
 
   async function refreshGoogleCatalogue() {
     stopGooglePolling();
-    if (!cataloguePanelIsVisible()) return;
+    if (!googleControlsAreVisible()) return;
     try {
       const status = await global.OFEnhancerHost.request(
         "getGoogleCatalogueStatus",
       );
-      if (cataloguePanelIsVisible()) renderGoogleCatalogue(status);
+      if (googleControlsAreVisible()) renderGoogleCatalogue(status);
     } catch (error) {
-      if (!cataloguePanelIsVisible()) return;
+      if (!googleControlsAreVisible()) return;
       renderGoogleCatalogue({ state: "error", errorCode: error?.message });
     }
   }
 
   function openGoogleSettings() {
     showView("settings");
+    googleSetup.hidden = false;
     googleSetup.open = true;
     global.requestAnimationFrame(() => googleClientId.focus());
   }
@@ -728,8 +782,12 @@
   }
 
   async function runGoogleAction(action) {
-    if (action === "settings") {
+    if (action === "developer") {
       openGoogleSettings();
+      return;
+    }
+    if (action === "catalogue") {
+      showView("catalogue");
       return;
     }
     if (action === "review") {
@@ -975,6 +1033,9 @@
     runGoogleAction(googleSecondaryAction.dataset.googleAction),
   );
   googleDisconnect.addEventListener("click", disconnectGoogle);
+  googleSettingsAction.addEventListener("click", () =>
+    runGoogleAction(googleSettingsAction.dataset.googleAction),
+  );
 
   googleClientId.addEventListener("input", () => {
     googleClientId.setCustomValidity("");
@@ -1006,14 +1067,16 @@
     googleSetupForm.setAttribute("aria-busy", "true");
     googleSetupStatus.textContent = "Saving Google setup…";
     try {
-      googleStatusView = await global.OFEnhancerHost.request(
-        "saveGoogleClientId",
-        { clientId },
-      );
-      googleSetupStatus.textContent =
-        googleClientId.value.trim() === clientId
-          ? "Google setup saved."
-          : "Google setup changed while saving. Save the current value again.";
+      const status = await global.OFEnhancerHost.request("saveGoogleClientId", {
+        clientId,
+      });
+      if (googleClientId.value.trim() === clientId) {
+        googleSetupStatus.textContent = "Google setup saved.";
+        renderGoogleCatalogue(status);
+      } else {
+        googleSetupStatus.textContent =
+          "Google setup changed while saving. Save the current value again.";
+      }
     } catch {
       googleSetupStatus.textContent = "OFEnhancer could not save Google setup.";
     } finally {

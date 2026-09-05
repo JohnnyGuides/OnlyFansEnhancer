@@ -1,14 +1,63 @@
 param(
   [string]$OutputRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) "dist"),
   [switch]$StageOnly,
-  [string]$ExtensionId = ""
+  [string]$ExtensionId = "",
+  [string]$GoogleOAuthClientId = "",
+  [string]$PersonalProfilePath = ""
 )
 
 $ErrorActionPreference = "Stop"
 Import-Module Microsoft.PowerShell.Utility
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+
+if (-not $PersonalProfilePath) {
+  $PersonalProfilePath = Join-Path $repositoryRoot ".local\personal-installer.json"
+}
+if (Test-Path -LiteralPath $PersonalProfilePath -PathType Leaf) {
+  $profileFile = Get-Item -LiteralPath $PersonalProfilePath
+  if ($profileFile.Length -gt (64 * 1024)) {
+    throw "The personal installer profile is too large."
+  }
+  try {
+    $profile = Get-Content -LiteralPath $PersonalProfilePath -Raw | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    throw "The personal installer profile is not valid JSON."
+  }
+  if ($profile -isnot [System.Management.Automation.PSCustomObject]) {
+    throw "The personal installer profile must be a JSON object."
+  }
+  foreach ($property in $profile.PSObject.Properties) {
+    if ($property.Name -cne "extensionId" -and $property.Name -cne "googleOAuthClientId") {
+      throw "The personal installer profile contains an unknown setting."
+    }
+  }
+  $profileExtensionId = $profile.PSObject.Properties["extensionId"]
+  if ($null -ne $profileExtensionId -and $profileExtensionId.Value -isnot [string]) {
+    throw "The personal installer profile extensionId must be a string."
+  }
+  $profileGoogleOAuthClientId = $profile.PSObject.Properties["googleOAuthClientId"]
+  if ($null -ne $profileGoogleOAuthClientId -and $profileGoogleOAuthClientId.Value -isnot [string]) {
+    throw "The personal installer profile googleOAuthClientId must be a string."
+  }
+  if (-not $ExtensionId -and $null -ne $profileExtensionId) {
+    $ExtensionId = $profileExtensionId.Value
+  }
+  if (-not $GoogleOAuthClientId -and $null -ne $profileGoogleOAuthClientId) {
+    $GoogleOAuthClientId = $profileGoogleOAuthClientId.Value
+  }
+}
 
 if ($ExtensionId -and $ExtensionId -notmatch '^[a-p]{32}$') {
   throw "The Chrome extension ID must contain exactly 32 letters from a to p."
+}
+if (
+  $GoogleOAuthClientId -and
+  $GoogleOAuthClientId -notmatch '^[0-9]{6,30}-[a-z0-9]{8,128}\.apps\.googleusercontent\.com$'
+) {
+  throw "The Google OAuth client ID is invalid."
+}
+if ($GoogleOAuthClientId -and -not $ExtensionId) {
+  throw "A Google OAuth client ID requires a Chrome extension ID in the personal installer profile."
 }
 
 function Get-Sha256([string]$Path) {
@@ -24,11 +73,10 @@ function Get-Sha256([string]$Path) {
     $stream.Dispose()
   }
 }
-$repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot "manifest.json") -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-if ($version -ne "0.20.5") {
-  throw "The desktop package requires personal extension version 0.20.5."
+if ($version -ne "0.20.6") {
+  throw "The desktop package requires personal extension version 0.20.6."
 }
 
 $outputFull = [System.IO.Path]::GetFullPath($OutputRoot)
@@ -145,6 +193,7 @@ $manifestHash = (Get-Sha256 $packageManifestPath).ToUpperInvariant()
 Write-Output "STAGE=$stage"
 Write-Output "MANIFEST_SHA256=$manifestHash"
 Write-Output $(if ($ExtensionId) { "INSTALL_PROFILE=personal" } else { "INSTALL_PROFILE=generic" })
+Write-Output $(if ($GoogleOAuthClientId) { "GOOGLE_PROFILE=configured" } else { "GOOGLE_PROFILE=unconfigured" })
 
 if ($StageOnly) { exit 0 }
 
@@ -164,6 +213,9 @@ $compilerArguments = @(
 )
 if ($ExtensionId) {
   $compilerArguments += "/DPersonalExtensionId=$ExtensionId"
+}
+if ($GoogleOAuthClientId) {
+  $compilerArguments += "/DPersonalGoogleOAuthClientId=$GoogleOAuthClientId"
 }
 $compilerArguments += (Join-Path $repositoryRoot "installer\OFEnhancer.iss")
 & $compiler @compilerArguments

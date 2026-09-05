@@ -227,7 +227,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.5",
+            productVersion: "0.20.6",
             protocolVersion: 1,
             capabilities: ["desktop-shell"],
             testData: true,
@@ -416,14 +416,14 @@ async function testGoogleStates(browser, port) {
 
   const strip = page.locator("#googleCatalogue");
   await strip
-    .getByText("Add your Google setup in Settings.", { exact: true })
+    .getByText("This copy needs Google setup.", { exact: true })
     .waitFor();
   assert.equal(await page.locator("#googleCatalogue").count(), 1);
   assert.equal(await strip.locator('[role="status"]').count(), 1);
   await tabTo(
     page,
-    strip.getByRole("button", { name: "Settings" }),
-    "Settings focus",
+    strip.getByRole("button", { name: "Developer setup" }),
+    "Developer setup focus",
   );
 
   await setGoogleState(page, googleStates.disconnected);
@@ -702,12 +702,13 @@ async function testGoogleSettings(browser, port) {
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.getByRole("button", { name: "Settings" }).click();
   const setup = page.locator("#googleSetup");
+  assert.equal(await setup.isVisible(), true, "developer setup is unavailable");
   assert.equal(
     await setup.getAttribute("open"),
     null,
-    "Google setup starts expanded",
+    "developer setup starts expanded",
   );
-  await setup.getByText("Google setup", { exact: true }).click();
+  await setup.getByText("Developer setup", { exact: true }).click();
   const input = setup.getByRole("textbox", { name: "Google client ID" });
   await input.fill("not-a-client-id");
   await setup.getByRole("button", { name: "Save setup" }).click();
@@ -719,12 +720,49 @@ async function testGoogleSettings(browser, port) {
 
   await input.fill(`  ${googleClientId}  `);
   await setup.getByRole("button", { name: "Save setup" }).click();
-  await setup.getByText("Google setup saved.", { exact: true }).waitFor();
+  await page.getByText("Not connected.", { exact: true }).waitFor();
+  assert.equal(await setup.isVisible(), false);
   assert.deepEqual((await googleCalls(page, "saveGoogleClientId")).at(-1), {
     operation: "saveGoogleClientId",
     payload: { clientId: googleClientId },
   });
-  assert.equal(await input.getAttribute("aria-invalid"), "false");
+  assert.equal(
+    await page.locator("#googleClientId").getAttribute("aria-invalid"),
+    "false",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testGoogleSettingsConnection(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  const errors = captureErrors(page);
+  await installHost(page, populated, { initial: googleStates.disconnected });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  const settings = page.locator('[data-panel="settings"]');
+  await settings.getByText("Not connected.", { exact: true }).waitFor();
+  assert.equal(
+    await settings
+      .getByRole("button", { name: "Connect Google Sheet" })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await page.locator("#googleSetup").isVisible(),
+    false,
+    "developer-only Google setup is visible in a configured copy",
+  );
+  await settings.getByRole("button", { name: "Connect Google Sheet" }).click();
+  await page.waitForFunction(() =>
+    __googleHostCalls.some(
+      (call) => call.operation === "startGoogleCatalogueConnection",
+    ),
+  );
+  assert.deepEqual(
+    (await googleCalls(page, "startGoogleCatalogueConnection")).at(-1),
+    { operation: "startGoogleCatalogueConnection", payload: {} },
+  );
   assert.deepEqual(errors, []);
   await page.close();
 }
@@ -826,8 +864,8 @@ async function testGoogleErrorRecovery(browser, port) {
     },
     {
       code: "google-client-id-not-configured",
-      message: "Add your Google setup in Settings.",
-      action: "Settings",
+      message: "This copy needs Google setup.",
+      action: "Developer setup",
       disconnect: false,
     },
     {
@@ -966,7 +1004,7 @@ async function testGoogleSettingsInFlight(browser, port) {
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.getByRole("button", { name: "Settings" }).click();
   const setup = page.locator("#googleSetup");
-  await setup.getByText("Google setup", { exact: true }).click();
+  await setup.getByText("Developer setup", { exact: true }).click();
   const input = setup.getByRole("textbox", { name: "Google client ID" });
   const save = setup.getByRole("button", { name: "Save setup" });
   await input.fill(googleClientId);
@@ -1235,7 +1273,10 @@ async function testGooglePolling(browser, port) {
     await installHost(page, populated, { initial: googleStates.connecting });
     await page.goto(`http://127.0.0.1:${port}/index.html`);
     await page.getByRole("button", { name: "Catalogue" }).click();
-    await page.getByText("Finish in your browser.", { exact: true }).waitFor();
+    await page
+      .locator("#googleCatalogue")
+      .getByText("Finish in your browser.", { exact: true })
+      .waitFor();
     if (stopEvent === "navigation")
       await page.getByRole("button", { name: "Uploads" }).click();
     else await page.evaluate(() => dispatchEvent(new Event("pagehide")));
@@ -1386,7 +1427,7 @@ async function testGoogleMobileDialogAndSettings(browser, port) {
   await setGoogleState(page, googleStates.notConfigured);
   await page
     .locator("#googleCatalogue")
-    .getByRole("button", { name: "Settings" })
+    .getByRole("button", { name: "Developer setup" })
     .click();
   await page.waitForFunction(
     () => document.querySelector("#googleClientId") === document.activeElement,
@@ -1397,7 +1438,7 @@ async function testGoogleMobileDialogAndSettings(browser, port) {
     .getByRole("textbox", { name: "Google client ID" })
     .fill(googleClientId);
   await setup.getByRole("button", { name: "Save setup" }).click();
-  await setup.getByText("Google setup saved.", { exact: true }).waitFor();
+  await page.getByText("Not connected.", { exact: true }).waitFor();
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -1415,6 +1456,7 @@ async function main() {
     try {
       await testGoogleStates(browser, port);
       await testGoogleSettings(browser, port);
+      await testGoogleSettingsConnection(browser, port);
       await testGoogleSettingsInFlight(browser, port);
       await testGoogleActionCalls(browser, port);
       await testGoogleErrorRecovery(browser, port);

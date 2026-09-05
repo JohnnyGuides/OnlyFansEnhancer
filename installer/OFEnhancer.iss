@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.5
+AppVersion=0.20.6
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.5
+OutputBaseFilename=OFEnhancer-Setup-0.20.6
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -36,7 +36,11 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 #ifdef PersonalExtensionId
+#ifdef PersonalGoogleOAuthClientId
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\tools\register-native-host.ps1"" -InstallRoot ""{app}"" -ExtensionId ""{#PersonalExtensionId}"" -GoogleOAuthClientId ""{#PersonalGoogleOAuthClientId}"""; StatusMsg: "Connecting Chrome and Google Sheet..."; Flags: runhidden waituntilterminated
+#else
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\tools\register-native-host.ps1"" -InstallRoot ""{app}"" -ExtensionId ""{#PersonalExtensionId}"""; StatusMsg: "Connecting Chrome..."; Flags: runhidden waituntilterminated
+#endif
 #endif
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent
 #ifdef PersonalExtensionId
@@ -49,10 +53,16 @@ Filename: "chrome.exe"; Parameters: """{app}\extension-setup.html"""; Descriptio
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\unregister-native-host.ps1"" -InstallRoot ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterNativeHost"
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\OFEnhancer"; Check: ShouldDeleteUserData
+
 [Code]
 var
   ExistingPage: TInputOptionWizardPage;
+  KeepDataPage: TInputOptionWizardPage;
   ExistingUninstaller: String;
+  ExistingUninstallCompleted: Boolean;
+  RemoveUserData: Boolean;
 
 function ExistingInstall(): Boolean;
 begin
@@ -79,7 +89,26 @@ begin
     ExistingPage.Add('Update or reinstall');
     ExistingPage.Add('Uninstall');
     ExistingPage.SelectedValueIndex := 0;
+
+    KeepDataPage := CreateInputOptionPage(
+      ExistingPage.ID,
+      'Keep your OFEnhancer data?',
+      'Choose what should happen to your local data.',
+      'Keeping it preserves your settings, catalogue, thumbnails, Google connection, and history for a future reinstall.',
+      False,
+      False
+    );
+    KeepDataPage.Add('Keep settings, catalogue, and history');
+    KeepDataPage.Values[0] := True;
   end;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result :=
+    (KeepDataPage <> nil) and
+    (PageID = KeepDataPage.ID) and
+    (ExistingPage.SelectedValueIndex <> 1);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -87,11 +116,74 @@ var
   ExitCode: Integer;
 begin
   Result := True;
-  if (ExistingPage <> nil) and (CurPageID = ExistingPage.ID) and (ExistingPage.SelectedValueIndex = 1) then
+  if (KeepDataPage <> nil) and (CurPageID = KeepDataPage.ID) then
   begin
-    if not Exec(RemoveQuotes(ExistingUninstaller), '/SILENT', '', SW_SHOW, ewWaitUntilTerminated, ExitCode) then
-      MsgBox('Windows could not start the existing uninstaller.', mbError, MB_OK);
-    WizardForm.Close;
+    if not Exec(
+      '>',
+      ExistingUninstaller + ' /SILENT /NORESTART',
+      '',
+      SW_SHOW,
+      ewWaitUntilTerminated,
+      ExitCode
+    ) then
+      MsgBox(
+        'Windows could not start the existing uninstaller: ' + SysErrorMessage(ExitCode),
+        mbError,
+        MB_OK
+      )
+    else if ExitCode <> 0 then
+      MsgBox(
+        'OFEnhancer could not be uninstalled. Your data was not removed.',
+        mbError,
+        MB_OK
+      )
+    else
+    begin
+      if not KeepDataPage.Values[0] then
+        if not DelTree(ExpandConstant('{localappdata}\OFEnhancer'), True, True, True) then
+          MsgBox(
+        'OFEnhancer was removed, but Windows could not remove all local data.',
+            mbError,
+            MB_OK
+          );
+      ExistingUninstallCompleted := True;
+      WizardForm.Close;
+    end;
     Result := False;
   end;
+end;
+
+procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
+begin
+  if ExistingUninstallCompleted then
+    Confirm := False;
+end;
+
+function ShouldDeleteUserData(): Boolean;
+begin
+  Result := RemoveUserData;
+end;
+
+procedure InitializeUninstallProgressForm();
+var
+  ButtonLabels: TArrayOfString;
+begin
+  if UninstallSilent then
+    Exit;
+
+  SetArrayLength(ButtonLabels, 2);
+  ButtonLabels[0] :=
+    'Keep my data (recommended)' + #13#10 +
+    'Preserve settings, catalogue, thumbnails, Google connection, and history.';
+  ButtonLabels[1] :=
+    'Remove my data' + #13#10 +
+    'Delete OFEnhancer data stored on this PC.';
+  RemoveUserData := TaskDialogMsgBox(
+    'Keep your OFEnhancer data?',
+    'You can reinstall later without setting everything up again.',
+    mbConfirmation,
+    MB_YESNO,
+    ButtonLabels,
+    0
+  ) = IDNO;
 end;

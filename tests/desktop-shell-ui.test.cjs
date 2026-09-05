@@ -54,7 +54,7 @@ async function main() {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus") {
             return {
-              productVersion: "0.20.5",
+              productVersion: "0.20.6",
               protocolVersion: 1,
               capabilities: [
                 "desktop-shell",

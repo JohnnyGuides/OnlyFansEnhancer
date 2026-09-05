@@ -1,6 +1,6 @@
 # Desktop foundation smoke test
 
-This checklist verifies the current OFEnhancer 0.20.5 desktop candidate
+This checklist verifies the current OFEnhancer 0.20.6 desktop candidate
 without publishing, writing the catalogue, changing Chrome profiles,
 registering a native host, running the installer, or moving real media.
 
@@ -75,7 +75,7 @@ identifiers, captions, cookies, headers, request bodies, or private page HTML.
 ## Installer status
 
 `npm run stage:desktop` is the authoritative package proof for
-`dist\ofenhancer-desktop-v0.20.5\`. `npm run build:desktop` compiles
-`OFEnhancer-Setup-0.20.5.exe` only when Inno Setup 6 is installed. A successful
+`dist\ofenhancer-desktop-v0.20.6\`. `npm run build:desktop` compiles
+`OFEnhancer-Setup-0.20.6.exe` only when Inno Setup 6 is installed. A successful
 stage followed by `INNO_COMPILER_MISSING` is not an installer build and must
 not be reported as one.
