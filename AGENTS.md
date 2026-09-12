@@ -10,3 +10,15 @@ and upload checkpoints. This preference does not authorize removing/reinstalling
 extensions, changing native-host registration, public publishing, live Google
 mutation, real-media moves, or unrelated account actions. Follow the task's
 explicit authorization for those operations.
+
+# Release delivery
+
+For completed product changes delivered as a release, increment the appropriate
+product version and build a matching Windows installer. Include a direct,
+clickable link to that versioned installer in the final response so the owner
+can install it immediately. Do not merely promise an installer or omit its link.
+
+Install the release when authorized and safely feasible, or provide the installer
+link for the owner to run. State clearly whether installation actually occurred,
+what was verified, and any remaining blockers. Preserve existing settings,
+extension identities, load locations, storage, and upload checkpoints.
