@@ -34,6 +34,18 @@ link for the owner to run. State clearly whether installation actually occurred,
 what was verified, and any remaining blockers. Preserve existing settings,
 extension identities, load locations, storage, and upload checkpoints.
 
+# Google OAuth recovery knowledge
+
+Use the existing Google Cloud project `ofenhancer-personal` (OFEnhancer Personal),
+Desktop client **OFEnhancer for Windows**, under `johnnyguides@gmail.com` in the
+Johnny Chrome profile. The exact client link and recovery procedure are in
+`docs/google-catalogue.md`. Before asking the owner for a file, check the existing
+DPAPI configuration at `%LocalAppData%\OFEnhancer\data\google-desktop-client.dat`
+and the existing Cloud client. A public client ID plus PKCE is not sufficient:
+Google requires this Desktop client's secret. Cloud no longer reveals existing
+secrets. Preserve this client and store imported credentials with DPAPI; commit
+recovery knowledge, never secrets or tokens. The owner's test workbook is **Work**.
+
 # GitHub identity
 
 This repository belongs to the `JohnnyGuides` GitHub account. For GitHub

@@ -119,7 +119,8 @@ public partial class MainWindow : Window, IDisposable
                 {
                     if (hasExtensionOverride) throw new InvalidOperationException("Chrome is using a command-line extension override. Start without that override to change saved setup.");
                     result = await Task.Run(chromeIntegration.Prepare);
-                    OpenChrome(new Uri("chrome://extensions/"));
+                    string message = await OpenChromePageAsync("extensions");
+                    result = new { prepared = true, message };
                 }
                 else
                 {
@@ -129,8 +130,9 @@ public partial class MainWindow : Window, IDisposable
                         string folder = chromeIntegration.Get().ExtensionFolder ?? throw new InvalidOperationException("Prepare Chrome setup first.");
                         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
                     }
-                    else OpenChrome(new Uri(operation == "openChromeExtensions" ? "chrome://extensions/" : "chrome://newtab/"));
-                    result = new { opened = true };
+                    if (operation is "openChromeExtensions" or "openChrome")
+                        result = new { opened = true, message = await OpenChromePageAsync(operation == "openChromeExtensions" ? "extensions" : "newtab") };
+                    else result = new { opened = true };
                 }
             }
             else if (operation == "getUploadBrowsers") { await Task.Run(chromeIntegration.Get); result = uploads.Status(); }
@@ -340,6 +342,30 @@ public partial class MainWindow : Window, IDisposable
     private static void OpenChrome(Uri uri)
     {
         ChromeIntegration.OpenChrome(uri);
+    }
+
+    private async Task<string> OpenChromePageAsync(string page)
+    {
+        await Task.Run(chromeIntegration.Get);
+        var status = JsonSerializer.SerializeToElement(uploads.Status());
+        if (status.GetProperty("browsers").GetArrayLength() > 0)
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(8));
+            try { await uploads.OpenChromePageAsync(page, timeout.Token); }
+            catch (OperationCanceledException) { throw new InvalidOperationException("Chrome did not confirm opening the page. Reload the existing OFEnhancer extension and try again."); }
+            return page == "extensions" ? "Chrome extensions opened in your existing Chrome window." : "A new tab opened in your existing Chrome window.";
+        }
+        // Chrome rejects internal URLs on its command line. Before the extension is
+        // connected, open the installed guide and explain the manual address step.
+        if (page == "extensions")
+        {
+            string guide = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "extension-setup.html"));
+            if (!File.Exists(guide)) throw new InvalidOperationException("Open chrome://extensions in Chrome's address bar. The extension is not connected yet.");
+            OpenChrome(new Uri(guide));
+            return "Chrome setup guide opened. Paste chrome://extensions into Chrome's address bar; direct opening becomes available once the extension is connected.";
+        }
+        OpenChrome(new Uri("about:blank"));
+        return "Chrome opened.";
     }
 
     private string? ChooseThumbnailRoot()

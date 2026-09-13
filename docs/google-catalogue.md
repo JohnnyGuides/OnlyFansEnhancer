@@ -28,9 +28,8 @@ or browser choice.
 
 ## Developer OAuth setup
 
-The controls below are hidden inside the collapsed **Developer setup** section
-in Settings. Normal users should not enter anything there. They are only for a
-self-hosted build or custom Google Cloud OAuth configuration.
+If **Finish Google setup** is shown, import the matching Desktop client JSON
+through **Developer setup** in Settings before connecting.
 
 Enable Google Picker, Drive, and Sheets APIs in the creator-controlled Google
 Cloud project and create a **Desktop app** OAuth client. A Web application client
@@ -44,14 +43,27 @@ A file for a different configured ID is rejected without changing the saved
 connection or catalogue. Cancelling changes nothing. Import into an unconfigured
 app also fills its public client ID.
 
-Normal publisher installations use the packaged public client ID with PKCE and
-do not require a client secret or downloaded setup file. A self-hosted/custom
-configuration may import its matching native client secret; OFEnhancer encrypts
+Google's Desktop client token exchange requires its client secret even with PKCE.
+The packaged public ID alone is insufficient. OFEnhancer encrypts
 that imported ID/secret with current-user Windows DPAPI in
 `%LocalAppData%\OFEnhancer\data\google-desktop-client.dat`. The secret is sent
 only to Google's token endpoint, never to WebView, Chrome, authorization URL,
 SQLite, logs, repository, or package. The downloaded JSON remains at its original
 location; protect it separately.
+
+The owner's existing project is **OFEnhancer Personal** (`ofenhancer-personal`),
+and its Desktop client is **OFEnhancer for Windows**. Open
+[the existing client](https://console.cloud.google.com/auth/clients/790171904832-bp9gh5qat83goicceeg740oh8mnedksc.apps.googleusercontent.com?project=ofenhancer-personal)
+in the Johnny Chrome profile, signed in as `johnnyguides@gmail.com`.
+Google no longer reveals or downloads existing client secrets. Check the DPAPI
+store above first; if the original JSON and saved configuration are both absent,
+the owner must create a replacement secret for this same client and save it
+privately. Do not create another Cloud project/client, reset the old secret,
+or put secrets in Git. The 2026-09-13 live test selected **Work** successfully,
+then Google returned `invalid_request: client_secret is missing`.
+The workbook visibly includes **2026 Video Catalogue** and **2026 uploads**;
+do not mistake the workbook picker for worksheet selection or change either tab
+just to complete a connection test.
 
 Authorization uses `drive.file`, state/PKCE, a loopback callback, and a system
 browser. Refresh credentials have their own DPAPI vault; access tokens stay in

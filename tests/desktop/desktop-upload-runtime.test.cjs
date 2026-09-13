@@ -192,6 +192,32 @@ function host(
   };
 }
 
+test("Chrome extensions opens a tab in the existing normal window and rejects other pages", async () => {
+  const fixture = extension();
+  const created = [];
+  const focused = [];
+  fixture.chrome.windows = {
+    getLastFocused: async () => ({ id: 27 }),
+    update: async (id, options) => focused.push({ id, ...options }),
+  };
+  fixture.chrome.tabs = {
+    create: async (options) => {
+      created.push(options);
+      return { id: 42 };
+    },
+  };
+  await fixture.runtime.execute({ kind: "openChromePage", page: "extensions" });
+  assert.deepEqual(JSON.parse(JSON.stringify(created)), [
+    { windowId: 27, url: "chrome://extensions/", active: true },
+  ]);
+  assert.deepEqual(focused, [{ id: 27, focused: true }]);
+  await assert.rejects(
+    fixture.runtime.execute({ kind: "openChromePage", page: "settings/reset" }),
+    /invalid-chrome-page/,
+  );
+  assert.equal(created.length, 1);
+});
+
 test("offline mutations fail without replay when a browser later arrives", async () => {
   let live = false;
   let mutations = 0;

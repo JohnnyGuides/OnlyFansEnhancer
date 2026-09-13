@@ -70,7 +70,7 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
-    public void MissingDeveloperClientFileDoesNotBlockPublisherClientConnection()
+    public void MissingDesktopClientConfigurationStopsBeforeOpeningGoogle()
     {
         using ControllerHarness harness = new();
         using TestDirectory clientDirectory = new();
@@ -88,10 +88,11 @@ public sealed class GoogleCatalogueControllerTests
             clientStore: new(Path.Combine(clientDirectory.Path, "missing-client.dat"))
         );
 
-        Assert.AreEqual("disconnected", controller.getGoogleCatalogueStatus().State);
-        Assert.AreEqual("connecting", controller.startGoogleCatalogueConnection().State);
-        Assert.IsNotNull(connection);
-        Assert.AreEqual(GoogleConnectionState.Connecting, connection.Snapshot.State);
+        Assert.AreEqual("google-client-configuration-required", controller.getGoogleCatalogueStatus().ErrorCode);
+        Assert.AreEqual("google-client-configuration-required", Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => controller.startGoogleCatalogueConnection()).Code);
+        Assert.IsNull(connection);
+        Assert.IsNull(harness.Vault.Load());
     }
 
     [TestMethod]
@@ -104,7 +105,7 @@ public sealed class GoogleCatalogueControllerTests
             (_, _, _) => throw new AssertFailedException(), (_, _) => harness.Session, clientStore: clientStore);
         var selection = harness.Store.GetGoogleCatalogueSelection();
         var refresh = harness.Vault.Load();
-        Assert.AreEqual("ready", controller.getGoogleCatalogueStatus().State);
+        Assert.AreEqual("google-client-configuration-required", controller.getGoogleCatalogueStatus().ErrorCode);
         Assert.AreEqual(controller.getGoogleCatalogueStatus(), controller.ImportGoogleClientConfiguration(() => null));
         string file = Path.Combine(temp.Path, "download.json");
         File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(new { installed = new { client_id = OtherClientId, client_secret = "secret" } }));

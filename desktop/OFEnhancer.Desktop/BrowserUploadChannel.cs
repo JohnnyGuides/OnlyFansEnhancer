@@ -173,7 +173,13 @@ public sealed class BrowserUploadChannel : IDisposable
     // Only MainWindow's AdditionalObject selection path may create this command.
     internal Task<JsonElement> RequestNativeFileAsync(JsonElement command) => QueueAsync(command);
 
-    private async Task<JsonElement> QueueAsync(JsonElement command)
+    internal Task<JsonElement> OpenChromePageAsync(string page, CancellationToken cancellationToken)
+    {
+        if (page is not ("extensions" or "newtab")) throw new InvalidOperationException("invalid-chrome-page");
+        return QueueAsync(JsonSerializer.SerializeToElement(new { kind = "openChromePage", page }), cancellationToken);
+    }
+
+    private async Task<JsonElement> QueueAsync(JsonElement command, CancellationToken cancellationToken = default)
     {
         if (System.Text.Encoding.UTF8.GetByteCount(command.GetRawText()) > 64 * 1024)
             throw new InvalidOperationException("upload-command-too-large");
@@ -193,7 +199,7 @@ public sealed class BrowserUploadChannel : IDisposable
             pending.Add(id, waiting);
             commands.Add(id, new { id, command = command.Clone() });
         }
-        try { return await waiting.Task.WaitAsync(TimeSpan.FromHours(2)); }
+        try { return await waiting.Task.WaitAsync(TimeSpan.FromHours(2), cancellationToken); }
         finally { lock (gate) { pending.Remove(id); commands.Remove(id); } }
     }
 }

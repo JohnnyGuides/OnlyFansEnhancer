@@ -37,6 +37,39 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     );
     assert.match(workers[0].url(), /^chrome-extension:\/\//);
     const extensionId = new URL(workers[0].url()).host;
+    const chromePageOpened = context.waitForEvent("page");
+    const chromePage = await workers[0].evaluate(async () => {
+      const before = await chrome.windows.getLastFocused({
+        windowTypes: ["normal"],
+      });
+      const windowsBefore = await chrome.windows.getAll({
+        windowTypes: ["normal"],
+      });
+      const runtime = CreatorDesktopUploadRuntime.create({ chrome });
+      const result = await runtime.execute({
+        kind: "openChromePage",
+        page: "extensions",
+      });
+      const tab = await chrome.tabs.get(result.tabId);
+      const windowsAfter = await chrome.windows.getAll({
+        windowTypes: ["normal"],
+      });
+      return {
+        expectedWindow: before.id,
+        windowId: tab.windowId,
+        before: windowsBefore.length,
+        after: windowsAfter.length,
+      };
+    });
+    const extensionsPage = await chromePageOpened;
+    await extensionsPage.waitForURL("chrome://extensions/");
+    await extensionsPage.close();
+    assert.equal(chromePage.windowId, chromePage.expectedWindow);
+    assert.equal(
+      chromePage.after,
+      chromePage.before,
+      "Opening extensions must not create a Chrome window.",
+    );
     const realAccountKey = "user:real-onlyfans-account";
     await workers[0].evaluate(async (primaryKey) => {
       let initialized = false;

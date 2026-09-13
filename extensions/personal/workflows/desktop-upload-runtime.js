@@ -139,6 +139,20 @@
         return {
           granted: await chrome.permissions.contains(command.permissions),
         };
+      if (command.kind === "openChromePage") {
+        if (!["extensions", "newtab"].includes(command.page))
+          throw new Error("invalid-chrome-page");
+        const window = await chrome.windows.getLastFocused({
+          windowTypes: ["normal"],
+        });
+        const tab = await chrome.tabs.create({
+          windowId: window.id,
+          url: `chrome://${command.page}/`,
+          active: true,
+        });
+        await chrome.windows.update(window.id, { focused: true });
+        return { opened: true, tabId: tab.id };
+      }
       if (command.kind === "port") {
         if (
           !["bind-session", "bind-social-session", "file-response"].includes(

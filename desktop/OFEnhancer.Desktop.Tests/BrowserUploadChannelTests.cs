@@ -7,6 +7,20 @@ namespace OFEnhancer.Desktop.Tests;
 [TestClass]
 public class BrowserUploadChannelTests
 {
+    [TestMethod]
+    public async Task ChromePageTimeoutRemovesUndeliveredCommandAndOnlyAcceptsKnownPages()
+    {
+        using var channel = new BrowserUploadChannel();
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        using var cancellation = new CancellationTokenSource();
+        var opening = channel.OpenChromePageAsync("extensions", cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsExceptionAsync<TaskCanceledException>(() => opening);
+        Assert.AreEqual(0, Json(channel.Exchange(Json(new { browserId = browser }))).GetProperty("commands").GetArrayLength());
+        Assert.ThrowsException<InvalidOperationException>(() => channel.OpenChromePageAsync("settings/reset", CancellationToken.None));
+    }
+
     private sealed class Clock : TimeProvider
     {
         internal DateTimeOffset Now = DateTimeOffset.UtcNow;

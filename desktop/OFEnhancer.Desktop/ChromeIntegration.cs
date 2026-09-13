@@ -60,6 +60,8 @@ internal sealed class ChromeIntegration
 
     internal static void OpenChrome(Uri uri)
     {
+        if (uri.Scheme == "chrome")
+            throw new InvalidOperationException("Chrome internal pages must be opened through the connected extension.");
         var browser = FindChrome() ?? throw new InvalidOperationException("chrome-not-found");
         ProcessStartInfo start = new(browser.ExecutablePath) { UseShellExecute = false };
         start.ArgumentList.Add(uri.AbsoluteUri);

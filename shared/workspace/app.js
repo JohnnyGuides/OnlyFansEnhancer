@@ -238,11 +238,14 @@
       const message = document.querySelector("#chromeSetupActionStatus");
       try {
         message.textContent = "Working…";
-        await global.OFEnhancerHost.request(button.dataset.chromeAction);
+        const result = await global.OFEnhancerHost.request(
+          button.dataset.chromeAction,
+        );
         message.textContent =
-          button.dataset.chromeAction === "prepareChrome"
+          result?.message ||
+          (button.dataset.chromeAction === "prepareChrome"
             ? "Preparation finished. Complete the required Chrome steps; connection is checked automatically."
-            : "Opened. Waiting for fresh Chrome evidence.";
+            : "Opened. Waiting for fresh Chrome evidence.");
       } catch (error) {
         message.textContent = `Could not finish: ${error.message}`;
       } finally {
@@ -1138,9 +1141,10 @@
       googleStatusView?.errorCode === "google-client-configuration-required";
     googleSetup.hidden = false;
     if (needsDeveloperSetup) {
-      googleSettingStatus.textContent = "Not connected";
+      googleSettingStatus.textContent =
+        "Google setup is incomplete. Import the desktop app setup file to connect.";
       googleSettingStatus.dataset.state = "disconnected";
-      setGoogleSettingsAction("Connect Google account", "connect");
+      setGoogleSettingsAction("Finish Google setup", "setup");
     } else if (state === "disconnected") {
       googleSettingStatus.textContent = "Not connected";
       googleSettingStatus.dataset.state = "disconnected";
@@ -1332,7 +1336,11 @@
             "saveBrowserPreference",
             { browserId: connectBrowserSelect.value },
           );
-          if (generation !== browserDialogGeneration) return;
+          if (
+            generation !== browserDialogGeneration ||
+            !connectBrowserDialog.open
+          )
+            return;
           renderBrowserSettings(saved);
           preferenceSaved = true;
           connectBrowserStatus.textContent = "Opening your browser…";

@@ -228,7 +228,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.14",
+            productVersion: "0.20.15",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -766,7 +766,15 @@ async function testGoogleDesktopSetupImport(browser, port) {
   });
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByText("Developer setup", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Finish Google setup", exact: true })
+    .filter({ visible: true })
+    .click();
+  assert.equal(await page.locator("#googleSetup").getAttribute("open"), "");
+  assert.equal(
+    (await googleCalls(page, "startGoogleCatalogueConnection")).length,
+    0,
+  );
   const setupImport = page.getByRole("button", {
     name: "Import Google setup file",
     exact: true,
@@ -964,7 +972,7 @@ async function testGoogleEndUserSettings(browser, port) {
   await developerSetup.getByText("Developer setup", { exact: true }).click();
   await developerSetup
     .getByText(
-      "Only for self-hosted OFEnhancer builds or custom Google Cloud OAuth configuration.",
+      "Import the Google Desktop client setup file once on this PC. OFEnhancer encrypts it locally and preserves it during updates.",
       { exact: true },
     )
     .waitFor();

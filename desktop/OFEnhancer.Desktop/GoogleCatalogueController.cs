@@ -274,6 +274,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 ?? throw new GoogleCatalogueControllerException("google-client-id-not-configured");
             if (Volatile.Read(ref _catalogueOperationActive) != 0)
                 throw new GoogleCatalogueControllerException("google-operation-in-progress");
+            if (_clientStore is not null && _clientStore.Load(clientId) is null)
+                throw new GoogleCatalogueControllerException("google-client-configuration-required");
             if (_connection?.Snapshot.State == GoogleConnectionState.Connecting)
                 throw new GoogleCatalogueControllerException("google-connection-in-progress");
             epoch = BeginConnectionEpochLocked();
@@ -703,7 +705,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         {
             try
             {
-                _clientStore.Load(settings.GoogleOAuthClientId);
+                if (_clientStore.Load(settings.GoogleOAuthClientId) is null)
+                    return View("error", errorCode: "google-client-configuration-required");
             }
             catch (GoogleCatalogueControllerException)
             {
