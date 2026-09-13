@@ -26,6 +26,21 @@
   channel.addEventListener("message", (event) => {
     const data = event.data;
     if (
+      data?.source === "creator-upload-console" &&
+      data.direction === "probe" &&
+      data.sessionId === sessionId &&
+      data.platform === platform
+    ) {
+      channel.postMessage({
+        source: "creator-upload-bridge",
+        direction: "ready",
+        sessionId,
+        platform,
+        requestId: data.requestId,
+      });
+      return;
+    }
+    if (
       data?.source !== "creator-upload-console" ||
       data.sessionId !== sessionId ||
       data.platform !== platform ||
@@ -43,6 +58,7 @@
         sessionId,
         platform,
         role: data.role,
+        requestId: data.requestId,
         token: data.token,
         file: data.file,
       },

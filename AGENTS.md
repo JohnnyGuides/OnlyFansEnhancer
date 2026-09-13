@@ -11,7 +11,18 @@ extensions, changing native-host registration, public publishing, live Google
 mutation, real-media moves, or unrelated account actions. Follow the task's
 explicit authorization for those operations.
 
+# Standing authorization for repository tooling
+
+The owner gives continuing authorization to review and unblock trusted scripts
+in this repository when an Internet-download marker prevents required build or
+test tooling from running. Do not request separate approval for each such file.
+Review the script first, scope `Unblock-File` to the exact repository file, and
+continue verification. This does not authorize changing machine-wide execution
+policy, disabling security protections, public publishing, or changing the
+installed extension/native integration outside the task's existing authority.
+
 # Release delivery
+
 
 For completed product changes delivered as a release, increment the appropriate
 product version and build a matching Windows installer. Include a direct,

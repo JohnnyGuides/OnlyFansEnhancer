@@ -205,7 +205,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.10",
+          productVersion: "0.20.11",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -562,7 +562,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.10",
+    productVersion: "0.20.11",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -582,7 +582,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.10");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.11");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -821,7 +821,19 @@ function send(message) {
       ),
     /Invalid catalogue upload preview/,
   );
-  context.uploadOnlyRequest = { ...validatedUpload, catalogue: null };
+  context.uploadOnlyRequest = {
+    ...validatedUpload,
+    draft: { ...validatedUpload.draft, publishMode: "autonomous" },
+    catalogue: null,
+  };
+  vm.runInContext(
+    `async function startAndObserveCreatorUpload(id, targets) {
+    const acknowledgement = await startCreatorUpload(id, targets);
+    if (acknowledgement.length) throw new Error("Start must acknowledge before results.");
+    return (await creatorUploadSessions.get(id).execution).map((entry) => entry.value);
+  }`,
+    context,
+  );
   const uploadOnly = vm.runInContext(
     "validateCreatorUploadRequest(uploadOnlyRequest)",
     context,
@@ -968,7 +980,7 @@ function send(message) {
       creatorUploadConsolePorts.add(port);
       try {
         const prepared = await prepareCreatorUpload(uploadOnlyRequest);
-        const first = await startCreatorUpload(uploadOnlyRequest.sessionId, uploadOnlyRequest.targets);
+        const first = await startAndObserveCreatorUpload(uploadOnlyRequest.sessionId, uploadOnlyRequest.targets);
         const retry = await retryCreatorUploadPlatform(uploadOnlyRequest.sessionId, "fansly");
         const storedAfterSuccess = await CreatorUploadSessionStore.load(uploadOnlyRequest.sessionId);
         const correctionRequest = {
@@ -983,7 +995,7 @@ function send(message) {
         creatorUploadConsolePorts.add(correctionPort);
         armManyVidsEditFailure();
         await prepareCreatorUpload(correctionRequest);
-        const correctionFirst = await startCreatorUpload(correctionRequest.sessionId, ["manyvids"]);
+        const correctionFirst = await startAndObserveCreatorUpload(correctionRequest.sessionId, ["manyvids"]);
         const correctionRetry = await retryCreatorUploadPlatform(correctionRequest.sessionId, "manyvids");
         const uncertainRequest = {
           ...uploadOnlyRequest,
@@ -997,7 +1009,7 @@ function send(message) {
         creatorUploadConsolePorts.add(uncertainPort);
         armManyVidsPostCheckpointFailure();
         await prepareCreatorUpload(uncertainRequest);
-        const uncertainResult = await startCreatorUpload(uncertainRequest.sessionId, ["manyvids"]);
+        const uncertainResult = await startAndObserveCreatorUpload(uncertainRequest.sessionId, ["manyvids"]);
         let uncertainRetryError = "";
         try {
           await retryCreatorUploadPlatform(uncertainRequest.sessionId, "manyvids");
@@ -1021,7 +1033,7 @@ function send(message) {
         };
         creatorUploadConsolePorts.add(pornhubPort);
         const pornhubPrepared = await prepareCreatorUpload(pornhubRequest);
-        const pornhubResult = await startCreatorUpload(
+        const pornhubResult = await startAndObserveCreatorUpload(
           pornhubRequest.sessionId,
           pornhubRequest.targets
         );
@@ -1192,6 +1204,7 @@ function send(message) {
         const calls = [];
         const session = {
           id,
+          draft: { publishMode: "autonomous" },
           platforms: new Map([
             ["onlyfans", { platform: "onlyfans", tabId: 41, status: "prepared" }],
             ["fansly", { platform: "fansly", tabId: 50, status: "prepared" }],
@@ -1213,7 +1226,7 @@ function send(message) {
                 : "catalogue-updated"
           };
         };
-        const first = await startCreatorUpload(id, [
+        const first = await startAndObserveCreatorUpload(id, [
           "onlyfans",
           "fansly",
           "manyvids",
@@ -1301,6 +1314,10 @@ function send(message) {
           tabId: 41,
           status: "prepared"
         });
+        let manualCheckpointError = "";
+        try { await checkpointCreatorUploadCommit(id, "onlyfans", 41); }
+        catch (error) { manualCheckpointError = error.message; }
+        session.draft = { publishMode: "autonomous" };
         const checkpoint = await checkpointCreatorUploadCommit(id, "onlyfans", 41);
         let duplicateCheckpointError = "";
         try {
@@ -1312,6 +1329,7 @@ function send(message) {
           commitRetry,
           unresolvedError,
           checkpoint,
+          manualCheckpointError,
           duplicateCheckpointError,
           calls
         });
@@ -1329,6 +1347,7 @@ function send(message) {
   ]);
   assert.match(safeRetries.unresolvedError, /manual link recovery/i);
   assert.deepEqual(safeRetries.checkpoint, { armed: true });
+  assert.match(safeRetries.manualCheckpointError, /forbidden in manual mode/);
   assert.match(safeRetries.duplicateCheckpointError, /manual link recovery/i);
   assert.deepEqual(safeRetries.calls, [
     "commit:fansly:https://fansly.com/post/987654321",

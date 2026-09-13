@@ -31,7 +31,12 @@
 
   function postAck(event, message) {
     event.source?.postMessage(
-      { source: SOURCE, direction: "ack", ...message },
+      {
+        source: SOURCE,
+        direction: "ack",
+        requestId: event.data.requestId,
+        ...message,
+      },
       event.origin === "null" ? "*" : event.origin,
     );
   }
@@ -190,19 +195,29 @@
   }
 
   // Called only by the extension after its native file attacher verified the
-  // exact input and origin. Re-read the assigned file before releasing waiters.
-  function acknowledgeNative(sessionId, role, token, expected) {
+  // exact input and origin. A capture-phase receipt also handles sites that clear
+  // or remove their input in the change handler; site acceptance remains separate.
+  function acknowledgeNative(
+    sessionId,
+    role,
+    token,
+    expected,
+    selectionVerified = false,
+  ) {
     const { selector } = attachmentTarget(sessionId, role, token);
     const inputs = document.querySelectorAll(selector);
     const file = inputs.length === 1 ? inputs[0].files?.[0] : null;
-    if (!file || file.name !== expected.name || file.size !== expected.size)
+    if (
+      !selectionVerified &&
+      (!file || file.name !== expected.name || file.size !== expected.size)
+    )
       throw new Error("The platform file does not match the selected file.");
     const entry = sessions.get(sessionId).roleMap.get(role);
     entry.used = true;
     entry.value = Object.freeze({
-      name: file.name,
-      size: file.size,
-      type: file.type,
+      name: expected.name,
+      size: expected.size,
+      type: file?.type || "",
       role,
     });
     for (const resolve of entry.waiters.splice(0)) resolve(entry.value);

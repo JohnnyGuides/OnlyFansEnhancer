@@ -51,11 +51,13 @@
     "done",
     "edit",
     "file",
+    "free",
     "finish",
     "finished",
     "for",
     "helper",
     "later",
+    "load",
     "media",
     "new",
     "next",
@@ -63,6 +65,7 @@
     "ok",
     "post",
     "preview",
+    "preset",
     "previous",
     "publish",
     "remove",
@@ -131,6 +134,8 @@
    *   stoppedAt: number | null,
    *   stopReason: string,
    *   events: TraceEvent[]
+   *   ownerId?: string
+   *   diagnosticVersion?: number
    * }} TraceState
    */
 
@@ -146,6 +151,18 @@
   let performanceObserver = null;
   let lastRoute = "";
   let lastSnapshot = "";
+  let ownerId = "";
+  let assetRole = "full";
+  const documentGeneration = globalThis.crypto?.randomUUID?.() || "";
+
+  function ownsTrace(trace) {
+    return Boolean(
+      trace?.active &&
+      trace.origin === location.origin &&
+      trace.ownerId === ownerId &&
+      ownerId,
+    );
+  }
 
   function sanitizeUrl(value, base) {
     try {
@@ -249,6 +266,11 @@
     const type = stableToken(element.getAttribute?.("type"), 30).toLowerCase();
     const signature = { tag };
     if (type) signature.type = type;
+    if (tag === "input" && type === "file") {
+      signature.connected = Boolean(element.isConnected);
+      signature.accept = stableToken(element.getAttribute("accept"), 160);
+      signature.multiple = Boolean(element.multiple);
+    }
 
     for (const [attribute, key] of [
       ["role", "role"],
@@ -373,11 +395,11 @@
   }
 
   function appendEvent(type, data) {
-    if (!currentTrace?.active || currentTrace.origin !== location.origin) {
+    if (!ownsTrace(currentTrace)) {
       return Promise.resolve(currentTrace);
     }
     return updateTrace((trace) => {
-      if (!trace?.active || trace.origin !== location.origin) return trace;
+      if (!ownsTrace(trace) || trace.id !== currentTrace.id) return trace;
       const events = appendBoundedEvent(
         trace.events,
         eventRecord(trace, type, data),
@@ -405,6 +427,8 @@
     const platform = platformFor(location.hostname);
     const trace = {
       schemaVersion: 1,
+      diagnosticVersion: 2,
+      ownerId,
       id: sessionId(),
       platform,
       origin: location.origin,
@@ -481,7 +505,10 @@
 
   function eventElement(event) {
     return (event.composedPath?.() || [event.target]).find(
-      (node) => node?.nodeType === 1 && !isRecorderNode(node),
+      (node) =>
+        node?.nodeType === 1 &&
+        !isRecorderNode(node) &&
+        inPublishingScope(node),
     );
   }
 
@@ -490,6 +517,7 @@
       (node) =>
         node?.nodeType === 1 &&
         !isRecorderNode(node) &&
+        inPublishingScope(node) &&
         (node.matches?.(
           "input,select,textarea,[contenteditable]:not([contenteditable='false'])",
         ) ||
@@ -505,7 +533,10 @@
 
   function actionableEventElement(event) {
     const path = (event.composedPath?.() || [event.target]).filter(
-      (node) => node?.nodeType === 1 && !isRecorderNode(node),
+      (node) =>
+        node?.nodeType === 1 &&
+        !isRecorderNode(node) &&
+        inPublishingScope(node),
     );
     const semantic = path.find(
       (node) =>
@@ -543,6 +574,15 @@
       actor: event?.isTrusted === true ? "user" : "script",
       surface: toolId ? "toolkit-panel" : "platform",
       ...(toolId ? { toolId } : {}),
+      documentGeneration,
+      frame: globalThis.top === globalThis.window ? "top" : "child",
+      boundary: element.closest?.(
+        "[role='dialog'], .modal, app-media-upload-modal",
+      )
+        ? "dialog"
+        : element.closest?.("app-post-creation, form, .uppy-Dashboard")
+          ? "composer"
+          : "outside",
     };
   }
 
@@ -688,6 +728,13 @@
         : "";
     if (href) data.url = href;
     void appendEvent("click", data);
+    if (element.tagName?.toLowerCase() === "input" && element.type === "file") {
+      // Some pickers detach or clear before the document's change listener runs.
+      element.addEventListener("change", handleChange, {
+        capture: true,
+        once: true,
+      });
+    }
   }
 
   function handleChange(event) {
@@ -730,6 +777,7 @@
         ...context,
         control: elementSignature(input),
         files,
+        assetRole,
       });
     }
   }
@@ -787,6 +835,15 @@
     );
   }
 
+  function inPublishingScope(element) {
+    if (platformFor(location.hostname) !== "Fansly") return true;
+    return Boolean(
+      element?.closest?.(
+        "app-post-creation, app-account-media-upload, app-post-schedule-modal, app-media-upload-modal, [data-testid='upload-composer'], [data-creator-toolkit-panel]",
+      ),
+    );
+  }
+
   function statusSnapshot() {
     const statuses = [];
     let candidates = 0;
@@ -795,7 +852,13 @@
     )) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || statuses.length >= 12) break;
-      if (isRecorderNode(element) || !isVisible(element)) continue;
+      if (
+        isRecorderNode(element) ||
+        !isVisible(element) ||
+        !inPublishingScope(element) ||
+        element.classList.contains("rmp-seek-bar")
+      )
+        continue;
       const role = element.getAttribute("role") || "";
       const rawText = String(element.textContent || "").trim();
       const states = STATUS_PATTERN.test(rawText)
@@ -824,8 +887,22 @@
     for (const element of document.querySelectorAll('input[type="file"]')) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || fileInputs.length >= 8) break;
-      if (!isRecorderNode(element) && isVisible(element)) {
-        fileInputs.push(elementSignature(element));
+      if (
+        !isRecorderNode(element) &&
+        inPublishingScope(element) &&
+        (isVisible(element) ||
+          element.closest(
+            "form, app-post-creation, .uppy-Dashboard, [role='dialog'], .modal",
+          ))
+      ) {
+        fileInputs.push({
+          ...elementSignature(element),
+          hidden: !isVisible(element),
+          locatorMatches: Math.min(
+            document.querySelectorAll("input[type='file']").length,
+            MAX_SNAPSHOT_CANDIDATES,
+          ),
+        });
       }
     }
 
@@ -836,7 +913,7 @@
     )) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || actions.length >= 12) break;
-      if (isRecorderNode(element)) continue;
+      if (isRecorderNode(element) || !inPublishingScope(element)) continue;
       const signature = elementSignature(element);
       if (ACTION_PATTERN.test(signature?.label || "") && isVisible(element)) {
         actions.push(signature);
@@ -849,7 +926,7 @@
     for (const element of document.querySelectorAll("a[href]")) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || links.length >= 12) break;
-      if (isRecorderNode(element)) continue;
+      if (isRecorderNode(element) || !inPublishingScope(element)) continue;
       const candidate = candidatePostUrl(element.getAttribute("href"));
       if (!candidate || seenLinks.has(candidate) || !isVisible(element))
         continue;
@@ -861,6 +938,35 @@
       fileInputs,
       actions,
       statuses: statusSnapshot(),
+      calendar: [
+        ...document.querySelectorAll(
+          "[class*='calendar'] [class*='month'], [class*='calendar'] [class*='year']",
+        ),
+      ]
+        .slice(0, MAX_SNAPSHOT_CANDIDATES)
+        .filter(
+          (element) =>
+            isVisible(element) &&
+            /^(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:\s+\d{4})?|\d{4})$/i.test(
+              element.textContent.trim(),
+            ),
+        )
+        .slice(0, 8)
+        .map((element) => ({
+          control: elementSignature(element),
+          value: element.textContent.trim(),
+        })),
+      mediaControls: [
+        ...document.querySelectorAll(
+          ".b-dropzone__preview__delete, app-account-media-upload app-account-media-template, app-post-creation app-account-media-template",
+        ),
+      ]
+        .filter(isVisible)
+        .slice(0, 20)
+        .map((element) => ({
+          control: elementSignature(element),
+          parent: elementSignature(element.parentElement),
+        })),
       links,
     };
   }
@@ -976,8 +1082,7 @@
 
   function renderPanel() {
     if (!panel) return;
-    const activeHere =
-      currentTrace?.active && currentTrace.origin === location.origin;
+    const activeHere = ownsTrace(currentTrace);
     const activeElsewhere = currentTrace?.active && !activeHere;
     panel.start.disabled = Boolean(currentTrace?.active);
     panel.stop.disabled = !activeHere;
@@ -1055,6 +1160,17 @@
     description.textContent =
       "Captures sanitized events locally; never publishes.";
     const actions = document.createElement("div");
+    const role = document.createElement("select");
+    role.setAttribute("aria-label", "Recorded asset role");
+    for (const value of ["full", "teaser", "thumbnail"]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      role.append(option);
+    }
+    role.addEventListener("change", () => {
+      assetRole = role.value;
+    });
     actions.className = "actions";
     const start = makeButton("Start trace", startSession);
     const stop = makeButton("Stop and download", () =>
@@ -1072,7 +1188,7 @@
     actions.append(start, stop, download, discard);
     const status = document.createElement("div");
     status.setAttribute("role", "status");
-    frame.append(headingRow, description, actions, status);
+    frame.append(headingRow, description, role, actions, status);
     shadow.append(style, frame);
     (document.documentElement || document.body).appendChild(host);
     panel = { host, start, stop, download, discard, status };
@@ -1080,17 +1196,20 @@
   }
 
   async function initialize() {
+    if (chrome.runtime?.sendMessage) {
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_UPLOAD_TRACE_CONTEXT",
+      });
+      ownerId = response?.ownerId || "";
+    } else {
+      ownerId =
+        globalThis.sessionStorage.getItem("creatorTraceOwner") || sessionId();
+      globalThis.sessionStorage.setItem("creatorTraceOwner", ownerId);
+    }
     currentTrace = await readTrace();
-    if (
-      currentTrace?.active &&
-      currentTrace.origin === location.origin &&
-      Date.now() >= currentTrace.expiresAt
-    ) {
+    if (ownsTrace(currentTrace) && Date.now() >= currentTrace.expiresAt) {
       await stopSession("timeout", false);
-    } else if (
-      currentTrace?.active &&
-      currentTrace.origin === location.origin
-    ) {
+    } else if (ownsTrace(currentTrace)) {
       showPanel();
       startObservers();
       scheduleSnapshot();
@@ -1101,7 +1220,7 @@
   function storageChanged(changes, area) {
     if (area !== "local" || !changes[STORAGE_KEY]) return;
     currentTrace = changes[STORAGE_KEY].newValue || null;
-    if (currentTrace?.active && currentTrace.origin === location.origin) {
+    if (ownsTrace(currentTrace)) {
       if (!routeTimer) startObservers();
     } else {
       stopObservers();

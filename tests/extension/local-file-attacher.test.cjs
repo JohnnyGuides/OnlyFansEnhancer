@@ -16,8 +16,14 @@ const privatePath = "C:\\private\\episode.mp4";
 function createChrome(options = {}) {
   const calls = [];
   const fileInputs = [];
+  const commands = [];
   let frameRead = 0;
   const chrome = {
+    extension: {
+      isAllowedFileSchemeAccess(callback) {
+        callback(options.fileAccess !== false);
+      },
+    },
     runtime: { lastError: null },
     tabs: {
       async get(tabId) {
@@ -37,6 +43,7 @@ function createChrome(options = {}) {
         reply("attach", callback);
       },
       sendCommand(target, method, parameters, callback) {
+        commands.push({ method, parameters });
         calls.push(["debugger.sendCommand", target.tabId, method]);
         if (method === "DOM.setFileInputFiles")
           fileInputs.push([...parameters.files]);
@@ -87,11 +94,16 @@ function createChrome(options = {}) {
     callback();
   }
 
-  return { calls, chrome, fileInputs };
+  return { calls, chrome, fileInputs, commands };
 }
 
 function load() {
-  const context = vm.createContext({ globalThis: {}, URL });
+  const context = vm.createContext({
+    globalThis: {},
+    URL,
+    setTimeout,
+    clearTimeout,
+  });
   vm.runInContext(fs.readFileSync(modulePath, "utf8"), context, {
     filename: modulePath,
   });
@@ -121,6 +133,41 @@ test("attaches one exact local file and dispatches the native events", async () 
     fake.calls.filter(([name]) => name === "debugger.detach").length,
     1,
   );
+});
+
+test("file access permission refusal happens before debugger attachment", async () => {
+  const fake = createChrome({ fileAccess: false });
+  await assert.rejects(
+    load().attach(request(), fake.chrome),
+    /file-access-required/,
+  );
+  assert.equal(fake.calls.length, 0);
+});
+
+test("large-video metadata uses bounded CDP controls without reading media bytes", async () => {
+  const fake = createChrome();
+  await load().attach(
+    request({
+      expected: {
+        name: "episode.mp4",
+        size: 6_000_000_001,
+        lastModified: 1_700_000_000_001,
+      },
+    }),
+    fake.chrome,
+  );
+  const verification = fake.commands.find(
+    (item) =>
+      item.method === "Runtime.callFunctionOn" &&
+      item.parameters.arguments[0]?.value?.size === 6_000_000_001,
+  );
+  assert.equal(verification.parameters.arguments[0].value.size, 6_000_000_001);
+  assert.ok(JSON.stringify(fake.commands).length < 5000);
+  assert.doesNotMatch(
+    JSON.stringify(fake.commands),
+    /arrayBuffer|readAsDataURL|base64|FileReader/,
+  );
+  assert.deepEqual(fake.fileInputs, [[privatePath]]);
 });
 
 test("rejects navigation away from the authorized origin before attachment", async () => {

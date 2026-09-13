@@ -3,10 +3,14 @@
 
   if (globalThis.CreatorUploadPlatformAdapters) return;
 
-  const DEFAULT_DOM_TIMEOUT = 20_000;
+  const DEFAULT_DOM_TIMEOUT = 30_000;
   const UPLOAD_TIMEOUT = 45 * 60_000;
+  const UPLOAD_STALL_TIMEOUT = 10 * 60_000;
   const MANYVIDS_FULL_INPUT =
     "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])";
+  let mutationSignal = null;
+  let reportProgress = null;
+  let pauseObservation = null;
 
   function abortIfNeeded(signal) {
     if (signal?.aborted)
@@ -16,7 +20,11 @@
   function visible(element) {
     if (!element || element.closest("[hidden]")) return false;
     const style = getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden";
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      element.getClientRects().length > 0
+    );
   }
 
   function enabled(element) {
@@ -26,6 +34,24 @@
       element.getAttribute("aria-disabled") !== "true" &&
       !element.closest("fieldset[disabled],[aria-disabled='true']"),
     );
+  }
+
+  function verifyNoBlockingErrors(root, platform) {
+    if (
+      [
+        ...root.querySelectorAll(
+          "[aria-invalid='true'], [role='alert'], input:invalid, textarea:invalid, select:invalid",
+        ),
+      ].some(
+        (element) =>
+          visible(element) &&
+          (element.getAttribute("role") !== "alert" ||
+            element.textContent.trim()),
+      )
+    )
+      throw new Error(
+        `${platform} has a visible validation error; the draft is not ready.`,
+      );
   }
 
   function one(selector, label, root = document, { allowHidden = false } = {}) {
@@ -68,6 +94,7 @@
   }
 
   function click(element, label) {
+    abortIfNeeded(mutationSignal);
     if (!visible(element) || !enabled(element)) {
       throw new Error(`${label} is unavailable.`);
     }
@@ -75,6 +102,10 @@
   }
 
   async function beforeCommit(context, platform) {
+    abortIfNeeded(context.signal);
+    if (publicationMode(context.draft) !== "autonomous") {
+      throw new Error(`${platform} publication is forbidden in manual mode.`);
+    }
     if (typeof context.beforeCommit !== "function") {
       throw new Error(`${platform} final action is not durably armed.`);
     }
@@ -82,6 +113,14 @@
     if (result?.armed !== true) {
       throw new Error(`${platform} final action was not durably armed.`);
     }
+    abortIfNeeded(context.signal);
+  }
+
+  function publicationMode(draft) {
+    const mode = draft?.publishMode ?? "manual";
+    if (mode !== "manual" && mode !== "autonomous")
+      throw new Error("Invalid publishing mode; no actions were authorized.");
+    return mode;
   }
 
   async function runSharedRecipe(adapter, plan, signal, maximumActions) {
@@ -108,10 +147,70 @@
     signal,
   ) {
     const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
+    const longUpload = timeoutMs === UPLOAD_TIMEOUT;
+    let lastAdvance = started;
+    let highestProgress = null;
+    let informed = false;
+    while (longUpload || Date.now() - started < timeoutMs) {
       abortIfNeeded(signal);
-      const value = probe();
+      const value = await probe();
       if (value) return value;
+      if (longUpload) {
+        const scopes = [
+          ...document.querySelectorAll(
+            ".uppy-Dashboard, app-account-media-upload, app-post-creation",
+          ),
+        ].filter(visible);
+        const bars = scopes
+          .flatMap((scope) => [
+            ...scope.querySelectorAll(
+              "[role='progressbar'][aria-valuenow][aria-valuemax]",
+            ),
+          ])
+          .filter(visible);
+        const readings = bars
+          .map(
+            (bar) =>
+              Number(bar.getAttribute("aria-valuenow")) /
+              Number(bar.getAttribute("aria-valuemax")),
+          )
+          .filter(
+            (value) => Number.isFinite(value) && value >= 0 && value <= 1,
+          );
+        // Multiple/unlabelled progress streams are not evidence of a stall.
+        if (readings.length === 1) {
+          if (highestProgress === null || readings[0] > highestProgress) {
+            highestProgress = readings[0];
+            lastAdvance = Date.now();
+          } else if (
+            Date.now() - lastAdvance >= UPLOAD_STALL_TIMEOUT &&
+            readings[0] < 1
+          ) {
+            if (pauseObservation) {
+              await reportProgress?.("upload-attention-required");
+              await pauseObservation();
+              abortIfNeeded(signal);
+              lastAdvance = Date.now();
+              await reportProgress?.("upload-observing");
+              continue;
+            }
+            throw new Error(
+              `upload-stalled: No observed progress for ten minutes while waiting for ${label}. Inspect the existing attachment before resuming; do not upload it again.`,
+            );
+          }
+        } else {
+          highestProgress = null;
+          lastAdvance = Date.now();
+        }
+        if (!informed && Date.now() - started >= UPLOAD_TIMEOUT) {
+          informed = true;
+          await reportProgress?.(
+            readings.length === 1
+              ? "upload-observing"
+              : "upload-progress-unknown",
+          );
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error(`Timed out waiting for ${label}.`);
@@ -144,6 +243,7 @@
   }
 
   function fillTextControl(control, value) {
+    abortIfNeeded(mutationSignal);
     const text = String(value || "");
     if (
       control instanceof HTMLTextAreaElement ||
@@ -161,7 +261,18 @@
       control.isContentEditable ||
       control.getAttribute("role") === "textbox"
     ) {
-      control.replaceChildren(document.createTextNode(text));
+      if (control.isContentEditable) {
+        control.focus();
+        const selection = document.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(control);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        if (!document.execCommand("insertText", false, text))
+          throw new Error("The rich-text editor rejected text insertion.");
+      } else {
+        throw new Error("The description editor is not editable.");
+      }
     } else {
       throw new Error("The description control is unsupported.");
     }
@@ -223,19 +334,108 @@
 
   async function runManyVidsUpload(context) {
     const { draft, signal } = context;
+    publicationMode(draft);
+    abortIfNeeded(signal);
     one(MANYVIDS_FULL_INPUT, "ManyVids full-video input", document, {
       allowHidden: true,
     });
+    const previousEdits = new Set(
+      document.querySelectorAll("button[aria-label^='Button edit video :']"),
+    );
+    const previousQueue = new Set(
+      document.querySelectorAll(".uppy-Dashboard-Item"),
+    );
+    if (previousQueue.size)
+      throw new Error(
+        "ManyVids existing queued media requires association review before attachment.",
+      );
+    const currentEdit = () => {
+      const controls = [
+        ...document.querySelectorAll(
+          "button[aria-label^='Button edit video :']",
+        ),
+      ].filter(
+        (control) =>
+          !previousEdits.has(control) &&
+          control.getAttribute("aria-label") ===
+            `Button edit video : ${draft.fullFilename}`,
+      );
+      if (controls.length > 1)
+        throw new Error("ManyVids new editor association is ambiguous.");
+      return controls[0] || null;
+    };
     await context.attachFile("full", MANYVIDS_FULL_INPUT);
+    // Uppy has both auto-start and queued variants. Only the dashboard's
+    // upload action is an intermediate action; editor Save is never used here.
+    let uploadStarted = false;
+    const uploadCommand = context.checkpointStep ? crypto.randomUUID() : "";
+    await waitFor(
+      async () => {
+        if (currentEdit() || manyVidsCompletedCard(draft.fullFilename))
+          return true;
+        const input = document.querySelector(MANYVIDS_FULL_INPUT);
+        const dashboard = input?.closest(".uppy-Dashboard");
+        if (!dashboard) return false;
+        const cards = [...dashboard.querySelectorAll(".uppy-Dashboard-Item")];
+        if (!cards.length) return false;
+        if (cards.length !== 1)
+          throw new Error("ManyVids upload association is ambiguous.");
+        const card = cards[0];
+        const name =
+          card.querySelector(".uppy-Dashboard-Item-name")?.textContent || "";
+        if (
+          name &&
+          !name.includes("...") &&
+          !name.includes("…") &&
+          normalizedFilename(name) !== normalizedFilename(draft.fullFilename)
+        )
+          throw new Error(
+            "ManyVids selected media does not match the approved full role.",
+          );
+        if (
+          card.matches(
+            "[data-state='uploading'], .is-uploading, [data-upload-started='true']",
+          ) ||
+          dashboard.querySelector(".uppy-StatusBar.is-uploading")
+        )
+          return true;
+        const actions = [
+          ...dashboard.querySelectorAll(".uppy-StatusBar-actionBtn--upload"),
+        ].filter(visible);
+        if (actions.length > 1)
+          throw new Error("ManyVids intermediate upload control is ambiguous.");
+        if (!uploadStarted && actions.length === 1 && enabled(actions[0])) {
+          abortIfNeeded(signal);
+          await context.checkpointStep?.(
+            "start-upload",
+            uploadCommand,
+            "intent",
+          );
+          uploadStarted = true;
+          click(actions[0], "ManyVids queued media upload");
+        }
+        return false;
+      },
+      "ManyVids upload initiation",
+      60_000,
+      signal,
+    );
+    if (uploadStarted)
+      await context.checkpointStep?.("start-upload", uploadCommand, "observed");
     const card = await waitFor(
-      () => manyVidsCompletedCard(draft.fullFilename),
+      () => currentEdit() || manyVidsCompletedCard(draft.fullFilename),
       "ManyVids completed upload card",
       UPLOAD_TIMEOUT,
       signal,
     );
-    context.progress?.("upload-ready");
-    click(manyVidsEditControl(card), "ManyVids continue/edit control");
-    context.progress?.("edit-requested");
+    await context.progress?.("upload-ready");
+    click(
+      card.matches("button[aria-label^='Button edit video :']")
+        ? card
+        : manyVidsEditControl(card),
+      "ManyVids continue/edit control",
+    );
+    await context.progress?.("edit-requested");
     return { platform: "manyvids", status: "edit-requested" };
   }
 
@@ -274,6 +474,8 @@
 
   async function runManyVidsEdit(context) {
     const { draft, signal } = context;
+    publicationMode(draft);
+    abortIfNeeded(signal);
     const manyvidsId = String(draft.manyvidsId || "").trim();
     if (!/^\d+$/.test(manyvidsId)) {
       throw new Error("ManyVids edit ID is invalid.");
@@ -286,15 +488,25 @@
     );
     const form = titleControl.closest("form");
     if (!form) throw new Error("ManyVids edit form is missing.");
-    context.progress?.("configuring");
+    await context.progress?.("configuring");
 
     if (draft.hasTeaser !== false) {
-      const previewMenu = exactText(
-        "button,a",
-        "Custom Preview",
-        "ManyVids Custom Preview control",
-        form,
+      const previousTeaser = form
+        .querySelector(".js-teaser-download")
+        ?.getAttribute("href");
+      const currentTeaserMenu = [
+        ...form.querySelectorAll("#dropdownMenuLink[aria-haspopup='true']"),
+      ].find(
+        (element) => normalizedText(element.textContent) === "teaser options",
       );
+      const previewMenu =
+        currentTeaserMenu ||
+        exactText(
+          "button,a",
+          "Custom Preview",
+          "ManyVids Custom Preview control",
+          form,
+        );
       click(previewMenu, "ManyVids Custom Preview control");
       const previewUpload = await waitFor(
         () => {
@@ -314,20 +526,93 @@
       );
       click(previewUpload, "ManyVids Custom Preview upload control");
       await context.attachFile("teaser", "input.noborder[name='file']");
+      if (currentTeaserMenu) {
+        await waitFor(
+          () => {
+            const view = form.querySelector(".js-generate-video-teaser-html");
+            const download = form.querySelector(".js-teaser-download");
+            const uploadPanel = form.querySelector(
+              ".js-custom-preview-wrapper",
+            );
+            return (
+              view &&
+              view.style.display !== "none" &&
+              download?.getAttribute("href") &&
+              download.getAttribute("href") !== previousTeaser &&
+              uploadPanel &&
+              !visible(uploadPanel)
+            );
+          },
+          "ManyVids accepted custom teaser",
+          UPLOAD_TIMEOUT,
+          signal,
+        );
+      }
     }
 
     if (draft.manyvidsThumbnail) {
+      const thumbnailPreview = () =>
+        form.querySelector(".js-thumbnail-container img.js-video-screenshot");
+      const previousThumbnail = thumbnailPreview()?.getAttribute("src");
+      const thumbnailMenu = [
+        ...form.querySelectorAll("#dropdownMenuLink"),
+      ].find(
+        (element) => normalizedText(element.textContent) === "edit thumbnail",
+      );
+      if (thumbnailMenu)
+        click(thumbnailMenu, "ManyVids Edit Thumbnail control");
       click(
         one("#upload_screenshot", "ManyVids thumbnail Upload control"),
         "ManyVids thumbnail Upload control",
       );
       await context.attachFile("thumbnail", "#fileUploader[name='image']");
+      await waitFor(
+        () => {
+          const confirmation = document.querySelector(
+            "form[name='thumbnail'] #save_thumb[name='upload_thumbnail_btn']",
+          );
+          return visible(confirmation) && enabled(confirmation);
+        },
+        "ManyVids thumbnail crop confirmation",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+      const thumbnailCommand = context.checkpointStep
+        ? crypto.randomUUID()
+        : "";
+      await context.checkpointStep?.(
+        "confirm-thumbnail",
+        thumbnailCommand,
+        "intent",
+      );
       click(
         one(
-          "#save_thumb[name='upload_thumbnail_btn']",
+          "form[name='thumbnail'] #save_thumb[name='upload_thumbnail_btn']",
           "ManyVids thumbnail Save control",
         ),
         "ManyVids thumbnail Save control",
+      );
+      await waitFor(
+        () => {
+          const preview = thumbnailPreview();
+          return (
+            visible(preview) &&
+            preview.complete &&
+            preview.naturalWidth > 0 &&
+            preview.getAttribute("src") !== previousThumbnail &&
+            !visible(
+              document.querySelector("form[name='thumbnail'] #save_thumb"),
+            )
+          );
+        },
+        "ManyVids accepted thumbnail",
+        UPLOAD_TIMEOUT,
+        signal,
+      );
+      await context.checkpointStep?.(
+        "confirm-thumbnail",
+        thumbnailCommand,
+        "observed",
       );
     }
 
@@ -358,39 +643,73 @@
       form,
     );
 
-    const release = new Date(`${draft.releaseDate}T00:00:00.000Z`);
-    if (Number.isNaN(release.getTime())) {
-      throw new Error("ManyVids release date is invalid.");
+    if (sharedManyVidsProfile.launchModeSelector === "#launchCustom") {
+      const release = new Date(`${draft.releaseDate}T00:00:00.000Z`);
+      if (Number.isNaN(release.getTime())) {
+        throw new Error("ManyVids release date is invalid.");
+      }
+      const excluded = new Set([coPerformer]);
+      selectByOption(
+        form,
+        [
+          String(release.getUTCMonth() + 1).padStart(2, "0"),
+          release.toLocaleString("en-US", { month: "long", timeZone: "UTC" }),
+        ],
+        "ManyVids launch month",
+        excluded,
+      );
+      selectByOption(
+        form,
+        [String(release.getUTCDate())],
+        "ManyVids launch day",
+        excluded,
+      );
+      selectByOption(
+        form,
+        [String(release.getUTCFullYear())],
+        "ManyVids launch year",
+        excluded,
+      );
     }
-    const excluded = new Set([coPerformer]);
-    selectByOption(
-      form,
-      [
-        String(release.getUTCMonth() + 1).padStart(2, "0"),
-        release.toLocaleString("en-US", { month: "long", timeZone: "UTC" }),
-      ],
-      "ManyVids launch month",
-      excluded,
-    );
-    selectByOption(
-      form,
-      [String(release.getUTCDate())],
-      "ManyVids launch day",
-      excluded,
-    );
-    selectByOption(
-      form,
-      [String(release.getUTCFullYear())],
-      "ManyVids launch year",
-      excluded,
-    );
+    if (
+      title.value !== String(draft.title || "") ||
+      description.value !== String(draft.description || "")
+    )
+      throw new Error(
+        "ManyVids metadata readback did not match the approved draft.",
+      );
     const save = exactText(
       "#saveVideo",
       "Save",
       "ManyVids final Save control",
       form,
     );
-    if (draft.publishMode === "manual")
+    const verifiedRecipe = sharedManyVids.inspectForm(
+      form,
+      sharedManyVidsProfile,
+    );
+    verifyNoBlockingErrors(form, "ManyVids");
+    if (
+      verifiedRecipe.tagsToAdd.length ||
+      [
+        verifiedRecipe.priceMode,
+        verifiedRecipe.launchMode,
+        verifiedRecipe.membership,
+        verifiedRecipe.premium,
+      ].some(
+        (mode) =>
+          !mode.safe ||
+          !(
+            mode.control.checked ||
+            mode.control.getAttribute("aria-checked") === "true"
+          ),
+      ) ||
+      !enabled(save)
+    )
+      throw new Error(
+        "ManyVids configured recipe or final editor readiness changed before verification.",
+      );
+    if (publicationMode(draft) === "manual")
       return {
         platform: "manyvids",
         status: "manual-submit-required",
@@ -398,11 +717,12 @@
       };
     await beforeCommit(context, "ManyVids");
     click(save, "ManyVids final Save control");
-    context.progress?.("save-clicked");
+    await context.progress?.("save-clicked");
     return { platform: "manyvids", status: "save-clicked", manyvidsId };
   }
 
   function selectOption(select, expected, label) {
+    abortIfNeeded(mutationSignal);
     const option = [...select.options].find(
       (candidate) =>
         candidate.value.trim().toLowerCase() === expected.toLowerCase() ||
@@ -433,6 +753,32 @@
       (candidate) =>
         visible(candidate) && candidate.textContent.trim() === parts.day,
     );
+    const monthRoot = root.querySelector(
+      `[data-year="${parts.date.slice(0, 4)}"][data-month="${parts.date.slice(5, 7)}"]`,
+    );
+    const expectedMonth = new Intl.DateTimeFormat("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${parts.date}T12:00:00Z`));
+    const calendarScope =
+      platform === "OnlyFans"
+        ? byDay[0]?.closest(".vdatetime-popup, [role='dialog']")
+        : null;
+    const headerVerified =
+      calendarScope &&
+      [...calendarScope.querySelectorAll("div,span")].some(
+        (element) =>
+          visible(element) &&
+          element.textContent.trim().replace(/\s+/g, " ") === expectedMonth,
+      );
+    if (
+      (!monthRoot || !byDay.every((day) => monthRoot.contains(day))) &&
+      !headerVerified
+    )
+      throw new Error(
+        `${platform} calendar month/year is unverified; no date was selected.`,
+      );
     if (byDay.length !== 1) {
       throw new Error(`${platform} publication date is missing or ambiguous.`);
     }
@@ -444,15 +790,42 @@
       `.vdatetime-time-picker__list[data-part="${part}"]`,
     );
     if (explicit && visible(explicit)) return explicit;
+    const typed = [
+      ...document.querySelectorAll(".vdatetime-time-picker__list"),
+    ].filter((list) => {
+      const items = [...list.querySelectorAll(".vdatetime-time-picker__item")];
+      return (
+        visible(list) &&
+        items.every((item) => /^\d+$/.test(item.textContent.trim())) &&
+        (part === "minute"
+          ? items.length === 60
+          : items.length === 12 || items.length === 24)
+      );
+    });
+    if (typed.length === 1) return typed[0];
     const candidates = [
       ...document.querySelectorAll(".vdatetime-time-picker__list"),
     ].filter(
       (list) =>
         visible(list) &&
         [...list.querySelectorAll(".vdatetime-time-picker__item")].some(
-          (item) => item.textContent.trim() === String(Number(target)),
+          (item) =>
+            /^\d+$/.test(item.textContent.trim()) &&
+            Number(item.textContent.trim()) === Number(target),
         ),
     );
+    if (candidates.length > 1) {
+      const numeric = candidates.filter((list) => {
+        const values = [
+          ...list.querySelectorAll(".vdatetime-time-picker__item"),
+        ].map((item) => Number(item.textContent.trim()));
+        return part === "minute"
+          ? values.some((value) => value > 23)
+          : values.length <= 24 &&
+              values.every((value) => Number.isFinite(value) && value <= 23);
+      });
+      if (numeric.length === 1) return numeric[0];
+    }
     if (candidates.length !== 1) {
       throw new Error(`OnlyFans ${part} list is missing or ambiguous.`);
     }
@@ -461,16 +834,81 @@
 
   async function runOnlyFans(context) {
     const { draft, signal } = context;
+    publicationMode(draft);
     abortIfNeeded(signal);
-    context.progress?.("uploading-full");
+    await waitFor(
+      () =>
+        document.querySelector(
+          ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
+        ),
+      "OnlyFans NEW POST editor",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    const labels = () =>
+      [...document.querySelectorAll("[id^='post-label-'], .b-post-labels")].map(
+        (control) => ({
+          node: control,
+          checked:
+            control instanceof HTMLInputElement ? control.checked : undefined,
+          value: control.getAttribute("aria-checked"),
+          text: control.textContent,
+        }),
+      );
+    const labelsBefore = labels();
+    if (document.querySelector(".b-dropzone__preview__delete"))
+      throw new Error(
+        "OnlyFans existing attachments require association review before selecting media.",
+      );
+    if (
+      !document.querySelector("#file_upload_input") &&
+      !context.supportsNativePicker
+    ) {
+      click(
+        one(
+          "#attach_file_photo[aria-label='Add media']",
+          "OnlyFans media activation",
+        ),
+        "OnlyFans media activation",
+      );
+    }
+    if (!context.supportsNativePicker)
+      await waitFor(
+        () => document.querySelector("#file_upload_input[type='file']"),
+        "OnlyFans local media input",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    await context.progress?.("uploading-full");
     await context.attachFile("full", "#file_upload_input");
-    context.progress?.("configuring");
+    await waitFor(
+      () => {
+        const previews = [
+          ...document.querySelectorAll(".b-dropzone__preview__delete"),
+        ].filter(visible);
+        if (previews.length > 1)
+          throw new Error(
+            "OnlyFans selected attachment association is ambiguous.",
+          );
+        return previews.length === 1;
+      },
+      "OnlyFans recognized full attachment",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    await context.progress?.("configuring");
 
     const editor = one(
       ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
       "OnlyFans description editor",
     );
     fillTextControl(editor, draft.description);
+    await waitFor(
+      () => editor.textContent === String(draft.description || ""),
+      "OnlyFans description readback",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
 
     const parts = zonedParts(
       draft.scheduledIso,
@@ -504,16 +942,50 @@
       signal,
     );
     const hourList = findOnlyFansTimeList("hour", parts.hour);
-    const minuteList = findOnlyFansTimeList("minute", parts.minute);
+    const hourItems = [
+      ...hourList.querySelectorAll(".vdatetime-time-picker__item"),
+    ];
+    const twelveHour =
+      hourItems.length === 12 &&
+      !hourItems.some((item) => Number(item.textContent.trim()) > 12);
+    const hourValue = twelveHour
+      ? String(Number(parts.hour) % 12 || 12)
+      : String(Number(parts.hour));
     click(
       exactText(
         ".vdatetime-time-picker__item",
-        String(Number(parts.hour)),
+        hourValue,
         "OnlyFans hour",
         hourList,
       ),
       "OnlyFans hour",
     );
+    if (twelveHour) {
+      const periods = [
+        ...document.querySelectorAll(".vdatetime-time-picker__list"),
+      ].filter(
+        (list) =>
+          visible(list) &&
+          [...list.querySelectorAll(".vdatetime-time-picker__item")].some(
+            (item) => item.textContent.trim() === "AM",
+          ) &&
+          [...list.querySelectorAll(".vdatetime-time-picker__item")].some(
+            (item) => item.textContent.trim() === "PM",
+          ),
+      );
+      if (periods.length !== 1)
+        throw new Error("OnlyFans AM/PM control is missing or ambiguous.");
+      click(
+        exactText(
+          ".vdatetime-time-picker__item",
+          Number(parts.hour) < 12 ? "AM" : "PM",
+          "OnlyFans AM/PM",
+          periods[0],
+        ),
+        "OnlyFans AM/PM",
+      );
+    }
+    const minuteList = findOnlyFansTimeList("minute", parts.minute);
     click(
       exactText(
         ".vdatetime-time-picker__item",
@@ -544,11 +1016,34 @@
       UPLOAD_TIMEOUT,
       signal,
     );
-    if (draft.publishMode === "manual")
+    const labelsAfter = labels();
+    verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
+    if (
+      editor.textContent !== String(draft.description || "") ||
+      [...document.querySelectorAll(".b-dropzone__preview__delete")].filter(
+        visible,
+      ).length !== 1
+    )
+      throw new Error(
+        "OnlyFans attachment or description changed before verification.",
+      );
+    if (
+      labelsBefore.length !== labelsAfter.length ||
+      labelsBefore.some((item, index) => {
+        const next = labelsAfter[index];
+        return (
+          item.checked !== next.checked ||
+          item.value !== next.value ||
+          item.text !== next.text
+        );
+      })
+    )
+      throw new Error("OnlyFans labels changed during preparation.");
+    if (publicationMode(draft) === "manual")
       return { platform: "onlyfans", status: "manual-submit-required" };
     await beforeCommit(context, "OnlyFans");
     click(commit, "OnlyFans final Save control");
-    context.progress?.("submitted");
+    await context.progress?.("submitted");
     return { platform: "onlyfans", status: "submitted" };
   }
 
@@ -558,7 +1053,7 @@
       "Fansly media menu",
     );
     click(
-      exactText(".dropdown-item", "Upload New", "Fansly Upload New"),
+      exactText(".dropdown-item", "Upload New", "Fansly Upload New", composer),
       "Fansly Upload New",
     );
   }
@@ -568,15 +1063,61 @@
       "app-account-media-template",
     ).length;
     fanslyUploadNew(composer);
-    await context.attachFile(role, "app-post-creation input[type='file']");
+    const scope = await fanslyFileScope(context, composer);
+    await context.attachFile(role, "input[data-creator-fansly-file]");
     return waitFor(
       () => {
+        const currentScope =
+          document.querySelector("app-account-media-upload.active-modal") ||
+          scope;
         const cards = [
-          ...composer.querySelectorAll("app-account-media-template"),
+          ...currentScope.querySelectorAll("app-account-media-template"),
         ];
-        return cards.length > before ? cards.at(-1) : null;
+        if (cards.length > (scope === composer ? before : 0) + 1)
+          throw new Error("Fansly selected media association is ambiguous.");
+        return cards.length > (currentScope === composer ? before : 0)
+          ? cards.at(-1)
+          : null;
       },
       `Fansly ${role} media card`,
+      DEFAULT_DOM_TIMEOUT,
+      context.signal,
+    );
+  }
+
+  async function fanslyFileScope(context, composer) {
+    return waitFor(
+      () => {
+        const dialogs = [
+          ...document.querySelectorAll(
+            "[role='dialog'], app-media-upload-modal, .media-upload-modal",
+          ),
+        ].filter(
+          (node) => visible(node) && node.querySelector("input[type='file']"),
+        );
+        const deepest = dialogs.filter(
+          (node) =>
+            !dialogs.some((other) => other !== node && node.contains(other)),
+        );
+        if (deepest.length > 1)
+          throw new Error("Fansly media source dialog is ambiguous.");
+        const scope = deepest[0] || composer;
+        const inputs = [
+          ...scope.querySelectorAll(
+            "input[type='file']:not([webkitdirectory])",
+          ),
+        ];
+        if (!inputs.length) return false;
+        if (inputs.length !== 1)
+          throw new Error("Fansly media input is ambiguous.");
+        for (const old of document.querySelectorAll(
+          "[data-creator-fansly-file]",
+        ))
+          old.removeAttribute("data-creator-fansly-file");
+        inputs[0].setAttribute("data-creator-fansly-file", "");
+        return scope;
+      },
+      "Fansly media input",
       DEFAULT_DOM_TIMEOUT,
       context.signal,
     );
@@ -608,7 +1149,8 @@
       );
     }
     click(uploadNewCandidates[0], "Fansly free-preview Upload New control");
-    await context.attachFile("teaser", "app-post-creation input[type='file']");
+    await fanslyFileScope(context, composer);
+    await context.attachFile("teaser", "input[data-creator-fansly-file]");
     return waitFor(
       () => {
         const markers = [
@@ -624,46 +1166,338 @@
     );
   }
 
-  async function runFansly(context) {
-    const { draft, signal } = context;
-    abortIfNeeded(signal);
-    const composer = one("app-post-creation", "Fansly post composer");
-    context.progress?.("uploading-full");
-    const fullCard = await attachFanslyMedia(context, composer, "full");
-    context.progress?.("configuring");
-    click(fullCard, "Fansly full media card");
-    const lockControl = one(
-      ".locked-text-container",
-      "Fansly full media access control",
-      fullCard,
+  function fanslyPermissionState(modal) {
+    const settings = one(
+      ".permission-settings-container",
+      "Fansly effective permissions",
+      modal,
     );
-    click(lockControl, "Fansly full media access control");
-    const preset = exactText(
-      ".dropdown-item, [role='option'], button",
-      draft.fanslyPreset || "defaulT",
-      "Fansly access preset defaulT",
-      document,
-      { caseSensitive: true },
+    const alternatives = [...settings.querySelectorAll(":scope > .flex-col")];
+    const groups = (alternatives.length ? alternatives : [settings]).map(
+      (group) =>
+        [...group.querySelectorAll(".permission-flag:not(.new-flag)")].map(
+          (flag) => flag.textContent.trim().replace(/\s+/g, " "),
+        ),
     );
-    click(preset, "Fansly access preset defaulT");
-    await waitFor(
-      () => {
-        const expected = String(draft.fanslyPreset || "defaulT");
-        return (
-          fullCard.dataset.preset === expected ||
-          [...fullCard.querySelectorAll(".locked-text-container")].some(
-            (control) => control.textContent.trim() === expected,
-          )
+    if (
+      groups.some(
+        (flags) =>
+          !flags.length ||
+          flags.some((flag) => !flag) ||
+          !flags.some(
+            (flag) =>
+              /^(Subscribed|Following|Private List)\b/i.test(flag) ||
+              (/^Price\s+/i.test(flag) &&
+                Number(flag.replace(/^Price\s+/i, "")) > 0),
+          ),
+      )
+    )
+      throw new Error(
+        "Fansly preset has an unverified or public access alternative.",
+      );
+    return JSON.stringify(groups);
+  }
+
+  async function chooseFanslyDate(root, parts, signal) {
+    if (!root.closest("app-post-schedule-modal"))
+      return chooseDate(root, parts, "Fansly");
+    const [year, month] = parts.date.split("-").map(Number);
+    const months = Array.from({ length: 12 }, (_, index) =>
+      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
+        new Date(Date.UTC(2020, index, 1)),
+      ),
+    );
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const header = one(".header .month", "Fansly calendar month", root);
+      const match = header.textContent.trim().match(/^(\w+)\s+(\d{4})$/);
+      const currentMonth = match ? months.indexOf(match[1]) + 1 : 0;
+      if (!currentMonth)
+        throw new Error("Fansly calendar month/year is unverified.");
+      const delta = (year - Number(match[2])) * 12 + month - currentMonth;
+      if (!delta) {
+        const day = exactText(
+          ".current-month-day",
+          parts.day,
+          "Fansly calendar date",
+          root,
         );
-      },
-      "Fansly locked-media preset",
+        click(day, "Fansly calendar date");
+        await waitFor(
+          () => day.classList.contains("is-selected"),
+          "Fansly selected date",
+          DEFAULT_DOM_TIMEOUT,
+          signal,
+        );
+        return;
+      }
+      const previous = header.textContent;
+      click(
+        one(
+          delta > 0 ? ".next-month" : ".previous-month",
+          "Fansly calendar navigation",
+          root,
+        ),
+        "Fansly calendar navigation",
+      );
+      await waitFor(
+        () =>
+          one(".header .month", "Fansly calendar month", root).textContent !==
+          previous,
+        "Fansly changed calendar month",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
+    throw new Error("Fansly date exceeds supported calendar navigation range.");
+  }
+
+  async function prepareCurrentFanslyMedia(context, composer, modal, fullCard) {
+    const { draft, signal } = context;
+    if (draft.hasTeaser !== false) {
+      await context.progress?.("waiting-for-teaser");
+      click(
+        exactText(
+          "xd-localization-string",
+          "Add Free Preview",
+          "Fansly free preview",
+          fullCard,
+        ),
+        "Fansly free preview",
+      );
+      click(
+        exactText(
+          ".dropdown-item",
+          "Upload New",
+          "Fansly preview source",
+          fullCard,
+        ),
+        "Fansly preview source",
+      );
+      const input = one(
+        "input[type='file']:not([multiple])",
+        "Fansly preview input",
+        fullCard,
+        { allowHidden: true },
+      );
+      for (const old of document.querySelectorAll("[data-creator-fansly-file]"))
+        old.removeAttribute("data-creator-fansly-file");
+      input.setAttribute("data-creator-fansly-file", "");
+      await context.attachFile("teaser", "input[data-creator-fansly-file]");
+      await waitFor(
+        () => fullCard.querySelector(".preview-image"),
+        "Fansly selected free preview",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
+    await context.progress?.("configuring");
+    const load = exactText(".btn", "Load Preset", "Fansly Load Preset", modal);
+    click(load, "Fansly Load Preset");
+    const menu = load.closest(".transparent-dropdown");
+    if (!menu) throw new Error("Fansly preset menu scope is missing.");
+    const choices = [
+      ...menu.querySelectorAll(".dropdown-list > .dropdown-item"),
+    ].filter(visible);
+    const preset =
+      draft.fanslyPresetSelection === "first"
+        ? choices[0]
+        : choices.find(
+            (choice) => choice.textContent.trim() === draft.fanslyPreset,
+          );
+    if (!preset) throw new Error("Fansly approved access preset is missing.");
+    const presetName = preset.textContent.trim();
+    if (!presetName) throw new Error("Fansly preset identity is empty.");
+    click(preset, "Fansly approved access preset");
+    const permissions = await waitFor(
+      () => fanslyPermissionState(modal),
+      "Fansly effective preset permissions",
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
+    if (draft.hasTeaser !== false && !fullCard.querySelector(".preview-image"))
+      throw new Error(
+        "Fansly free preview disappeared after applying permissions.",
+      );
+    const commandId = context.checkpointStep ? crypto.randomUUID() : "";
+    await context.checkpointStep?.("attach-media", commandId, "intent");
+    click(
+      exactText(".btn", "Upload", "Fansly parent media Upload", modal),
+      "Fansly parent media Upload",
+    );
+    await waitFor(
+      () => {
+        const cards = [
+          ...composer.querySelectorAll("app-account-media-template"),
+        ];
+        if (cards.length > 1)
+          throw new Error("Fansly composer attachment is ambiguous.");
+        return (
+          !modal.isConnected &&
+          cards.length === 1 &&
+          !/\b(Verifying|Uploading|Processing)\b/i.test(composer.textContent)
+        );
+      },
+      "Fansly processed composer attachment",
+      UPLOAD_TIMEOUT,
+      signal,
+    );
+    // Reopen the existing attachment; the composer itself omits preview/access details.
+    click(
+      exactText(
+        "xd-localization-string",
+        "Edit Permissions",
+        "Fansly attached-media permissions",
+        composer,
+      ),
+      "Fansly attached-media permissions",
+    );
+    const review = await waitFor(
+      () => document.querySelector("app-account-media-upload.active-modal"),
+      "Fansly attachment review",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    const reviewCard = one(
+      "app-account-media-template",
+      "Fansly reviewed full media",
+      review,
+    );
+    if (
+      fanslyPermissionState(review) !== permissions ||
+      (draft.hasTeaser !== false && !reviewCard.querySelector(".preview-image"))
+    )
+      throw new Error(
+        "Fansly attachment permissions or free preview did not persist.",
+      );
+    click(
+      exactText(
+        ".btn",
+        "Cancel",
+        "Fansly close unchanged media review",
+        review,
+      ),
+      "Fansly close unchanged media review",
+    );
+    await waitFor(
+      () => !review.isConnected,
+      "Fansly closed media review",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    await context.checkpointStep?.("attach-media", commandId, "observed");
+  }
 
-    if (draft.hasTeaser !== false) {
-      context.progress?.("waiting-for-teaser");
-      await attachFanslyPreview(context, composer, fullCard);
+  async function runFansly(context) {
+    const { draft, signal } = context;
+    publicationMode(draft);
+    abortIfNeeded(signal);
+    await waitFor(
+      () => document.querySelector("app-post-creation"),
+      "Fansly composer readiness",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    const composer = one("app-post-creation", "Fansly post composer");
+    if (composer.querySelector("app-account-media-template"))
+      throw new Error(
+        "Fansly existing media requires association review before attachment.",
+      );
+    await context.progress?.("uploading-full");
+    const fullCard = await attachFanslyMedia(context, composer, "full");
+    const currentMediaModal = fullCard.closest("app-account-media-upload");
+    if (currentMediaModal) {
+      await prepareCurrentFanslyMedia(
+        context,
+        composer,
+        currentMediaModal,
+        fullCard,
+      );
+    } else {
+      const mediaModal = fullCard.closest(
+        "[role='dialog'], app-media-upload-modal, .media-upload-modal",
+      );
+      if (draft.hasTeaser !== false) {
+        await context.progress?.("waiting-for-teaser");
+        await attachFanslyPreview(context, composer, fullCard);
+      }
+      await context.progress?.("configuring");
+      click(fullCard, "Fansly full media card");
+      const lockControl = one(
+        ".locked-text-container",
+        "Fansly full media access control",
+        fullCard,
+      );
+      click(lockControl, "Fansly full media access control");
+      const loadControls = [
+        ...document.querySelectorAll("button, [role='button'], .btn"),
+      ].filter(
+        (control) =>
+          visible(control) && control.textContent.trim() === "Load Preset",
+      );
+      if (loadControls.length > 1)
+        throw new Error("Fansly Load Preset control is ambiguous.");
+      if (loadControls.length === 1)
+        click(loadControls[0], "Fansly Load Preset");
+      const preset = exactText(
+        ".dropdown-item, [role='option'], button",
+        draft.fanslyPreset || "defaulT",
+        "Fansly access preset defaulT",
+        document,
+        { caseSensitive: true },
+      );
+      click(preset, "Fansly access preset defaulT");
+      await waitFor(
+        () => {
+          const expected = String(draft.fanslyPreset || "defaulT");
+          return (
+            fullCard.dataset.locked !== "false" &&
+            (fullCard.dataset.preset === expected ||
+              [...fullCard.querySelectorAll(".locked-text-container")].some(
+                (control) => control.textContent.trim() === expected,
+              ))
+          );
+        },
+        "Fansly locked-media preset",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+
+      if (mediaModal) {
+        const commandId = context.checkpointStep ? crypto.randomUUID() : "";
+        const upload = exactText(
+          "button, [role='button'], .btn",
+          "Upload",
+          "Fansly parent media Upload",
+          mediaModal,
+        );
+        abortIfNeeded(signal);
+        await context.checkpointStep?.("attach-media", commandId, "intent");
+        click(upload, "Fansly parent media Upload");
+        await waitFor(
+          () => {
+            const cards = [
+              ...composer.querySelectorAll("app-account-media-template"),
+            ].filter((card) => !mediaModal.contains(card));
+            if (cards.length > 1)
+              throw new Error("Fansly composer attachment is ambiguous.");
+            const card = cards[0];
+            return (
+              card &&
+              card.dataset.locked !== "false" &&
+              (card.dataset.preset === "defaulT" ||
+                card
+                  .querySelector(".locked-text-container")
+                  ?.textContent.trim() === "defaulT") &&
+              (draft.hasTeaser === false ||
+                card.querySelector("[data-free-preview='true'], .free-preview"))
+            );
+          },
+          "Fansly processed composer attachment",
+          UPLOAD_TIMEOUT,
+          signal,
+        );
+        await context.checkpointStep?.("attach-media", commandId, "observed");
+      }
     }
 
     const sharedFansly = globalThis.CreatorToolkitAdapters?.fanslyPrefill;
@@ -719,7 +1553,7 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    chooseDate(dateRoot, parts, "Fansly");
+    await chooseFanslyDate(dateRoot, parts, signal);
     const selects = [...dateRoot.querySelectorAll("select")].filter(visible);
     const format = selects.find((select) =>
       [...select.options].some((option) => option.textContent.trim() === "24H"),
@@ -767,6 +1601,16 @@
       UPLOAD_TIMEOUT,
       signal,
     );
+    verifyNoBlockingErrors(composer, "Fansly");
+    const finalCaption = composer.querySelector("textarea");
+    if (
+      draft.fanslyCaption !== undefined &&
+      finalCaption?.value !== draft.fanslyCaption
+    )
+      throw new Error("Fansly caption changed before verification.");
+    if (publicationMode(draft) === "manual")
+      return { platform: "fansly", status: "manual-submit-required" };
+    await beforeCommit(context, "Fansly");
     click(schedule, "Fansly Schedule control");
     const confirm = await waitFor(
       () => {
@@ -785,18 +1629,43 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    if (draft.publishMode === "manual")
-      return { platform: "fansly", status: "manual-submit-required" };
-    await beforeCommit(context, "Fansly");
+    abortIfNeeded(signal);
     click(confirm, "Fansly final Post confirmation");
-    context.progress?.("submitted");
+    await context.progress?.("submitted");
     return { platform: "fansly", status: "submitted" };
   }
 
+  function guarded(run) {
+    return async (context) => {
+      if (mutationSignal)
+        throw new Error("Another preparation is active in this document.");
+      mutationSignal = context.signal || new AbortController().signal;
+      reportProgress = context.progress;
+      pauseObservation = context.pauseObservation;
+      try {
+        abortIfNeeded(mutationSignal);
+        const result = await run({ ...context, signal: mutationSignal });
+        if (
+          result.status === "manual-submit-required" &&
+          context.checkpointStep
+        ) {
+          const commandId = crypto.randomUUID();
+          abortIfNeeded(mutationSignal);
+          await context.checkpointStep("verify", commandId, "intent");
+          await context.checkpointStep("verify", commandId, "prepared");
+        }
+        return result;
+      } finally {
+        mutationSignal = null;
+        reportProgress = null;
+        pauseObservation = null;
+      }
+    };
+  }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    runFansly,
-    runManyVidsEdit,
-    runManyVidsUpload,
-    runOnlyFans,
+    runFansly: guarded(runFansly),
+    runManyVidsEdit: guarded(runManyVidsEdit),
+    runManyVidsUpload: guarded(runManyVidsUpload),
+    runOnlyFans: guarded(runOnlyFans),
   });
 })();

@@ -61,7 +61,7 @@ for (const desktop of [false, true]) {
           await guidance.evaluate((element) => element.hidden),
           false,
         );
-        assert.match(await guidance.textContent(), /Chrome uploader/);
+        assert.match(await guidance.textContent(), /Chrome\s+uploader/);
       }
     } finally {
       await browser.close();

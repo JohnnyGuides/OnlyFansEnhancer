@@ -7,6 +7,124 @@
   const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
   const PLATFORMS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
   const writeChains = new Map();
+  const RECOVERY_KEY = "creatorUploadRecoveryV1";
+  const STEP_KINDS = new Set([
+    "select-full",
+    "select-teaser",
+    "select-thumbnail",
+    "start-upload",
+    "attach-media",
+    "confirm-preview",
+    "confirm-thumbnail",
+    "configure",
+    "verify",
+  ]);
+
+  function recoveryStep(value) {
+    if (
+      !value ||
+      !STEP_KINDS.has(value.actionId) ||
+      !PLATFORMS.has(value.platform) ||
+      ![
+        "intent",
+        "observed",
+        "attention-required",
+        "cancelled",
+        "prepared",
+      ].includes(value.outcome) ||
+      !/^[a-f0-9-]{36}$/i.test(value.commandId || "") ||
+      !/^[a-f0-9-]{36}$/i.test(value.documentId || "") ||
+      !/^[a-f0-9]{64}$/i.test(value.signature || "")
+    )
+      throw new Error("Invalid preparation step journal record.");
+    const tabId = finiteInteger(value.tabId, 1);
+    const frameId = finiteInteger(value.frameId, 0);
+    if (tabId === undefined || frameId === undefined)
+      throw new Error("Invalid preparation step binding.");
+    return {
+      actionId: value.actionId,
+      platform: value.platform,
+      outcome: value.outcome,
+      commandId: value.commandId,
+      documentId: value.documentId,
+      signature: value.signature,
+      tabId,
+      frameId,
+      recipeVersion: 1,
+      at: Date.now(),
+    };
+  }
+
+  async function listRecovery() {
+    const stored = await chrome.storage.local.get(RECOVERY_KEY);
+    if (!Array.isArray(stored[RECOVERY_KEY])) return [];
+    return stored[RECOVERY_KEY].slice(-20)
+      .filter(
+        (record) =>
+          ID_PATTERN.test(record?.id || "") && Array.isArray(record.steps),
+      )
+      .map((record) => ({
+        id: record.id,
+        schemaVersion: 1,
+        explicitResumeRequired: true,
+        steps: record.steps.slice(0, 64).flatMap((step) => {
+          try {
+            return [{ ...recoveryStep(step), at: finiteInteger(step.at) || 0 }];
+          } catch {
+            return [];
+          }
+        }),
+      }));
+  }
+
+  async function recordStep(id, value) {
+    key(id);
+    const step = recoveryStep(value);
+    return enqueueWrite(RECOVERY_KEY, async () => {
+      const records = await listRecovery();
+      let record = records.find((item) => item.id === id);
+      if (!record) {
+        record = {
+          id,
+          schemaVersion: 1,
+          explicitResumeRequired: true,
+          steps: [],
+        };
+        records.push(record);
+      }
+      const previous = record.steps.find(
+        (item) => item.commandId === step.commandId,
+      );
+      if (previous) {
+        for (const field of [
+          "actionId",
+          "platform",
+          "documentId",
+          "signature",
+          "tabId",
+          "frameId",
+        ])
+          if (previous[field] !== step[field])
+            throw new Error("Preparation command identity changed.");
+        if (previous.outcome !== "intent") return previous;
+        if (step.outcome === "intent") return previous;
+        Object.assign(previous, step);
+      } else {
+        if (step.outcome !== "intent")
+          throw new Error("Preparation outcome has no recorded intent.");
+        if (record.steps.length >= 64)
+          throw new Error("Preparation recovery journal is full.");
+        record.steps.push(step);
+      }
+      await chrome.storage.local.set({ [RECOVERY_KEY]: records.slice(-20) });
+      const durable = (await listRecovery())
+        .find((item) => item.id === id)
+        ?.steps.find((item) => item.commandId === step.commandId);
+      if (!durable || durable.outcome !== step.outcome)
+        throw new Error("Preparation journal was not durable.");
+      return durable;
+    });
+  }
   const DRAFT_STRINGS = Object.freeze({
     title: 500,
     description: 10_000,
@@ -91,9 +209,11 @@
     }
     if (Object.hasOwn(value, "hasTeaser"))
       output.hasTeaser = value.hasTeaser !== false;
-    if (Object.hasOwn(value, "publishMode"))
-      output.publishMode =
-        value.publishMode === "manual" ? "manual" : "autonomous";
+    if (value.fanslyPresetSelection === "first")
+      output.fanslyPresetSelection = "first";
+    if (!["manual", "autonomous"].includes(value.publishMode ?? "manual"))
+      throw new Error("Invalid publishing mode.");
+    output.publishMode = value.publishMode ?? "manual";
     for (const field of ["profiles"]) {
       if (!Object.hasOwn(value, field)) continue;
       const safe = safeJson(value[field]);
@@ -126,6 +246,8 @@
       ["manyvidsId", 100],
       ["postUrl", 500],
       ["error", 500],
+      ["documentId", 36],
+      ["progressStage", 20],
     ]) {
       if (Object.hasOwn(value, field))
         output[field] = clean(value[field], maximum);
@@ -134,6 +256,9 @@
       const timestamp = finiteInteger(value[field]);
       if (timestamp !== undefined) output[field] = timestamp;
     }
+    const progressSequence = finiteInteger(value.progressSequence);
+    if (progressSequence !== undefined)
+      output.progressSequence = progressSequence;
     for (const field of ["commitArmed", "submitAttempted"]) {
       if (Object.hasOwn(value, field)) output[field] = value[field] === true;
     }
@@ -169,6 +294,13 @@
   }
 
   function mergePlatform(previous = {}, next = {}) {
+    if (
+      previous.documentId &&
+      previous.documentId === next.documentId &&
+      Number.isSafeInteger(next.progressSequence) &&
+      next.progressSequence < (previous.progressSequence || 0)
+    )
+      return previous;
     const merged = { ...previous, ...next };
     for (const field of ["commitArmed", "submitAttempted"]) {
       if (previous[field] === true) merged[field] = true;
@@ -252,5 +384,8 @@
     load,
     remove,
     list,
+    RECOVERY_KEY,
+    listRecovery,
+    recordStep,
   });
 })();

@@ -492,6 +492,25 @@
             <button id="confirmUpload" class="primary" type="button">
               Yes, upload now
             </button>
+            <button id="cancelPreparation" type="button">
+              Stop preparation
+            </button>
+            <button id="exportPreparation" type="button">
+              Preview preparation diagnostics
+            </button>
+            <dialog id="preparationDiagnostics">
+              <p>
+                Sanitized step evidence. Review before saving or sharing. No
+                media paths, captions, or video bytes are included.
+              </p>
+              <pre id="preparationDiagnosticsText"></pre>
+              <button id="savePreparationDiagnostics" type="button">
+                Save diagnostics
+              </button>
+              <button id="closePreparationDiagnostics" type="button">
+                Close
+              </button>
+            </dialog>
             <button id="rejectMatch" type="button">No</button>
           </div>
         </section>

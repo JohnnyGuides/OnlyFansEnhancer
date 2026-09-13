@@ -644,16 +644,19 @@ test("ManyVids upload adapter clicks only the completed file card edit control",
     await page.setContent(`
       <input class="uppy-Dashboard-input" hidden type="file" name="files[]" multiple>
       <input class="uppy-Dashboard-input" hidden webkitdirectory type="file" name="files[]" multiple>
-      <article class="uppy-Dashboard-Item" data-state="upload-complete">
+      <template><article class="uppy-Dashboard-Item" data-state="upload-complete">
         <span class="uppy-Dashboard-Item-name">episode-full.mp4</span>
         <button class="uppy-Dashboard-Item-action--remove" aria-label="Remove file"></button>
         <button class="edit-upload"></button>
-      </article>
+      </article></template>
       <script>
         globalThis.manyvidsEditClicks = 0;
         globalThis.manyvidsRemoveClicks = 0;
-        document.querySelector(".edit-upload").addEventListener("click", () => manyvidsEditClicks += 1);
-        document.querySelector(".uppy-Dashboard-Item-action--remove").addEventListener("click", () => manyvidsRemoveClicks += 1);
+        document.querySelector("input:not([webkitdirectory])").addEventListener("change", () => {
+          document.body.append(document.querySelector("template").content.cloneNode(true));
+          document.querySelector(".edit-upload").addEventListener("click", () => manyvidsEditClicks += 1);
+          document.querySelector(".uppy-Dashboard-Item-action--remove").addEventListener("click", () => manyvidsRemoveClicks += 1);
+        });
       </script>
     `);
     await page.evaluate(() => {
@@ -736,15 +739,19 @@ for (const scenario of [
       ];
       await page.setContent(`
       <form name="thumbnail">
-        <a id="upload_screenshot" href="#">Upload</a>
+          <a id="upload_screenshot" href="#" hidden>Upload</a>
         <input id="fileUploader" name="image" type="file" hidden>
-        <input id="save_thumb" name="upload_thumbnail_btn" type="button" value="Save thumbnail">
+          <input id="save_thumb" name="upload_thumbnail_btn" type="submit" value="Save thumbnail" hidden>
       </form>
-      <form id="edit-form">
+        <form id="edit-form">
+          <div class="js-thumbnail-container"><img class="js-video-screenshot"><a id="dropdownMenuLink" role="button">Edit Thumbnail</a></div>
         <input id="Title" name="video_title" type="text">
         <textarea id="video_description"></textarea>
-        <button id="custom-preview" type="button">Custom Preview</button>
-        <div id="preview-menu" hidden><button class="dropdown-item" type="button">Upload</button></div>
+          <a id="dropdownMenuLink" aria-haspopup="true" role="button" class="test-teaser-menu">Teaser Options</a>
+          <div id="preview-menu" hidden><button class="dropdown-item" type="button">Upload</button></div>
+          <a class="js-generate-video-teaser-html" style="display:none">View current teaser</a>
+          <a class="js-teaser-download" style="display:none"></a>
+          <div class="js-custom-preview-wrapper">Uploading</div>
         <input class="noborder" name="file" type="file" hidden>
         <select id="co-performer"><option value="NO">No</option><option value="YES">Yes</option></select>
         <input id="free_vid_0" name="free_vid" type="radio"><label for="free_vid_0">Set Your Price</label>
@@ -773,9 +780,26 @@ for (const scenario of [
         globalThis.manyvidsSaveClicks = 0;
         globalThis.manyvidsThumbSaveClicks = 0;
         globalThis.manyvidsCommitEvents = [];
-        document.querySelector("#custom-preview").addEventListener("click", () => document.querySelector("#preview-menu").hidden = false);
+          document.querySelector(".test-teaser-menu").addEventListener("click", () => document.querySelector("#preview-menu").hidden = false);
+          document.querySelector("input.noborder").onchange = (event) => {
+            event.target.value = "";
+            setTimeout(() => {
+              document.querySelector(".js-generate-video-teaser-html").style.display = "block";
+              document.querySelector(".js-teaser-download").href = "https://example.test/accepted-teaser";
+              document.querySelector(".js-custom-preview-wrapper").hidden = true;
+            }, 150);
+          };
         document.querySelector("#preview-menu button").addEventListener("click", () => document.querySelector("#preview-menu").hidden = true);
-        document.querySelector("#save_thumb").addEventListener("click", () => manyvidsThumbSaveClicks += 1);
+          document.querySelector("#dropdownMenuLink").onclick = () => document.querySelector("#upload_screenshot").hidden = false;
+          document.querySelector("#fileUploader").onchange = () => setTimeout(() => document.querySelector("#save_thumb").hidden = false, 100);
+          document.querySelector("form[name='thumbnail']").onsubmit = (event) => {
+            event.preventDefault();
+            manyvidsThumbSaveClicks += 1;
+            setTimeout(() => {
+              document.querySelector("#save_thumb").hidden = true;
+              document.querySelector(".js-video-screenshot").src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+            }, 150);
+          };
         document.querySelector("#saveVideo").addEventListener("click", () => {
           manyvidsSaveClicks += 1;
           manyvidsCommitEvents.push("click:save");
@@ -909,11 +933,12 @@ for (const scenario of [
   });
 }
 
-test("OnlyFans adapter uploads full media, fills description, schedules, and leaves labels untouched", async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  try {
-    await page.setContent(`
+for (const onlyfansMode of ["manual", "autonomous"]) {
+  test(`OnlyFans ${onlyfansMode} adapter uploads full media, fills description, schedules, and leaves labels untouched`, async () => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`
       <button id="attach_file_photo" aria-label="Add media"></button>
       <input id="file_upload_input" type="file" accept="video/*">
       <div class="tiptap ProseMirror b-text-editor js-text-editor" role="textbox" contenteditable="true"></div>
@@ -944,6 +969,13 @@ test("OnlyFans adapter uploads full media, fills description, schedules, and lea
         });
         document.querySelector("#time button").addEventListener("click", () => document.querySelector("#date-dialog").hidden = true);
         globalThis.onlyfansSaveClicks = 0;
+        document.querySelector("#file_upload_input").addEventListener("change", () => {
+          const preview = document.createElement("button");
+          preview.type = "button";
+          preview.className = "b-dropzone__preview__delete";
+          preview.textContent = "Delete";
+          document.body.append(preview);
+        });
         globalThis.onlyfansCommitEvents = [];
         document.querySelector("#save").addEventListener("click", () => {
           onlyfansSaveClicks += 1;
@@ -951,93 +983,104 @@ test("OnlyFans adapter uploads full media, fills description, schedules, and lea
         });
       </script>
     `);
-    await page.addScriptTag({
-      path: path.join(
-        repositoryRoot,
-        "workflows",
-        "upload-platform-adapters.js",
-      ),
-    });
-    const result = await page.evaluate(async () => {
-      const labelsBefore = Array.from(
-        document.querySelectorAll('[id^="post-label-"]'),
-      ).map((input) => input.checked);
-      const progress = [];
-      const result = await CreatorUploadPlatformAdapters.runOnlyFans({
-        draft: {
-          title: "Catalogue title must not be posted",
-          description: "Only the episode description",
-          scheduledIso: "2026-08-28T15:00:00.000Z",
-          timeZone: "Europe/Zurich",
-        },
-        async attachFile(role, selector) {
-          const input = document.querySelector(selector);
-          const transfer = new DataTransfer();
-          transfer.items.add(
-            new File(["full"], "episode-full.mp4", { type: "video/mp4" }),
-          );
-          input.files = transfer.files;
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-          progress.push(`attached:${role}`);
-        },
-        progress(value) {
-          progress.push(value);
-        },
-        async beforeCommit() {
-          onlyfansCommitEvents.push("checkpoint:onlyfans");
-          return { armed: true };
-        },
+      await page.addScriptTag({
+        path: path.join(
+          repositoryRoot,
+          "workflows",
+          "upload-platform-adapters.js",
+        ),
       });
-      return {
-        result,
-        labelsBefore,
-        labelsAfter: Array.from(
+      const result = await page.evaluate(async (onlyfansMode) => {
+        const labelsBefore = Array.from(
           document.querySelectorAll('[id^="post-label-"]'),
-        ).map((input) => input.checked),
-        caption: document.querySelector('[role="textbox"]').textContent,
-        selectedDate: document.querySelector('[data-date="2026-08-28"]').dataset
-          .selected,
-        selectedHour: document.querySelector(
-          '[data-part="hour"] [data-selected="true"]',
-        )?.textContent,
-        selectedMinute: document.querySelector(
-          '[data-part="minute"] [data-selected="true"]',
-        )?.textContent,
-        saveClicks: globalThis.onlyfansSaveClicks,
-        progress,
-        commitEvents: onlyfansCommitEvents,
-      };
-    });
+        ).map((input) => input.checked);
+        const progress = [];
+        const result = await CreatorUploadPlatformAdapters.runOnlyFans({
+          draft: {
+            title: "Catalogue title must not be posted",
+            publishMode: onlyfansMode,
+            description: "Only the episode description",
+            scheduledIso: "2026-08-28T15:00:00.000Z",
+            timeZone: "Europe/Zurich",
+          },
+          async attachFile(role, selector) {
+            const input = document.querySelector(selector);
+            const transfer = new DataTransfer();
+            transfer.items.add(
+              new File(["full"], "episode-full.mp4", { type: "video/mp4" }),
+            );
+            input.files = transfer.files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            progress.push(`attached:${role}`);
+          },
+          progress(value) {
+            progress.push(value);
+          },
+          async beforeCommit() {
+            onlyfansCommitEvents.push("checkpoint:onlyfans");
+            return { armed: true };
+          },
+        });
+        return {
+          result,
+          labelsBefore,
+          labelsAfter: Array.from(
+            document.querySelectorAll('[id^="post-label-"]'),
+          ).map((input) => input.checked),
+          caption: document.querySelector('[role="textbox"]').textContent,
+          selectedDate: document.querySelector('[data-date="2026-08-28"]')
+            .dataset.selected,
+          selectedHour: document.querySelector(
+            '[data-part="hour"] [data-selected="true"]',
+          )?.textContent,
+          selectedMinute: document.querySelector(
+            '[data-part="minute"] [data-selected="true"]',
+          )?.textContent,
+          saveClicks: globalThis.onlyfansSaveClicks,
+          progress,
+          commitEvents: onlyfansCommitEvents,
+        };
+      }, onlyfansMode);
 
-    assert.deepEqual(result.result, {
-      platform: "onlyfans",
-      status: "submitted",
-    });
-    assert.deepEqual(result.labelsAfter, result.labelsBefore);
-    assert.equal(result.caption, "Only the episode description");
-    assert.doesNotMatch(result.caption, /Catalogue title/);
-    assert.equal(result.selectedDate, "true");
-    assert.equal(result.selectedHour, "17");
-    assert.equal(result.selectedMinute, "00");
-    assert.equal(result.saveClicks, 1);
-    assert.equal(result.commitEvents.includes("checkpoint:onlyfans"), true);
-    assert.equal(
-      result.commitEvents.indexOf("checkpoint:onlyfans") <
-        result.commitEvents.indexOf("click:save"),
-      true,
-    );
-    assert.ok(
-      result.progress.indexOf("attached:full") <
-        result.progress.indexOf("configuring"),
-    );
-  } finally {
-    await browser.close();
-  }
-});
+      assert.deepEqual(result.result, {
+        platform: "onlyfans",
+        status:
+          onlyfansMode === "autonomous"
+            ? "submitted"
+            : "manual-submit-required",
+      });
+      assert.deepEqual(result.labelsAfter, result.labelsBefore);
+      assert.equal(result.caption, "Only the episode description");
+      assert.doesNotMatch(result.caption, /Catalogue title/);
+      assert.equal(result.selectedDate, "true");
+      assert.equal(result.selectedHour, "17");
+      assert.equal(result.selectedMinute, "00");
+      assert.equal(result.saveClicks, onlyfansMode === "autonomous" ? 1 : 0);
+      assert.equal(
+        result.commitEvents.includes("checkpoint:onlyfans"),
+        onlyfansMode === "autonomous",
+      );
+      if (onlyfansMode === "autonomous")
+        assert.equal(
+          result.commitEvents.indexOf("checkpoint:onlyfans") <
+            result.commitEvents.indexOf("click:save"),
+          true,
+        );
+      assert.ok(
+        result.progress.indexOf("attached:full") <
+          result.progress.indexOf("configuring"),
+      );
+    } finally {
+      await browser.close();
+    }
+  });
+}
 
 for (const scenario of [
   { hasTeaser: true, publishMode: "autonomous" },
   { hasTeaser: false, publishMode: "manual" },
+  { hasTeaser: false },
+  { hasTeaser: true, publishMode: "manual", mediaModal: true },
 ]) {
   test(`fansly adapter: preview=${scenario.hasTeaser}, publish=${scenario.publishMode}`, async () => {
     const browser = await chromium.launch({ headless: true });
@@ -1072,6 +1115,7 @@ for (const scenario of [
       <script>
         let uploadRole = "";
         globalThis.fanslyPostClicks = 0;
+        globalThis.fanslyScheduleClicks = 0;
         globalThis.fanslyEvents = [];
         document.querySelector("#fansly-file").addEventListener("change", (event) => {
           if (uploadRole === "teaser") {
@@ -1112,13 +1156,47 @@ for (const scenario of [
           document.querySelector("#schedule-modal").hidden = true;
           document.querySelector(".new-post-btn").textContent = "Schedule";
         });
-        document.querySelector(".new-post-btn").addEventListener("click", () => document.querySelector("#confirm-modal").hidden = false);
+        document.querySelector(".new-post-btn").addEventListener("click", () => {
+          fanslyScheduleClicks += 1;
+          document.querySelector("#confirm-modal").hidden = false;
+        });
         document.querySelector("#confirm-modal .btn").addEventListener("click", () => {
           fanslyPostClicks += 1;
           fanslyEvents.push("click:post");
         });
       </script>
     `);
+      if (scenario.mediaModal) {
+        await page.evaluate(() => {
+          const modal = document.createElement("div");
+          modal.className = "media-upload-modal";
+          modal.setAttribute("role", "dialog");
+          modal.hidden = true;
+          modal.append(
+            document.querySelector("#fansly-file"),
+            document.querySelector("#media"),
+          );
+          const upload = document.createElement("button");
+          upload.type = "button";
+          upload.textContent = "Upload";
+          globalThis.fanslyMediaUploads = 0;
+          upload.onclick = () => {
+            globalThis.fanslyMediaUploads++;
+            setTimeout(() => {
+              const card = modal.querySelector("app-account-media-template");
+              document.querySelector("app-post-creation").append(card);
+              modal.hidden = true;
+            }, 150);
+          };
+          modal.append(upload);
+          document.body.append(modal);
+          document
+            .querySelector(".default-dropdown .dropdown-item")
+            .addEventListener("click", () => {
+              setTimeout(() => (modal.hidden = false), 100);
+            });
+        });
+      }
       await page.evaluate(() => {
         globalThis.CreatorToolkitMasterRun = true;
       });
@@ -1185,20 +1263,22 @@ for (const scenario of [
           minute: document.querySelector('[data-time="minute"]').value,
           format: document.querySelector('[data-time="format"]').value,
           postClicks: globalThis.fanslyPostClicks,
+          scheduleClicks: globalThis.fanslyScheduleClicks,
+          mediaUploads: globalThis.fanslyMediaUploads || 0,
         };
       }, scenario);
 
       assert.deepEqual(result.result, {
         platform: "fansly",
         status:
-          scenario.publishMode === "manual"
+          scenario.publishMode !== "autonomous"
             ? "manual-submit-required"
             : "submitted",
       });
       assert.deepEqual(result.events, [
         "uploaded:full:episode-full.mp4",
         ...(scenario.hasTeaser ? ["preview:episode-teaser.mp4"] : []),
-        ...(scenario.publishMode === "manual"
+        ...(scenario.publishMode !== "autonomous"
           ? []
           : ["checkpoint:fansly", "click:post"]),
       ]);
@@ -1221,8 +1301,13 @@ for (const scenario of [
       assert.equal(result.format, "24H");
       assert.equal(
         result.postClicks,
-        scenario.publishMode === "manual" ? 0 : 1,
+        scenario.publishMode !== "autonomous" ? 0 : 1,
       );
+      assert.equal(
+        result.scheduleClicks,
+        scenario.publishMode === "autonomous" ? 1 : 0,
+      );
+      assert.equal(result.mediaUploads, scenario.mediaModal ? 1 : 0);
       if (scenario.hasTeaser)
         assert.ok(
           result.progress.indexOf("attached:full") <

@@ -154,6 +154,113 @@ async function main() {
       { attached: true },
       "a failed selector left the extension debugger attached",
     );
+    await page.evaluate(() => {
+      const input = document.querySelector("#upload");
+      input.value = "";
+      input.addEventListener("change", () => {
+        input.value = "";
+        input.remove();
+      });
+    });
+    assert.deepEqual(
+      await worker.evaluate(
+        async ({ filePath, origin, tabId, size }) =>
+          CreatorLocalFileAttacher.attach(
+            {
+              tabId,
+              selector: "#upload",
+              filePath,
+              allowedOrigins: [origin],
+              expected: { name: "inert-proof.mp4", size },
+            },
+            chrome,
+          ),
+        { filePath, origin, tabId, size: fs.statSync(filePath).size },
+      ),
+      { attached: true },
+      "selection receipt must survive a site's synchronous input clearing/removal",
+    );
+    assert.equal(await page.locator("#upload").count(), 0);
+    await page.evaluate(() => {
+      const button = document.createElement("button");
+      button.id = "activate";
+      button.type = "button";
+      button.textContent = "Add media";
+      button.onclick = () => {
+        const input = document.createElement("input");
+        input.id = "detached";
+        input.type = "file";
+        input.onchange = () => {
+          proof.detachedName = input.files[0].name;
+          input.value = "";
+        };
+        input.click();
+      };
+      document.body.append(button);
+    });
+    assert.deepEqual(
+      await worker.evaluate(
+        async ({ filePath, origin, tabId, size }) =>
+          CreatorLocalFileAttacher.attach(
+            {
+              tabId,
+              selector: "#detached",
+              pickerSelector: "#activate",
+              filePath,
+              allowedOrigins: [origin],
+              expected: { name: "inert-proof.mp4", size },
+            },
+            chrome,
+          ),
+        { filePath, origin, tabId, size: fs.statSync(filePath).size },
+      ),
+      { attached: true },
+    );
+    assert.equal(
+      await page.evaluate(() => proof.detachedName),
+      "inert-proof.mp4",
+    );
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "shadow-host";
+      host.attachShadow({ mode: "open" }).innerHTML =
+        '<input id="scoped" type="file">';
+      document.body.append(host);
+      const frame = document.createElement("iframe");
+      frame.id = "file-frame";
+      frame.src = location.href;
+      document.body.append(frame);
+    });
+    await page.frameLocator("#file-frame").locator("#upload").waitFor();
+    for (const [scope, selector] of [
+      [[{ kind: "shadow", selector: "#shadow-host" }], "#scoped"],
+      [[{ kind: "frame", selector: "#file-frame" }], "#upload"],
+    ]) {
+      assert.deepEqual(
+        await worker.evaluate(
+          async ({ filePath, origin, tabId, scope, selector }) =>
+            CreatorLocalFileAttacher.attach(
+              { tabId, filePath, allowedOrigins: [origin], scope, selector },
+              chrome,
+            ),
+          { filePath, origin, tabId, scope, selector },
+        ),
+        { attached: true },
+      );
+    }
+    assert.equal(
+      await page
+        .locator("#shadow-host #scoped")
+        .evaluate((input) => input.files[0].name),
+      "inert-proof.mp4",
+    );
+    assert.equal(
+      await page
+        .frameLocator("#file-frame")
+        .locator("#upload")
+        .evaluate((input) => input.files[0].name),
+      "inert-proof.mp4",
+    );
   } finally {
     await context?.close();
     await new Promise((resolve) => server.close(resolve));

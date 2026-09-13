@@ -1612,7 +1612,7 @@
           summaryRow("Fansly teaser", teaserFile?.name || "No custom preview");
           summaryRow(
             "Fansly access",
-            `Full locked with preset defaulT${teaserFile ? " · teaser attached as Free Preview" : ""}`,
+            `Full restricted with the first Load Preset entry${teaserFile ? " · teaser attached as Free Preview" : ""}`,
           );
           summaryRow("Fansly caption", value.fanslyCaption || "Empty");
           summaryRow("Fansly saved toggles", authorization.fansly);
@@ -1829,8 +1829,15 @@
     function statusLabel(status) {
       return (
         {
-          prepared: "Ready",
+          prepared: "Opening preparation interface",
+          cancelled: "Stopped · draft preserved",
           "uploading-full": "Uploading full video",
+          "upload-observing":
+            "Upload exceeds 45 minutes; continuing to observe",
+          "upload-progress-unknown":
+            "Upload progress unknown; continuing to observe",
+          "upload-attention-required":
+            "Upload progress stalled · inspect the existing attachment",
           "upload-ready": "Upload ready; opening editor",
           "edit-requested": "Opening ManyVids editor",
           "save-clicked": "Saving ManyVids video",
@@ -1914,6 +1921,7 @@
             "failed",
             "edit-failed",
             "catalogue-commit-failed",
+            "upload-attention-required",
             "stale",
             "conflict",
           ]).has(state.status) ||
@@ -1930,7 +1938,9 @@
           retry.type = "button";
           retry.textContent = state.postUrl
             ? "Retry sheet update"
-            : `Retry ${name.textContent}`;
+            : state.status === "upload-attention-required"
+              ? "Continue observing"
+              : `Retry ${name.textContent}`;
           retry.addEventListener("click", () => retryPlatform(platform, retry));
           card.append(retry);
         }
@@ -2046,6 +2056,7 @@
     }
 
     function deliverFile(session, request) {
+      if (session.cancelled) return;
       const file = sessionFile(session, request.role);
       if (!file) {
         session.pendingFiles.set(request.requestId, request);
@@ -2064,7 +2075,18 @@
           file,
         );
       const channel = channelFor(session);
+      let sent = false;
+      const probe = () =>
+        channel.postMessage({
+          source: "creator-upload-console",
+          direction: "probe",
+          sessionId: session.id,
+          platform: request.platform,
+          requestId: request.requestId,
+        });
+      const readyPoll = setInterval(probe, 250);
       const timeout = setTimeout(() => {
+        clearInterval(readyPoll);
         channel.removeEventListener("message", onAck);
         session.port.postMessage({
           type: "file-response",
@@ -2074,17 +2096,46 @@
         });
       }, 60_000);
       const onAck = (event) => {
+        if (session.cancelled) {
+          clearTimeout(timeout);
+          clearInterval(readyPoll);
+          channel.removeEventListener("message", onAck);
+          return;
+        }
         const data = event.data;
+        if (
+          data?.source === "creator-upload-bridge" &&
+          data.direction === "ready" &&
+          data.sessionId === session.id &&
+          data.platform === request.platform &&
+          data.requestId === request.requestId &&
+          !sent
+        ) {
+          sent = true;
+          clearInterval(readyPoll);
+          channel.postMessage({
+            source: "creator-upload-console",
+            sessionId: session.id,
+            platform: request.platform,
+            role: request.role,
+            requestId: request.requestId,
+            token: request.token,
+            file,
+          });
+          return;
+        }
         if (
           data?.source !== "creator-upload-bridge" ||
           data.direction !== "ack" ||
           data.sessionId !== session.id ||
           data.platform !== request.platform ||
-          data.role !== request.role
+          data.role !== request.role ||
+          data.requestId !== request.requestId
         ) {
           return;
         }
         clearTimeout(timeout);
+        clearInterval(readyPoll);
         channel.removeEventListener("message", onAck);
         session.port.postMessage({
           type: "file-response",
@@ -2096,14 +2147,7 @@
         });
       };
       channel.addEventListener("message", onAck);
-      channel.postMessage({
-        source: "creator-upload-console",
-        sessionId: session.id,
-        platform: request.platform,
-        role: request.role,
-        token: request.token,
-        file,
-      });
+      probe();
     }
 
     function flushPendingTeaser() {
@@ -2368,6 +2412,7 @@
               scheduledIso: value.scheduledIso,
               timeZone,
               fanslyPreset: "defaulT",
+              fanslyPresetSelection: "first",
               manyvidsThumbnail: Boolean(thumbnailFile),
               pornhubFilename: pornhubFile?.name || fullFile?.name || "",
               contentPreset: value.contentPreset,
@@ -2449,14 +2494,21 @@
           scheduleSocialResume(socialPlan.id, xJob);
         }
         matchStatus.textContent =
-          "Upload run finished. Review each platform card.";
+          "Run accepted. Follow each platform card for its confirmed result.";
       } catch (error) {
         matchStatus.textContent = error.message;
         if (activeSession) {
           for (const platform of targets) {
             if (
-              !platformStates.get(platform)?.status ||
-              platformStates.get(platform).status === "prepared"
+              !new Set([
+                "manual-submit-required",
+                "catalogue-updated",
+                "uploaded-no-sheet",
+                "already-linked",
+                "idempotent",
+                "cancelled",
+                "failed",
+              ]).has(platformStates.get(platform)?.status)
             ) {
               setPlatformState(platform, {
                 status: "failed",
@@ -2469,6 +2521,51 @@
         rejectMatch.disabled = false;
       }
     }
+
+    get("#cancelPreparation")?.addEventListener("click", async () => {
+      if (!activeSession) return;
+      activeSession.cancelled = true;
+      try {
+        await sendMessage({
+          type: "CANCEL_CREATOR_UPLOAD",
+          sessionId: activeSession.id,
+        });
+        matchStatus.textContent =
+          "Preparation stopped. The site may continue an upload already started; drafts are preserved.";
+      } catch (error) {
+        matchStatus.textContent = error.message;
+      }
+    });
+    get("#exportPreparation")?.addEventListener("click", async () => {
+      try {
+        const result = await sendMessage({
+          type: "GET_CREATOR_UPLOAD_RECOVERY",
+          sessionId: activeSession?.id,
+        });
+        get("#preparationDiagnosticsText").textContent = JSON.stringify(
+          { schemaVersion: 1, records: result.records || [] },
+          null,
+          2,
+        );
+        get("#preparationDiagnostics").showModal();
+      } catch (error) {
+        matchStatus.textContent = error.message;
+      }
+    });
+    get("#closePreparationDiagnostics")?.addEventListener("click", () =>
+      get("#preparationDiagnostics").close(),
+    );
+    get("#savePreparationDiagnostics")?.addEventListener("click", () => {
+      const blob = new Blob([get("#preparationDiagnosticsText").textContent], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "ofenhancer-preparation-diagnostics.json";
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
 
     fullInput.addEventListener("change", () => {
       fullFile = fullInput.files?.[0] || null;

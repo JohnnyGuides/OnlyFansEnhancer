@@ -2802,6 +2802,9 @@ function creatorUploadSessionRecord(session) {
           submitAttempted: target.submitAttempted,
           postUrl: target.postUrl,
           error: target.error,
+          documentId: target.documentId,
+          progressSequence: target.progressSequence,
+          progressStage: target.progressStage,
         },
       ]),
     ),
@@ -2854,6 +2857,8 @@ async function getCreatorUploadSession(sessionId) {
     } else if (
       new Set([
         "uploading-full",
+        "upload-observing",
+        "upload-progress-unknown",
         "upload-ready",
         "edit-requested",
         "configuring",
@@ -2897,6 +2902,10 @@ function creatorUploadClean(value, maximum) {
 }
 
 function validateCreatorUploadRequest(message) {
+  if (
+    !["manual", "autonomous"].includes(message.draft?.publishMode ?? "manual")
+  )
+    throw new Error("Invalid publishing mode.");
   const sessionId = creatorUploadClean(message?.sessionId, 64);
   if (!CREATOR_UPLOAD_SESSION_PATTERN.test(sessionId)) {
     throw new Error("Invalid creator upload session.");
@@ -2923,10 +2932,11 @@ function validateCreatorUploadRequest(message) {
     scheduledIso: creatorUploadClean(message.draft?.scheduledIso, 40),
     timeZone: creatorUploadClean(message.draft?.timeZone, 100),
     fanslyPreset: creatorUploadClean(message.draft?.fanslyPreset, 100),
+    fanslyPresetSelection:
+      message.draft?.fanslyPresetSelection === "first" ? "first" : "exact",
     manyvidsThumbnail: message.draft?.manyvidsThumbnail === true,
     hasTeaser: message.draft?.hasTeaser !== false,
-    publishMode:
-      message.draft?.publishMode === "manual" ? "manual" : "autonomous",
+    publishMode: message.draft?.publishMode ?? "manual",
     pornhubFilename: creatorUploadClean(message.draft?.pornhubFilename, 500),
     contentPreset: creatorUploadClean(message.draft?.contentPreset, 100),
     fanslyCaption: creatorUploadClean(message.draft?.fanslyCaption, 15_000),
@@ -2963,7 +2973,11 @@ function validateCreatorUploadRequest(message) {
   ) {
     throw new Error("Creator uploads must target Friday at 15:00 UTC.");
   }
-  if (targets.includes("fansly") && draft.fanslyPreset !== "defaulT") {
+  if (
+    targets.includes("fansly") &&
+    draft.fanslyPresetSelection !== "first" &&
+    draft.fanslyPreset !== "defaulT"
+  ) {
     throw new Error("Fansly full media requires the exact defaulT preset.");
   }
   if (targets.includes("fansly") && !draft.fanslyCaption) {
@@ -3404,11 +3418,11 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       : platform === "fansly"
         ? {
             full: {
-              selector: "app-post-creation input[type='file']",
+              selector: "input[data-creator-fansly-file]",
               token: tokens.full,
             },
             teaser: {
-              selector: "app-post-creation input[type='file']",
+              selector: "input[data-creator-fansly-file]",
               token: tokens.teaser,
             },
           }
@@ -3586,8 +3600,34 @@ async function prepareCreatorUpload(message) {
   return { sessionId: session.id, platforms };
 }
 
-function invokeCreatorUploadAdapter(args) {
-  const send = (message) =>
+async function invokeCreatorUploadAdapter(args) {
+  globalThis.CreatorUploadRuns ||= new Map();
+  const key = `${args.sessionId}:${args.platform}:${args.stage || "upload"}`;
+  const previous = globalThis.CreatorUploadRuns.get(key);
+  if (previous) return previous.promise;
+  const controller = new AbortController();
+  let resumeObserver = null;
+  let sequence = 0;
+  const state = { status: "running", result: null, error: "" };
+  let verifiedDraft = null;
+  const draftSnapshot = () =>
+    JSON.stringify(
+      [
+        ...(globalThis.document?.querySelectorAll(
+          "app-post-creation input, app-post-creation textarea, app-post-creation select, app-post-creation app-account-media-template, form:has(#Title) input:not([type='file']):not([type='hidden']), form:has(#Title) textarea, form:has(#Title) select, form:has(#Title) img.js-video-screenshot, .tiptap.ProseMirror[role='textbox'], .b-dropzone__preview__delete",
+        ) || []),
+      ].map((element) => [
+        element.tagName,
+        element.id,
+        element.type === "password" ? "" : element.value,
+        element.checked,
+        element.getAttribute("src"),
+        element.getAttribute("role") === "textbox" ? element.textContent : "",
+      ]),
+    );
+  const onLeave = () => controller.abort();
+  globalThis.addEventListener("pagehide", onLeave, { once: true });
+  const sendOnce = (message) =>
     new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
@@ -3603,29 +3643,91 @@ function invokeCreatorUploadAdapter(args) {
         resolve(response);
       });
     });
+  const send = async (message) => {
+    for (;;) {
+      if (controller.signal.aborted)
+        throw new Error("Preparation was cancelled.");
+      try {
+        return await sendOnce(message);
+      } catch (error) {
+        if (
+          ![
+            "CREATOR_UPLOAD_PLATFORM_PROGRESS",
+            "CHECKPOINT_CREATOR_UPLOAD_STEP",
+          ].includes(message.type)
+        )
+          throw error;
+        // Only idempotent, sequence/command-bound acknowledgements may be retried.
+        // Never repeat file delivery or an intermediate site action here.
+        state.error =
+          "The coordinator acknowledgement was interrupted. Resume observation of this document.";
+        await context.pauseObservation();
+      }
+    }
+  };
   const context = {
     draft: args.draft,
+    signal: controller.signal,
+    supportsNativePicker: args.nativePicker === true,
+    pauseObservation() {
+      state.status = "paused";
+      return new Promise((resolve, reject) => {
+        const abort = () => {
+          resumeObserver = null;
+          reject(new Error("Preparation was cancelled."));
+        };
+        if (controller.signal.aborted) return abort();
+        controller.signal.addEventListener("abort", abort, { once: true });
+        resumeObserver = () => {
+          controller.signal.removeEventListener("abort", abort);
+          resumeObserver = null;
+          state.status = "running";
+          resolve();
+        };
+      });
+    },
+    checkpointStep(actionId, commandId, outcome) {
+      return send({
+        type: "CHECKPOINT_CREATOR_UPLOAD_STEP",
+        sessionId: args.sessionId,
+        platform: args.platform,
+        actionId,
+        commandId,
+        outcome,
+      });
+    },
     attachFile: async (role, selector) => {
       if (selector !== args.selectors[role]) {
         throw new Error(
           "The platform adapter requested an unexpected file control.",
         );
       }
+      const commandId = crypto.randomUUID();
+      await context.checkpointStep(`select-${role}`, commandId, "intent");
       await send({
         type: "DELIVER_CREATOR_UPLOAD_FILE",
         sessionId: args.sessionId,
         platform: args.platform,
         role,
       });
-      return globalThis.CreatorUploadFileBridge.waitFor(args.sessionId, role);
+      const selected = await globalThis.CreatorUploadFileBridge.waitFor(
+        args.sessionId,
+        role,
+      );
+      if (controller.signal.aborted)
+        throw new Error("Preparation was cancelled.");
+      await context.checkpointStep(`select-${role}`, commandId, "observed");
+      return selected;
     },
     progress(status) {
-      send({
+      return send({
         type: "CREATOR_UPLOAD_PLATFORM_PROGRESS",
         sessionId: args.sessionId,
         platform: args.platform,
         status,
-      }).catch(() => {});
+        sequence: ++sequence,
+        executionStage: args.stage || "upload",
+      });
     },
     beforeCommit() {
       return send({
@@ -3635,19 +3737,52 @@ function invokeCreatorUploadAdapter(args) {
       });
     },
   };
-  if (args.platform === "onlyfans") {
-    return globalThis.CreatorUploadPlatformAdapters.runOnlyFans(context);
-  }
-  if (args.platform === "fansly") {
-    return globalThis.CreatorUploadPlatformAdapters.runFansly(context);
-  }
-  if (args.platform === "manyvids" && args.stage === "upload") {
-    return globalThis.CreatorUploadPlatformAdapters.runManyVidsUpload(context);
-  }
-  if (args.platform === "manyvids" && args.stage === "edit") {
-    return globalThis.CreatorUploadPlatformAdapters.runManyVidsEdit(context);
-  }
-  throw new Error("Unknown creator upload adapter stage.");
+  const execute = () => {
+    if (args.platform === "onlyfans") {
+      return globalThis.CreatorUploadPlatformAdapters.runOnlyFans(context);
+    }
+    if (args.platform === "fansly") {
+      return globalThis.CreatorUploadPlatformAdapters.runFansly(context);
+    }
+    if (args.platform === "manyvids" && args.stage === "upload") {
+      return globalThis.CreatorUploadPlatformAdapters.runManyVidsUpload(
+        context,
+      );
+    }
+    if (args.platform === "manyvids" && args.stage === "edit") {
+      return globalThis.CreatorUploadPlatformAdapters.runManyVidsEdit(context);
+    }
+    throw new Error("Unknown creator upload adapter stage.");
+  };
+  const promise = Promise.resolve()
+    .then(execute)
+    .then(
+      (result) => {
+        state.status = "completed";
+        state.result = result;
+        verifiedDraft = draftSnapshot();
+        return result;
+      },
+      (error) => {
+        state.status = "failed";
+        state.error = String(error.message || error).slice(0, 500);
+        throw error;
+      },
+    )
+    .finally(() => globalThis.removeEventListener("pagehide", onLeave));
+  globalThis.CreatorUploadRuns.set(key, {
+    controller,
+    promise,
+    state,
+    verifyDraft: () =>
+      verifiedDraft !== null && verifiedDraft === draftSnapshot(),
+    resumeObservation: () => {
+      if (!resumeObserver || controller.signal.aborted) return false;
+      resumeObserver();
+      return true;
+    },
+  });
+  return promise;
 }
 
 async function prepareCreatorUploadResponseObserver(tabId) {
@@ -3940,21 +4075,23 @@ async function runCreatorUploadPlatform(session, platform) {
   });
   let observerExecution = null;
   try {
-    await prepareCreatorUploadResponseObserver(target.tabId);
-    observerExecution = startCreatorUploadResponseObserver(
-      target.tabId,
-      session.id,
-      platform,
-    ).then(
-      (value) => ({ ok: true, value }),
-      (error) => ({ ok: false, error }),
-    );
+    if (session.draft.publishMode === "autonomous") {
+      await prepareCreatorUploadResponseObserver(target.tabId);
+      observerExecution = startCreatorUploadResponseObserver(
+        target.tabId,
+        session.id,
+        platform,
+      ).then(
+        (value) => ({ ok: true, value }),
+        (error) => ({ ok: false, error }),
+      );
+    }
     const selectors =
       platform === "onlyfans"
         ? { full: "#file_upload_input" }
         : {
-            full: "app-post-creation input[type='file']",
-            teaser: "app-post-creation input[type='file']",
+            full: "input[data-creator-fansly-file]",
+            teaser: "input[data-creator-fansly-file]",
           };
     const execution = await chrome.scripting.executeScript({
       target: { tabId: target.tabId },
@@ -3965,6 +4102,7 @@ async function runCreatorUploadPlatform(session, platform) {
           platform,
           selectors,
           draft: session.draft,
+          nativePicker: creatorUploadPort(session.id)?.desktop === true,
         },
       ],
     });
@@ -4067,6 +4205,10 @@ async function runCreatorUploadPlatform(session, platform) {
 async function startCreatorUpload(sessionId, targets) {
   const session = await getCreatorUploadSession(sessionId);
   if (!session) throw new Error("Unknown creator upload session.");
+  if (session.cancelled || session.restored)
+    throw new Error(
+      "This interrupted run requires explicit reconciliation before resume.",
+    );
   const requested = Array.isArray(targets) ? [...new Set(targets)] : [];
   if (
     !requested.length ||
@@ -4074,9 +4216,32 @@ async function startCreatorUpload(sessionId, targets) {
   ) {
     throw new Error("Invalid creator upload targets.");
   }
-  return Promise.all(
-    requested.map((platform) => runCreatorUploadPlatform(session, platform)),
-  );
+  if (!session.execution) {
+    await checkpointCreatorUploadSession(session);
+    session.execution = Promise.allSettled(
+      requested.map(async (platform) => {
+        try {
+          return await runCreatorUploadPlatform(session, platform);
+        } catch (error) {
+          const target = session.platforms.get(platform);
+          if (!CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) {
+            Object.assign(target, {
+              status: session.cancelled ? "cancelled" : "failed",
+              error: error.message,
+            });
+            await checkpointCreatorUploadSession(session);
+            creatorUploadPost(session.id, {
+              type: "platform-result",
+              platform,
+              result: target,
+            });
+          }
+          return target;
+        }
+      }),
+    );
+  }
+  return [];
 }
 
 async function retryCreatorUploadPlatform(sessionId, platform) {
@@ -4146,6 +4311,58 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
       "The platform submission may already exist; manual link recovery is required before any retry.",
     );
   }
+  if (
+    session.draft.publishMode !== "autonomous" &&
+    target.stage !== "prepared"
+  ) {
+    if (session.cancelled || target.stage === "cancelled")
+      throw new Error(
+        "Preparation was cancelled. The existing draft is preserved.",
+      );
+    if (target.documentId) {
+      const [inspection] = await chrome.scripting.executeScript({
+        target: { tabId: target.tabId, documentIds: [target.documentId] },
+        func: (key) => {
+          const run = globalThis.CreatorUploadRuns?.get(key);
+          if (!run || run.controller.signal.aborted) return null;
+          if (run.state?.status === "completed" && !run.verifyDraft?.())
+            return { status: "draft-changed" };
+          if (run.state?.status === "paused") run.resumeObservation();
+          return run.state || null;
+        },
+        args: [`${session.id}:${platform}:${target.stage || "upload"}`],
+      });
+      if (
+        inspection?.result?.status === "completed" &&
+        inspection.result.result?.status === "manual-submit-required"
+      )
+        return [await recordCreatorManualPreparation(session, target)];
+      if (inspection?.result?.status === "running") {
+        target.status = "upload-observing";
+        delete target.error;
+        await checkpointCreatorUploadSession(session);
+        return [{ platform, status: target.status }];
+      }
+    }
+    if (
+      !session.cancelled &&
+      target.documentId &&
+      target.status === "upload-attention-required"
+    ) {
+      const [resumed] = await chrome.scripting.executeScript({
+        target: { tabId: target.tabId, documentIds: [target.documentId] },
+        func: (key) =>
+          globalThis.CreatorUploadRuns?.get(key)?.resumeObservation?.() ===
+          true,
+        args: [`${session.id}:${platform}:${target.stage || "upload"}`],
+      });
+      if (resumed?.result === true)
+        return [{ platform, status: "upload-observing" }];
+    }
+    throw new Error(
+      "Preparation requires inspection of the existing bound draft. An uncertain upload will not be replayed or navigated away from.",
+    );
+  }
   if (platform === "manyvids" && target.manyvidsId) {
     if (!target.tokens) {
       target.tokens = {
@@ -4180,6 +4397,9 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
 async function checkpointCreatorUploadCommit(sessionId, platform, tabId) {
   const session = await getCreatorUploadSession(sessionId);
   const target = session?.platforms.get(platform);
+  if (session?.draft?.publishMode !== "autonomous")
+    throw new Error("Publication checkpoint forbidden in manual mode.");
+  if (session?.cancelled) throw new Error("Preparation was cancelled.");
   if (
     !session ||
     !target ||
@@ -4340,6 +4560,16 @@ function handleExtensionMessage(message, sender, sendResponse) {
         return { uploadConsole: await openUploadConsole() };
       case "SHOW_UPLOAD_TRACE_RECORDER":
         return { traceRecorder: await showUploadTraceRecorder() };
+      case "GET_UPLOAD_TRACE_CONTEXT":
+        return { ownerId: sender.tab?.id ? `tab-${sender.tab.id}` : "" };
+      case "GET_CREATOR_UPLOAD_RECOVERY": {
+        const records = await CREATOR_UPLOAD_SESSION_STORE.listRecovery();
+        return {
+          records: message.sessionId
+            ? records.filter((record) => record.id === message.sessionId)
+            : records,
+        };
+      }
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };
       case "GET_X_TEASER_SESSIONS":
@@ -4363,8 +4593,52 @@ function handleExtensionMessage(message, sender, sendResponse) {
         };
       case "START_CREATOR_UPLOAD":
         return {
+          accepted: true,
           results: await startCreatorUpload(message.sessionId, message.targets),
         };
+      case "CANCEL_CREATOR_UPLOAD": {
+        const session = await getCreatorUploadSession(message.sessionId);
+        if (!session) throw new Error("Unknown preparation run.");
+        session.cancelled = true;
+        for (const [id, pending] of creatorUploadFileRequests) {
+          if (pending.sessionId !== session.id) continue;
+          clearTimeout(pending.timeout);
+          pending.fileController?.abort();
+          pending.reject(new Error("Preparation was cancelled."));
+          creatorUploadFileRequests.delete(id);
+        }
+        for (const target of session.platforms.values()) {
+          if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
+          target.status = "cancelled";
+          target.stage = "cancelled";
+          if (target.tabId) {
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: target.tabId },
+                func: (sessionId) => {
+                  for (const [key, run] of globalThis.CreatorUploadRuns || [])
+                    if (key.startsWith(`${sessionId}:`)) run.controller.abort();
+                },
+                args: [session.id],
+              });
+            } catch {
+              /* A closed document has already stopped its executor. */
+            }
+          }
+          creatorUploadPost(session.id, {
+            type: "platform-result",
+            platform: target.platform,
+            result: {
+              platform: target.platform,
+              status: "cancelled",
+              error:
+                "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
+            },
+          });
+        }
+        await checkpointCreatorUploadSession(session);
+        return { cancelled: true };
+      }
       case "PREPARE_CREATOR_SOCIAL_DISTRIBUTION":
         return {
           socialDistribution: await getCreatorSocialRuntime().prepare({
@@ -4421,11 +4695,63 @@ function handleExtensionMessage(message, sender, sendResponse) {
           message.platform,
           sender.tab?.id,
         );
+      case "CHECKPOINT_CREATOR_UPLOAD_STEP": {
+        const session = await getCreatorUploadSession(message.sessionId);
+        const target = session?.platforms.get(message.platform);
+        if (
+          !session ||
+          session.cancelled ||
+          !target ||
+          target.tabId !== sender.tab?.id ||
+          !sender.documentId ||
+          sender.frameId !== 0 ||
+          target.stage === "cancelled"
+        )
+          throw new Error("Unauthorized preparation step.");
+        if (
+          target.documentId &&
+          target.documentId !== sender.documentId &&
+          target.progressStage !== "upload"
+        )
+          throw new Error("Preparation document changed.");
+        const signatureBytes = new TextEncoder().encode(
+          JSON.stringify(
+            CREATOR_UPLOAD_SESSION_STORE.sanitize({
+              id: session.id,
+              draft: session.draft,
+            }).draft,
+            (_key, value) =>
+              value && typeof value === "object" && !Array.isArray(value)
+                ? Object.fromEntries(
+                    Object.keys(value)
+                      .sort()
+                      .map((key) => [key, value[key]]),
+                  )
+                : value,
+          ),
+        );
+        const digest = await crypto.subtle.digest("SHA-256", signatureBytes);
+        const signature = [...new Uint8Array(digest)]
+          .map((value) => value.toString(16).padStart(2, "0"))
+          .join("");
+        const step = await CREATOR_UPLOAD_SESSION_STORE.recordStep(session.id, {
+          actionId: message.actionId,
+          commandId: message.commandId,
+          outcome: message.outcome,
+          platform: message.platform,
+          documentId: sender.documentId,
+          frameId: sender.frameId,
+          tabId: target.tabId,
+          signature,
+        });
+        return { step };
+      }
       case "DELIVER_CREATOR_UPLOAD_FILE": {
         const session = await getCreatorUploadSession(message.sessionId);
         const target = session?.platforms.get(message.platform);
         if (
           !session ||
+          session.cancelled ||
           !target ||
           sender.tab?.id !== target.tabId ||
           !Object.hasOwn(target.tokens || {}, message.role)
@@ -4441,10 +4767,47 @@ function handleExtensionMessage(message, sender, sendResponse) {
         if (!session || !target || sender.tab?.id !== target.tabId) {
           throw new Error("Unauthorized creator upload progress update.");
         }
+        if (
+          !sender.documentId ||
+          !Number.isSafeInteger(message.sequence) ||
+          message.sequence < 1
+        )
+          throw new Error(
+            "Preparation progress has no document or sequence binding.",
+          );
+        if (
+          target.documentId &&
+          (target.documentId !== sender.documentId ||
+            target.progressStage !== message.executionStage)
+        ) {
+          if (
+            message.platform !== "manyvids" ||
+            message.executionStage !== "edit" ||
+            target.stage !== "edit" ||
+            manyVidsRoute(sender.url, "edit")?.manyvidsId !== target.manyvidsId
+          )
+            throw new Error("Preparation document changed.");
+          target.progressSequence = 0;
+        }
+        if (
+          session.cancelled ||
+          target.stage === "cancelled" ||
+          CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)
+        )
+          throw new Error("Preparation progress is stale or cancelled.");
+        if (message.sequence <= (target.progressSequence || 0)) {
+          // A lost acknowledgement may follow a storage failure; re-confirm
+          // durability before acknowledging the already applied sequence.
+          await checkpointCreatorUploadSession(session);
+          return { forwarded: false };
+        }
         const status = creatorUploadClean(message.status, 100);
         if (
           !new Set([
             "uploading-full",
+            "upload-observing",
+            "upload-progress-unknown",
+            "upload-attention-required",
             "configuring",
             "waiting-for-teaser",
             "upload-ready",
@@ -4455,6 +4818,9 @@ function handleExtensionMessage(message, sender, sendResponse) {
         ) {
           throw new Error("Invalid creator upload progress state.");
         }
+        target.documentId = sender.documentId;
+        target.progressStage = message.executionStage;
+        target.progressSequence = message.sequence;
         if (status === "submitted") target.submitted = true;
         target.status = status;
         await checkpointCreatorUploadSession(session);
@@ -4527,6 +4893,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
 chrome.runtime.onMessage.addListener(handleExtensionMessage);
 
 async function recordCreatorManualPreparation(session, target) {
+  if (session.cancelled || target.stage === "cancelled")
+    throw new Error("Preparation was cancelled.");
   const result = {
     platform: target.platform,
     status: "manual-submit-required",
@@ -4597,6 +4965,7 @@ async function attachDesktopUploadFile(command, ports) {
     redgifs: "https://studio.redgifs.com",
   };
   const origin = origins[pending.platform];
+  pending.fileController = new AbortController();
   const tab = await chrome.tabs.get(pending.tabId);
   if (!origin || new URL(tab.url).origin !== origin)
     throw new Error("The upload page changed.");
@@ -4609,9 +4978,24 @@ async function attachDesktopUploadFile(command, ports) {
   await globalThis.CreatorLocalFileAttacher.attach({
     tabId: pending.tabId,
     selector: target.result.selector,
+    pickerSelector:
+      pending.platform === "onlyfans" && pending.role === "full"
+        ? "#attach_file_photo[aria-label='Add media']"
+        : undefined,
     filePath: command.filePath,
     allowedOrigins: [origin],
+    signal: pending.fileController.signal,
+    expected: {
+      name: command.name,
+      size: command.size,
+      lastModified: command.lastModified,
+    },
   });
+  if (
+    pending.fileController.signal.aborted ||
+    !creatorUploadFileRequests.has(command.requestId)
+  )
+    throw new Error("The file request was cancelled or interrupted.");
   await chrome.scripting.executeScript({
     target: { tabId: pending.tabId },
     func: (id, role, token, expected) =>
@@ -4620,6 +5004,7 @@ async function attachDesktopUploadFile(command, ports) {
         role,
         token,
         expected,
+        true,
       ),
     args: [
       pending.sessionId,

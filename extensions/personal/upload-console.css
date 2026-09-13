@@ -737,3 +737,13 @@ button:disabled {
     grid-column: auto;
   }
 }
+/* Bounded, copyable recovery evidence; captions and media are never rendered. */
+#preparationDiagnostics {
+  max-width: min(54rem, 90vw);
+  max-height: 85vh;
+  overflow: auto;
+}
+#preparationDiagnosticsText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

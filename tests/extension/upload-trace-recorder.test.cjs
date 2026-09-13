@@ -232,7 +232,7 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
         status: 200,
         contentType: "text/html",
         body: `
-          <main>
+          <main data-testid="upload-composer">
             <form id="upload-form" data-testid="upload-composer">
               <input id="video-file" name="video" type="file">
               <label for="audience">Audience</label>

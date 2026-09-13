@@ -45,6 +45,7 @@ function loadStore() {
     },
     structuredClone,
   });
+  context.chrome.storage.local = context.chrome.storage.session;
   vm.runInContext(
     fs.readFileSync(
       path.join(repositoryRoot, "workflows/upload-session-store.js"),
@@ -65,6 +66,39 @@ function loadStore() {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("recovery journal keeps bounded non-secret monotonic step evidence across session loss", async () => {
+  const { store, values } = loadStore();
+  const id = "journal-session-12345678";
+  const step = {
+    actionId: "start-upload",
+    platform: "manyvids",
+    outcome: "intent",
+    commandId: "11111111-1111-1111-1111-111111111111",
+    documentId: "22222222-2222-2222-2222-222222222222",
+    signature: "a".repeat(64),
+    tabId: 42,
+    frameId: 0,
+    filePath: "C:\\private\\video.mp4",
+    caption: "private",
+  };
+  await store.recordStep(id, step);
+  await store.recordStep(id, { ...step, outcome: "observed" });
+  await store.recordStep(id, step);
+  const recovered = plain(await store.listRecovery());
+  assert.equal(recovered[0].steps[0].outcome, "observed");
+  assert.equal(recovered[0].explicitResumeRequired, true);
+  assert.equal(await store.load(id), null);
+  assert.doesNotMatch(JSON.stringify(values), /private|filePath|caption/);
+  await assert.rejects(
+    store.recordStep(id, { ...step, tabId: 99 }),
+    /identity changed/,
+  );
+  await assert.rejects(
+    store.recordStep(id, { ...step, actionId: "publish" }),
+    /Invalid preparation/,
+  );
+});
 
 test("upload session storage round-trips only bounded allow-listed metadata", async () => {
   const { store } = loadStore();

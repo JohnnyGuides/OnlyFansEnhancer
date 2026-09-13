@@ -11,6 +11,21 @@ Inno Setup 6 is needed to compile the installer; StageOnly does not require it.
 The X teaser host is framework-dependent and needs the .NET 8 Windows runtime;
 the desktop installer stages a self-contained win-x64 desktop and relay.
 
+If supported tools are installed in this checkout's ignored `.local` directory,
+select them for the current PowerShell process before running checks:
+
+```powershell
+$env:DOTNET_ROOT = Join-Path $PWD '.local/toolchains/dotnet'
+$env:PATH = $env:DOTNET_ROOT + ';' + $env:PATH
+$env:DOTNET_CLI_HOME = Join-Path $PWD '.local/toolchains/cli'
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD '.local/playwright'
+```
+
+These settings do not change machine-wide tool selection or security policy.
+An Internet-marked unsigned PowerShell script may still be refused by
+RemoteSigned; preserve that restriction and obtain a trusted signed script when
+required. Do not modify policy merely to pass a registration test.
+
 | Command                                   | Scope                                                                                |
 | ----------------------------------------- | ------------------------------------------------------------------------------------ |
 | `npm run lint`                            | Configured typed workflow/static JavaScript rules                                    |
@@ -152,6 +167,38 @@ leave a fixture server holding a gate open indefinitely. Browser-policy and
 script-signature failures are blockers; do not relax machine policy to test.
 
 ## Chrome setup and readiness
+
+Desktop path attachment requires **Allow access to file URLs** in the personal
+extension's Chrome details. The uploader checks this permission before attaching
+the debugger and reports missing permission without changing Chrome preferences.
+Chrome displays its normal debugging warning while OFEnhancer assigns the selected
+file to the approved input. Do not suppress that warning. The extension-console
+entry point continues to use the original selected File through structured cloning.
+
+**Stop preparation** stops subsequent automated preparation actions and preserves
+the draft. Uploads already started by the site may continue. Inspect the existing
+draft before retrying an interrupted upload; a missing acknowledgement does not
+establish that the upload was never started.
+
+Preparation recovery retains bounded, non-secret step intents and outcomes in
+local extension storage. Same-document retry inspects the original execution and
+can continue a paused acknowledgement/observation without replaying file delivery.
+After a browser restart, inspect the preserved site draft and reauthorize assets;
+an unavailable or changed document is an attention-required condition, never an
+instruction to create another draft. Diagnostic export is previewed before saving.
+
+The local-path primitive supports explicitly scoped open shadow roots and
+same-origin in-process frames. Cross-origin or out-of-process frame scopes stop
+with an unsupported-frame error; they are not silently redirected to the main
+document. Existing observed platform recipes use their main document controls.
+
+For authenticated smoke verification, choose **Prepare the form; I will publish**,
+select the approved full/teaser/thumbnail roles, and confirm the preparation run.
+Check ManyVids assets and saved recipe, Fansly full-media permissions/free preview
+and caption/toggles/date, and OnlyFans full attachment/description/date with labels
+unchanged. Leave the final publication control untouched. Use Stop to preserve an
+interrupted draft, and use the diagnostic preview/export for any failed step.
+Synthetic browser tests do not establish authenticated upload acceptance.
 
 Use the sidebar Chrome action or Start menu **Connect Chrome**. Preparation is
 restricted to a permanent current-user installation with a verified package
