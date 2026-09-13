@@ -119,14 +119,16 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 static () => new HttpListenerGoogleOAuthCallbackReceiver(),
                 openBrowser,
                 completed,
-                clientStore is null ? null : clientStore.Load(clientId)?.ClientSecret
-                    ?? throw new GoogleCatalogueControllerException("google-client-configuration-required")
+                clientStore?.Load(clientId)?.ClientSecret
             ),
             (clientId, completion) =>
             {
+                GoogleDesktopClientCredential? configuredClient = clientStore?.Load(clientId);
                 GoogleRefreshAccessTokenSource tokens = new(clientId, httpClient, tokenVault,
-                    clientStore is null ? null : () => clientStore.Load(clientId)?.ClientSecret
-                        ?? throw new GoogleCatalogueException("google-client-configuration-required"));
+                    configuredClient is null
+                        ? null
+                        : () => clientStore!.Load(clientId)?.ClientSecret
+                            ?? throw new GoogleCatalogueException("google-client-configuration-required"));
                 GoogleWorkspaceClient workspace = new(httpClient, tokens);
                 return new GoogleCatalogueSession(
                     completion.WorkbookId,
@@ -274,8 +276,6 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 throw new GoogleCatalogueControllerException("google-operation-in-progress");
             if (_connection?.Snapshot.State == GoogleConnectionState.Connecting)
                 throw new GoogleCatalogueControllerException("google-connection-in-progress");
-            if (_clientStore is not null && _clientStore.Load(clientId) is null)
-                throw new GoogleCatalogueControllerException("google-client-configuration-required");
             epoch = BeginConnectionEpochLocked();
             previousConnection = _connection;
             previousSession = _session;
@@ -703,8 +703,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         {
             try
             {
-                if (_clientStore.Load(settings.GoogleOAuthClientId) is null)
-                    return View("error", errorCode: "google-client-configuration-required");
+                _clientStore.Load(settings.GoogleOAuthClientId);
             }
             catch (GoogleCatalogueControllerException)
             {

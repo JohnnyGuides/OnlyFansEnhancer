@@ -66,6 +66,19 @@ button.connection {
   flex-wrap: wrap;
   gap: 10px;
 }
+.chrome-primary-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+#chromeSetupDialog .chrome-primary-action button {
+  background: #172733;
+  border-color: #35657a;
+  font-weight: 750;
+}
+#chromeSetupDialog .chrome-support-actions {
+  margin-top: 10px;
+}
 [data-catalogue-state="empty"] .catalogue-controls {
   display: block;
   border-bottom: 0;
@@ -1379,6 +1392,10 @@ dialog::backdrop {
   }
 
   .dialog-actions button {
+    width: 100%;
+  }
+
+  .chrome-primary-action button {
     width: 100%;
   }
 }

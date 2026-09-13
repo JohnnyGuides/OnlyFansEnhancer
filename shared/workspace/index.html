@@ -435,7 +435,12 @@
         <p id="chromeExtensionFolder"></p>
       </div>
       <p id="chromeSetupActionStatus" role="status"></p>
-      <div class="dialog-actions">
+      <div class="chrome-primary-action">
+        <button type="button" data-chrome-action="openChromeExtensions">
+          Open Chrome extensions
+        </button>
+      </div>
+      <div class="dialog-actions chrome-support-actions">
         <button type="button" data-chrome-action="installChromeInfo">
           Chrome installation information
         </button>
@@ -444,9 +449,6 @@
         </button>
         <button type="button" data-chrome-action="openChrome">
           Open Chrome
-        </button>
-        <button type="button" data-chrome-action="openChromeExtensions">
-          Open Chrome extensions
         </button>
         <button type="button" data-chrome-action="revealChromeExtension">
           Show extension folder

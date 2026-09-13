@@ -70,6 +70,31 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public void MissingDeveloperClientFileDoesNotBlockPublisherClientConnection()
+    {
+        using ControllerHarness harness = new();
+        using TestDirectory clientDirectory = new();
+        FakeConnection? connection = null;
+        using GoogleCatalogueController controller = new(
+            harness.Settings,
+            harness.Store,
+            harness.Vault,
+            (_, scopedVault, completed) =>
+            {
+                connection = new(scopedVault) { Completed = completed };
+                return connection;
+            },
+            (_, _) => harness.Session,
+            clientStore: new(Path.Combine(clientDirectory.Path, "missing-client.dat"))
+        );
+
+        Assert.AreEqual("disconnected", controller.getGoogleCatalogueStatus().State);
+        Assert.AreEqual("connecting", controller.startGoogleCatalogueConnection().State);
+        Assert.IsNotNull(connection);
+        Assert.AreEqual(GoogleConnectionState.Connecting, connection.Snapshot.State);
+    }
+
+    [TestMethod]
     public void NativeClientImportCancellationMismatchAndSuccessPreserveConnectedSelection()
     {
         using ControllerHarness harness = ReadyHarness();
@@ -79,7 +104,7 @@ public sealed class GoogleCatalogueControllerTests
             (_, _, _) => throw new AssertFailedException(), (_, _) => harness.Session, clientStore: clientStore);
         var selection = harness.Store.GetGoogleCatalogueSelection();
         var refresh = harness.Vault.Load();
-        Assert.AreEqual("google-client-configuration-required", controller.getGoogleCatalogueStatus().ErrorCode);
+        Assert.AreEqual("ready", controller.getGoogleCatalogueStatus().State);
         Assert.AreEqual(controller.getGoogleCatalogueStatus(), controller.ImportGoogleClientConfiguration(() => null));
         string file = Path.Combine(temp.Path, "download.json");
         File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(new { installed = new { client_id = OtherClientId, client_secret = "secret" } }));

@@ -228,7 +228,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.13",
+            productVersion: "0.20.14",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -365,6 +365,8 @@ async function installHost(page, initialState = null, googleOptions = {}) {
             };
           }
           if (operation === "startGoogleCatalogueConnection") {
+            if (googleFixtures.connectionStartError)
+              throw new Error(googleFixtures.connectionStartError);
             googleStatus = { state: "connecting" };
             return structuredClone(googleStatus);
           }
@@ -1239,6 +1241,88 @@ async function testConnectBrowserDialog(browser, port) {
   }
 }
 
+async function testConnectBrowserFailureStaysInChooser(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  const errors = captureErrors(page);
+  await installHost(page, null, {
+    initial: googleStates.disconnected,
+    connectionStartError: "browser-launch-failed",
+    browserOptions: {
+      selectedId: "firefox",
+      options: [
+        { id: "system", name: "System default" },
+        { id: "chrome", name: "Google Chrome" },
+        { id: "firefox", name: "Mozilla Firefox" },
+      ],
+    },
+  });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Connect Google account", exact: true })
+    .filter({ visible: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Connect Google account" });
+  await dialog.getByLabel("Browser", { exact: true }).selectOption("firefox");
+  await dialog.getByRole("button", { name: "Continue in browser" }).click();
+
+  await dialog
+    .getByText(
+      "Mozilla Firefox could not open. Choose another browser or try again.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await dialog.isVisible(), true);
+  assert.equal(
+    (await googleCalls(page, "startGoogleCatalogueConnection")).length,
+    1,
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testCancelledBrowserSaveDoesNotStartConnection(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
+  await installHost(page, null, {
+    initial: googleStates.disconnected,
+    browserOptions: {
+      selectedId: "firefox",
+      options: [
+        { id: "system", name: "System default" },
+        { id: "chrome", name: "Google Chrome" },
+        { id: "firefox", name: "Mozilla Firefox" },
+      ],
+    },
+  });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Connect Google account", exact: true })
+    .filter({ visible: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Connect Google account" });
+  await page.evaluate(() => {
+    globalThis.__holdBrowserSave = true;
+  });
+  await dialog.getByRole("button", { name: "Continue in browser" }).click();
+  await page.waitForFunction(() => typeof __releaseBrowserSave === "function");
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "hidden" });
+  await page.evaluate(async () => {
+    globalThis.__holdBrowserSave = false;
+    globalThis.__releaseBrowserSave();
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
+
+  assert.equal(
+    (await googleCalls(page, "startGoogleCatalogueConnection")).length,
+    0,
+  );
+  await page.close();
+}
+
 async function testGoogleImportRefresh(browser, port) {
   for (const action of ["inspect", "apply"]) {
     const page = await browser.newPage();
@@ -2016,6 +2100,8 @@ async function main() {
       await testPreservedCatalogueLinks(browser, port);
       await testGoogleImportRefresh(browser, port);
       await testConnectBrowserDialog(browser, port);
+      await testConnectBrowserFailureStaysInChooser(browser, port);
+      await testCancelledBrowserSaveDoesNotStartConnection(browser, port);
       await testGoogleStates(browser, port);
       await testGoogleSettings(browser, port);
       await testGoogleEndUserSettings(browser, port);

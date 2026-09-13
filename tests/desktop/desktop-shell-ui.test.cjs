@@ -46,6 +46,7 @@ async function main() {
     await testOfflineBridgeRecovery(browser, address.port);
     await testChromeReadinessStates(browser, address.port);
     await testStaleChromeObservation(browser, address.port);
+    await testChromeExtensionsHasItsOwnActionRow(browser, address.port);
     for (const viewport of viewports) {
       const page = await browser.newPage({ viewport });
       const errors = [];
@@ -57,7 +58,7 @@ async function main() {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus") {
             return {
-              productVersion: "0.20.13",
+              productVersion: "0.20.14",
               protocolVersion: 1,
               capabilities: [
                 "desktop-shell",
@@ -152,6 +153,54 @@ async function main() {
   );
 }
 
+async function testChromeExtensionsHasItsOwnActionRow(browser, port) {
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
+  await page.addInitScript(() => {
+    globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
+      if (operation === "getStatus")
+        return {
+          productVersion: "0.20.14",
+          protocolVersion: 1,
+          capabilities: ["chrome-readiness"],
+        };
+      if (operation === "getChromeReadiness")
+        return {
+          state: "setup",
+          chromeFound: true,
+          prepared: true,
+          extensionFolder: "C:\\OFEnhancer\\extension-keyed",
+          message: "Synthetic Chrome setup evidence.",
+        };
+      throw new Error("unsupported-operation");
+    };
+  });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.locator("#chromeConnection").click();
+  const dialog = page.locator("#chromeSetupDialog");
+  const actions = dialog.locator("button:visible");
+  const extensionButton = dialog.getByRole("button", {
+    name: "Open Chrome extensions",
+    exact: true,
+  });
+  await extensionButton.waitFor();
+  const extensionBox = await extensionButton.boundingBox();
+  const otherBoxes = await actions.evaluateAll((buttons) =>
+    buttons
+      .filter(
+        (button) => button.textContent.trim() !== "Open Chrome extensions",
+      )
+      .map((button) => button.getBoundingClientRect().top),
+  );
+  assert.equal(
+    otherBoxes.some((top) => Math.abs(top - extensionBox.y) < 1),
+    false,
+    "Open Chrome extensions must be the only button on its row",
+  );
+  await page.close();
+}
+
 async function testChromeReadinessStates(browser, port) {
   const labels = {
     setup: "Set up Chrome",
@@ -167,7 +216,7 @@ async function testChromeReadinessStates(browser, port) {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus")
             return {
-              productVersion: "0.20.13",
+              productVersion: "0.20.14",
               protocolVersion: 1,
               capabilities: ["chrome-readiness"],
             };
@@ -226,7 +275,7 @@ async function testStaleChromeObservation(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.13",
+          productVersion: "0.20.14",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };

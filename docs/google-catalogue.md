@@ -44,13 +44,14 @@ A file for a different configured ID is rejected without changing the saved
 connection or catalogue. Cancelling changes nothing. Import into an unconfigured
 app also fills its public client ID.
 
-The current implementation needs the matching native client secret for token
-exchange/refresh. It encrypts the imported ID/secret with current-user Windows
-DPAPI in `%LocalAppData%\OFEnhancer\data\google-desktop-client.dat`. The secret is
-sent only to Google's token endpoint, never to WebView, Chrome, authorization URL,
+Normal publisher installations use the packaged public client ID with PKCE and
+do not require a client secret or downloaded setup file. A self-hosted/custom
+configuration may import its matching native client secret; OFEnhancer encrypts
+that imported ID/secret with current-user Windows DPAPI in
+`%LocalAppData%\OFEnhancer\data\google-desktop-client.dat`. The secret is sent
+only to Google's token endpoint, never to WebView, Chrome, authorization URL,
 SQLite, logs, repository, or package. The downloaded JSON remains at its original
-location; protect it separately. A public client ID alone does not complete
-production setup.
+location; protect it separately.
 
 Authorization uses `drive.file`, state/PKCE, a loopback callback, and a system
 browser. Refresh credentials have their own DPAPI vault; access tokens stay in

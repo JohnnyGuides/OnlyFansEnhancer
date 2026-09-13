@@ -1276,20 +1276,40 @@
     googleMigrationDialog.showModal();
   }
 
-  async function chooseConnectionBrowser() {
+  function selectedConnectionBrowserName() {
+    const selectedId = connectBrowserSelect.value;
+    return (
+      browserSettingsView?.options.find((option) => option.id === selectedId)
+        ?.name || "The selected browser"
+    );
+  }
+
+  function connectionBrowserFailureMessage(code) {
+    if (
+      code === "browser-launch-failed" ||
+      code === "browser-not-installed" ||
+      code === "invalid-browser"
+    )
+      return `${selectedConnectionBrowserName()} could not open. Choose another browser or try again.`;
+    if (code === "google-client-configuration-required")
+      return "Google setup is incomplete. Open Developer setup or try again after updating OFEnhancer.";
+    return "Google sign-in could not start. Check your connection and try again.";
+  }
+
+  async function chooseConnectionBrowser(payload) {
     let view;
     try {
       view = await global.OFEnhancerHost.request("getBrowserOptions");
     } catch {
       // Older hosts can still connect using their own browser launcher.
-      return true;
+      return "continue";
     }
     renderBrowserSettings(view);
     if (
       browserSettingsView.options.filter((option) => option.id !== "system")
         .length < 2
     )
-      return true;
+      return "continue";
     connectBrowserSelect.replaceChildren(
       ...Array.from(browserPreference.options, (option) =>
         option.cloneNode(true),
@@ -1300,13 +1320,51 @@
     setBusy(continueBrowserConnection, false);
     connectBrowserStatus.textContent = "";
     connectBrowserDialog.returnValue = "";
-    browserDialogGeneration += 1;
+    const generation = ++browserDialogGeneration;
     const choice = new Promise((resolve) => {
+      const continueConnection = async () => {
+        let preferenceSaved = false;
+        setBusy(continueBrowserConnection, true);
+        connectBrowserSelect.disabled = true;
+        connectBrowserStatus.textContent = "Saving browser choice…";
+        try {
+          const saved = await global.OFEnhancerHost.request(
+            "saveBrowserPreference",
+            { browserId: connectBrowserSelect.value },
+          );
+          if (generation !== browserDialogGeneration) return;
+          renderBrowserSettings(saved);
+          preferenceSaved = true;
+          connectBrowserStatus.textContent = "Opening your browser…";
+          await performGoogleAction("connect", payload, true);
+          if (generation !== browserDialogGeneration) return;
+          if (connectBrowserDialog.open) connectBrowserDialog.close("started");
+        } catch (error) {
+          if (generation !== browserDialogGeneration) return;
+          connectBrowserStatus.textContent = !preferenceSaved
+            ? "Could not save that browser choice. Choose another browser or try again."
+            : connectionBrowserFailureMessage(error?.message);
+        } finally {
+          if (generation === browserDialogGeneration) {
+            setBusy(continueBrowserConnection, false);
+            connectBrowserSelect.disabled = false;
+          }
+        }
+      };
       connectBrowserDialog.addEventListener(
         "close",
-        () => resolve(connectBrowserDialog.returnValue === "connect"),
+        () => {
+          if (generation === browserDialogGeneration)
+            browserDialogGeneration += 1;
+          continueBrowserConnection.removeEventListener(
+            "click",
+            continueConnection,
+          );
+          resolve(connectBrowserDialog.returnValue || "cancel");
+        },
         { once: true },
       );
+      continueBrowserConnection.addEventListener("click", continueConnection);
     });
     connectBrowserDialog.showModal();
     return choice;
@@ -1317,14 +1375,18 @@
     if (connectionStartPending) return;
     connectionStartPending = true;
     try {
-      if (await chooseConnectionBrowser())
+      if ((await chooseConnectionBrowser(payload)) === "continue")
         await performGoogleAction(action, payload);
     } finally {
       connectionStartPending = false;
     }
   }
 
-  async function performGoogleAction(action, payload = {}) {
+  async function performGoogleAction(
+    action,
+    payload = {},
+    throwOnError = false,
+  ) {
     if (action === "setup") {
       showView("settings");
       googleSetup.hidden = false;
@@ -1391,6 +1453,7 @@
         state: "error",
         errorCode: error?.message,
       });
+      if (throwOnError) throw error;
     }
   }
 
@@ -1602,31 +1665,6 @@
   document
     .querySelector("#cancelBrowserConnection")
     .addEventListener("click", () => connectBrowserDialog.close());
-  continueBrowserConnection.addEventListener("click", async () => {
-    const generation = browserDialogGeneration;
-    setBusy(continueBrowserConnection, true);
-    connectBrowserSelect.disabled = true;
-    connectBrowserStatus.textContent = "Saving browser choice…";
-    try {
-      const view = await global.OFEnhancerHost.request(
-        "saveBrowserPreference",
-        { browserId: connectBrowserSelect.value },
-      );
-      if (generation !== browserDialogGeneration) return;
-      renderBrowserSettings(view);
-      if (connectBrowserDialog.open) connectBrowserDialog.close("connect");
-    } catch {
-      if (generation !== browserDialogGeneration) return;
-      connectBrowserStatus.textContent =
-        "Could not save that browser choice. Choose another browser or try again.";
-    } finally {
-      if (generation === browserDialogGeneration) {
-        setBusy(continueBrowserConnection, false);
-        connectBrowserSelect.disabled = false;
-      }
-    }
-  });
-
   importGoogleSetup.addEventListener("click", async () => {
     setBusy(importGoogleSetup, true);
     googleSetupImportStatus.textContent =
