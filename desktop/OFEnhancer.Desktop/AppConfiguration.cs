@@ -7,12 +7,20 @@ public static partial class AppConfiguration
 {
     internal static void ApplyFreshInstallerDefaults(string installRoot, string settingsPath)
     {
-        if (File.Exists(settingsPath)) return;
         string defaults = Path.Combine(installRoot, "installer-defaults.json");
         if (!File.Exists(defaults)) return;
-        // Uses the same strict schema/normalization as ordinary settings. Existing data is never replaced.
-        var values = new DesktopSettingsStore(defaults).Load();
-        if (values != DesktopSettings.Empty) new DesktopSettingsStore(settingsPath).Save(values);
+        // Uses the same strict schema/normalization as ordinary settings. Existing values always win.
+        DesktopSettingsStore defaultsStore = new(defaults);
+        if (!defaultsStore.TryLoad(out DesktopSettings installerValues)) return;
+        DesktopSettingsStore settings = new(settingsPath);
+        DesktopSettings current = DesktopSettings.Empty;
+        if (File.Exists(settingsPath) && !settings.TryLoad(out current)) return;
+        DesktopSettings merged = new(
+            current.ExtensionId ?? installerValues.ExtensionId,
+            current.GoogleOAuthClientId ?? installerValues.GoogleOAuthClientId,
+            current.BrowserId ?? installerValues.BrowserId
+        );
+        if (merged != current) settings.Save(merged);
     }
     private const string DataRootEnvironmentVariable = "OFENHANCER_DATA_ROOT";
     private const int MaximumDataRootLength = 1_024;

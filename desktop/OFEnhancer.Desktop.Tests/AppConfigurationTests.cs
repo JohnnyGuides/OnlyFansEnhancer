@@ -204,6 +204,37 @@ public sealed class AppConfigurationTests
         Assert.AreEqual(expected, AppConfiguration.IsValidGoogleOAuthClientId(value));
     }
 
+    [TestMethod]
+    public void Personalized_defaults_backfill_missing_google_client_without_replacing_saved_settings()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"ofenhancer-defaults-{Guid.NewGuid():N}");
+        string installRoot = Path.Combine(root, "install");
+        string settingsPath = Path.Combine(root, "data", "settings.json");
+        Directory.CreateDirectory(installRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        File.WriteAllText(
+            Path.Combine(installRoot, "installer-defaults.json"),
+            $$"""{"extensionId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","googleOAuthClientId":"{{GoogleClientId}}"}"""
+        );
+        File.WriteAllText(
+            settingsPath,
+            $$"""{"extensionId":"{{ExtensionId}}","browserId":"firefox"}"""
+        );
+        try
+        {
+            AppConfiguration.ApplyFreshInstallerDefaults(installRoot, settingsPath);
+
+            DesktopSettings saved = new DesktopSettingsStore(settingsPath).Load();
+            Assert.AreEqual(ExtensionId, saved.ExtensionId);
+            Assert.AreEqual(GoogleClientId, saved.GoogleOAuthClientId);
+            Assert.AreEqual("firefox", saved.BrowserId);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     private static string CreateSettings(string extensionId)
     {
         string root = Path.Combine(Path.GetTempPath(), $"ofenhancer-settings-{Guid.NewGuid():N}");

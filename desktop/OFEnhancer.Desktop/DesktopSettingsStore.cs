@@ -30,26 +30,37 @@ internal sealed class DesktopSettingsStore
     }
 
     internal DesktopSettings Load()
+        => TryLoad(out DesktopSettings settings) ? settings : DesktopSettings.Empty;
+
+    internal bool TryLoad(out DesktopSettings settings)
     {
         try
         {
             if (!File.Exists(_path) || new FileInfo(_path).Length > MaximumSettingsBytes)
-                return DesktopSettings.Empty;
+            {
+                settings = DesktopSettings.Empty;
+                return false;
+            }
             DesktopSettingsPayload? payload = JsonSerializer.Deserialize<DesktopSettingsPayload>(
                 File.ReadAllBytes(_path),
                 JsonOptions
             );
             if (payload is null)
-                return DesktopSettings.Empty;
-            return new(
+            {
+                settings = DesktopSettings.Empty;
+                return false;
+            }
+            settings = new(
                 AppConfiguration.NormalizeExtensionId(payload.ExtensionId),
                 AppConfiguration.NormalizeGoogleOAuthClientId(payload.GoogleOAuthClientId),
                 BrowserSelection.NormalizeId(payload.BrowserId)
             );
+            return true;
         }
         catch
         {
-            return DesktopSettings.Empty;
+            settings = DesktopSettings.Empty;
+            return false;
         }
     }
 

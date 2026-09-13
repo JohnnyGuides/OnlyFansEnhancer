@@ -21,7 +21,10 @@ OFEnhancer access to that file.
 
 Existing credentials, spreadsheet selection, worksheet selection, and browser
 preference are restored automatically. An upgrade does not require reconnecting
-or reselecting the workbook unless Google authorization has expired.
+or reselecting the workbook unless Google authorization has expired. A
+personalized installer also fills in its publisher OAuth client when an older
+settings file does not yet contain one, without replacing a saved custom client
+or browser choice.
 
 ## Developer OAuth setup
 
