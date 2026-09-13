@@ -61,6 +61,13 @@ the owner must create a replacement secret for this same client and save it
 privately. Do not create another Cloud project/client, reset the old secret,
 or put secrets in Git. The 2026-09-13 live test selected **Work** successfully,
 then Google returned `invalid_request: client_secret is missing`.
+This was resolved on 2026-09-13: the owner created a replacement secret, which
+was imported directly into the current-user DPAPI store without creating a
+plaintext file. A fresh live Google sign-in, token refresh, and read-only import
+of **Work → 2026 Video Catalogue** then succeeded. The installed app now has its
+client configuration; check that encrypted store before requesting another
+secret. The verification used a separate local catalogue, not the owner's live
+catalogue database, and did not write to Google Sheets.
 The workbook visibly includes **2026 Video Catalogue** and **2026 uploads**;
 do not mistake the workbook picker for worksheet selection or change either tab
 just to complete a connection test.
