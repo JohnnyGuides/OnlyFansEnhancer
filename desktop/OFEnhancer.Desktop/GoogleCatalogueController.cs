@@ -10,7 +10,7 @@ public interface IGoogleCatalogueController : IDisposable
 {
     GoogleCatalogueStatusView getGoogleCatalogueStatus();
     GoogleCatalogueStatusView saveGoogleClientId(string clientId);
-    GoogleCatalogueStatusView startGoogleCatalogueConnection();
+    GoogleCatalogueStatusView startGoogleCatalogueConnection(string? sheetUrl = null);
     GoogleCatalogueStatusView cancelGoogleCatalogueConnection();
     GoogleCatalogueStatusView inspectGoogleWorkbook();
     GoogleCatalogueImportResult importGoogleCatalogue();
@@ -22,7 +22,7 @@ public interface IGoogleCatalogueController : IDisposable
 internal interface IGoogleConnectionSession : IDisposable
 {
     GoogleConnectionSnapshot Snapshot { get; }
-    void Start();
+    void Start(GoogleSheetReference? target = null);
     void Cancel();
 }
 
@@ -128,7 +128,13 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                     clientStore is null ? null : () => clientStore.Load(clientId)?.ClientSecret
                         ?? throw new GoogleCatalogueException("google-client-configuration-required"));
                 GoogleWorkspaceClient workspace = new(httpClient, tokens);
-                return new GoogleCatalogueSession(completion.WorkbookId, workspace, store, tokens);
+                return new GoogleCatalogueSession(
+                    completion.WorkbookId,
+                    workspace,
+                    store,
+                    tokens,
+                    completion.PreferredSheetId
+                );
             },
             completionDispatcher,
             clientStore
@@ -243,8 +249,17 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
     }
 
-    public GoogleCatalogueStatusView startGoogleCatalogueConnection()
+    public GoogleCatalogueStatusView startGoogleCatalogueConnection(string? sheetUrl = null)
     {
+        GoogleSheetReference? target = null;
+        if (!string.IsNullOrWhiteSpace(sheetUrl))
+        {
+            try { target = GoogleSheetReference.Parse(sheetUrl); }
+            catch (GoogleSheetReferenceException exception)
+            {
+                throw new GoogleCatalogueControllerException(exception.Code);
+            }
+        }
         string clientId;
         IGoogleConnectionSession connection;
         IGoogleConnectionSession? previousConnection;
@@ -286,7 +301,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
 
         try
         {
-            connection.Start();
+            connection.Start(target);
         }
         catch
         {
@@ -928,12 +943,14 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
     private readonly GoogleWorkbookMigrator _migrator;
     private readonly GoogleCatalogueSyncWorker _syncWorker;
     private readonly IDisposable? _authorization;
+    private readonly int? _preferredSheetId;
 
     internal GoogleCatalogueSession(
         string workbookId,
         GoogleWorkspaceClient workspace,
         CatalogueStore store,
-        IDisposable? authorization = null
+        IDisposable? authorization = null,
+        int? preferredSheetId = null
     )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
@@ -941,6 +958,7 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
         _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _authorization = authorization;
+        _preferredSheetId = preferredSheetId;
         _migrator = new(workbookId, workspace, store);
         _syncWorker = new(workspace, store);
     }
@@ -956,7 +974,7 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
     public async Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken)
     {
         GoogleWorkbookSnapshot snapshot = await _workspace.ReadImportWorkbookAsync(_workbookId, cancellationToken).ConfigureAwait(false);
-        return GoogleCatalogueImportReader.Read(snapshot);
+        return GoogleCatalogueImportReader.Read(snapshot, _preferredSheetId);
     }
 
     public Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(CancellationToken cancellationToken) =>

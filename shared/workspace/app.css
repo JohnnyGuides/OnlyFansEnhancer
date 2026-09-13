@@ -914,6 +914,106 @@ dialog::backdrop {
   gap: 16px;
 }
 
+.google-account-card {
+  display: grid;
+  gap: 18px;
+  max-width: 720px;
+  margin: 28px 0 18px;
+  padding: 22px;
+  border: 1px solid #303744;
+  border-radius: 18px;
+  background: #111720;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 18%);
+}
+
+.google-account-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.google-account-heading h2 {
+  margin: 0 0 7px;
+  font-size: 1.15rem;
+}
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #aeb6c3;
+  font-size: 0.88rem;
+}
+
+.connection-status::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #788292;
+  content: "";
+}
+
+.connection-status[data-state="connected"]::before {
+  background: #5bdb9a;
+  box-shadow: 0 0 0 4px rgb(91 219 154 / 10%);
+}
+
+.connection-status[data-state="loading"]::before {
+  background: #65cfff;
+}
+
+.connection-status[data-state="error"]::before {
+  background: #f07272;
+}
+
+.google-account-help {
+  max-width: 60ch;
+  margin: -6px 0 0;
+  color: #aeb6c3;
+}
+
+.sheet-url-form {
+  display: grid;
+  gap: 8px;
+  padding-top: 18px;
+  border-top: 1px solid #303744;
+}
+
+.sheet-url-form label {
+  color: #f4f5f7;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.sheet-url-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.sheet-url-control input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid #3a4352;
+  border-radius: 12px;
+  background: #0d1118;
+  color: #f4f5f7;
+  font: inherit;
+}
+
+.sheet-url-control input[aria-invalid="true"] {
+  border-color: #f07272;
+}
+
+.sheet-url-form .action-status {
+  min-height: 1.5em;
+  margin: 0;
+  color: #cbd2dc;
+  font-size: 0.82rem;
+}
+
 .setting-action .secondary-button {
   flex: 0 0 auto;
 }
@@ -937,6 +1037,16 @@ dialog::backdrop {
 
 .google-setup-import {
   padding-bottom: 20px;
+}
+
+.developer-warning {
+  max-width: 60ch;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-left: 3px solid #d9a441;
+  background: rgb(217 164 65 / 8%);
+  color: #e7d3a6;
+  line-height: 1.5;
 }
 
 .google-setup-import p {
@@ -1151,6 +1261,20 @@ dialog::backdrop {
   .settings-list .setting-action {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .google-account-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .google-account-heading .action-button,
+  .sheet-url-control .secondary-button {
+    width: 100%;
+  }
+
+  .sheet-url-control {
+    grid-template-columns: 1fr;
   }
 
   .setting-action .secondary-button {

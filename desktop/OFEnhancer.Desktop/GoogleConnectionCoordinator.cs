@@ -24,6 +24,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
     private readonly Func<IGoogleOAuthCallbackReceiver> _receiverFactory;
     private readonly Action<Uri> _openBrowser;
     private readonly Action<GoogleConnectionCompletion> _completed;
+    private GoogleSheetReference? _target;
     private CancellationTokenSource? _currentCancellation;
     private IGoogleOAuthCallbackReceiver? _currentReceiver;
     private Task? _currentTask;
@@ -37,7 +38,8 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         Func<IGoogleOAuthCallbackReceiver> receiverFactory,
         Action<Uri> openBrowser,
         Action<GoogleConnectionCompletion> completed,
-        string? clientSecret = null
+        string? clientSecret = null,
+        GoogleSheetReference? target = null
     )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
@@ -48,6 +50,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         _receiverFactory = receiverFactory ?? throw new ArgumentNullException(nameof(receiverFactory));
         _openBrowser = openBrowser ?? throw new ArgumentNullException(nameof(openBrowser));
         _completed = completed ?? throw new ArgumentNullException(nameof(completed));
+        _target = target;
     }
 
     internal GoogleConnectionSnapshot Snapshot
@@ -61,7 +64,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         }
     }
 
-    internal void Start()
+    internal void Start(GoogleSheetReference? target = null)
     {
         lock (_gate)
         {
@@ -70,6 +73,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
                 throw new InvalidOperationException("A Google connection is already in progress.");
             }
 
+            _target = target ?? _target;
             IGoogleOAuthCallbackReceiver receiver = _receiverFactory();
             GoogleOAuthStart start;
             try
@@ -115,7 +119,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
 
     GoogleConnectionSnapshot IGoogleConnectionSession.Snapshot => Snapshot;
 
-    void IGoogleConnectionSession.Start() => Start();
+    void IGoogleConnectionSession.Start(GoogleSheetReference? target) => Start(target);
 
     void IGoogleConnectionSession.Cancel() => Cancel();
 
@@ -155,6 +159,9 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
                 cancellation.Token,
                 _clientSecret
             ).ConfigureAwait(false);
+            if (_target is not null
+                && !string.Equals(callback.WorkbookId, _target.WorkbookId, StringComparison.Ordinal))
+                throw new GoogleOAuthException("selected_sheet_does_not_match_url");
             if (tokens.RefreshToken is null)
             {
                 throw new GoogleOAuthException("missing_refresh_token");
@@ -183,7 +190,12 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
             }
             _tokenVault.Save(credential);
 
-            GoogleConnectionCompletion completion = new(workbook.Id, workbook.Title, credential.AccessTokenExpiresAt);
+            GoogleConnectionCompletion completion = new(
+                workbook.Id,
+                workbook.Title,
+                credential.AccessTokenExpiresAt,
+                _target?.SheetId
+            );
             SetSnapshot(new(GoogleConnectionState.NeedsInspection, null));
             _completed(completion);
             Volatile.Write(ref _connectionPhase, ConnectionFinished);
@@ -401,7 +413,8 @@ internal sealed record GoogleConnectionSnapshot(GoogleConnectionState State, str
 internal sealed record GoogleConnectionCompletion(
     string WorkbookId,
     string WorkbookTitle,
-    DateTimeOffset CredentialExpiry
+    DateTimeOffset CredentialExpiry,
+    int? PreferredSheetId = null
 )
 {
     public override string ToString() =>

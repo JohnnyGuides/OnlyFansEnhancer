@@ -63,6 +63,9 @@
   );
   const googleSettingStatus = document.querySelector("#googleSettingStatus");
   const googleSettingsAction = document.querySelector("#googleSettingsAction");
+  const googleSheetUrlForm = document.querySelector("#googleSheetUrlForm");
+  const googleSheetUrl = document.querySelector("#googleSheetUrl");
+  const googleSheetUrlStatus = document.querySelector("#googleSheetUrlStatus");
   const googleMigrationDialog = document.querySelector(
     "#googleMigrationDialog",
   );
@@ -628,6 +631,36 @@
     return `${count} ${count === 1 ? singular : pluralForm}`;
   }
 
+  function parseGoogleSheetUrl(value) {
+    let url;
+    try {
+      url = new URL(value.trim());
+    } catch {
+      return null;
+    }
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "docs.google.com" ||
+      url.port ||
+      url.username ||
+      url.password
+    )
+      return null;
+    const match = url.pathname.match(
+      /^\/spreadsheets\/d\/([A-Za-z0-9_-]{1,256})(?:\/|$)/,
+    );
+    if (!match) return null;
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    const gids = fragment.getAll("gid");
+    if (gids.length > 1) return null;
+    const rawGid = gids.length === 0 ? null : gids[0];
+    if (rawGid !== null && !/^\d{1,10}$/.test(rawGid)) return null;
+    const gid = rawGid === null ? null : Number(rawGid);
+    if (gid !== null && (!Number.isSafeInteger(gid) || gid > 2147483647))
+      return null;
+    return `https://docs.google.com/spreadsheets/d/${match[1]}/edit${gid === null ? "" : `#gid=${gid}`}`;
+  }
+
   function formatGoogleDate(value) {
     if (!value) return "Not checked yet.";
     const date = new Date(value);
@@ -722,6 +755,13 @@
         label: "Try import again",
         action: "import",
         allowDisconnect: true,
+      };
+    if (code === "selected-sheet-does-not-match-url")
+      return {
+        message:
+          "The spreadsheet selected in Google did not match the pasted URL. Try again and choose that same spreadsheet.",
+        label: "Try again",
+        action: "connect",
       };
     if (
       [
@@ -850,8 +890,8 @@
       };
     if (code === "google-catalogue-disconnected")
       return {
-        message: "Connect Google Sheet to continue.",
-        label: "Connect Google Sheet",
+        message: "Connect your Google account to continue.",
+        label: "Connect Google account",
         action: "connect",
       };
     if (code === "google-migration-failed")
@@ -1043,7 +1083,7 @@
         "secondary-button",
       );
     } else if (state === "disconnected") {
-      setGooglePrimaryAction("Connect Google Sheet", "connect");
+      setGooglePrimaryAction("Connect Google account", "connect");
     } else if (state === "connecting") {
       setGooglePrimaryAction("Cancel", "cancel", "secondary-button");
     } else if (state === "needsInspection") {
@@ -1096,23 +1136,18 @@
       state === "notConfigured" ||
       googleStatusView?.errorCode === "google-client-id-not-configured" ||
       googleStatusView?.errorCode === "google-client-configuration-required";
-    googleSetup.hidden = !needsDeveloperSetup;
-
+    googleSetup.hidden = false;
     if (needsDeveloperSetup) {
-      const needsFile =
-        googleStatusView?.errorCode === "google-client-configuration-required";
-      googleSettingStatus.textContent = needsFile
-        ? "Google setup is incomplete."
-        : "Developer setup required.";
-      setGoogleSettingsAction(
-        needsFile ? "Finish Google setup" : "Developer setup",
-        needsFile ? "setup" : "developer",
-      );
+      googleSettingStatus.textContent = "Not connected";
+      googleSettingStatus.dataset.state = "disconnected";
+      setGoogleSettingsAction("Connect Google account", "connect");
     } else if (state === "disconnected") {
-      googleSettingStatus.textContent = "Not connected.";
-      setGoogleSettingsAction("Connect Google Sheet", "connect");
+      googleSettingStatus.textContent = "Not connected";
+      googleSettingStatus.dataset.state = "disconnected";
+      setGoogleSettingsAction("Connect Google account", "connect");
     } else if (state === "connecting") {
-      googleSettingStatus.textContent = "Finish in your browser.";
+      googleSettingStatus.textContent = "Waiting for Google authorization…";
+      googleSettingStatus.dataset.state = "loading";
       setGoogleSettingsAction("Cancel", "cancel");
     } else if (
       state === "needsInspection" ||
@@ -1121,16 +1156,19 @@
       state === "syncing" ||
       state === "conflict"
     ) {
-      googleSettingStatus.textContent = `${googleStatusView.workbookName || "Your workbook"} is connected.`;
+      googleSettingStatus.textContent = `Connected to Google · ${googleStatusView.workbookName || "Your workbook"}${googleStatusView.sheetName ? ` — ${googleStatusView.sheetName}` : ""}`;
+      googleSettingStatus.dataset.state = "connected";
       setGoogleSettingsAction("Open catalogue", "catalogue");
     } else if (
       googleStatusView?.errorCode === "google-authorization-required" ||
       googleStatusView?.errorCode === "google-token-refresh-failed"
     ) {
-      googleSettingStatus.textContent = "Connection expired.";
+      googleSettingStatus.textContent = "Authorization failed or expired";
+      googleSettingStatus.dataset.state = "error";
       setGoogleSettingsAction("Reconnect", "connect");
     } else {
-      googleSettingStatus.textContent = "Check the catalogue connection.";
+      googleSettingStatus.textContent = "Google connection needs attention";
+      googleSettingStatus.dataset.state = "error";
       setGoogleSettingsAction("Open catalogue", "catalogue");
     }
   }
@@ -1274,18 +1312,19 @@
     return choice;
   }
 
-  async function runGoogleAction(action) {
-    if (action !== "connect") return performGoogleAction(action);
+  async function runGoogleAction(action, payload = {}) {
+    if (action !== "connect") return performGoogleAction(action, payload);
     if (connectionStartPending) return;
     connectionStartPending = true;
     try {
-      if (await chooseConnectionBrowser()) await performGoogleAction(action);
+      if (await chooseConnectionBrowser())
+        await performGoogleAction(action, payload);
     } finally {
       connectionStartPending = false;
     }
   }
 
-  async function performGoogleAction(action) {
+  async function performGoogleAction(action, payload = {}) {
     if (action === "setup") {
       showView("settings");
       googleSetup.hidden = false;
@@ -1337,7 +1376,7 @@
     };
     googleCatalogueStatus.textContent = workingCopy[action];
     try {
-      const result = await global.OFEnhancerHost.request(operation);
+      const result = await global.OFEnhancerHost.request(operation, payload);
       if (action === "import") {
         renderGoogleCatalogue(
           result.status,
@@ -1602,6 +1641,8 @@
         status?.state === "notConfigured"
           ? "No setup file was imported."
           : "Google setup saved on this PC.";
+      if (status?.state !== "notConfigured" && !status?.errorCode)
+        googleSetup.open = false;
       if (!googleSetup.hidden) importGoogleSetup.focus();
       else googleSettingsAction.focus();
     } catch (error) {
@@ -1626,6 +1667,30 @@
     googleClientId.setCustomValidity("");
     googleClientId.setAttribute("aria-invalid", "false");
     googleSetupStatus.textContent = "";
+  });
+  googleSheetUrl.addEventListener("input", () => {
+    googleSheetUrl.setCustomValidity("");
+    googleSheetUrl.setAttribute("aria-invalid", "false");
+    googleSheetUrlStatus.textContent = "";
+  });
+  googleSheetUrlForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const canonicalUrl = parseGoogleSheetUrl(googleSheetUrl.value);
+    if (!canonicalUrl) {
+      const message =
+        "Paste a Google Sheets URL like https://docs.google.com/spreadsheets/d/…";
+      googleSheetUrl.setCustomValidity(message);
+      googleSheetUrl.setAttribute("aria-invalid", "true");
+      googleSheetUrlStatus.textContent = message;
+      googleSheetUrl.focus();
+      return;
+    }
+    googleSheetUrl.setCustomValidity("");
+    googleSheetUrl.setAttribute("aria-invalid", "false");
+    googleSheetUrl.value = canonicalUrl;
+    googleSheetUrlStatus.textContent =
+      "Continue in Google and select this same spreadsheet.";
+    await runGoogleAction("connect", { sheetUrl: canonicalUrl });
   });
   googleSetupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1658,6 +1723,7 @@
       if (googleClientId.value.trim() === clientId) {
         googleSetupStatus.textContent = "Google setup saved.";
         renderGoogleCatalogue(status);
+        googleSetup.open = false;
       } else {
         googleSetupStatus.textContent =
           "Google setup changed while saving. Save the current value again.";

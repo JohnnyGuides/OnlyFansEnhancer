@@ -73,10 +73,10 @@ public sealed partial class WebMessageRouter(
                     () => importGoogleClientConfiguration?.Invoke()
                         ?? throw new GoogleCatalogueControllerException("google-client-configuration-required")
                 ),
-                "startGoogleCatalogueConnection" => WithGoogle(
+                "startGoogleCatalogueConnection" => WithGooglePayload(
                     requestId,
                     request,
-                    () => googleCatalogue!.startGoogleCatalogueConnection()
+                    StartGoogleCatalogueConnection
                 ),
                 "cancelGoogleCatalogueConnection" => WithGoogle(
                     requestId,
@@ -209,6 +209,12 @@ public sealed partial class WebMessageRouter(
         return googleCatalogue!.saveGoogleClientId(payload.ClientId);
     }
 
+    private GoogleCatalogueStatusView StartGoogleCatalogueConnection(WebRequest request)
+    {
+        GoogleSheetPayload payload = DeserializePayload<GoogleSheetPayload>(request.Payload);
+        return googleCatalogue!.startGoogleCatalogueConnection(payload.SheetUrl);
+    }
+
     private GoogleCatalogueStatusView ApplyGoogleWorkbookMigration(WebRequest request)
     {
         MigrationPayload payload = DeserializePayload<MigrationPayload>(request.Payload);
@@ -304,6 +310,8 @@ public sealed partial class WebMessageRouter(
     private sealed record BindingPayload(string? AssetId, string? ItemId);
 
     private sealed record GoogleClientIdPayload(string? ClientId);
+
+    private sealed record GoogleSheetPayload(string? SheetUrl);
 
     private sealed record BrowserPreferencePayload(string? BrowserId);
 

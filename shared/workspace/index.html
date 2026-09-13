@@ -294,26 +294,73 @@
                 ></p>
               </dd>
             </div>
-            <div>
-              <dt>Google Sheet</dt>
-              <dd class="setting-action">
-                <span id="googleSettingStatus" role="status" aria-live="polite">
-                  Checking…
-                </span>
-                <button
-                  id="googleSettingsAction"
-                  class="secondary-button"
-                  type="button"
-                  hidden
-                ></button>
-              </dd>
-            </div>
           </dl>
+          <section
+            class="google-account-card"
+            aria-labelledby="googleAccountTitle"
+          >
+            <div class="google-account-heading">
+              <div>
+                <h2 id="googleAccountTitle">Google account</h2>
+                <span
+                  id="googleSettingStatus"
+                  class="connection-status"
+                  role="status"
+                  aria-live="polite"
+                  >Checking…</span
+                >
+              </div>
+              <button
+                id="googleSettingsAction"
+                class="action-button"
+                type="button"
+                hidden
+              ></button>
+            </div>
+            <p class="google-account-help">
+              Sign in with Google, grant access, and select your catalogue
+              spreadsheet in the browser.
+            </p>
+            <form id="googleSheetUrlForm" class="sheet-url-form" novalidate>
+              <label for="googleSheetUrl">Google Sheet URL</label>
+              <div class="sheet-url-control">
+                <input
+                  id="googleSheetUrl"
+                  name="google-sheet-url"
+                  type="url"
+                  inputmode="url"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="https://docs.google.com/spreadsheets/d/…"
+                  aria-describedby="googleSheetUrlHelp googleSheetUrlStatus"
+                  aria-invalid="false"
+                />
+                <button class="secondary-button" type="submit">
+                  Use this sheet
+                </button>
+              </div>
+              <p id="googleSheetUrlHelp" class="settings-help">
+                This is the destination spreadsheet, not a password or
+                credential. Your catalogue can be on any worksheet, not only the
+                first tab.
+              </p>
+              <p
+                id="googleSheetUrlStatus"
+                class="action-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </form>
+          </section>
           <button type="button" class="secondary-button chrome-setup-trigger">
             Check Chrome setup
           </button>
-          <details id="googleSetup" class="settings-disclosure" hidden>
+          <details id="googleSetup" class="settings-disclosure">
             <summary>Developer setup</summary>
+            <p class="developer-warning">
+              Only for self-hosted OFEnhancer builds or custom Google Cloud
+              OAuth configuration.
+            </p>
             <div class="google-setup-import">
               <p id="googleSetupImportHelp">
                 Choose the desktop app setup file downloaded from Google Cloud.
@@ -419,7 +466,7 @@
     >
       <div class="dialog-heading">
         <div>
-          <h2 id="connectBrowserTitle">Connect Google Sheet</h2>
+          <h2 id="connectBrowserTitle">Connect Google account</h2>
           <p id="connectBrowserIntro">
             Choose the browser where you use Google Drive. Then sign in and
             select your catalogue spreadsheet.

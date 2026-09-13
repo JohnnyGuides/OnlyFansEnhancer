@@ -57,7 +57,7 @@ async function main() {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus") {
             return {
-              productVersion: "0.20.11",
+              productVersion: "0.20.12",
               protocolVersion: 1,
               capabilities: [
                 "desktop-shell",
@@ -167,7 +167,7 @@ async function testChromeReadinessStates(browser, port) {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus")
             return {
-              productVersion: "0.20.11",
+              productVersion: "0.20.12",
               protocolVersion: 1,
               capabilities: ["chrome-readiness"],
             };
@@ -226,7 +226,7 @@ async function testStaleChromeObservation(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.11",
+          productVersion: "0.20.12",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };

@@ -5,15 +5,37 @@ import, optional reviewed write-back, and the older Apps Script bridge are
 separate operations. Connecting one does not silently configure or migrate the
 other. Use a disposable workbook copy for the first write-back acceptance.
 
-## Desktop OAuth setup
+## Connect Google and choose the catalogue
+
+For a normal installation, open **Settings** and select **Connect Google
+account**. OFEnhancer opens the saved browser (or the Windows default), where
+you sign in, grant permission, and select the spreadsheet that contains the
+catalogue. The catalogue may be on any visible worksheet; it does not need to be
+the first tab.
+
+You can instead paste a Google Sheets URL into **Google Sheet URL**. This is the
+destination spreadsheet address, not a credential. If the URL includes a
+`#gid=...` fragment, OFEnhancer keeps that worksheet as the preferred catalogue
+tab. During Google authorization, select the same spreadsheet so Google grants
+OFEnhancer access to that file.
+
+Existing credentials, spreadsheet selection, worksheet selection, and browser
+preference are restored automatically. An upgrade does not require reconnecting
+or reselecting the workbook unless Google authorization has expired.
+
+## Developer OAuth setup
+
+The controls below are hidden inside the collapsed **Developer setup** section
+in Settings. Normal users should not enter anything there. They are only for a
+self-hosted build or custom Google Cloud OAuth configuration.
 
 Enable Google Picker, Drive, and Sheets APIs in the creator-controlled Google
 Cloud project and create a **Desktop app** OAuth client. A Web application client
 file is not accepted. Neither the repository nor a generic installer supplies
 working credentials.
 
-In Settings, open **Finish Google setup** or **Developer setup**, choose
-**Import Google setup file**, and select the JSON downloaded for that Desktop
+In Settings, open **Developer setup**, choose **Import Google setup file**, and
+select the JSON downloaded for that Desktop
 client. The native Windows picker validates the client ID and Google endpoints.
 A file for a different configured ID is rejected without changing the saved
 connection or catalogue. Cancelling changes nothing. Import into an unconfigured
@@ -54,7 +76,7 @@ even when Chrome is unavailable for uploads.
 
 ## Connect and import without changing the sheet
 
-Select **Connect Google Sheet**, choose the browser when prompted, complete
+Select **Connect Google account**, choose the browser when prompted, complete
 consent, select exactly one spreadsheet, then return and select **Import catalogue**.
 Confirm the worksheet name and imported count. This operation only updates the
 local catalogue, not Google Sheets.

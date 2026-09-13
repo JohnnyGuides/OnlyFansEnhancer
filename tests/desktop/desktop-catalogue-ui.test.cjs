@@ -228,7 +228,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.11",
+            productVersion: "0.20.12",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -489,7 +489,7 @@ async function testGoogleStates(browser, port) {
     .waitFor();
   await tabTo(
     page,
-    strip.getByRole("button", { name: "Connect Google Sheet" }),
+    strip.getByRole("button", { name: "Connect Google account" }),
     "Connect focus",
   );
 
@@ -764,9 +764,7 @@ async function testGoogleDesktopSetupImport(browser, port) {
   });
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Finish Google setup", exact: true })
-    .click({ timeout: 3000 });
+  await page.getByText("Developer setup", { exact: true }).click();
   const setupImport = page.getByRole("button", {
     name: "Import Google setup file",
     exact: true,
@@ -789,7 +787,7 @@ async function testGoogleDesktopSetupImport(browser, port) {
     globalThis.__cancelGoogleSetupImport = false;
   });
   await setupImport.click();
-  await page.getByText("Not connected.", { exact: true }).waitFor();
+  await page.getByText("Not connected", { exact: true }).waitFor();
   assert.deepEqual(
     (await googleCalls(page, "importGoogleClientConfiguration")).at(-1),
     { operation: "importGoogleClientConfiguration", payload: {} },
@@ -900,8 +898,9 @@ async function testGoogleSettings(browser, port) {
 
   await input.fill(`  ${googleClientId}  `);
   await setup.getByRole("button", { name: "Save setup" }).click();
-  await page.getByText("Not connected.", { exact: true }).waitFor();
-  assert.equal(await setup.isVisible(), false);
+  await page.getByText("Not connected", { exact: true }).waitFor();
+  assert.equal(await setup.isVisible(), true);
+  assert.equal(await setup.getAttribute("open"), null);
   assert.deepEqual((await googleCalls(page, "saveGoogleClientId")).at(-1), {
     operation: "saveGoogleClientId",
     payload: { clientId: googleClientId },
@@ -914,6 +913,125 @@ async function testGoogleSettings(browser, port) {
   await page.close();
 }
 
+async function testGoogleEndUserSettings(browser, port) {
+  const page = await browser.newPage({ viewport: { width: 800, height: 760 } });
+  const errors = captureErrors(page);
+  await installHost(page, populated, { initial: googleStates.disconnected });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+
+  const settings = page.locator('[data-panel="settings"]');
+  await settings
+    .getByRole("heading", { name: "Google account", exact: true })
+    .waitFor();
+  assert.equal(
+    await settings
+      .getByRole("button", { name: "Connect Google account", exact: true })
+      .count(),
+    1,
+  );
+  await settings.getByText("Not connected", { exact: true }).waitFor();
+
+  const sheetUrl = settings.getByRole("textbox", {
+    name: "Google Sheet URL",
+    exact: true,
+  });
+  assert.equal(
+    await sheetUrl.getAttribute("placeholder"),
+    "https://docs.google.com/spreadsheets/d/…",
+  );
+  assert.equal(
+    await settings
+      .getByText(
+        "This is the destination spreadsheet, not a password or credential. Your catalogue can be on any worksheet, not only the first tab.",
+        { exact: true },
+      )
+      .count(),
+    1,
+  );
+
+  const developerSetup = settings.locator("#googleSetup");
+  assert.equal(await developerSetup.isVisible(), true);
+  assert.equal(await developerSetup.getAttribute("open"), null);
+  assert.equal(
+    await developerSetup
+      .getByRole("textbox", { name: "Google client ID" })
+      .isVisible(),
+    false,
+  );
+  await developerSetup.getByText("Developer setup", { exact: true }).click();
+  await developerSetup
+    .getByText(
+      "Only for self-hosted OFEnhancer builds or custom Google Cloud OAuth configuration.",
+      { exact: true },
+    )
+    .waitFor();
+
+  await sheetUrl.fill("https://docs.google.com/document/d/not-a-sheet/edit");
+  await settings
+    .getByRole("button", { name: "Use this sheet", exact: true })
+    .click();
+  await settings
+    .getByText(
+      "Paste a Google Sheets URL like https://docs.google.com/spreadsheets/d/…",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await sheetUrl.getAttribute("aria-invalid"), "true");
+  assert.equal(
+    (await googleCalls(page, "startGoogleCatalogueConnection")).length,
+    0,
+  );
+
+  await sheetUrl.fill(
+    " https://docs.google.com/spreadsheets/d/workbook-123/edit?usp=sharing#gid=2126708696 ",
+  );
+  await settings
+    .getByRole("button", { name: "Use this sheet", exact: true })
+    .click();
+  await page.waitForFunction(() =>
+    __googleHostCalls.some(
+      (call) => call.operation === "startGoogleCatalogueConnection",
+    ),
+  );
+  assert.deepEqual(
+    (await googleCalls(page, "startGoogleCatalogueConnection")).at(-1),
+    {
+      operation: "startGoogleCatalogueConnection",
+      payload: {
+        sheetUrl:
+          "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696",
+      },
+    },
+  );
+  assert.equal(await sheetUrl.getAttribute("aria-invalid"), "false");
+
+  await settings
+    .getByText("Waiting for Google authorization…", { exact: true })
+    .waitFor();
+  await page.evaluate(
+    (next) => __setGoogleState(next),
+    googleStates.needsInspection,
+  );
+  await page.getByRole("button", { name: "Uploads", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settings
+    .getByText(`Connected to Google · ${workbookName}`, { exact: true })
+    .waitFor();
+  await page.evaluate((next) => __setGoogleState(next), googleStates.error);
+  await page.getByRole("button", { name: "Uploads", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settings
+    .getByText("Authorization failed or expired", { exact: true })
+    .waitFor();
+  assert.equal(
+    await settings.getByRole("button", { name: "Reconnect" }).count(),
+    1,
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
 async function testGoogleSettingsConnection(browser, port) {
   const page = await browser.newPage({ viewport: { width: 800, height: 700 } });
   const errors = captureErrors(page);
@@ -921,19 +1039,22 @@ async function testGoogleSettingsConnection(browser, port) {
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.getByRole("button", { name: "Settings" }).click();
   const settings = page.locator('[data-panel="settings"]');
-  await settings.getByText("Not connected.", { exact: true }).waitFor();
+  await settings.getByText("Not connected", { exact: true }).waitFor();
   assert.equal(
     await settings
-      .getByRole("button", { name: "Connect Google Sheet" })
+      .getByRole("button", { name: "Connect Google account" })
       .count(),
     1,
   );
   assert.equal(
     await page.locator("#googleSetup").isVisible(),
-    false,
-    "developer-only Google setup is visible in a configured copy",
+    true,
+    "collapsed developer setup is unavailable",
   );
-  await settings.getByRole("button", { name: "Connect Google Sheet" }).click();
+  assert.equal(await page.locator("#googleSetup").getAttribute("open"), null);
+  await settings
+    .getByRole("button", { name: "Connect Google account" })
+    .click();
   await page.waitForFunction(() =>
     __googleHostCalls.some(
       (call) => call.operation === "startGoogleCatalogueConnection",
@@ -1011,10 +1132,12 @@ async function testConnectBrowserDialog(browser, port) {
       })
       .click();
     const connect = page
-      .getByRole("button", { name: "Connect Google Sheet", exact: true })
+      .getByRole("button", { name: "Connect Google account", exact: true })
       .filter({ visible: true });
     await connect.click();
-    const dialog = page.getByRole("dialog", { name: "Connect Google Sheet" });
+    const dialog = page.getByRole("dialog", {
+      name: "Connect Google account",
+    });
     await dialog.waitFor({ timeout: 3000 });
     assert.equal(
       (await googleCalls(page, "startGoogleCatalogueConnection")).length,
@@ -1156,7 +1279,7 @@ async function testGoogleActionCalls(browser, port) {
   const fixtures = [
     {
       state: googleStates.disconnected,
-      button: "Connect Google Sheet",
+      button: "Connect Google account",
       operation: "startGoogleCatalogueConnection",
     },
     {
@@ -1832,7 +1955,7 @@ async function testGoogleMobileDialogAndSettings(browser, port) {
     .getByRole("textbox", { name: "Google client ID" })
     .fill(googleClientId);
   await setup.getByRole("button", { name: "Save setup" }).click();
-  await page.getByText("Not connected.", { exact: true }).waitFor();
+  await page.getByText("Not connected", { exact: true }).waitFor();
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -1895,6 +2018,7 @@ async function main() {
       await testConnectBrowserDialog(browser, port);
       await testGoogleStates(browser, port);
       await testGoogleSettings(browser, port);
+      await testGoogleEndUserSettings(browser, port);
       await testGoogleSettingsConnection(browser, port);
       await testCatalogueLoadingRecovery(browser, port);
       await testBrowserSelection(browser, port);

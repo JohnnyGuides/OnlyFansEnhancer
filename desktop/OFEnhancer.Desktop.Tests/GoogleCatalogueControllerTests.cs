@@ -52,6 +52,24 @@ public sealed class GoogleCatalogueControllerTests
     private static readonly string PlanHash = new('a', 64);
 
     [TestMethod]
+    public void PastedSheetUrlIsValidatedBeforeConnectionAndPassedAsTheBrowserSelectionTarget()
+    {
+        using ControllerHarness harness = new();
+
+        GoogleCatalogueControllerException invalid = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => harness.Controller.startGoogleCatalogueConnection("https://example.com/not-google")
+        );
+        Assert.AreEqual("invalid-google-sheet-url", invalid.Code);
+        Assert.AreEqual(0, harness.Connections.Count);
+
+        GoogleCatalogueStatusView status = harness.Controller.startGoogleCatalogueConnection(
+            "https://docs.google.com/spreadsheets/d/private-workbook-id/edit#gid=17"
+        );
+        Assert.AreEqual("connecting", status.State);
+        Assert.AreEqual(new GoogleSheetReference("private-workbook-id", 17), harness.Connection.Target);
+    }
+
+    [TestMethod]
     public void NativeClientImportCancellationMismatchAndSuccessPreserveConnectedSelection()
     {
         using ControllerHarness harness = ReadyHarness();
@@ -411,7 +429,7 @@ public sealed class GoogleCatalogueControllerTests
             await entered.Task;
 
             GoogleCatalogueControllerException concurrent = Assert.ThrowsException<GoogleCatalogueControllerException>(
-                syncing.Controller.startGoogleCatalogueConnection
+                () => syncing.Controller.startGoogleCatalogueConnection()
             );
 
             Assert.AreEqual("google-operation-in-progress", concurrent.Code);
@@ -450,7 +468,7 @@ public sealed class GoogleCatalogueControllerTests
         await entered.Task;
 
         GoogleCatalogueControllerException concurrent = Assert.ThrowsException<GoogleCatalogueControllerException>(
-            harness.Controller.startGoogleCatalogueConnection
+            () => harness.Controller.startGoogleCatalogueConnection()
         );
 
         Assert.AreEqual("google-operation-in-progress", concurrent.Code);
@@ -1044,12 +1062,14 @@ public sealed class GoogleCatalogueControllerTests
         internal Action<GoogleConnectionCompletion>? Completed { get; set; }
         internal int CancelCalls { get; private set; }
         internal bool Disposed { get; private set; }
+        internal GoogleSheetReference? Target { get; private set; }
 
         public GoogleConnectionSnapshot Snapshot { get; private set; } =
             new(GoogleConnectionState.Disconnected, null);
 
-        public void Start()
+        public void Start(GoogleSheetReference? target = null)
         {
+            Target = target;
             Snapshot = new(GoogleConnectionState.Connecting, null);
         }
 

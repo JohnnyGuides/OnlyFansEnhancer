@@ -94,6 +94,60 @@ public sealed class GoogleConnectionCoordinatorTests
     }
 
     [TestMethod]
+    public async Task PastedSheetUrlRequiresTheSameBrowserSelectionAndKeepsItsWorksheet()
+    {
+        FakeCallbackReceiver receiver = new(RedirectUri);
+        SequenceHandler handler = new(
+            Json(HttpStatusCode.OK, """{"access_token":"access-value","refresh_token":"refresh-value","expires_in":3600}"""),
+            Json(HttpStatusCode.OK, """{"id":"sheet-123","name":"Creator workbook","mimeType":"application/vnd.google-apps.spreadsheet","capabilities":{"canEdit":true}}""")
+        );
+        TaskCompletionSource<GoogleConnectionCompletion> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        GoogleConnectionCoordinator coordinator = CreateCoordinator(
+            receiver,
+            handler,
+            new MemoryGoogleTokenVault(),
+            _ => { },
+            value => completed.TrySetResult(value),
+            new GoogleSheetReference("sheet-123", 2126708696)
+        );
+
+        coordinator.Start();
+        await WaitUntilAsync(() => receiver.AuthorizationUri is not null);
+        string state = QueryValue(receiver.AuthorizationUri!, "state");
+        receiver.Complete(new($"{RedirectUri}?state={state}&code=authorization-code&picked_file_ids=sheet-123"));
+
+        GoogleConnectionCompletion result = await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.AreEqual(2126708696, result.PreferredSheetId);
+    }
+
+    [TestMethod]
+    public async Task PastedSheetUrlRejectsADifferentSpreadsheetSelectedInTheBrowser()
+    {
+        FakeCallbackReceiver receiver = new(RedirectUri);
+        MemoryGoogleTokenVault vault = new();
+        SequenceHandler handler = new(
+            Json(HttpStatusCode.OK, """{"access_token":"access-value","refresh_token":"refresh-value","expires_in":3600}""")
+        );
+        GoogleConnectionCoordinator coordinator = CreateCoordinator(
+            receiver,
+            handler,
+            vault,
+            _ => { },
+            target: new GoogleSheetReference("expected-sheet", 17)
+        );
+
+        coordinator.Start();
+        await WaitUntilAsync(() => receiver.AuthorizationUri is not null);
+        string state = QueryValue(receiver.AuthorizationUri!, "state");
+        receiver.Complete(new($"{RedirectUri}?state={state}&code=authorization-code&picked_file_ids=different-sheet"));
+
+        await WaitForStateAsync(coordinator, GoogleConnectionState.Error);
+        Assert.AreEqual("selected_sheet_does_not_match_url", coordinator.Snapshot.ErrorCode);
+        Assert.IsNull(vault.Load());
+        Assert.AreEqual(1, handler.Requests.Count);
+    }
+
+    [TestMethod]
     public async Task ChangedStateDoesNotCallGoogleOrSaveCredential()
     {
         FakeCallbackReceiver receiver = new(RedirectUri);
@@ -208,7 +262,8 @@ public sealed class GoogleConnectionCoordinatorTests
         HttpMessageHandler handler,
         IGoogleTokenVault vault,
         Action<Uri> openBrowser,
-        Action<GoogleConnectionCompletion>? completed = null
+        Action<GoogleConnectionCompletion>? completed = null,
+        GoogleSheetReference? target = null
     ) => new(
         ClientId,
         new HttpClient(handler),
@@ -219,7 +274,8 @@ public sealed class GoogleConnectionCoordinatorTests
             receiver.AuthorizationUri = uri;
             openBrowser(uri);
         },
-        completed ?? (_ => { })
+        completed ?? (_ => { }),
+        target: target
     );
 
     private static HttpResponseMessage Json(HttpStatusCode status, string body) => new(status)

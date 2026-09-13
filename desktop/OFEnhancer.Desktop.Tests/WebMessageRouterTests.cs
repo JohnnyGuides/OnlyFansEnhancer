@@ -59,7 +59,7 @@ public sealed class WebMessageRouterTests
 
         Assert.IsTrue(response.RootElement.GetProperty("ok").GetBoolean());
         Assert.AreEqual(
-            "0.20.11",
+            "0.20.12",
             response.RootElement.GetProperty("result").GetProperty("productVersion").GetString()
         );
     }
@@ -280,6 +280,12 @@ public sealed class WebMessageRouterTests
             router.Handle(Request("saveGoogleClientId", new { clientId = GoogleClientId, extra = true })),
             "invalid-payload"
         );
+        const string sheetUrl = "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=17";
+        AssertOk(router.Handle(Request("startGoogleCatalogueConnection", new { sheetUrl })));
+        AssertError(
+            router.Handle(Request("startGoogleCatalogueConnection", new { sheetUrl, extra = true })),
+            "invalid-payload"
+        );
         AssertOk(router.Handle(Request("applyGoogleWorkbookMigration", new { planHash = PlanHash })));
         AssertError(
             router.Handle(Request("applyGoogleWorkbookMigration", new { planHash = "bad" })),
@@ -291,6 +297,7 @@ public sealed class WebMessageRouterTests
         );
 
         Assert.AreEqual(GoogleClientId, google.SavedClientId);
+        Assert.AreEqual(sheetUrl, google.SheetUrl);
         Assert.AreEqual(PlanHash, google.AppliedPlanHash);
     }
 
@@ -413,6 +420,7 @@ public sealed class WebMessageRouterTests
     {
         internal List<string> Calls { get; } = [];
         internal string? SavedClientId { get; private set; }
+        internal string? SheetUrl { get; private set; }
         internal string? AppliedPlanHash { get; private set; }
         internal string? ErrorCode { get; init; }
 
@@ -426,9 +434,11 @@ public sealed class WebMessageRouterTests
             return Called("saveGoogleClientId");
         }
 
-        public GoogleCatalogueStatusView startGoogleCatalogueConnection() => Called(
-            "startGoogleCatalogueConnection"
-        );
+        public GoogleCatalogueStatusView startGoogleCatalogueConnection(string? sheetUrl = null)
+        {
+            SheetUrl = sheetUrl;
+            return Called("startGoogleCatalogueConnection");
+        }
 
         public GoogleCatalogueStatusView cancelGoogleCatalogueConnection() => Called(
             "cancelGoogleCatalogueConnection"
