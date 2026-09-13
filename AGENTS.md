@@ -22,3 +22,15 @@ Install the release when authorized and safely feasible, or provide the installe
 link for the owner to run. State clearly whether installation actually occurred,
 what was verified, and any remaining blockers. Preserve existing settings,
 extension identities, load locations, storage, and upload checkpoints.
+
+# GitHub identity
+
+This repository belongs to the `JohnnyGuides` GitHub account. For GitHub
+authentication, commits, pushes, releases, and other repository operations,
+use the `JohnnyGuides` identity and the
+`146333925+JohnnyGuides@users.noreply.github.com` commit email.
+
+Keep authentication scoped to this repository. Do not remove, overwrite, or
+replace the `O-Marmullaku` GitHub credential because other projects use that
+account. If both accounts are available, select or configure `JohnnyGuides`
+for this repository explicitly rather than changing the machine-wide default.
