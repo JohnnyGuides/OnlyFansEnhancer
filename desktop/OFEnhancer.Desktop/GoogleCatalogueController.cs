@@ -13,6 +13,7 @@ public interface IGoogleCatalogueController : IDisposable
     GoogleCatalogueStatusView startGoogleCatalogueConnection();
     GoogleCatalogueStatusView cancelGoogleCatalogueConnection();
     GoogleCatalogueStatusView inspectGoogleWorkbook();
+    GoogleCatalogueImportResult importGoogleCatalogue();
     GoogleCatalogueStatusView applyGoogleWorkbookMigration(string planHash);
     GoogleCatalogueStatusView syncGoogleCatalogue();
     GoogleCatalogueStatusView disconnectGoogleCatalogue();
@@ -28,6 +29,8 @@ internal interface IGoogleConnectionSession : IDisposable
 internal interface IGoogleCatalogueSession : IDisposable
 {
     Task<WorkbookInspection> InspectAsync(CancellationToken cancellationToken);
+    Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken);
+    Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(CancellationToken cancellationToken);
     Task<WorkbookMigrationResult> ApplyMigrationAsync(
         string planHash,
         CancellationToken cancellationToken
@@ -43,6 +46,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     private readonly DesktopSettingsStore _settings;
     private readonly CatalogueStore _store;
     private readonly IGoogleTokenVault _tokenVault;
+    private readonly GoogleDesktopClientStore? _clientStore;
+    private bool _importingClient;
     private readonly Func<
         string,
         IGoogleTokenVault,
@@ -75,12 +80,14 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         IGoogleTokenVault tokenVault,
         Func<string, IGoogleTokenVault, Action<GoogleConnectionCompletion>, IGoogleConnectionSession> connectionFactory,
         Func<string, GoogleConnectionCompletion, IGoogleCatalogueSession> sessionFactory,
-        Func<Action, Task>? completionDispatcher = null
+        Func<Action, Task>? completionDispatcher = null,
+        GoogleDesktopClientStore? clientStore = null
     )
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _tokenVault = tokenVault ?? throw new ArgumentNullException(nameof(tokenVault));
+        _clientStore = clientStore;
         _connectionFactory = connectionFactory
             ?? throw new ArgumentNullException(nameof(connectionFactory));
         _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory));
@@ -98,7 +105,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         IGoogleTokenVault tokenVault,
         HttpClient httpClient,
         Action<Uri> openBrowser,
-        Func<Action, Task>? completionDispatcher = null
+        Func<Action, Task>? completionDispatcher = null,
+        GoogleDesktopClientStore? clientStore = null
     )
         : this(
             settings,
@@ -110,15 +118,20 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 connectionVault,
                 static () => new HttpListenerGoogleOAuthCallbackReceiver(),
                 openBrowser,
-                completed
+                completed,
+                clientStore is null ? null : clientStore.Load(clientId)?.ClientSecret
+                    ?? throw new GoogleCatalogueControllerException("google-client-configuration-required")
             ),
             (clientId, completion) =>
             {
-                GoogleRefreshAccessTokenSource tokens = new(clientId, httpClient, tokenVault);
+                GoogleRefreshAccessTokenSource tokens = new(clientId, httpClient, tokenVault,
+                    clientStore is null ? null : () => clientStore.Load(clientId)?.ClientSecret
+                        ?? throw new GoogleCatalogueException("google-client-configuration-required"));
                 GoogleWorkspaceClient workspace = new(httpClient, tokens);
                 return new GoogleCatalogueSession(completion.WorkbookId, workspace, store, tokens);
             },
-            completionDispatcher
+            completionDispatcher,
+            clientStore
         )
     {
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -143,6 +156,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         lock (_gate)
         {
             ThrowIfDisposed();
+            if (_importingClient)
+                throw new GoogleCatalogueControllerException("google-operation-in-progress");
             DesktopSettings current = _settings.Load();
             try
             {
@@ -182,6 +197,52 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         return status;
     }
 
+    internal GoogleCatalogueStatusView ImportGoogleClientConfiguration(Func<string?> chooseFile)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            if (_clientStore is null)
+                throw new GoogleCatalogueControllerException("google-client-configuration-required");
+            if (_connection?.Snapshot.State == GoogleConnectionState.Connecting)
+                throw new GoogleCatalogueControllerException("google-connection-in-progress");
+            EnterCatalogueOperationLocked();
+            _importingClient = true;
+        }
+        try
+        {
+            string? path = chooseFile();
+            if (path is null) return getGoogleCatalogueStatus();
+            GoogleDesktopClientCredential credential = GoogleDesktopClientStore.ReadFile(path);
+            lock (_gate)
+            {
+                ThrowIfDisposed();
+                DesktopSettings current = _settings.Load();
+                if (current.GoogleOAuthClientId is not null
+                    && !string.Equals(current.GoogleOAuthClientId, credential.ClientId, StringComparison.Ordinal))
+                    throw new GoogleCatalogueControllerException("google-client-configuration-mismatch");
+                _clientStore!.Save(credential);
+                if (current.GoogleOAuthClientId is null)
+                    _settings.Save(current with { GoogleOAuthClientId = credential.ClientId });
+                _connectionErrorCode = null;
+                if (_connection?.Snapshot.State == GoogleConnectionState.Error)
+                {
+                    _connection.Dispose();
+                    _connection = null;
+                }
+                return StatusLocked();
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _importingClient = false;
+                ExitCatalogueOperation();
+            }
+        }
+    }
+
     public GoogleCatalogueStatusView startGoogleCatalogueConnection()
     {
         string clientId;
@@ -198,6 +259,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 throw new GoogleCatalogueControllerException("google-operation-in-progress");
             if (_connection?.Snapshot.State == GoogleConnectionState.Connecting)
                 throw new GoogleCatalogueControllerException("google-connection-in-progress");
+            if (_clientStore is not null && _clientStore.Load(clientId) is null)
+                throw new GoogleCatalogueControllerException("google-client-configuration-required");
             epoch = BeginConnectionEpochLocked();
             previousConnection = _connection;
             previousSession = _session;
@@ -262,6 +325,46 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
     }
 
+    internal GoogleSubredditPresetSnapshot ReadSubredditPresets()
+    {
+        IGoogleCatalogueSession session;
+        lock(_gate)
+        {
+            ThrowIfDisposed();
+            session=_session ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+            EnterCatalogueOperationLocked();
+        }
+        try { return session.ReadSubredditPresetsAsync(_lifetime.Token).GetAwaiter().GetResult(); }
+        catch(Exception exception) { throw SafeException(exception); }
+        finally { ExitCatalogueOperation(); }
+    }
+
+    public GoogleCatalogueImportResult importGoogleCatalogue()
+    {
+        IGoogleCatalogueSession session;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            session = _session ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+            if (_ready) throw new GoogleCatalogueControllerException("google-import-sync-active");
+            EnterCatalogueOperationLocked();
+        }
+        try
+        {
+            GoogleCatalogueImportPreview preview = session.ReadImportAsync(_lifetime.Token).GetAwaiter().GetResult();
+            lock (_gate)
+            {
+                ThrowIfDisposed();
+                if (!ReferenceEquals(session, _session))
+                    throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                _store.ImportWorkbookProjection(preview.Projection, updateGoogleBindings: false);
+                return new(StatusLocked(), preview.CatalogueSheetTitle, preview.Projection.Items.Count, preview.Issues ?? []);
+            }
+        }
+        catch (Exception exception) { throw SafeException(exception); }
+        finally { ExitCatalogueOperation(); }
+    }
+
     public GoogleCatalogueStatusView inspectGoogleWorkbook()
     {
         IGoogleCatalogueSession session;
@@ -274,6 +377,18 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
         try
         {
+            // Persist the verification-in-progress state before reading new contrary evidence.
+            // If persistence fails, do not inspect or perform any remote mutation.
+            lock (_gate)
+            {
+                if (_selection is { Ready: true, SheetId: not null, SheetTitle: not null, Profile: not null })
+                {
+                    _ready = false;
+                    _store.SaveGoogleCatalogueProfile(_selection.WorkbookId, _selection.SheetId,
+                        _selection.SheetTitle, _selection.Profile, false, DateTimeOffset.UtcNow);
+                    _selection = _store.GetGoogleCatalogueSelection();
+                }
+            }
             WorkbookInspection inspection = session
                 .InspectAsync(_lifetime.Token)
                 .GetAwaiter()
@@ -283,6 +398,14 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 ThrowIfDisposed();
                 DateTimeOffset inspectedUtc = DateTimeOffset.UtcNow;
                 bool ready = inspection.AlreadyMigrated && inspection.Conflicts.Count == 0;
+                // Invalidate before persistence so a failed save cannot leave this process ready.
+                _ready = false;
+                if (inspection.Conflicts.Count > 0 && _selection is { SheetId: not null, SheetTitle: not null, Profile: not null })
+                {
+                    _store.SaveGoogleCatalogueProfile(_selection.WorkbookId, _selection.SheetId,
+                        _selection.SheetTitle, _selection.Profile, false, inspectedUtc);
+                    _selection = _store.GetGoogleCatalogueSelection();
+                }
                 if (ready)
                 {
                     _store.ImportWorkbookProjection(inspection.Projection);
@@ -561,6 +684,18 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         DesktopSettings settings = _settings.Load();
         if (settings.GoogleOAuthClientId is null)
             return new("notConfigured");
+        if (_clientStore is not null)
+        {
+            try
+            {
+                if (_clientStore.Load(settings.GoogleOAuthClientId) is null)
+                    return View("error", errorCode: "google-client-configuration-required");
+            }
+            catch (GoogleCatalogueControllerException)
+            {
+                return View("error", errorCode: "google-client-configuration-required");
+            }
+        }
         GoogleConnectionSnapshot? connection = _connection?.Snapshot;
         if (_connectionErrorCode is not null)
             return View("error", errorCode: _connectionErrorCode);
@@ -762,6 +897,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     }
 }
 
+public sealed record GoogleCatalogueImportResult(GoogleCatalogueStatusView Status, string SheetName, int ImportedItems,
+    IReadOnlyList<GoogleCatalogueImportIssue>? Issues = null);
+
 public sealed record GoogleCatalogueStatusView(
     string State,
     string? WorkbookName = null,
@@ -815,6 +953,15 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
         return GoogleWorkbookProfile.Inspect(snapshot, _store);
     }
 
+    public async Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken)
+    {
+        GoogleWorkbookSnapshot snapshot = await _workspace.ReadImportWorkbookAsync(_workbookId, cancellationToken).ConfigureAwait(false);
+        return GoogleCatalogueImportReader.Read(snapshot);
+    }
+
+    public Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(CancellationToken cancellationToken) =>
+        _workspace.ReadSubredditPresetsAsync(_workbookId,cancellationToken);
+
     public Task<WorkbookMigrationResult> ApplyMigrationAsync(
         string planHash,
         CancellationToken cancellationToken
@@ -833,6 +980,7 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
     private readonly string _clientId;
     private readonly HttpClient _httpClient;
     private readonly IGoogleTokenVault _vault;
+    private readonly Func<string>? _clientSecret;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private string? _accessToken;
     private DateTimeOffset _expiresAt;
@@ -841,7 +989,8 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
     internal GoogleRefreshAccessTokenSource(
         string clientId,
         HttpClient httpClient,
-        IGoogleTokenVault vault
+        IGoogleTokenVault vault,
+        Func<string>? clientSecret = null
     )
     {
         if (!AppConfiguration.IsValidGoogleOAuthClientId(clientId))
@@ -849,6 +998,7 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
         _clientId = clientId;
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _vault = vault ?? throw new ArgumentNullException(nameof(vault));
+        _clientSecret = clientSecret;
     }
 
     public async ValueTask<string> GetAccessTokenAsync(
@@ -871,12 +1021,14 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
                 ?? throw new GoogleCatalogueException("google-authorization-required");
             if (!string.Equals(credential.ClientId, _clientId, StringComparison.Ordinal))
                 throw new GoogleCatalogueException("google-authorization-required");
-            using FormUrlEncodedContent content = new(new Dictionary<string, string>
+            Dictionary<string, string> form = new()
             {
                 ["grant_type"] = "refresh_token",
                 ["refresh_token"] = credential.RefreshToken,
                 ["client_id"] = _clientId,
-            });
+            };
+            if (_clientSecret is not null) form["client_secret"] = _clientSecret();
+            using FormUrlEncodedContent content = new(form);
             using HttpRequestMessage request = new(HttpMethod.Post, TokenEndpoint)
             {
                 Content = content,
@@ -941,6 +1093,10 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
         {
             throw;
         }
+        catch (GoogleCatalogueControllerException)
+        {
+            throw new GoogleCatalogueException("google-client-configuration-required");
+        }
         catch
         {
             throw new GoogleCatalogueException("google-token-refresh-failed");
@@ -974,13 +1130,53 @@ internal static class GoogleHttpClientFactory
 internal static class GoogleBrowserLauncher
 {
     internal static ProcessStartInfo CreateStartInfo(Uri authorizationUri)
+        => CreateStartInfo(authorizationUri, BrowserSelection.SystemDefaultId, []);
+
+    internal static ProcessStartInfo CreateStartInfo(
+        Uri authorizationUri,
+        string? browserId,
+        IReadOnlyList<InstalledBrowser> installedBrowsers
+    )
     {
         ArgumentNullException.ThrowIfNull(authorizationUri);
+        ArgumentNullException.ThrowIfNull(installedBrowsers);
         if (authorizationUri.Scheme != Uri.UriSchemeHttps)
             throw new ArgumentException("Google authorization URI must use HTTPS.", nameof(authorizationUri));
-        return new(authorizationUri.AbsoluteUri) { UseShellExecute = true };
+
+        string normalized = BrowserSelection.NormalizeId(browserId ?? BrowserSelection.SystemDefaultId)
+            ?? throw new BrowserLaunchException("invalid-browser");
+        if (normalized == BrowserSelection.SystemDefaultId)
+            return new(authorizationUri.AbsoluteUri) { UseShellExecute = true };
+
+        InstalledBrowser? browser = installedBrowsers.FirstOrDefault(
+            candidate => candidate.Id == normalized
+        );
+        if (browser is null)
+            return new(authorizationUri.AbsoluteUri) { UseShellExecute = true };
+
+        ProcessStartInfo start = new(browser.ExecutablePath)
+        {
+            UseShellExecute = false,
+        };
+        start.ArgumentList.Add(authorizationUri.AbsoluteUri);
+        return start;
     }
 
-    internal static void Open(Uri authorizationUri) =>
-        Process.Start(CreateStartInfo(authorizationUri));
+    internal static void Open(Uri authorizationUri, DesktopSettingsStore settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ProcessStartInfo start = CreateStartInfo(
+            authorizationUri,
+            settings.Load().BrowserId,
+            InstalledBrowserCatalog.Discover()
+        );
+        try
+        {
+            Process.Start(start);
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            throw new BrowserLaunchException("browser-launch-failed");
+        }
+    }
 }

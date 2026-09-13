@@ -21,8 +21,11 @@ public sealed record CatalogueItemSummary(
     bool Archived,
     string? ThumbnailAssetId = null,
     string ThumbnailStatus = "missing",
-    IReadOnlyList<CatalogueCandidate>? Candidates = null
+    IReadOnlyList<CatalogueCandidate>? Candidates = null,
+    IReadOnlyDictionary<string, CatalogueSourceLinkCell>? SourceLinkCells = null
 );
+
+public sealed record CatalogueSourceLinkCell(string Text, string? Hyperlink, IReadOnlyList<string> Urls, string? IssueCode = null);
 
 public sealed record CatalogueCandidate(
     string ItemId,
@@ -76,7 +79,8 @@ public sealed record WorkbookCatalogueItem
         int xTeasers,
         int redditTeasers,
         IReadOnlyDictionary<string, string> platformLinks,
-        string? metadataId
+        string? metadataId,
+        IReadOnlyDictionary<string, CatalogueSourceLinkCell>? sourceLinkCells = null
     )
     {
         SourceRow = sourceRow;
@@ -90,6 +94,7 @@ public sealed record WorkbookCatalogueItem
         RedditTeasers = redditTeasers;
         PlatformLinks = platformLinks;
         MetadataId = metadataId;
+        SourceLinkCells = sourceLinkCells;
     }
 
     public int SourceRow { get; }
@@ -103,6 +108,7 @@ public sealed record WorkbookCatalogueItem
     public int RedditTeasers { get; }
     public IReadOnlyDictionary<string, string> PlatformLinks { get; }
     public string? MetadataId { get; }
+    public IReadOnlyDictionary<string, CatalogueSourceLinkCell>? SourceLinkCells { get; }
 }
 
 public sealed record WorkbookProjection(string WorkbookId, string SheetId, bool Complete, IReadOnlyList<WorkbookCatalogueItem> Items);

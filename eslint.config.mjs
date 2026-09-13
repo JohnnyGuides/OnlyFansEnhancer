@@ -46,10 +46,23 @@ const browserGlobals = Object.fromEntries(
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "store/**"],
+    files: ["tools/**/*.mjs"],
+    ...js.configs.recommended,
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: { Buffer: "readonly", process: "readonly", console: "readonly" },
+    },
   },
   {
-    files: ["creator-tools/**/*.js", "options.js", "realbooru-parser.js"],
+    ignores: ["dist/**", "node_modules/**", ".local/**"],
+  },
+  {
+    files: [
+      "extensions/personal/workflows/**/*.js",
+      "extensions/personal/options.js",
+      "extensions/personal/realbooru-parser.js",
+    ],
     ...js.configs.recommended,
     languageOptions: {
       ecmaVersion: "latest",
@@ -69,7 +82,7 @@ export default [
     },
   },
   {
-    files: ["creator-tools/**/*.js"],
+    files: ["extensions/personal/workflows/**/*.js"],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {

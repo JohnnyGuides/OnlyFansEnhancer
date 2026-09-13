@@ -138,7 +138,7 @@ internal sealed class TeaserHost
         CatalogueProof catalogue = request.Catalogue
             ?? throw new InvalidOperationException("Audit catalogue metadata is missing.");
         ValidateStatus(status);
-        if (catalogue.Row < 2 || catalogue.Row > 5000 || !SafeIdPattern.IsMatch(catalogue.Id))
+        if (catalogue.Row < 2 || catalogue.Row > 5002 || !SafeIdPattern.IsMatch(catalogue.Id))
             throw new InvalidOperationException("Invalid audit catalogue row or ID.");
         if (request.Frames is not { Length: 3 })
             throw new InvalidOperationException("Exactly three audit frames are required.");

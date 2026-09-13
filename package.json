@@ -1,30 +1,33 @@
 {
   "name": "creator-workflow-toolkit",
-  "version": "0.20.6",
+  "version": "0.20.10",
   "private": true,
   "description": "Development checks for the personal Creator Workflow Toolkit and store-safe Fan Identity Mask edition.",
   "scripts": {
-    "test": "npm run test:personal && npm run test:store",
-    "test:personal": "node --test tests/master-uploader-social-ui.test.cjs tests/social-trace-contract.test.cjs tests/social-publisher-adapters.test.cjs tests/social-chrome-runtime.test.cjs tests/social-distribution-contract.test.cjs tests/social-distribution-session-store.test.cjs tests/social-distribution-orchestrator.test.cjs tests/subreddit-presets.test.cjs tests/x-teaser-contract.test.cjs tests/x-teaser-session-store.test.cjs tests/x-teaser-reconcile.test.cjs tests/x-teaser-tab-binding.test.cjs tests/x-teaser-native-host.test.cjs tests/x-teaser-chrome.test.cjs tests/x-teaser-package.test.cjs tests/background.test.cjs tests/realbooru-parser.test.cjs tests/creator-tools.test.cjs tests/creator-runtime.test.cjs tests/creator-adapters.test.cjs tests/upload-trace-recorder.test.cjs tests/upload-session-store.test.cjs tests/upload-coordinator.test.cjs tests/upload-milestone.test.cjs tests/catalogue-proposal.test.cjs tests/local-file-attacher.test.cjs tests/extension-load.test.cjs",
-    "test:store": "node --test tests/store-edition.test.cjs",
-    "test:snapshots": "node tests/saved-pages.test.cjs",
-    "test:x-teaser-ui": "node tests/x-teaser-ui.test.cjs",
-    "test:social-trace-ui": "node tests/social-trace-recorder-ui.test.cjs",
-    "test:desktop-shell-ui": "node tests/desktop-shell-ui.test.cjs",
-    "test:desktop-catalogue-ui": "node tests/desktop-catalogue-ui.test.cjs",
-    "test:desktop-native-bridge": "node --test tests/desktop-native-bridge.test.cjs",
-    "test:local-file-attacher-chrome": "node tests/local-file-attacher-chrome.test.cjs",
-    "test:desktop-package": "node --test tests/register-native-host.test.cjs tests/release-output-cleanup.test.cjs tests/desktop-package.test.cjs",
-    "build:personal": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-personal-package.ps1",
-    "build:store": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-store-package.ps1",
-    "build:x-teaser-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-x-teaser-native-host.ps1",
-    "stage:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-package.ps1 -StageOnly",
-    "build:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-package.ps1",
-    "lint": "eslint creator-tools options.js realbooru-parser.js upload-console.js x-teaser.js",
+    "build:personal": "node tools/build-extensions.mjs personal",
+    "build:store": "node tools/build-extensions.mjs store",
+    "build:extensions": "npm run build:personal && npm run build:store",
+    "build:x-teaser-host": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-x-teaser-native-host.ps1",
+    "stage:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-desktop-package.ps1 -StageOnly",
+    "build:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-desktop-package.ps1",
+    "test": "npm run build:extensions && node tools/run-tests.mjs portable",
+    "test:structure": "node tools/run-tests.mjs structure",
+    "test:packages": "node tools/run-tests.mjs packages",
+    "test:unit": "npm run build:extensions && node tools/run-tests.mjs unit",
+    "test:browser": "npm run build:extensions && node tools/run-tests.mjs browser",
+    "test:native": "node tools/run-tests.mjs native",
+    "test:windows-packaging": "node tools/run-tests.mjs windows-packaging",
+    "test:dotnet": "dotnet test desktop/OFEnhancer.sln -c Release",
+    "test:snapshots": "npm run build:personal && node tools/run-tests.mjs private",
+    "test:desktop-shell-ui": "node tests/desktop/desktop-shell-ui.test.cjs",
+    "test:desktop-catalogue-ui": "node tests/desktop/desktop-catalogue-ui.test.cjs",
+    "lint": "eslint extensions/personal/workflows extensions/personal/options.js extensions/personal/realbooru-parser.js tools",
     "typecheck": "tsc -p jsconfig.json",
-    "format": "prettier --write \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "format:check": "prettier --check \"app/**/*.{html,css,js}\" \"creator-tools/**/*.js\" \"tests/**/*.cjs\" \"docs/**/*.md\" README.md PRIVACY.md STORE_READINESS.md options.js options.html options.css realbooru-parser.js realbooru-parser.html upload-console.js upload-console.html upload-console.css x-teaser.js x-teaser.html x-teaser.css file-bridge.js file-bridge.html manifest.json package.json jsconfig.json eslint.config.mjs",
-    "check": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run test:desktop-shell-ui && npm run test:desktop-catalogue-ui && npm run test:desktop-native-bridge && npm run test:local-file-attacher-chrome && npm run test:desktop-package && npm run build:personal && npm run build:store"
+    "format": "prettier --write \"{extensions,shared}/**/*.{html,css,js,json}\" \"tools/**/*.mjs\" \"tests/**/*.cjs\" \"docs/**/*.{md,html}\" \"packaging/**/*.{json,md,html}\" README.md package.json jsconfig.json eslint.config.mjs .prettierrc.json",
+    "format:check": "prettier --check \"{extensions,shared}/**/*.{html,css,js,json}\" \"tools/**/*.mjs\" \"tests/**/*.cjs\" \"docs/**/*.{md,html}\" \"packaging/**/*.{json,md,html}\" README.md package.json jsconfig.json eslint.config.mjs .prettierrc.json",
+    "check:web": "npm run lint && npm run typecheck && npm run format:check && npm test",
+    "check:windows": "npm run test:dotnet && npm run test:native && npm run test:windows-packaging && npm run build:x-teaser-host",
+    "check": "npm run check:web && npm run check:windows"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -34,5 +37,8 @@
     "prettier": "3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0"
+  },
+  "engines": {
+    "node": "^22.13.0 || >=24"
   }
 }

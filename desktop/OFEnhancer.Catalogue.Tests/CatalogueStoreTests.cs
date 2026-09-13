@@ -6,14 +6,34 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class CatalogueStoreTests
 {
     [TestMethod]
-    public void VersionTwoAddsOnlyBindingsAndOutbox()
+    public void VersionTwoUpgradePreservesRowsAndAddsEmptySourceLinkEvidence()
+    {
+        using TempDirectory temp = new();
+        string databasePath = Path.Combine(temp.Path, "catalogue.db");
+        using (CatalogueStore oldStore = CatalogueStore.OpenForTesting(databasePath, [Migrations.VersionOne, Migrations.VersionTwo]))
+        {
+            using SqliteCommand command = oldStore.Connection.CreateCommand();
+            command.CommandText = "INSERT INTO catalogue_items(item_id,source_key,title,description,updated_utc) VALUES ('kept-id','kept-key','Kept title','','2026-09-08T12:00:00Z')";
+            command.ExecuteNonQuery();
+        }
+        using CatalogueStore store = CatalogueStore.Open(databasePath);
+        CatalogueItemSummary item = store.GetItems().Single();
+        Assert.AreEqual("kept-id", item.ItemId);
+        Assert.AreEqual("Kept title", item.Title);
+        Assert.AreEqual(0, item.SourceLinkCells!.Count);
+        Assert.AreEqual(3, store.SchemaVersion);
+        Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v2-*.sqlite").Length);
+    }
+
+    [TestMethod]
+    public void LatestSchemaKeepsTheExistingTableSet()
     {
         using TempDirectory temp = new();
         string databasePath = Path.Combine(temp.Path, "catalogue.db");
 
         using CatalogueStore store = CatalogueStore.Open(databasePath);
 
-        Assert.AreEqual(2, store.SchemaVersion);
+        Assert.AreEqual(3, store.SchemaVersion);
         CollectionAssert.AreEqual(
             new[]
             {
@@ -43,7 +63,7 @@ public sealed class CatalogueStoreTests
         }
 
         using CatalogueStore migrated = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(2, ReadVersion(databasePath));
+        Assert.AreEqual(3, ReadVersion(databasePath));
         Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
         Assert.AreEqual("ok", ReadIntegrity(databasePath));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);
@@ -59,7 +79,7 @@ public sealed class CatalogueStoreTests
         const string fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         const string createdUtc = "2026-09-04T10:00:00.0000000+00:00";
         const string attemptedUtc = "2026-09-04T10:01:00.0000000+00:00";
-        using (CatalogueStore store = CatalogueStore.Open(databasePath))
+        using (CatalogueStore store = CatalogueStore.OpenForTesting(databasePath, [Migrations.VersionOne, Migrations.VersionTwo]))
         {
             using SqliteCommand command = store.Connection.CreateCommand();
             command.CommandText =
@@ -101,7 +121,7 @@ public sealed class CatalogueStoreTests
         CatalogueMigrationException exception = Assert.ThrowsException<CatalogueMigrationException>(
             () => CatalogueStore.OpenForTesting(
                 databasePath,
-                [.. Migrations.All, new MigrationStep(3, "CREATE TABLE broken(")]
+                [Migrations.VersionOne, Migrations.VersionTwo, new MigrationStep(3, "CREATE TABLE broken(")]
             )
         );
 

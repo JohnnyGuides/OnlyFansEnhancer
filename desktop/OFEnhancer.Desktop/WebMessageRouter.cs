@@ -12,7 +12,10 @@ public sealed partial class WebMessageRouter(
     Func<string?> extensionId,
     CatalogueStore? catalogue = null,
     Func<string?>? chooseThumbnailRoot = null,
-    IGoogleCatalogueController? googleCatalogue = null
+    IGoogleCatalogueController? googleCatalogue = null,
+    Func<BrowserSettingsView>? browserOptions = null,
+    Func<string, BrowserSettingsView>? saveBrowserPreference = null,
+    Func<GoogleCatalogueStatusView>? importGoogleClientConfiguration = null
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -38,8 +41,18 @@ public sealed partial class WebMessageRouter(
             requestId = request.RequestId;
             return request.Operation switch
             {
-                "getStatus" => WithEmptyPayload(request, () => Success(requestId, AgentStatus.Current)),
+                "getStatus" => WithEmptyPayload(request, () => Success(requestId, AgentStatus.Current with { Capabilities = [.. AgentStatus.Current.Capabilities, "chrome-readiness"] })),
                 "openChromeUploader" => WithEmptyPayload(request, () => OpenUploader(requestId)),
+                "getBrowserOptions" => WithBrowser(
+                    requestId,
+                    request,
+                    browserOptions
+                ),
+                "saveBrowserPreference" => WithBrowserPayload(
+                    requestId,
+                    request,
+                    saveBrowserPreference
+                ),
                 "getCatalogue" => WithCatalogue(requestId, request, GetCatalogue),
                 "importCatalogueSnapshot" => WithCatalogue(requestId, request, ImportCatalogue),
                 "scanThumbnails" => WithCatalogue(requestId, request, ScanThumbnails),
@@ -53,6 +66,12 @@ public sealed partial class WebMessageRouter(
                     requestId,
                     request,
                     SaveGoogleClientId
+                ),
+                "importGoogleClientConfiguration" => WithGoogle(
+                    requestId,
+                    request,
+                    () => importGoogleClientConfiguration?.Invoke()
+                        ?? throw new GoogleCatalogueControllerException("google-client-configuration-required")
                 ),
                 "startGoogleCatalogueConnection" => WithGoogle(
                     requestId,
@@ -69,6 +88,9 @@ public sealed partial class WebMessageRouter(
                     request,
                     () => googleCatalogue!.inspectGoogleWorkbook()
                 ),
+                "importGoogleCatalogue" => WithEmptyPayload(request, () => googleCatalogue is null
+                    ? Failure(requestId, "google-catalogue-unavailable")
+                    : Success(requestId, googleCatalogue.importGoogleCatalogue())),
                 "applyGoogleWorkbookMigration" => WithGooglePayload(
                     requestId,
                     request,
@@ -111,6 +133,10 @@ public sealed partial class WebMessageRouter(
         {
             return Failure(requestId, exception.Code);
         }
+        catch (BrowserSettingsException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
         catch (Exception)
         {
             return Failure(requestId, "internal-error");
@@ -127,6 +153,32 @@ public sealed partial class WebMessageRouter(
     {
         DeserializePayload<EmptyPayload>(request.Payload);
         return action();
+    }
+
+    private string WithBrowser(
+        string requestId,
+        WebRequest request,
+        Func<BrowserSettingsView>? action
+    )
+    {
+        if (action is null)
+            return Failure(requestId, "browser-settings-unavailable");
+        DeserializePayload<EmptyPayload>(request.Payload);
+        return Success(requestId, action());
+    }
+
+    private string WithBrowserPayload(
+        string requestId,
+        WebRequest request,
+        Func<string, BrowserSettingsView>? action
+    )
+    {
+        if (action is null)
+            return Failure(requestId, "browser-settings-unavailable");
+        BrowserPreferencePayload payload = DeserializePayload<BrowserPreferencePayload>(request.Payload);
+        if (payload.BrowserId is null)
+            throw new WebPayloadException(new JsonException("Browser ID is required."));
+        return Success(requestId, action(payload.BrowserId));
     }
 
     private string WithGoogle(
@@ -252,6 +304,8 @@ public sealed partial class WebMessageRouter(
     private sealed record BindingPayload(string? AssetId, string? ItemId);
 
     private sealed record GoogleClientIdPayload(string? ClientId);
+
+    private sealed record BrowserPreferencePayload(string? BrowserId);
 
     private sealed record MigrationPayload(string? PlanHash);
 

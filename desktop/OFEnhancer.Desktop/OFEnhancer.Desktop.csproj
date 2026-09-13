@@ -1,12 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Content Include="..\..\extensions\personal\upload-console.*">
+      <Link>app\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\extensions\personal\workflows\*.js">
+      <Link>app\workflows\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\shared\workspace\upload-host.js">
+      <Link>app\app\upload-host.js</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <ProjectReference Include="..\OFEnhancer.Catalogue\OFEnhancer.Catalogue.csproj" />
     <ProjectReference Include="..\OFEnhancer.Protocol\OFEnhancer.Protocol.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="OFEnhancer.Protocol.Tests" />
+    <InternalsVisibleTo Include="OFEnhancer.Desktop.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,7 +29,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Version>0.20.6</Version>
+    <Version>0.20.10</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -26,7 +38,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="..\..\app\**\*" Condition="Exists('..\..\app')">
+    <Content Include="..\..\shared\workspace\**\*" Condition="Exists('..\..\shared\workspace')">
       <Link>app\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

@@ -99,5 +99,10 @@ internal static class Migrations
         """
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo];
+    internal static readonly MigrationStep VersionThree = new(
+        3,
+        "ALTER TABLE catalogue_items ADD COLUMN source_link_cells_json TEXT NOT NULL DEFAULT '{}';"
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree];
 }

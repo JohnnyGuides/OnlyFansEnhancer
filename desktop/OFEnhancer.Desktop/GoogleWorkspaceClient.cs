@@ -31,7 +31,7 @@ internal sealed class GoogleWorkspaceClient
     private const string SpreadsheetMetadataFields =
         "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)))";
     private const string WorkbookFields =
-        "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(effectiveValue,formattedValue,hyperlink)),columnMetadata(hiddenByUser)),columnGroups(range(sheetId,dimension,startIndex,endIndex),depth,collapsed)),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))";
+        "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,formattedValue,hyperlink,effectiveFormat(numberFormat(type)))),columnMetadata(hiddenByUser)),columnGroups(range(sheetId,dimension,startIndex,endIndex),depth,collapsed)),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))";
     private readonly HttpClient _httpClient;
     private readonly IGoogleAccessTokenSource _tokens;
 
@@ -103,7 +103,7 @@ internal sealed class GoogleWorkspaceClient
         List<(string Name, string Value)> query =
         [
             ("includeGridData", "true"),
-            .. metadata.Sheets.Select(sheet => ("ranges", $"'{sheet.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:X5002")),
+            .. metadata.Sheets.Select(sheet => ("ranges", $"'{sheet.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:{(char)('A' + Math.Min(24, sheet.ColumnCount) - 1)}{Math.Min(5002, sheet.RowCount)}")),
             ("fields", WorkbookFields),
         ];
         Uri workbookEndpoint = BuildUri(baseEndpoint, query);
@@ -122,6 +122,79 @@ internal sealed class GoogleWorkspaceClient
             throw new GoogleCatalogueException("invalid-google-response");
         }
         return snapshot;
+    }
+
+    internal async Task<GoogleWorkbookSnapshot> ReadImportWorkbookAsync(string fileId, CancellationToken cancellationToken)
+    {
+        string workbookId = Required(fileId, 256, "fileId");
+        GoogleWorkbookSnapshot metadata = await ReadWorkbookMetadataAsync(workbookId, cancellationToken).ConfigureAwait(false);
+        GoogleSheetSnapshot[] visible = metadata.Sheets.Where(sheet =>
+            !sheet.Hidden && sheet.RowCount > 0 && sheet.ColumnCount > 0).ToArray();
+        if (visible.Length == 0)
+            throw new GoogleCatalogueException("catalogue-tab-not-found");
+        GoogleWorkbookSnapshot headers = await ReadImportRangesAsync(metadata, visible, headerDiscovery: true,
+            cancellationToken).ConfigureAwait(false);
+        GoogleCatalogueImportPreview discovered = GoogleCatalogueImportReader.Detect(headers);
+        GoogleSheetSnapshot selected = headers.Sheets.Single(sheet => sheet.SheetId == discovered.CatalogueSheetId);
+        if (selected.RowCount > 5002)
+            throw new GoogleCatalogueException("workbook-row-limit");
+        GoogleWorkbookSnapshot body = await ReadImportRangesAsync(metadata, [selected], headerDiscovery: false,
+            cancellationToken).ConfigureAwait(false);
+        GoogleCatalogueImportPreview verified = GoogleCatalogueImportReader.Detect(body);
+        if (!discovered.HasSameMapping(verified))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        return body;
+    }
+
+    internal async Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(string fileId, CancellationToken cancellationToken)
+    {
+        string workbookId=Required(fileId,256,"fileId");
+        GoogleWorkbookSnapshot metadata=await ReadWorkbookMetadataAsync(workbookId,cancellationToken).ConfigureAwait(false);
+        GoogleSheetSnapshot[] visible=metadata.Sheets.Where(sheet=>!sheet.Hidden && sheet.RowCount>0 && sheet.ColumnCount>0).ToArray();
+        if(visible.Length==0) throw new GoogleCatalogueException("catalogue-tab-not-found");
+        GoogleWorkbookSnapshot headers=await ReadImportRangesAsync(metadata,visible,true,cancellationToken).ConfigureAwait(false);
+        GoogleCatalogueImportPreview detected=GoogleCatalogueImportReader.Detect(headers);
+        GoogleSheetSnapshot selected=headers.Sheets.Single(sheet=>sheet.SheetId==detected.CatalogueSheetId);
+        if(selected.ColumnCount<28) throw new GoogleCatalogueException("subreddit-presets-unavailable");
+        int lastRow=Math.Min(501,selected.RowCount);
+        string range=$"'{selected.Title.Replace("'","''",StringComparison.Ordinal)}'!Z1:AB{lastRow}";
+        Uri endpoint=BuildUri($"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}/values/{Uri.EscapeDataString(range)}",
+            [("fields","range,values"),("valueRenderOption","FORMATTED_VALUE")]);
+        byte[] body=await SendReadAsync(token=>CreateJsonRequest(HttpMethod.Get,endpoint,token),SheetsOrigin,4*1024*1024,cancellationToken).ConfigureAwait(false);
+        GoogleWorkbookSnapshot verifiedMetadata=await ReadWorkbookMetadataAsync(workbookId,cancellationToken).ConfigureAwait(false);
+        GoogleSheetSnapshot? identity=verifiedMetadata.Sheets.SingleOrDefault(sheet=>sheet.SheetId==selected.SheetId);
+        if(identity is null || identity.Title!=selected.Title || identity.Hidden) throw new GoogleCatalogueException("subreddit-source-mismatch");
+        return GoogleSubredditPresets.Parse(body,selected.Title,lastRow);
+    }
+
+    private async Task<GoogleWorkbookSnapshot> ReadImportRangesAsync(
+        GoogleWorkbookSnapshot metadata, IReadOnlyList<GoogleSheetSnapshot> requestedSheets,
+        bool headerDiscovery, CancellationToken cancellationToken)
+    {
+        string cells = headerDiscovery ? "formattedValue" : "effectiveValue,formattedValue,hyperlink,effectiveFormat(numberFormat(type))";
+        string fields = $"spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values({cells}))))";
+        List<(string Name, string Value)> query = [("fields", fields)];
+        foreach (GoogleSheetSnapshot sheet in requestedSheets)
+        {
+            char lastColumn = (char)('A' + Math.Min(sheet.ColumnCount, 24) - 1);
+            int lastRow = Math.Min(sheet.RowCount, headerDiscovery ? 20 : 5002);
+            query.Add(("ranges", $"'{sheet.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:{lastColumn}{lastRow}"));
+        }
+        Uri endpoint = BuildUri($"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(metadata.WorkbookId)}", query);
+        byte[] response = await SendReadAsync(token => CreateJsonRequest(HttpMethod.Get, endpoint, token),
+            SheetsOrigin, MaximumWorkbookResponseBytes, cancellationToken).ConfigureAwait(false);
+        GoogleWorkbookSnapshot snapshot = GoogleWorkbookSnapshot.Parse(response, headerDiscovery);
+        if (!string.Equals(snapshot.WorkbookId, metadata.WorkbookId, StringComparison.Ordinal)
+            || requestedSheets.Any(requested => !snapshot.Sheets.Any(sheet => sheet.SheetId == requested.SheetId))
+            || snapshot.Sheets.Any(sheet => !metadata.Sheets.Any(original => original.SheetId == sheet.SheetId
+                && original.Title == sheet.Title && original.Hidden == sheet.Hidden)))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        // Retain every tab's identity, but expose data only from the ranges requested in this phase.
+        return metadata with
+        {
+            Sheets = metadata.Sheets.Select(original => requestedSheets.Any(requested => requested.SheetId == original.SheetId)
+                ? snapshot.Sheets.Single(sheet => sheet.SheetId == original.SheetId) : original).ToArray(),
+        };
     }
 
     internal async Task<GoogleSheetIdentity> ReadSheetIdentityAsync(
@@ -251,7 +324,7 @@ internal sealed class GoogleWorkspaceClient
             $"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}/values/{EscapePath(boundedRange)}",
             [
                 ("majorDimension", "ROWS"),
-                ("valueRenderOption", "UNFORMATTED_VALUE"),
+                ("valueRenderOption", "FORMULA"),
                 ("dateTimeRenderOption", "FORMATTED_STRING"),
             ]
         );
@@ -342,6 +415,19 @@ internal sealed class GoogleWorkspaceClient
             body,
             cancellationToken
         );
+    }
+
+    internal Task UpdateMetadataCellAsync(string workbookId, int metadataId, int column, string value, CancellationToken cancellationToken)
+    {
+        if (metadataId < 0 || column is < 1 or > 24) throw new GoogleCatalogueException("invalid-google-batch");
+        object?[] cells = new object?[column];
+        cells[column - 1] = value;
+        byte[] body = JsonSerializer.SerializeToUtf8Bytes(new {
+            valueInputOption = "RAW",
+            data = new[] { new { dataFilter = new { developerMetadataLookup = new { metadataId } }, majorDimension = "ROWS", values = new[] { cells } } }
+        });
+        EnsureRequestSize(body, MaximumValuesRequestBytes);
+        return SendMutationAsync(new($"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(Required(workbookId, 256, "fileId"))}/values:batchUpdateByDataFilter"), body, cancellationToken);
     }
 
     private async Task<byte[]> SendReadAsync(
@@ -550,7 +636,7 @@ internal sealed record GoogleWorkbookSnapshot(
     IReadOnlyList<GoogleDeveloperMetadataSnapshot> DeveloperMetadata
 )
 {
-    internal static GoogleWorkbookSnapshot Parse(byte[] utf8Json)
+    internal static GoogleWorkbookSnapshot Parse(byte[] utf8Json, bool headerDiscovery = false)
     {
         try
         {
@@ -592,7 +678,7 @@ internal sealed record GoogleWorkbookSnapshot(
                 }
                 if (!sheetIds.Add(sheetId) || !sheetTitles.Add(sheetTitle))
                     throw Invalid();
-                IReadOnlyList<GoogleWorkbookRowSnapshot> rows = ParseRows(sheet, out IReadOnlySet<int> hiddenColumns);
+                IReadOnlyList<GoogleWorkbookRowSnapshot> rows = ParseRows(sheet, out IReadOnlySet<int> hiddenColumns, headerDiscovery);
                 IReadOnlyList<GoogleDimensionGroupSnapshot> columnGroups = ParseColumnGroups(sheet, sheetId);
                 sheets.Add(new(sheetId, sheetTitle, hidden, rowCount, columnCount, rows, hiddenColumns, columnGroups));
             }
@@ -683,7 +769,7 @@ internal sealed record GoogleWorkbookSnapshot(
         );
     }
 
-    internal static string? CellValue(JsonElement value, int maximumLength)
+    internal static string? CellValue(JsonElement value, int maximumLength, bool allowTextWhitespace = false)
     {
         string? result = value.ValueKind switch
         {
@@ -694,14 +780,16 @@ internal sealed record GoogleWorkbookSnapshot(
             JsonValueKind.False => "FALSE",
             _ => throw Invalid(),
         };
-        if (result is not null && (result.Length > maximumLength || result.Any(char.IsControl)))
+        if (result is not null && (result.Length > maximumLength || result.Any(character =>
+            char.IsControl(character) && !(allowTextWhitespace && character is '\r' or '\n' or '\t'))))
             throw Invalid();
         return result;
     }
 
     private static IReadOnlyList<GoogleWorkbookRowSnapshot> ParseRows(
         JsonElement sheet,
-        out IReadOnlySet<int> hiddenColumns
+        out IReadOnlySet<int> hiddenColumns,
+        bool headerDiscovery = false
     )
     {
         HashSet<int> hidden = [];
@@ -760,7 +848,7 @@ internal sealed record GoogleWorkbookSnapshot(
                 {
                     while (cells.Count <= column)
                         cells.Add(new(null, null));
-                    cells[column] = ParseCell(cell);
+                    cells[column] = ParseCell(cell, headerDiscovery);
                     column++;
                 }
             }
@@ -800,13 +888,20 @@ internal sealed record GoogleWorkbookSnapshot(
         return result;
     }
 
-    private static GoogleWorkbookCellSnapshot ParseCell(JsonElement cell)
+    private static GoogleWorkbookCellSnapshot ParseCell(JsonElement cell, bool headerDiscovery = false)
     {
         if (cell.ValueKind != JsonValueKind.Object)
             throw Invalid();
+        if (headerDiscovery)
+        {
+            string? header = cell.TryGetProperty("formattedValue", out JsonElement displayed)
+                && displayed.ValueKind == JsonValueKind.String ? displayed.GetString() : null;
+            // Discovery needs short labels only; unrelated notes and content are not catalogue validation errors.
+            return new(header?.Length <= 200 && !header.Any(char.IsControl) ? header : null, null);
+        }
         string? value = null;
         if (cell.TryGetProperty("formattedValue", out JsonElement formatted))
-            value = CellValue(formatted, 10_000);
+            value = CellValue(formatted, 10_000, allowTextWhitespace: true);
         else if (cell.TryGetProperty("effectiveValue", out JsonElement effective))
         {
             if (effective.ValueKind != JsonValueKind.Object || effective.EnumerateObject().Count() > 1)
@@ -814,17 +909,33 @@ internal sealed record GoogleWorkbookSnapshot(
             JsonProperty property = effective.EnumerateObject().SingleOrDefault();
             value = property.Name switch
             {
-                "stringValue" => CellValue(property.Value, 10_000),
+                "stringValue" => CellValue(property.Value, 10_000, allowTextWhitespace: true),
                 "numberValue" => CellValue(property.Value, 10_000),
                 "boolValue" => CellValue(property.Value, 10_000),
                 "" => null,
                 _ => throw Invalid(),
             };
         }
+        if (cell.TryGetProperty("effectiveFormat", out JsonElement format)
+            && format.TryGetProperty("numberFormat", out JsonElement numberFormat)
+            && numberFormat.TryGetProperty("type", out JsonElement type)
+            && type.GetString() is "DATE" or "DATE_TIME"
+            && cell.TryGetProperty("effectiveValue", out JsonElement dateValue)
+            && dateValue.TryGetProperty("numberValue", out JsonElement number))
+        {
+            if (dateValue.EnumerateObject().Count() != 1
+                || !number.TryGetDouble(out double serial) || !double.IsFinite(serial))
+                throw Invalid();
+            // Google dates count days from 1899-12-30; display text depends on workbook locale.
+            int days = checked((int)Math.Floor(serial));
+            value = new DateOnly(1899, 12, 30).AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
         string? hyperlink = null;
         if (cell.TryGetProperty("hyperlink", out JsonElement hyperlinkValue))
             hyperlink = CellValue(hyperlinkValue, 2_048);
-        return new(value, hyperlink);
+        string? formula = cell.TryGetProperty("userEnteredValue", out var entered) && entered.TryGetProperty("formulaValue", out var expression)
+            ? CellValue(expression, 10_000, allowTextWhitespace: true) : null;
+        return new(value, hyperlink, formula);
     }
 
     private static string String(JsonElement root, string property, int maximumLength)
@@ -878,7 +989,7 @@ internal sealed record GoogleWorkbookRowSnapshot(
     IReadOnlyList<GoogleWorkbookCellSnapshot> Cells
 );
 
-internal sealed record GoogleWorkbookCellSnapshot(string? Value, string? Hyperlink);
+internal sealed record GoogleWorkbookCellSnapshot(string? Value, string? Hyperlink, string? Formula = null);
 
 internal sealed record GoogleDeveloperMetadataSnapshot(
     int MetadataId,

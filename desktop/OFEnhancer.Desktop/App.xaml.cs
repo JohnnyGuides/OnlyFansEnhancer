@@ -42,15 +42,25 @@ public partial class App : System.Windows.Application
         if (!first)
         {
             candidateLock.Dispose();
+            if (eventArgs.Args.Contains("--chrome-setup", StringComparer.Ordinal))
+            {
+                try
+                {
+                    using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(3));
+                    var response = new AgentPipeClient(DesktopAgent.DefaultPipeName(userKey)).SendAsync(
+                        new AgentRequest(AgentProtocol.Version, Guid.NewGuid(), "showChromeSetup"), timeout.Token).GetAwaiter().GetResult();
+                    if (!response.Ok) throw new InvalidOperationException("The running desktop does not support setup activation.");
+                }
+                catch { System.Windows.MessageBox.Show("Open the running OFEnhancer window and select its Chrome connection button.", "Chrome setup"); }
+            }
             Shutdown();
             return;
         }
         instanceLock = candidateLock;
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
-        agent = new DesktopAgent(DesktopAgent.DefaultPipeName(userKey));
-        agent.Start();
 
+        AppConfiguration.ApplyFreshInstallerDefaults(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")), AppConfiguration.SettingsPath);
         string? extensionId = AppConfiguration.ResolveExtensionId(
             eventArgs.Args,
             AppConfiguration.SettingsPath
@@ -70,9 +80,12 @@ public partial class App : System.Windows.Application
             Shutdown();
             return;
         }
-        window = new MainWindow(extensionId, catalogue);
+        window = new MainWindow(extensionId, catalogue, eventArgs.Args.Contains("--extension-id", StringComparer.Ordinal));
+        agent = new DesktopAgent(DesktopAgent.DefaultPipeName(userKey), window.HandleAgentRequest);
+        agent.Start();
         MainWindow = window;
         window.Show();
+        if (eventArgs.Args.Contains("--chrome-setup", StringComparer.Ordinal)) window.OpenChromeSetup();
 
         tray = new NotifyIcon
         {

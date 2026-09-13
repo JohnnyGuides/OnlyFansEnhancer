@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Connect Chrome to OFEnhancer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #090b10;
+        color: #f4f5f7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+      }
+      main {
+        width: min(720px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 64px 0;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 42px;
+      }
+      img {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+      }
+      h1,
+      h2,
+      p {
+        margin-top: 0;
+      }
+      h1 {
+        margin-bottom: 4px;
+        font-size: clamp(2rem, 7vw, 3.8rem);
+        letter-spacing: -0.04em;
+      }
+      header p,
+      li,
+      .note {
+        color: #aeb6c3;
+        line-height: 1.6;
+      }
+      ol {
+        padding-left: 1.5rem;
+      }
+      li {
+        margin: 18px 0;
+      }
+      code {
+        display: block;
+        overflow-wrap: anywhere;
+        margin-top: 8px;
+        padding: 14px;
+        border: 1px solid #303744;
+        border-radius: 10px;
+        background: #111722;
+        color: #dceef7;
+      }
+      .note {
+        margin-top: 34px;
+        padding-top: 22px;
+        border-top: 1px solid #303744;
+      }
+      :focus-visible {
+        outline: 3px solid #65cfff;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="assets/finalLogo.png" alt="" />
+        <div>
+          <h1>Connect Chrome</h1>
+          <p>
+            Prepare the integration, then finish the required steps in Chrome.
+          </p>
+        </div>
+      </header>
+      <ol>
+        <li>
+          Open OFEnhancer and select the Chrome connection button in the
+          sidebar, or choose Connect Chrome from the Start menu.
+        </li>
+        <li>
+          For a fresh installation, choose <strong>Prepare integration</strong>.
+          OFEnhancer validates its installed package and registers its own
+          current-user native bridge. This does not load the extension.
+        </li>
+        <li>
+          Choose <strong>Open Chrome extensions</strong>. If necessary, paste
+          <code>chrome://extensions</code> into Chrome's address bar.
+        </li>
+        <li>
+          Enable Developer mode, choose <strong>Load unpacked</strong>, and
+          select the exact <strong>extension-keyed</strong> folder displayed by
+          OFEnhancer.
+        </li>
+        <li>
+          Leave OFEnhancer open. Its status changes only after fresh matching
+          extension messages arrive; no desktop restart or copied extension ID
+          is needed.
+        </li>
+      </ol>
+      <p class="note">
+        Already using the extension? Preserve its existing load folder, ID,
+        settings and upload checkpoints. Open Chrome and check again first;
+        reload the existing extension after an update. Do not remove it or load
+        the new keyed folder to repair a legacy installation. OFEnhancer stops
+        with specific guidance when legacy installation evidence is
+        insufficient.
+      </p>
+      <p class="note">
+        Chrome will mention debugger access. OFEnhancer uses it only to attach a
+        local file to the exact upload control, then detaches. This setup does
+        not post anything.
+      </p>
+    </main>
+  </body>
+</html>

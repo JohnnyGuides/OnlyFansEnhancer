@@ -82,7 +82,8 @@ internal static partial class GoogleOAuthProtocol
         string authorizationCode,
         Uri redirectUri,
         string codeVerifier,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string? clientSecret = null
     )
     {
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -93,14 +94,16 @@ internal static partial class GoogleOAuthProtocol
             throw new GoogleOAuthException("invalid_token_request");
         }
 
-        using FormUrlEncodedContent content = new(new Dictionary<string, string>
+        Dictionary<string, string> form = new()
         {
             ["grant_type"] = "authorization_code",
             ["code"] = authorizationCode,
             ["client_id"] = clientId,
             ["redirect_uri"] = redirectUri.AbsoluteUri,
             ["code_verifier"] = codeVerifier
-        });
+        };
+        if (clientSecret is not null) form["client_secret"] = clientSecret;
+        using FormUrlEncodedContent content = new(form);
         using HttpRequestMessage request = new(HttpMethod.Post, TokenEndpoint) { Content = content };
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 

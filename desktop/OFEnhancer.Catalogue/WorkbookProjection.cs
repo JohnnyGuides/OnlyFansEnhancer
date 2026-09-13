@@ -11,13 +11,14 @@ internal static class WorkbookProjectionImporter
     private const int MaximumItems = 5_000;
     private static readonly JsonSerializerOptions StorageJson = new() { WriteIndented = false };
 
-    internal static void Import(SqliteConnection connection, WorkbookProjection projection)
+    internal static void Import(SqliteConnection connection, WorkbookProjection projection, bool updateGoogleBindings = true)
     {
         ArgumentNullException.ThrowIfNull(projection);
         ValidatedProjection validated = Validate(projection);
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
         using SqliteTransaction transaction = connection.BeginTransaction();
+        Execute(connection, transaction, "DELETE FROM settings WHERE key = 'catalogue.snapshot.sha256'");
         if (validated.Complete)
             Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
 
@@ -64,6 +65,10 @@ internal static class WorkbookProjectionImporter
             command.Parameters.AddWithValue("$links", JsonSerializer.Serialize(row.PlatformLinks, StorageJson));
             command.Parameters.AddWithValue("$now", now);
             command.ExecuteNonQuery();
+            if (!updateGoogleBindings)
+                Execute(connection, transaction,
+                    "UPDATE catalogue_items SET source_link_cells_json = $cells WHERE item_id = $itemId",
+                    ("$cells", JsonSerializer.Serialize(row.SourceLinkCells, StorageJson)), ("$itemId", itemId));
             bindings.Add(new GoogleRowBinding(
                 validated.WorkbookId,
                 validated.SheetId,
@@ -74,7 +79,8 @@ internal static class WorkbookProjectionImporter
                 DateTimeOffset.Parse(now, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
             ));
         }
-        ReplaceSheetBindings(connection, transaction, validated.WorkbookId, validated.SheetId, bindings, validated.Complete);
+        if (updateGoogleBindings)
+            ReplaceSheetBindings(connection, transaction, validated.WorkbookId, validated.SheetId, bindings, validated.Complete);
         transaction.Commit();
     }
 
@@ -163,7 +169,8 @@ internal static class WorkbookProjectionImporter
                 row.XTeasers,
                 row.RedditTeasers,
                 ValidateLinks(row.PlatformLinks),
-                metadataId
+                metadataId,
+                ValidateSourceLinkCells(row.SourceLinkCells)
             ));
         }
         return new ValidatedProjection(workbookId, sheetId, projection.Complete, rows);
@@ -187,6 +194,31 @@ internal static class WorkbookProjectionImporter
             result.Add(platform, canonical);
         }
         return result;
+    }
+
+    private static IReadOnlyDictionary<string, CatalogueSourceLinkCell> ValidateSourceLinkCells(
+        IReadOnlyDictionary<string, CatalogueSourceLinkCell>? cells)
+    {
+        if (cells is null) return new Dictionary<string, CatalogueSourceLinkCell>();
+        if (cells.Count > 9) throw Invalid("Too many source link cells.");
+        SortedDictionary<string, CatalogueSourceLinkCell> validated = new(StringComparer.Ordinal);
+        foreach ((string platform, CatalogueSourceLinkCell cell) in cells)
+        {
+            if (platform is not ("onlyfans" or "fansly" or "manyvids" or "pornhubFree" or "pornhubPaid" or "clips4sale" or "x" or "reddit" or "redgifs")
+                || cell is null || cell.Text is null || cell.Text.Length > 10_000
+                || cell.Text.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t'))
+                || cell.Hyperlink?.Length > 2_048
+                || cell.Hyperlink?.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t')) == true
+                || cell.Urls is null || cell.Urls.Count > 100
+                || cell.IssueCode is not null && (cell.IssueCode.Length is 0 or > 64
+                    || cell.IssueCode.Any(character => character is not (>= 'a' and <= 'z' or '-'))))
+                throw Invalid("Source link cell is invalid.");
+            List<string> urls = [];
+            foreach (string url in cell.Urls)
+                urls.Add(ValidateLinks(new Dictionary<string, string> { [platform] = url })[platform]);
+            validated.Add(platform, cell with { Urls = urls.Distinct(StringComparer.Ordinal).ToArray() });
+        }
+        return validated;
     }
 
     private static string Required(string? value, int maximum, string field, bool allowEmpty = false)
@@ -232,12 +264,14 @@ internal static class WorkbookProjectionImporter
     private static WorkbookProjectionException Invalid(string message) => new("invalid-workbook-projection", message);
 
     private sealed record ValidatedProjection(string WorkbookId, string SheetId, bool Complete, IReadOnlyList<ValidatedWorkbookItem> Items);
-    private sealed record ValidatedWorkbookItem(int SourceRow, string SourceKey, string Title, string Description, string? PlannedDate, string? Series, string? Episode, int XTeasers, int RedditTeasers, IReadOnlyDictionary<string, string> PlatformLinks, string? MetadataId);
+    private sealed record ValidatedWorkbookItem(int SourceRow, string SourceKey, string Title, string Description, string? PlannedDate, string? Series, string? Episode, int XTeasers, int RedditTeasers, IReadOnlyDictionary<string, string> PlatformLinks, string? MetadataId,
+        [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyDictionary<string, CatalogueSourceLinkCell> SourceLinkCells);
 }
 
 public sealed partial class CatalogueStore
 {
-    public void ImportWorkbookProjection(WorkbookProjection projection) => WorkbookProjectionImporter.Import(connection, projection);
+    public void ImportWorkbookProjection(WorkbookProjection projection, bool updateGoogleBindings = true) =>
+        WorkbookProjectionImporter.Import(connection, projection, updateGoogleBindings);
 
     public void ReplaceGoogleBindings(string workbookId, IReadOnlyList<GoogleRowBinding> bindings)
     {

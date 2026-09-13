@@ -16,6 +16,7 @@ internal sealed class DesktopSettingsStore
     };
     private readonly string _path;
     private readonly Action<string, string> _replace;
+    internal string SettingsPath => _path;
 
     internal DesktopSettingsStore(
         string path,
@@ -42,7 +43,8 @@ internal sealed class DesktopSettingsStore
                 return DesktopSettings.Empty;
             return new(
                 AppConfiguration.NormalizeExtensionId(payload.ExtensionId),
-                AppConfiguration.NormalizeGoogleOAuthClientId(payload.GoogleOAuthClientId)
+                AppConfiguration.NormalizeGoogleOAuthClientId(payload.GoogleOAuthClientId),
+                BrowserSelection.NormalizeId(payload.BrowserId)
             );
         }
         catch
@@ -56,8 +58,9 @@ internal sealed class DesktopSettingsStore
         ArgumentNullException.ThrowIfNull(settings);
         string? extensionId = NullOrValidatedExtensionId(settings.ExtensionId);
         string? googleClientId = NullOrValidatedGoogleClientId(settings.GoogleOAuthClientId);
+        string? browserId = NullOrValidatedBrowserId(settings.BrowserId);
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(
-            new DesktopSettingsPayload(extensionId, googleClientId),
+            new DesktopSettingsPayload(extensionId, googleClientId, browserId),
             JsonOptions
         );
         string? directory = Path.GetDirectoryName(_path);
@@ -109,6 +112,14 @@ internal sealed class DesktopSettingsStore
             ?? throw new DesktopSettingsException("invalid-google-client-id");
     }
 
+    private static string? NullOrValidatedBrowserId(string? value)
+    {
+        if (value is null)
+            return null;
+        return BrowserSelection.NormalizeId(value)
+            ?? throw new DesktopSettingsException("invalid-browser-id");
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -123,11 +134,16 @@ internal sealed class DesktopSettingsStore
 
     private sealed record DesktopSettingsPayload(
         [property: JsonPropertyName("extensionId")] string? ExtensionId,
-        [property: JsonPropertyName("googleOAuthClientId")] string? GoogleOAuthClientId
+        [property: JsonPropertyName("googleOAuthClientId")] string? GoogleOAuthClientId,
+        [property: JsonPropertyName("browserId")] string? BrowserId
     );
 }
 
-internal sealed record DesktopSettings(string? ExtensionId, string? GoogleOAuthClientId)
+internal sealed record DesktopSettings(
+    string? ExtensionId,
+    string? GoogleOAuthClientId,
+    string? BrowserId = null
+)
 {
     internal static DesktopSettings Empty { get; } = new(null, null);
 }

@@ -5,6 +5,26 @@ namespace OFEnhancer.Catalogue.Tests;
 [TestClass]
 public sealed class CatalogueSnapshotImporterTests
 {
+    [DataTestMethod]
+    [DataRow("pornhubFree")]
+    [DataRow("pornhubPaid")]
+    public void PornhubVideoShowRouteKeepsExactVideoIdentity(string platform)
+    {
+        Assert.AreEqual("https://www.pornhub.com/view_video.php?viewkey=phAbC_123-Z",
+            CatalogueSnapshotImporter.CanonicalPlatformLink(platform,
+                new Uri("https://www.pornhub.com/video/show?viewkey=phAbC_123-Z")));
+    }
+
+    [DataTestMethod]
+    [DataRow("https://www.pornhub.com/video/show?viewkey=abc&tracking=1")]
+    [DataRow("https://www.pornhub.com/video/show?viewkey=abc#fragment")]
+    [DataRow("https://www.pornhub.com.evil.example/video/show?viewkey=abc")]
+    [DataRow("https://www.pornhub.com/video/other?viewkey=abc")]
+    public void PornhubRouteAliasKeepsExistingUrlBoundaries(string url)
+    {
+        Assert.IsNull(CatalogueSnapshotImporter.CanonicalPlatformLink("pornhubFree", new Uri(url)));
+    }
+
     [TestMethod]
     public void ReimportKeepsOpaqueIdentityBindingAndArchivesMissingItems()
     {

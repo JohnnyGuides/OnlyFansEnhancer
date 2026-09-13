@@ -102,6 +102,13 @@ internal static class GoogleWorkbookProfile
             throw new GoogleCatalogueException("workbook-row-limit");
 
         List<WorkbookConflict> conflicts = [];
+        foreach (var sheet in snapshot.Sheets)
+            foreach (var row in sheet.Rows)
+                for (int index = 0; index < row.Cells.Count; index++)
+                    if (row.Cells[index].Formula is not null
+                        && ((sheet.SheetId == selected.SheetId && index >= 20)
+                            || GoogleWorkbookContract.CompanionHeaders.ContainsKey(sheet.Title)))
+                        conflicts.Add(new("foreign-formula", $"{sheet.Title}:{row.RowNumber}:{index + 1}"));
         bool[] ownedTechnicalColumns = InspectTechnicalHeaders(header, bodyRows, conflicts);
         bool technicalHeadersComplete = ownedTechnicalColumns.All(owned => owned);
         InspectCompanionTabs(snapshot, conflicts);

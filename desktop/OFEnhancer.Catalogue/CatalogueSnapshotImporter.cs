@@ -294,7 +294,8 @@ internal static class CatalogueSnapshotImporter
     {
         if (
             !string.Equals(uri.IdnHost, "www.pornhub.com", StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(uri.AbsolutePath, "/view_video.php", StringComparison.OrdinalIgnoreCase)
+            || !(string.Equals(uri.AbsolutePath, "/view_video.php", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(uri.AbsolutePath, "/video/show", StringComparison.OrdinalIgnoreCase))
             || !string.IsNullOrEmpty(uri.Fragment)
         )
             return null;
@@ -494,13 +495,16 @@ public sealed partial class CatalogueStore
     public CatalogueImportSummary ImportSnapshot(string json) =>
         CatalogueSnapshotImporter.Import(connection, json);
 
-    public IReadOnlyList<CatalogueItemSummary> GetItems(bool includeArchived = false)
+    public IReadOnlyList<CatalogueItemSummary> GetItems(bool includeArchived = false) => ReadItems(includeArchived, null);
+
+    private IReadOnlyList<CatalogueItemSummary> ReadItems(bool includeArchived, Microsoft.Data.Sqlite.SqliteTransaction? transaction)
     {
         using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText =
             """
             SELECT item_id, source_key, source_row, title, description, planned_date,
-                   series, episode, x_teasers, reddit_teasers, platform_links_json, archived
+                   series, episode, x_teasers, reddit_teasers, platform_links_json, archived, source_link_cells_json
             FROM catalogue_items
             WHERE $includeArchived = 1 OR archived = 0
             ORDER BY CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END, planned_date, title, item_id
@@ -526,10 +530,12 @@ public sealed partial class CatalogueStore
                     reader.GetInt32(8),
                     reader.GetInt32(9),
                     links,
-                    reader.GetInt32(11) == 1
+                    reader.GetInt32(11) == 1,
+                    SourceLinkCells: JsonSerializer.Deserialize<Dictionary<string, CatalogueSourceLinkCell>>(reader.GetString(12)) ?? []
                 )
             );
         }
-        return items;
+        reader.Close();
+        return WithRecordedPublications(items,transaction);
     }
 }

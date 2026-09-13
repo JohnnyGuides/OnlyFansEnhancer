@@ -13,7 +13,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="OFEnhancer.Desktop" />
     <InternalsVisibleTo Include="OFEnhancer.Catalogue.Tests" />
-    <InternalsVisibleTo Include="OFEnhancer.Protocol.Tests" />
+    <InternalsVisibleTo Include="OFEnhancer.Desktop.Tests" />
   </ItemGroup>
 
 </Project>

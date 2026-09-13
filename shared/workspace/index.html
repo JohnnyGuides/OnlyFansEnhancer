@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#090b10" />
+    <title>OFEnhancer</title>
+    <link rel="icon" href="finalLogo.png" />
+    <link rel="stylesheet" href="app.css" />
+    <script src="host-bridge.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="finalLogo.png" alt="" width="44" height="44" />
+          <div>
+            <strong translate="no">OFEnhancer</strong>
+            <span id="versionLabel">Starting…</span>
+          </div>
+        </div>
+
+        <nav aria-label="Workspace">
+          <button type="button" data-view="catalogue">Catalogue</button>
+          <button type="button" data-view="uploads" aria-current="page">
+            Uploads
+          </button>
+          <button type="button" data-view="teasers">Teasers</button>
+          <button type="button" data-view="attention">Attention</button>
+          <button type="button" data-view="settings">Settings</button>
+        </nav>
+
+        <button
+          type="button"
+          id="chromeConnection"
+          class="connection"
+          aria-label="Check Chrome connection and setup"
+        >
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connectionLabel" role="status">Checking Chrome…</span>
+        </button>
+      </aside>
+
+      <main id="workspace" tabindex="-1">
+        <section data-panel="uploads">
+          <header class="page-heading">
+            <h1 tabindex="-1">Uploads</h1>
+            <p>
+              Prepare uploads here. Your personal extension executes them in
+              Chrome, where your website sign-ins stay.
+            </p>
+          </header>
+          <div class="primary-action">
+            <div>
+              <h2>Chrome uploader</h2>
+              <p>
+                Your current OnlyFans, Fansly, ManyVids, Pornhub, X, and Reddit
+                tools stay in Chrome.
+              </p>
+            </div>
+            <button id="openUploader" class="action-button" type="button">
+              Upload a video
+            </button>
+          </div>
+          <p id="actionStatus" class="action-status" role="status"></p>
+          <p class="chrome-readiness-message">Checking Chrome…</p>
+          <button type="button" class="secondary-button chrome-setup-trigger">
+            Check Chrome setup
+          </button>
+        </section>
+
+        <section data-panel="catalogue" hidden>
+          <header class="page-heading">
+            <h1 tabindex="-1">Catalogue</h1>
+            <p id="catalogueSummary">Loading your videos…</p>
+          </header>
+
+          <div class="catalogue-controls">
+            <label class="catalogue-search" for="catalogueSearch">
+              <span>Search catalogue</span>
+              <input
+                id="catalogueSearch"
+                name="catalogue-search"
+                type="search"
+                autocomplete="off"
+                placeholder="Ashley, episode 04…"
+              />
+            </label>
+            <div class="filter-group" aria-label="Filter catalogue">
+              <button
+                type="button"
+                data-catalogue-filter="all"
+                aria-pressed="true"
+              >
+                All
+              </button>
+              <button type="button" data-catalogue-filter="missing">
+                Needs thumbnail
+              </button>
+              <button type="button" data-catalogue-filter="bound">Bound</button>
+            </div>
+            <div class="catalogue-actions">
+              <input
+                id="catalogueFile"
+                class="visually-hidden"
+                type="file"
+                accept="application/json,.json"
+              />
+              <button
+                id="importCatalogue"
+                class="secondary-button"
+                type="button"
+              >
+                Import file
+              </button>
+              <button
+                id="scanThumbnails"
+                class="secondary-button"
+                type="button"
+              >
+                Scan thumbnails
+              </button>
+            </div>
+          </div>
+
+          <section
+            id="googleCatalogue"
+            class="google-catalogue"
+            aria-labelledby="googleCatalogueTitle"
+            hidden
+          >
+            <div class="google-catalogue-copy">
+              <h2 id="googleCatalogueTitle">Google Sheet</h2>
+              <p
+                id="googleCatalogueStatus"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              ></p>
+            </div>
+            <div class="google-catalogue-actions">
+              <button
+                id="googlePrimaryAction"
+                class="action-button"
+                type="button"
+              ></button>
+              <button
+                id="googleSecondaryAction"
+                class="secondary-button"
+                type="button"
+                hidden
+              ></button>
+              <button
+                id="googleDisconnect"
+                class="quiet-button"
+                type="button"
+                hidden
+              >
+                Disconnect
+              </button>
+            </div>
+          </section>
+
+          <p id="catalogueStatus" class="action-status" role="status"></p>
+
+          <div
+            id="catalogueLoading"
+            class="catalogue-loading"
+            aria-label="Loading catalogue"
+          >
+            <span></span><span></span><span></span>
+          </div>
+
+          <div id="catalogueUnavailable" class="empty-state" hidden>
+            <h2>Open the desktop app</h2>
+            <p>The local catalogue is available in OFEnhancer for Windows.</p>
+            <button type="button" id="retryCatalogue" class="secondary-button">
+              Try again
+            </button>
+          </div>
+
+          <div id="catalogueEmpty" class="empty-state" hidden>
+            <h2>Start your catalogue</h2>
+            <p>
+              Import your JSON catalogue file, or connect Google Sheet for a
+              read-only import. No Chrome setup is required. Once your videos
+              are here, you can scan and match thumbnails.
+            </p>
+          </div>
+
+          <section id="thumbnailReview" class="thumbnail-review" hidden>
+            <div class="section-heading">
+              <div>
+                <h2>Needs a match</h2>
+                <p>Choose once. OFEnhancer will remember the file.</p>
+              </div>
+              <span id="thumbnailReviewCount" class="count-badge"></span>
+            </div>
+            <ul id="thumbnailReviewList" class="review-list"></ul>
+          </section>
+
+          <ul
+            id="catalogueList"
+            class="catalogue-list"
+            aria-label="Video catalogue"
+          ></ul>
+          <button
+            id="loadMoreCatalogue"
+            class="secondary-button load-more"
+            type="button"
+            hidden
+          >
+            Show more videos
+          </button>
+          <div id="catalogueNoMatches" class="empty-state compact-empty" hidden>
+            <h2>No matching videos</h2>
+            <p>Try a different search or filter.</p>
+          </div>
+        </section>
+
+        <section data-panel="teasers" hidden>
+          <header class="page-heading">
+            <h1 tabindex="-1">Teasers</h1>
+            <p>Teaser preparation uses the existing Chrome workflows.</p>
+          </header>
+          <div class="empty-state">
+            <h2>Chrome still handles teaser posts</h2>
+            <p>
+              Use the personal extension's existing teaser tools in Chrome. The
+              separate X recorder native host requires its own setup.
+            </p>
+          </div>
+          <p class="chrome-readiness-message">Checking Chrome…</p>
+          <button type="button" class="secondary-button chrome-setup-trigger">
+            Check Chrome setup
+          </button>
+        </section>
+
+        <section data-panel="attention" hidden>
+          <header class="page-heading">
+            <h1 tabindex="-1">Attention</h1>
+            <p>
+              Problems and decisions will collect here without sensitive desktop
+              notifications.
+            </p>
+          </header>
+          <div class="empty-state">
+            <h2 id="attentionHeading">Checking desktop agent</h2>
+            <p id="attentionStatus">Please wait.</p>
+            <button type="button" class="secondary-button chrome-setup-trigger">
+              Check Chrome setup
+            </button>
+          </div>
+        </section>
+
+        <section data-panel="settings" hidden>
+          <header class="page-heading">
+            <h1 tabindex="-1">Settings</h1>
+            <p>Desktop and browser connection details.</p>
+          </header>
+          <dl class="settings-list">
+            <div>
+              <dt>Desktop agent</dt>
+              <dd id="agentSetting">Checking…</dd>
+            </div>
+            <div>
+              <dt>Chrome uploader</dt>
+              <dd id="extensionSetting">Checking Chrome…</dd>
+            </div>
+            <div class="settings-control">
+              <dt>
+                <label for="browserPreference">Google connection browser</label>
+              </dt>
+              <dd>
+                <select
+                  id="browserPreference"
+                  name="browser-preference"
+                  aria-describedby="browserPreferenceHelp browserPreferenceStatus"
+                  disabled
+                >
+                  <option value="system">System default</option>
+                </select>
+                <p id="browserPreferenceHelp" class="settings-help">
+                  Choose where Google sign-in opens. System default follows
+                  Windows.
+                </p>
+                <p
+                  id="browserPreferenceStatus"
+                  class="settings-help"
+                  role="status"
+                  aria-live="polite"
+                ></p>
+              </dd>
+            </div>
+            <div>
+              <dt>Google Sheet</dt>
+              <dd class="setting-action">
+                <span id="googleSettingStatus" role="status" aria-live="polite">
+                  Checking…
+                </span>
+                <button
+                  id="googleSettingsAction"
+                  class="secondary-button"
+                  type="button"
+                  hidden
+                ></button>
+              </dd>
+            </div>
+          </dl>
+          <button type="button" class="secondary-button chrome-setup-trigger">
+            Check Chrome setup
+          </button>
+          <details id="googleSetup" class="settings-disclosure" hidden>
+            <summary>Developer setup</summary>
+            <div class="google-setup-import">
+              <p id="googleSetupImportHelp">
+                Choose the desktop app setup file downloaded from Google Cloud.
+                OFEnhancer keeps it encrypted on this PC.
+              </p>
+              <button
+                id="importGoogleSetup"
+                class="secondary-button"
+                type="button"
+                aria-describedby="googleSetupImportHelp"
+              >
+                Import Google setup file
+              </button>
+              <p
+                id="googleSetupImportStatus"
+                class="action-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </div>
+            <form id="googleSetupForm" class="settings-form" novalidate>
+              <label for="googleClientId">Google client ID</label>
+              <p id="googleClientIdHelp">
+                Advanced: the public ID alone may not be enough to connect.
+                Import the setup file above for a desktop app.
+              </p>
+              <input
+                id="googleClientId"
+                name="google-client-id"
+                type="text"
+                inputmode="url"
+                autocomplete="off"
+                spellcheck="false"
+                aria-describedby="googleClientIdHelp googleSetupStatus"
+                aria-invalid="false"
+                required
+              />
+              <button class="secondary-button" type="submit">Save setup</button>
+              <p
+                id="googleSetupStatus"
+                class="action-status"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </form>
+          </details>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="chromeSetupDialog" aria-labelledby="chromeSetupTitle">
+      <button type="button" id="closeChromeSetup">Close</button>
+      <h2 id="chromeSetupTitle">Chrome setup</h2>
+      <p id="chromeSetupMessage" role="status"></p>
+      <div id="chromeSetupSteps" hidden>
+        <ol>
+          <li>Prepare the OFEnhancer integration below.</li>
+          <li>
+            Open Chrome extensions. If the page does not open, paste
+            <code>chrome://extensions</code> into Chrome's address bar.
+          </li>
+          <li>
+            Enable Developer mode, choose Load unpacked, then select the exact
+            folder below. Keep that folder in place.
+          </li>
+        </ol>
+        <p>
+          Already loaded? Open Chrome and check again first. Reload your
+          existing extension after an update; do not remove it or move its load
+          folder.
+        </p>
+        <p id="chromeExtensionFolder"></p>
+      </div>
+      <p id="chromeSetupActionStatus" role="status"></p>
+      <div class="dialog-actions">
+        <button type="button" data-chrome-action="installChromeInfo">
+          Chrome installation information
+        </button>
+        <button type="button" data-chrome-action="prepareChrome">
+          Prepare integration
+        </button>
+        <button type="button" data-chrome-action="openChrome">
+          Open Chrome
+        </button>
+        <button type="button" data-chrome-action="openChromeExtensions">
+          Open Chrome extensions
+        </button>
+        <button type="button" data-chrome-action="revealChromeExtension">
+          Show extension folder
+        </button>
+        <button type="button" id="copyChromeFolder">Copy folder</button>
+        <button type="button" id="copyChromeAddress">
+          Copy extensions address
+        </button>
+        <button type="button" id="checkChrome">Check again</button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="connectBrowserDialog"
+      aria-labelledby="connectBrowserTitle"
+      aria-describedby="connectBrowserIntro"
+    >
+      <div class="dialog-heading">
+        <div>
+          <h2 id="connectBrowserTitle">Connect Google Sheet</h2>
+          <p id="connectBrowserIntro">
+            Choose the browser where you use Google Drive. Then sign in and
+            select your catalogue spreadsheet.
+          </p>
+        </div>
+      </div>
+      <div class="connect-browser-field">
+        <label for="connectBrowserSelect">Browser</label>
+        <select
+          id="connectBrowserSelect"
+          name="connection-browser"
+          aria-describedby="connectBrowserHelp"
+          autofocus
+        ></select>
+        <p id="connectBrowserHelp" class="settings-help">
+          Your choice is saved for next time. System default follows Windows.
+        </p>
+      </div>
+      <p
+        id="connectBrowserStatus"
+        class="action-status"
+        role="status"
+        aria-live="polite"
+      ></p>
+      <div class="dialog-actions">
+        <button id="cancelBrowserConnection" class="quiet-button" type="button">
+          Cancel
+        </button>
+        <button
+          id="continueBrowserConnection"
+          class="action-button"
+          type="button"
+        >
+          Continue in browser
+        </button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="googleMigrationDialog"
+      aria-labelledby="googleMigrationTitle"
+      aria-describedby="googleMigrationIntro"
+    >
+      <div class="dialog-heading">
+        <div>
+          <h2 id="googleMigrationTitle">Update Google Sheet?</h2>
+          <p id="googleMigrationIntro">
+            Review what OFEnhancer will change and preserve, then choose Yes or
+            No.
+          </p>
+        </div>
+      </div>
+      <dl class="google-migration-summary">
+        <div>
+          <dt>Workbook</dt>
+          <dd id="googleMigrationWorkbook"></dd>
+        </div>
+        <div>
+          <dt>Sheet</dt>
+          <dd id="googleMigrationSheet"></dd>
+        </div>
+        <div>
+          <dt>Add</dt>
+          <dd id="googleMigrationAdd"></dd>
+        </div>
+        <div>
+          <dt>Link</dt>
+          <dd id="googleMigrationLink"></dd>
+        </div>
+        <div>
+          <dt>Preserve</dt>
+          <dd id="googleMigrationPreserve">
+            Existing tabs, rows, formulas, links, formatting, and distribution
+            history
+          </dd>
+        </div>
+        <div>
+          <dt>Conflicts</dt>
+          <dd id="googleMigrationConflicts"></dd>
+        </div>
+      </dl>
+      <p
+        id="googleMigrationStatus"
+        class="action-status"
+        role="status"
+        aria-live="polite"
+      ></p>
+      <div class="dialog-actions">
+        <button
+          id="cancelGoogleMigration"
+          class="quiet-button"
+          type="button"
+          autofocus
+        >
+          No
+        </button>
+        <button id="applyGoogleMigration" class="action-button" type="button">
+          Yes, update the workbook
+        </button>
+      </div>
+    </dialog>
+
+    <dialog id="matchDialog" aria-labelledby="matchDialogTitle">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="matchDialogTitle">Match thumbnail</h2>
+          <p id="matchDialogFile"></p>
+        </div>
+        <button id="closeMatchDialog" class="quiet-button" type="button">
+          Close
+        </button>
+      </div>
+      <div class="match-source">
+        <div id="matchDialogImage"></div>
+        <p>Which catalogue video is this?</p>
+      </div>
+      <div id="candidateList" class="candidate-list"></div>
+      <p id="matchDialogStatus" class="action-status" role="status"></p>
+    </dialog>
+  </body>
+</html>

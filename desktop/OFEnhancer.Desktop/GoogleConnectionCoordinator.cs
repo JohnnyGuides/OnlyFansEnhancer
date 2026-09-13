@@ -18,6 +18,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromMinutes(5);
     private readonly object _gate = new();
     private readonly string _clientId;
+    private readonly string? _clientSecret;
     private readonly HttpClient _httpClient;
     private readonly IGoogleTokenVault _tokenVault;
     private readonly Func<IGoogleOAuthCallbackReceiver> _receiverFactory;
@@ -35,11 +36,13 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         IGoogleTokenVault tokenVault,
         Func<IGoogleOAuthCallbackReceiver> receiverFactory,
         Action<Uri> openBrowser,
-        Action<GoogleConnectionCompletion> completed
+        Action<GoogleConnectionCompletion> completed,
+        string? clientSecret = null
     )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
         _clientId = clientId;
+        _clientSecret = clientSecret;
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _tokenVault = tokenVault ?? throw new ArgumentNullException(nameof(tokenVault));
         _receiverFactory = receiverFactory ?? throw new ArgumentNullException(nameof(receiverFactory));
@@ -149,7 +152,8 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
                 callback.AuthorizationCode,
                 receiver.RedirectUri,
                 start.CodeVerifier,
-                cancellation.Token
+                cancellation.Token,
+                _clientSecret
             ).ConfigureAwait(false);
             if (tokens.RefreshToken is null)
             {
@@ -195,6 +199,10 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         catch (GoogleOAuthException error)
         {
             SetSnapshot(new(GoogleConnectionState.Error, error.ErrorCode));
+        }
+        catch (BrowserLaunchException error)
+        {
+            SetSnapshot(new(GoogleConnectionState.Error, error.Code));
         }
         catch
         {

@@ -1,0 +1,74 @@
+{
+  "manifest_version": 3,
+  "name": "Creator Workflow Toolkit",
+  "version": "0.20.10",
+  "minimum_chrome_version": "116",
+  "description": "Local identity masking and workflow helpers for adult creators across supported publishing and community sites.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "webNavigation",
+    "nativeMessaging",
+    "debugger",
+    "offscreen",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "optional_host_permissions": [
+    "https://gelbooru.com/*",
+    "https://*.gelbooru.com/*",
+    "https://realbooru.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
+  "host_permissions": [
+    "https://onlyfans.com/*",
+    "https://workspace.clips4sale.com/*",
+    "https://pornhub.mainhub.com/*",
+    "https://fansly.com/*",
+    "https://www.manyvids.com/*",
+    "https://my.sheer.com/*",
+    "https://www.reddit.com/*",
+    "https://sh.reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://www.redgifs.com/*",
+    "https://studio.redgifs.com/*",
+    "https://x.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "gelbooru_image_referrer",
+        "enabled": true,
+        "path": "gelbooru-rules.json"
+      }
+    ]
+  },
+  "action": {
+    "default_title": "Creator Workflow Toolkit",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://onlyfans.com/*"],
+      "js": ["identity-settings.js", "core.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["file-bridge.html", "file-bridge.js"],
+      "matches": [
+        "https://onlyfans.com/*",
+        "https://fansly.com/*",
+        "https://www.manyvids.com/*",
+        "https://studio.redgifs.com/*",
+        "https://x.com/*"
+      ]
+    }
+  ]
+}

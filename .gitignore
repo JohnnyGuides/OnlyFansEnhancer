@@ -1,20 +1,23 @@
 node_modules/
 dist/
+.local/
+**/bin/
+**/obj/
+_metadata/
 playwright-report/
 test-results/
-.worktrees/
-.local/
-.impeccable/review/
-native-host/**/bin/
-native-host/**/obj/
-desktop/**/bin/
-desktop/**/obj/
-_metadata/
 *.zip
 .env
 .env.*
 !.env.example
-
-# Saved OnlyFans pages can contain private account information.
+# Private runtime data and credentials are never source.
+native-host/config.json
+native-host/**/config.json
+*.db
+*.sqlite
+*.db-*
+*.db.backup-*
+*.dat
+# Saved pages can contain private account information.
 *.html.snapshot
 tests/fixtures/private/

@@ -1,15 +1,20 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Protocol", "OFEnhancer.Protocol\OFEnhancer.Protocol.csproj", "{54699A2F-10B9-4CD3-B2A2-89C0F6E4B370}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Protocol.Tests", "OFEnhancer.Protocol.Tests\OFEnhancer.Protocol.Tests.csproj", "{93661F08-6A10-48C1-BABE-51B6C342F9E0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Desktop.Tests", "OFEnhancer.Desktop.Tests\OFEnhancer.Desktop.Tests.csproj", "{93661F08-6A10-48C1-BABE-51B6C342F9E0}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Desktop", "OFEnhancer.Desktop\OFEnhancer.Desktop.csproj", "{4FCC4B4B-2789-4E3D-B69C-B898FDFD8728}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancerNativeBridge", "..\native-host\OFEnhancerNativeBridge\OFEnhancerNativeBridge.csproj", "{58189830-69CE-42D6-BBCB-BD0F179E8865}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Catalogue", "OFEnhancer.Catalogue\OFEnhancer.Catalogue.csproj", "{EAFBED33-F481-56EB-9240-A24D13733B56}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OFEnhancer.Catalogue.Tests", "OFEnhancer.Catalogue.Tests\OFEnhancer.Catalogue.Tests.csproj", "{502C0A9D-9C93-56A2-BD3C-388EB1A693D6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CreatorTeaserNativeHost", "..\native-host\CreatorTeaserNativeHost\CreatorTeaserNativeHost.csproj", "{67CF87D3-39D2-52FF-9943-200633D54FB8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -20,6 +25,18 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EAFBED33-F481-56EB-9240-A24D13733B56}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EAFBED33-F481-56EB-9240-A24D13733B56}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EAFBED33-F481-56EB-9240-A24D13733B56}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EAFBED33-F481-56EB-9240-A24D13733B56}.Release|Any CPU.Build.0 = Release|Any CPU
+		{502C0A9D-9C93-56A2-BD3C-388EB1A693D6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{502C0A9D-9C93-56A2-BD3C-388EB1A693D6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{502C0A9D-9C93-56A2-BD3C-388EB1A693D6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{502C0A9D-9C93-56A2-BD3C-388EB1A693D6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{67CF87D3-39D2-52FF-9943-200633D54FB8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{67CF87D3-39D2-52FF-9943-200633D54FB8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{67CF87D3-39D2-52FF-9943-200633D54FB8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{67CF87D3-39D2-52FF-9943-200633D54FB8}.Release|Any CPU.Build.0 = Release|Any CPU
 		{54699A2F-10B9-4CD3-B2A2-89C0F6E4B370}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{54699A2F-10B9-4CD3-B2A2-89C0F6E4B370}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{54699A2F-10B9-4CD3-B2A2-89C0F6E4B370}.Release|Any CPU.ActiveCfg = Release|Any CPU

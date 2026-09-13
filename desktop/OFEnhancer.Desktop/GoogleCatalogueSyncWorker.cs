@@ -122,13 +122,9 @@ internal sealed class GoogleCatalogueSyncWorker
         _store.MarkSyncAttempted(operation.OperationId, UtcNow());
         try
         {
-            await _workspace.UpdateValuesBatchAsync(
-                new GoogleValuesBatch(
-                    operation.WorkbookId,
-                    [new GoogleValueUpdate(target.Range!, operation.PayloadValue)]
-                ),
-                cancellationToken
-            ).ConfigureAwait(false);
+            await _workspace.UpdateMetadataCellAsync(operation.WorkbookId, target.MetadataId,
+                GoogleWorkbookProfile.ColumnForDestination(operation.DestinationField)[0] - 'A' + 1,
+                operation.PayloadValue, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -225,6 +221,15 @@ internal sealed class GoogleCatalogueSyncWorker
             cancellationToken
         ).ConfigureAwait(false);
         string title = sheet.Title.Replace("'", "''", StringComparison.Ordinal);
+        string headerRange = $"'{title}'!{column}1";
+        GoogleProjectionCell header = await _workspace.ReadProjectionCellAsync(operation.WorkbookId, headerRange, cancellationToken).ConfigureAwait(false);
+        string expectedHeader = operation.DestinationField switch {
+            "pornhubFree" => "Pornhub Free", "onlyfans" => "OnlyFans", "fansly" => "Fansly", "manyvids" => "ManyVids",
+            "xTeasers" => "# teasers", "x" => "Twitter Teaser(s)", "redditTeasers" => "# Reddit posts", "reddit" => "Reddit Post(s)",
+            "ofenhancerId" => "OFEnhancer ID", "pornhubPaid" => "Pornhub Paid", "clips4sale" => "Clips4Sale", "lastVerifiedSync" => "Last verified sync",
+            _ => throw new GoogleCatalogueException("unsupported-workbook-destination")
+        };
+        if (header.Range != headerRange || header.Value != expectedHeader) return new(null, null, "projection-layout-changed");
         string range = $"'{title}'!{column}{match.RowNumber}";
         GoogleProjectionCell cell = await _workspace.ReadProjectionCellAsync(
             operation.WorkbookId,
@@ -232,7 +237,7 @@ internal sealed class GoogleCatalogueSyncWorker
             cancellationToken
         ).ConfigureAwait(false);
         return string.Equals(cell.Range, range, StringComparison.Ordinal)
-            ? new(range, cell, null)
+            ? new(range, cell, null, match.MetadataId)
             : new(null, null, "projection-cell-range-mismatch");
     }
 
@@ -274,7 +279,7 @@ internal sealed class GoogleCatalogueSyncWorker
         Unresolved,
     }
 
-    private sealed record TargetCell(string? Range, GoogleProjectionCell? Cell, string? ErrorCode);
+    private sealed record TargetCell(string? Range, GoogleProjectionCell? Cell, string? ErrorCode, int MetadataId = -1);
 }
 
 internal sealed record GoogleSyncSummary(

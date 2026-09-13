@@ -11,5 +11,8 @@
     "noImplicitAny": false,
     "useDefineForClassFields": true
   },
-  "include": ["creator-tools/**/*.js", "realbooru-parser.js"]
+  "include": [
+    "extensions/personal/workflows/**/*.js",
+    "extensions/personal/realbooru-parser.js"
+  ]
 }

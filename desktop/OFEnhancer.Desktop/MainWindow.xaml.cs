@@ -6,6 +6,8 @@ using System.Windows;
 using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using OFEnhancer.Catalogue;
+using OFEnhancer.Protocol;
+using System.Text.Json;
 
 namespace OFEnhancer.Desktop;
 
@@ -15,36 +17,144 @@ public partial class MainWindow : Window, IDisposable
     private readonly WebMessageDispatcher dispatcher;
     private readonly ThumbnailResourceResolver thumbnails;
     private readonly CatalogueStore catalogue;
+    private readonly DesktopSettingsStore settings;
+    private readonly BrowserSettingsController browserSettings;
     private readonly HttpClient googleHttp;
     private readonly GoogleCatalogueController googleCatalogue;
+    private readonly BrowserUploadChannel uploads = new();
+    private readonly UploadCatalogueController uploadCatalogue;
+    private readonly ChromeIntegration chromeIntegration;
+    private readonly bool hasExtensionOverride;
     private bool exiting;
     private bool disposed;
+    private bool showChromeSetup;
     private HwndSource? windowSource;
 
-    public MainWindow(string? extensionId, CatalogueStore catalogue)
+    public MainWindow(string? extensionId, CatalogueStore catalogue, bool extensionOverride = false)
     {
         InitializeComponent();
         this.catalogue = catalogue;
+        hasExtensionOverride = extensionOverride;
+        settings = new DesktopSettingsStore(AppConfiguration.SettingsPath);
+        Func<string?> effectiveIdentity = () => extensionOverride ? extensionId : settings.Load().ExtensionId;
+        chromeIntegration = new ChromeIntegration(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")), settings, effectiveIdentity, uploads);
+        browserSettings = new BrowserSettingsController(settings);
         WebMessageRouter? queuedRouter = null;
         dispatcher = new WebMessageDispatcher(json => queuedRouter!.Handle(json));
         googleHttp = GoogleHttpClientFactory.Create();
         googleCatalogue = new(
-            new DesktopSettingsStore(AppConfiguration.SettingsPath),
+            settings,
             catalogue,
             new DpapiGoogleTokenVault(AppConfiguration.GoogleTokenPath),
             googleHttp,
-            GoogleBrowserLauncher.Open,
-            dispatcher.EnqueueAsync
+            uri => GoogleBrowserLauncher.Open(uri, settings),
+            dispatcher.EnqueueAsync,
+            new GoogleDesktopClientStore(AppConfiguration.GoogleDesktopClientPath)
         );
         router = new WebMessageRouter(
             OpenChrome,
-            () => extensionId,
+            effectiveIdentity,
             catalogue,
             () => Dispatcher.Invoke(ChooseThumbnailRoot),
-            googleCatalogue
+            googleCatalogue,
+            browserSettings.Get,
+            browserSettings.Save,
+            () => googleCatalogue.ImportGoogleClientConfiguration(() => Dispatcher.Invoke(ChooseGoogleClientConfiguration))
         );
         queuedRouter = router;
+        uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets);
+        uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>
+        {
+            if (!exiting && Browser.CoreWebView2 is not null)
+                Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { uploadEvent = value }));
+        });
         thumbnails = new ThumbnailResourceResolver(catalogue);
+    }
+
+    public async Task<AgentResponse> HandleAgentRequest(AgentRequest request)
+    {
+        try
+        {
+            if (request.Operation == "getStatus") return AgentResponse.Success(request, AgentStatus.Current);
+            if (request.Operation == "showChromeSetup")
+            {
+                if (request.Payload is JsonElement setupPayload && setupPayload.ValueKind == JsonValueKind.Object && setupPayload.EnumerateObject().Any())
+                    return AgentResponse.Failure(request.RequestId.ToString(), "invalid-payload");
+                _ = Dispatcher.BeginInvoke(OpenChromeSetup);
+                return AgentResponse.SuccessResult(request, new { opened = true });
+            }
+            JsonElement payload = request.Payload ?? JsonSerializer.SerializeToElement(new { });
+            if (request.Operation == "browserExchange")
+            {
+                chromeIntegration.Get();
+                return AgentResponse.SuccessResult(request, uploads.Exchange(payload));
+            }
+            object result = await dispatcher.EnqueueAsync(() => uploadCatalogue.Handle(request.Operation, payload));
+            return AgentResponse.SuccessResult(request, result);
+        }
+        catch (Exception error)
+        {
+            return AgentResponse.Failure(request.RequestId.ToString(), error is GoogleCatalogueControllerException googleError ? googleError.Code : error is InvalidOperationException ? error.Message : "desktop-operation-failed");
+        }
+    }
+
+    private async Task<string?> HandleUploadMessage(string json, IReadOnlyList<object> additionalObjects)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        string operation = root.GetProperty("operation").GetString() ?? "";
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension" }.Contains(operation)) return null;
+        string requestId = root.GetProperty("requestId").GetString() ?? "";
+        try
+        {
+            if (!Guid.TryParse(requestId, out _)) throw new InvalidOperationException("invalid-request");
+            JsonElement payload = root.GetProperty("payload");
+            object result;
+            if (operation is "getStatus" or "getChromeReadiness" or "prepareChrome" or "openChrome" or "openChromeExtensions" or "installChromeInfo" or "revealChromeExtension")
+            {
+                if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any()) throw new InvalidOperationException("invalid-payload");
+                if (operation == "getStatus") result = AgentStatus.Current with { Capabilities = [.. AgentStatus.Current.Capabilities, "chrome-readiness"] };
+                else if (operation == "getChromeReadiness") result = await Task.Run(chromeIntegration.Get);
+                else if (operation == "prepareChrome")
+                {
+                    if (hasExtensionOverride) throw new InvalidOperationException("Chrome is using a command-line extension override. Start without that override to change saved setup.");
+                    result = await Task.Run(chromeIntegration.Prepare);
+                    OpenChrome(new Uri("chrome://extensions/"));
+                }
+                else
+                {
+                    if (operation == "installChromeInfo") Process.Start(new ProcessStartInfo("https://www.google.com/chrome/") { UseShellExecute = true });
+                    else if (operation == "revealChromeExtension")
+                    {
+                        string folder = chromeIntegration.Get().ExtensionFolder ?? throw new InvalidOperationException("Prepare Chrome setup first.");
+                        Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+                    }
+                    else OpenChrome(new Uri(operation == "openChromeExtensions" ? "chrome://extensions/" : "chrome://newtab/"));
+                    result = new { opened = true };
+                }
+            }
+            else if (operation == "getUploadBrowsers") { await Task.Run(chromeIntegration.Get); result = uploads.Status(); }
+            else if (operation == "selectUploadBrowser") result = uploads.Select(payload.GetProperty("browserId").GetString() ?? "");
+            else if (operation == "deliverUploadFile")
+            {
+                if (additionalObjects.Count != 1 || additionalObjects[0] is not CoreWebView2File file)
+                    throw new InvalidOperationException("Choose the file again in this window.");
+                FileInfo info = new(file.Path);
+                if (!info.Exists || info.Name != payload.GetProperty("name").GetString() || info.Length != payload.GetProperty("size").GetInt64() ||
+                    Math.Abs(new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() - payload.GetProperty("lastModified").GetInt64()) > 2)
+                    throw new InvalidOperationException("The selected file changed. Choose it again before uploading.");
+                var command = payload.EnumerateObject().ToDictionary(item => item.Name, item => (object)item.Value.Clone());
+                command["kind"] = "file";
+                command["filePath"] = info.FullName;
+                result = await uploads.RequestNativeFileAsync(JsonSerializer.SerializeToElement(command));
+            }
+            else result = await uploads.RequestAsync(payload);
+            return JsonSerializer.Serialize(new { requestId, ok = true, result }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        }
+        catch (Exception error)
+        {
+            return JsonSerializer.Serialize(new { requestId, ok = false, error = new { code = error is InvalidOperationException ? error.Message : "upload-connection-failed" } });
+        }
     }
 
     public async Task ExitAsync()
@@ -60,10 +170,32 @@ public partial class MainWindow : Window, IDisposable
         if (disposed)
             return;
         disposed = true;
+        uploads.Dispose();
         windowSource?.RemoveHook(HandleWindowMessage);
         windowSource = null;
         googleCatalogue.Dispose();
         googleHttp.Dispose();
+    }
+
+    public void OpenChromeSetup()
+    {
+        showChromeSetup = true;
+        Show();
+        Activate();
+        if (Browser.CoreWebView2 is not null)
+            Browser.CoreWebView2.Navigate("https://app.ofenhancer.local/index.html");
+    }
+
+    private string? ChooseGoogleClientConfiguration()
+    {
+        Microsoft.Win32.OpenFileDialog dialog = new()
+        {
+            Title = "Import Google Desktop app setup",
+            Filter = "Google Desktop app JSON (*.json)|*.json",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
     }
 
     protected override void OnSourceInitialized(EventArgs eventArgs)
@@ -86,6 +218,13 @@ public partial class MainWindow : Window, IDisposable
             userDataFolder: userDataFolder
         );
         await Browser.EnsureCoreWebView2Async(environment);
+        Browser.CoreWebView2.NavigationCompleted += async (_, _) =>
+        {
+            if (!showChromeSetup || !Uri.TryCreate(Browser.CoreWebView2.Source, UriKind.Absolute, out var source)
+                || source.Host != "app.ofenhancer.local" || source.AbsolutePath != "/index.html") return;
+            showChromeSetup = false;
+            await Browser.CoreWebView2.ExecuteScriptAsync("document.getElementById('chromeConnection')?.click()");
+        };
         string appRoot = Path.Combine(AppContext.BaseDirectory, "app");
         Browser.CoreWebView2.SetVirtualHostNameToFolderMapping(
             "app.ofenhancer.local",
@@ -147,9 +286,17 @@ public partial class MainWindow : Window, IDisposable
         {
             if (exiting || !WebMessageSourcePolicy.IsTrusted(message.Source))
                 return;
-            string response = await dispatcher.HandleAsync(message.TryGetWebMessageAsString());
-            if (!exiting)
-                Browser.CoreWebView2.PostWebMessageAsJson(response);
+            try
+            {
+                string json = message.TryGetWebMessageAsString();
+                string response = await HandleUploadMessage(json, message.AdditionalObjects?.ToArray() ?? [])
+                    ?? await dispatcher.HandleAsync(json);
+                if (!exiting) Browser.CoreWebView2.PostWebMessageAsJson(response);
+            }
+            catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException)
+            {
+                if (!exiting) Browser.CoreWebView2.PostWebMessageAsJson("{\"ok\":false,\"error\":{\"code\":\"invalid-request\"}}");
+            }
         };
         Browser.CoreWebView2.NavigationStarting += (_, args) =>
         {
@@ -192,9 +339,7 @@ public partial class MainWindow : Window, IDisposable
 
     private static void OpenChrome(Uri uri)
     {
-        ProcessStartInfo start = new("chrome.exe") { UseShellExecute = true };
-        start.ArgumentList.Add(uri.AbsoluteUri);
-        Process.Start(start);
+        ChromeIntegration.OpenChrome(uri);
     }
 
     private string? ChooseThumbnailRoot()

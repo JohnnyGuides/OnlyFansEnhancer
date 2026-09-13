@@ -4,6 +4,81 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class WorkbookProjectionTests
 {
     [TestMethod]
+    public void SnapshotAfterWorkbookImportMustRestoreProjectionAcrossRestart()
+    {
+        using TestDirectory temp = new();
+        string database = Path.Combine(temp.Path, "catalogue.db");
+        using (CatalogueStore store = CatalogueStore.Open(database))
+        {
+            store.ImportSnapshot(Snapshot("ashley"));
+            Assert.IsTrue(store.ImportSnapshot(Snapshot("ashley")).Unchanged);
+            store.ImportWorkbookProjection(Projection(true, Row(15, null, "bianca")));
+        }
+        using (CatalogueStore store = CatalogueStore.Open(database))
+        {
+            Assert.IsFalse(store.ImportSnapshot(Snapshot("ashley")).Unchanged);
+            Assert.AreEqual("ashley", store.GetItems().Single().SourceKey);
+            Assert.IsTrue(store.ImportSnapshot(Snapshot("ashley")).Unchanged);
+        }
+    }
+
+    [TestMethod]
+    public void InvalidSourceLinkEvidenceRejectsImportBeforeChangingLocalRows()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.ImportWorkbookProjection(Projection(true, Row(2, null, "kept")), updateGoogleBindings: false);
+        foreach (CatalogueSourceLinkCell cell in new[]
+        {
+            new CatalogueSourceLinkCell("text", null, ["https://evil.example/post"]),
+            new CatalogueSourceLinkCell("bad\0text", null, []),
+            new CatalogueSourceLinkCell(new string('a', 10_001), null, []),
+            new CatalogueSourceLinkCell("text", new string('a', 2_049), []),
+            new CatalogueSourceLinkCell("text", null, Enumerable.Repeat("https://x.com/creator/status/123456789", 101).ToArray())
+        })
+        {
+            WorkbookCatalogueItem row = new(3, "other", "Title", "", null, null, null, 0, 0,
+                new Dictionary<string, string>(), null, new Dictionary<string, CatalogueSourceLinkCell> { ["x"] = cell });
+            Assert.ThrowsException<WorkbookProjectionException>(() => store.ImportWorkbookProjection(Projection(true, row), updateGoogleBindings: false));
+            Assert.AreEqual("kept", store.GetItems().Single().SourceKey);
+        }
+    }
+
+    [TestMethod]
+    public void ReadImportPreservesAllSourceLinksAcrossReopenAndLegacySyncPull()
+    {
+        using TestDirectory temp = new();
+        string path = Path.Combine(temp.Path, "catalogue.db");
+        string first = "https://x.com/johnny_guides/status/123456789";
+        string second = "https://x.com/johnny_guides/status/234567890";
+        CatalogueSourceLinkCell cell = new(first + "\r\n" + second, null, [first, second], "multiple-links");
+        CatalogueSourceLinkCell conflict = new("https://onlyfans.com/123456789/creator", "https://onlyfans.com/234567890/creator",
+            ["https://onlyfans.com/123456789/creator", "https://onlyfans.com/234567890/creator"], "catalogue-link-conflict");
+        WorkbookCatalogueItem row = new(2, "source", "Title", "", null, null, null, 2, 0,
+            new Dictionary<string, string>(), null, new Dictionary<string, CatalogueSourceLinkCell> { ["x"] = cell, ["onlyfans"] = conflict });
+        using (CatalogueStore store = CatalogueStore.Open(path))
+        {
+            store.ImportWorkbookProjection(Projection(true, row), updateGoogleBindings: false);
+            Assert.AreEqual(0, store.GetGoogleBindings("workbook-1").Count);
+        }
+        using (CatalogueStore store = CatalogueStore.Open(path))
+        {
+            CatalogueSourceLinkCell actual = store.GetItems().Single().SourceLinkCells!["x"];
+            Assert.AreEqual(cell.Text, actual.Text);
+            CollectionAssert.AreEqual(cell.Urls.ToArray(), actual.Urls.ToArray());
+            Assert.AreEqual(cell.IssueCode, actual.IssueCode);
+            CatalogueItemSummary summary = store.GetItems().Single();
+            Assert.IsFalse(summary.PlatformLinks.ContainsKey("onlyfans"));
+            Assert.AreEqual(conflict.Hyperlink, summary.SourceLinkCells!["onlyfans"].Hyperlink);
+            Assert.AreEqual(conflict.Text, summary.SourceLinkCells["onlyfans"].Text);
+            store.ImportWorkbookProjection(Projection(true, Row(2, null, "source")));
+            Assert.AreEqual(cell.Text, store.GetItems().Single().SourceLinkCells!["x"].Text);
+            store.ImportWorkbookProjection(Projection(true, Row(2, null, "source")), updateGoogleBindings: false);
+            Assert.AreEqual(0, store.GetItems().Single().SourceLinkCells!.Count);
+        }
+    }
+
+    [TestMethod]
     public void StableMetadataIdSurvivesRowMoveAndFreshLocalImport()
     {
         using TestDirectory temp = new();

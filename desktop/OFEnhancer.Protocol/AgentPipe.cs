@@ -21,9 +21,17 @@ public static class AgentPipeFrame
     }
 
     public static async Task<string> ReadAsync(Stream input, CancellationToken stop)
+        => await ReadOrEndAsync(input, stop).ConfigureAwait(false)
+            ?? throw new AgentProtocolException("incomplete-frame", "The desktop message ended early.");
+
+    public static async Task<string?> ReadOrEndAsync(Stream input, CancellationToken stop)
     {
         byte[] length = new byte[sizeof(int)];
-        await ReadExactAsync(input, length, stop).ConfigureAwait(false);
+        int first = await input.ReadAsync(length.AsMemory(0, 1), stop).ConfigureAwait(false);
+        if (first == 0) return null;
+        byte[] remaining = new byte[3];
+        await ReadExactAsync(input, remaining, stop).ConfigureAwait(false);
+        remaining.CopyTo(length, 1);
         int count = BinaryPrimitives.ReadInt32LittleEndian(length);
         if (count is <= 0 or > AgentProtocol.MaxFrameBytes)
             throw new AgentProtocolException("frame-too-large", "The desktop message is too large.");
@@ -52,27 +60,53 @@ public static class AgentPipeFrame
 public sealed partial class AgentPipeServer
 {
     private const int RememberedRequestLimit = 1024;
+    private const int ConcurrentConnections = 8;
     private readonly string pipeName;
+    private readonly TimeSpan connectionLifetime;
     private readonly Queue<Guid> requestOrder = new();
     private readonly HashSet<Guid> recentRequests = [];
 
-    public AgentPipeServer(string pipeName) => this.pipeName = ValidatePipeName(pipeName);
+    public AgentPipeServer(string pipeName, TimeSpan? connectionLifetime = null)
+    {
+        this.pipeName = ValidatePipeName(pipeName);
+        this.connectionLifetime = connectionLifetime ?? TimeSpan.FromSeconds(90);
+        if (this.connectionLifetime <= TimeSpan.Zero || this.connectionLifetime > TimeSpan.FromSeconds(90))
+            throw new ArgumentOutOfRangeException(nameof(connectionLifetime));
+    }
 
-    public async Task RunAsync(
+    public Task RunAsync(
         Func<AgentRequest, AgentResponse> handle,
+        CancellationToken stop
+    ) => RunWithHandlerAsync(request => Task.FromResult(handle(request)), stop);
+
+    public async Task RunWithHandlerAsync(
+        Func<AgentRequest, Task<AgentResponse>> handle,
         CancellationToken stop
     )
     {
         ArgumentNullException.ThrowIfNull(handle);
-        while (true)
+        // Browser exchanges must remain responsive while a catalogue read awaits Google.
+        await Task.WhenAll(Enumerable.Range(0, ConcurrentConnections).Select(_ => ServeAsync())).ConfigureAwait(false);
+        async Task ServeAsync()
         {
-            stop.ThrowIfCancellationRequested();
-            await RunOnceAsync(handle, stop).ConfigureAwait(false);
+            while (true)
+            {
+                stop.ThrowIfCancellationRequested();
+                try { await RunOnceWithHandlerAsync(handle, stop).ConfigureAwait(false); }
+                catch (IOException) when (!stop.IsCancellationRequested) { }
+                catch (AgentProtocolException) when (!stop.IsCancellationRequested) { }
+                catch (OperationCanceledException) when (!stop.IsCancellationRequested) { }
+            }
         }
     }
 
-    public async Task RunOnceAsync(
+    public Task RunOnceAsync(
         Func<AgentRequest, AgentResponse> handle,
+        CancellationToken stop
+    ) => RunOnceWithHandlerAsync(request => Task.FromResult(handle(request)), stop);
+
+    public async Task RunOnceWithHandlerAsync(
+        Func<AgentRequest, Task<AgentResponse>> handle,
         CancellationToken stop
     )
     {
@@ -80,31 +114,40 @@ public sealed partial class AgentPipeServer
         await using NamedPipeServerStream pipe = new(
             pipeName,
             PipeDirection.InOut,
-            1,
+            ConcurrentConnections,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly
         );
         await pipe.WaitForConnectionAsync(stop).ConfigureAwait(false);
+        using CancellationTokenSource lifetime = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        lifetime.CancelAfter(connectionLifetime);
+        stop = lifetime.Token;
         AgentResponse response;
+        string requestId = string.Empty;
         try
         {
             AgentRequest request = AgentRequest.Parse(
                 await AgentPipeFrame.ReadAsync(pipe, stop).ConfigureAwait(false)
             );
+            requestId = request.RequestId.ToString();
             response = TryRemember(request.RequestId)
-                ? handle(request)
+                ? await handle(request).WaitAsync(stop).ConfigureAwait(false)
                 : AgentResponse.Failure(request.RequestId.ToString(), "duplicate-request");
         }
         catch (AgentProtocolException error)
         {
-            response = AgentResponse.Failure(string.Empty, error.Code);
+            response = AgentResponse.Failure(requestId, error.Code);
         }
         catch (Exception)
         {
-            response = AgentResponse.Failure(string.Empty, "internal-error");
+            response = AgentResponse.Failure(requestId, "internal-error");
         }
+        // Serialize before writing any bytes so a size failure can return a correlated error.
+        string serialized;
+        try { serialized = AgentProtocol.Serialize(response); }
+        catch (AgentProtocolException error) { serialized = AgentProtocol.Serialize(AgentResponse.Failure(requestId, error.Code)); }
         await AgentPipeFrame
-            .WriteAsync(pipe, AgentProtocol.Serialize(response), stop)
+            .WriteAsync(pipe, serialized, stop)
             .ConfigureAwait(false);
     }
 

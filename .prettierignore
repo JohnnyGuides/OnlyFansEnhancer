@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.local/
+**/bin/
+**/obj/
+playwright-report/
+test-results/
+tests/fixtures/private/

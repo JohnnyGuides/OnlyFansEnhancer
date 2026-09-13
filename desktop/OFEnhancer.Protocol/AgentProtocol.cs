@@ -9,7 +9,7 @@ public sealed class AgentProtocolException(string code, string message) : Except
     public string Code { get; } = code;
 }
 
-public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Operation)
+public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Operation, JsonElement? Payload = null)
 {
     public static AgentRequest CreateStatus() =>
         new(AgentProtocol.Version, Guid.NewGuid(), AgentProtocol.GetStatusOperation);
@@ -33,11 +33,14 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
                 "unsupported-protocol",
                 "The desktop request uses an unsupported protocol."
             );
-        if (!string.Equals(request.Operation, AgentProtocol.GetStatusOperation, StringComparison.Ordinal))
+        if (request.Operation is not (AgentProtocol.GetStatusOperation or "getCatalogue" or "getUploadCatalogueSnapshot"
+            or "recordUploadResult" or "getSubredditPresets" or "browserExchange" or "showChromeSetup"))
             throw new AgentProtocolException(
                 "unsupported-operation",
                 "The desktop request uses an unsupported operation."
             );
+        if (request.Payload is { ValueKind: not (JsonValueKind.Object or JsonValueKind.Null) })
+            throw new AgentProtocolException("invalid-request", "The desktop request payload is invalid.");
         return request;
     }
 }
@@ -62,7 +65,8 @@ public sealed record AgentResponse(
     bool Ok,
     string RequestId,
     AgentStatus? Status = null,
-    AgentError? Error = null
+    AgentError? Error = null,
+    JsonElement? Result = null
 )
 {
     public static AgentResponse Success(AgentRequest request, AgentStatus status) =>
@@ -70,13 +74,16 @@ public sealed record AgentResponse(
 
     public static AgentResponse Failure(string requestId, string code) =>
         new(false, requestId, Error: new AgentError(code));
+
+    public static AgentResponse SuccessResult(AgentRequest request, object result) =>
+        new(true, request.RequestId.ToString(), Result: JsonSerializer.SerializeToElement(result, AgentProtocol.JsonOptions));
 }
 
 public static class AgentProtocol
 {
     public const int Version = 1;
     public const int MaxFrameBytes = 1_048_576;
-    public const string ProductVersion = "0.20.6";
+    public const string ProductVersion = "0.20.10";
     public const string GetStatusOperation = "getStatus";
 
     internal static JsonSerializerOptions JsonOptions { get; } =
@@ -111,7 +118,8 @@ public static class AgentProtocol
         if (
             response is null
             || string.IsNullOrWhiteSpace(response.RequestId)
-            || (response.Ok && response.Status is null)
+            || (response.Ok && response.Status is null && response.Result is null)
+            || (response.Ok && response.Status is not null && response.Result is not null)
             || (!response.Ok && response.Error is null)
         )
             throw new AgentProtocolException("invalid-response", "The desktop response is invalid.");
