@@ -228,3 +228,5 @@ separate `-OutputRoot`; the default command otherwise reads the owner's local
 profile. Build/stage operations never register native hosts. Real installation,
 registration, actual Chrome loading and update/uninstall acceptance remain
 separately authorized runtime checks.
+
+Uploader recovery preserves launcher identity and legacy publication hashes. Fansly home-route aliases require the original composer and top document. ManyVids continuation requires completion on the owned upload card and an exact Edit destination; missing destination evidence stops preparation before Edit. Pornhub uses one device activation per transport and the confirmed optional file or full-file fallback. Current semantic ownership fixtures are reconstructed, not authenticated captures.

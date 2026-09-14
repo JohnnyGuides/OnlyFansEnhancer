@@ -307,28 +307,8 @@
       .toLowerCase();
   }
 
-  function manyVidsCompletedCard(filename) {
-    const expected = normalizedFilename(filename);
-    const cards = [...document.querySelectorAll(".uppy-Dashboard-Item")].filter(
-      (card) => {
-        const label =
-          card.querySelector(".uppy-Dashboard-Item-name")?.textContent || "";
-        const completed =
-          card.getAttribute("data-state") === "upload-complete" ||
-          card.matches(
-            ".is-complete, .uppy-Dashboard-Item--complete, [data-upload-complete='true']",
-          );
-        return completed && normalizedFilename(label) === expected;
-      },
-    );
-    if (cards.length > 1) {
-      throw new Error("ManyVids completed upload card is ambiguous.");
-    }
-    return cards[0] || null;
-  }
-
-  function manyVidsEditControl(card) {
-    const candidates = [...card.querySelectorAll("button")].filter(
+  function manyVidsEditControl(card, wait = false) {
+    const candidates = [...card.querySelectorAll("button, a[href]")].filter(
       (button) =>
         enabled(button) &&
         (/^Button edit video : /.test(
@@ -339,6 +319,7 @@
           ".uppy-Dashboard-Item-action--remove, [aria-label*='remove' i], [aria-label*='delete' i], [title*='delete' i]",
         ),
     );
+    if (!candidates.length && wait) return null;
     if (candidates.length !== 1) {
       throw new Error(
         `ManyVids continue/edit control is ${candidates.length ? "ambiguous" : "missing"}.`,
@@ -363,34 +344,54 @@
     if (!dashboard || !visible(dashboard))
       throw new Error("ManyVids owned upload dashboard is unavailable.");
     progressScope = dashboard;
-    const previousEdits = new Set(
-      [
-        ...document.querySelectorAll(
-          "button[aria-label^='Button edit video :']",
-        ),
-      ].map((control) => control.getAttribute("aria-label")),
-    );
-    const previousQueue = new Set(
-      document.querySelectorAll(".uppy-Dashboard-Item"),
-    );
-    if (previousQueue.size)
+    if (dashboard.querySelectorAll(".uppy-Dashboard-Item").length)
       throw new Error(
         "ManyVids existing queued media requires association review before attachment.",
       );
+    let ownedCard = null;
+    let uploadIdentity = "";
+    const currentCard = () => {
+      if (!dashboard.isConnected || !visible(dashboard))
+        throw new Error("ManyVids owned dashboard changed.");
+      const cards = [
+        ...dashboard.querySelectorAll(".uppy-Dashboard-Item"),
+      ].filter(visible);
+      if (cards.length > 1)
+        throw new Error("ManyVids upload association is ambiguous.");
+      if (!cards.length) return null;
+      const card = cards[0];
+      const identity = card.getAttribute("data-upload-id") || card.id;
+      if (
+        ownedCard &&
+        card !== ownedCard &&
+        (!uploadIdentity || identity !== uploadIdentity)
+      )
+        throw new Error("ManyVids upload card identity changed.");
+      const name =
+        card.querySelector(".uppy-Dashboard-Item-name")?.textContent || "";
+      if (
+        normalizedFilename(name) !== normalizedFilename(draft.fullFilename) &&
+        !(
+          (!name || /\.\.\.|…/.test(name)) &&
+          fileReceipt?.role === "full" &&
+          fileReceipt.name === draft.fullFilename &&
+          fileReceipt.size > 0
+        )
+      )
+        throw new Error(
+          "ManyVids selected media does not match the approved full role.",
+        );
+      ownedCard = card;
+      uploadIdentity ||= identity;
+      return card;
+    };
     const currentEdit = () => {
-      const controls = [
-        ...document.querySelectorAll(
-          "button[aria-label^='Button edit video :']",
-        ),
-      ].filter(
-        (control) =>
-          !previousEdits.has(control.getAttribute("aria-label")) &&
-          control.getAttribute("aria-label") ===
-            `Button edit video : ${draft.fullFilename}`,
-      );
-      if (controls.length > 1)
-        throw new Error("ManyVids new editor association is ambiguous.");
-      return controls[0] || null;
+      const card = currentCard();
+      return card?.matches(
+        "[data-state='upload-complete'], .is-complete, .uppy-Dashboard-Item--complete, [data-upload-complete='true']",
+      )
+        ? card
+        : null;
     };
     const fileReceipt = await context.attachFile("full", MANYVIDS_FULL_INPUT);
     // Uppy has both auto-start and queued variants. Only the dashboard's
@@ -400,7 +401,7 @@
     const uploadCommand = context.checkpointStep ? newCommandId() : "";
     await waitFor(
       async () => {
-        if (currentEdit() || manyVidsCompletedCard(draft.fullFilename)) {
+        if (currentEdit()) {
           uploadObserved = true;
           return true;
         }
@@ -412,7 +413,8 @@
         if (!cards.length) return false;
         if (cards.length !== 1)
           throw new Error("ManyVids upload association is ambiguous.");
-        const card = cards[0];
+        const card = currentCard();
+        if (!card) return false;
         const name =
           card.querySelector(".uppy-Dashboard-Item-name")?.textContent || "";
         const exactName =
@@ -493,7 +495,10 @@
     if (uploadObserved && uploadAttempts)
       await context.checkpointStep?.("start-upload", uploadCommand, "observed");
     const card = await waitFor(
-      () => currentEdit() || manyVidsCompletedCard(draft.fullFilename),
+      () => {
+        const card = currentEdit();
+        return card && manyVidsEditControl(card, true) ? card : null;
+      },
       "ManyVids completed upload card",
       UPLOAD_TIMEOUT,
       signal,
@@ -503,12 +508,33 @@
       ? card
       : manyVidsEditControl(card);
     const editorCommand = context.checkpointStep ? newCommandId() : "";
-    await context.checkpointStep?.("open-editor", editorCommand, "intent");
+    const href =
+      edit.getAttribute("href") ||
+      edit.getAttribute("data-href") ||
+      edit.getAttribute("data-url");
+    const destination = href ? new URL(href, "https://www.manyvids.com") : null;
+    const videoId =
+      destination?.origin === "https://www.manyvids.com" &&
+      /^\/Edit-vid\/(\d+)\/?$/.exec(destination.pathname)?.[1];
+    if (
+      context.checkpointStep &&
+      (!videoId || destination.search || destination.hash)
+    )
+      throw new Error(
+        "ManyVids completed Edit destination identity is unavailable.",
+      );
+    await context.checkpointStep?.("open-editor", editorCommand, "intent", {
+      destinationUrl: destination?.href,
+      videoId,
+    });
     if (
       !card.isConnected ||
       !edit.isConnected ||
       !enabled(edit) ||
-      (currentEdit() || manyVidsCompletedCard(draft.fullFilename)) !== card
+      currentEdit() !== card ||
+      (edit.getAttribute("href") ||
+        edit.getAttribute("data-href") ||
+        edit.getAttribute("data-url")) !== href
     )
       throw new Error(
         "ManyVids completed card changed during the editor checkpoint.",
@@ -517,9 +543,38 @@
     return { platform: "manyvids", status: "edit-requested" };
   }
 
+  function pornhubDeviceAction() {
+    const actions = [
+      ...document.querySelectorAll("button.uploadButton"),
+    ].filter(visible);
+    const intended = actions.filter((button) =>
+      /^(upload from device|select video)$/i.test(
+        (button.getAttribute("aria-label") || button.textContent).trim(),
+      ),
+    );
+    if (intended.length !== 1)
+      throw new Error(
+        "Pornhub device upload candidates: " + intended.length + ".",
+      );
+    const button = intended[0];
+    const surface = button.closest(
+      "form, section, [role='region'], [role='dialog']",
+    );
+    if (surface && /vault/i.test(surface.getAttribute("aria-label") || ""))
+      throw new Error("Pornhub device action belongs to a foreign surface.");
+    return button;
+  }
+
+  function bindPornhubDeviceAction() {
+    const button = pornhubDeviceAction();
+    const key = crypto.randomUUID();
+    button.setAttribute("data-creator-device-action", key);
+    return '[data-creator-device-action="' + key + '"]';
+  }
+
   async function activatePornhubUploader(signal) {
     abortIfNeeded(signal);
-    const button = one("button.uploadButton", "Pornhub visible uploader");
+    const button = pornhubDeviceAction();
     let activated = null;
     let ambiguous = false;
     const capture = (event) => {
@@ -543,7 +598,12 @@
         signal,
       );
       abortIfNeeded(signal);
-      if (ambiguous || !chosen.isConnected)
+      if (
+        ambiguous ||
+        !chosen.isConnected ||
+        chosen.webkitdirectory ||
+        chosen.hasAttribute("directory")
+      )
         throw new Error(
           "Pornhub activated file input changed or is ambiguous.",
         );
@@ -1120,43 +1180,114 @@
     );
   }
 
+  function resolveOnlyFansComposer() {
+    const editors = [
+      ...document.querySelectorAll(
+        ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
+      ),
+    ].filter(visible);
+    if (editors.length > 1)
+      throw new Error(
+        "OnlyFans editor ownership candidates: " + editors.length,
+      );
+    if (!editors.length) return null;
+    const editor = editors[0];
+    let composer = editor.closest(
+      "form, [role='region'][aria-label='NEW POST'], [role='dialog'][aria-label='NEW POST']",
+    );
+    if (!composer) {
+      const headings = [
+        ...document.querySelectorAll("h1, h2, [role='heading']"),
+      ].filter(
+        (node) =>
+          visible(node) && normalizedText(node.textContent) === "new post",
+      );
+      if (headings.length !== 1)
+        throw new Error(
+          "OnlyFans NEW POST heading candidates: " + headings.length,
+        );
+      for (
+        let ancestor = editor.parentElement;
+        ancestor &&
+        ancestor !== document.body &&
+        ancestor !== document.documentElement;
+        ancestor = ancestor.parentElement
+      ) {
+        if (ancestor.contains(headings[0])) {
+          composer = ancestor;
+          break;
+        }
+      }
+    }
+    if (
+      !composer ||
+      composer === document.body ||
+      composer === document.documentElement
+    )
+      throw new Error("OnlyFans composer ownership is unverified.");
+    if (
+      composer.matches("[role='dialog']") &&
+      composer.getAttribute("aria-label") !== "NEW POST"
+    )
+      throw new Error("OnlyFans foreign composer.");
+    return { editor, composer };
+  }
+
   async function runOnlyFans(context) {
     const { draft, signal } = context;
     publicationMode(draft);
     abortIfNeeded(signal);
-    await waitFor(
-      () =>
-        document.querySelector(
-          ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
-        ),
-      "OnlyFans NEW POST editor",
+    const owned = await waitFor(
+      resolveOnlyFansComposer,
+      "OnlyFans NEW POST ownership",
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    const editor = one(
-      ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
-      "OnlyFans description editor",
-    );
+    const { editor, composer } = owned;
+    const revalidate = () => {
+      const current = resolveOnlyFansComposer();
+      if (
+        !current ||
+        current.editor !== editor ||
+        current.composer !== composer
+      )
+        throw new Error("OnlyFans composer ownership changed.");
+      return current;
+    };
+    const control = async (selector, label) =>
+      waitFor(
+        () => {
+          revalidate();
+          const candidates = [...document.querySelectorAll(selector)].filter(
+            (node) =>
+              visible(node) &&
+              (composer.contains(node) ||
+                (node instanceof HTMLButtonElement && node.form === composer) ||
+                (editor.id &&
+                  (node.getAttribute("aria-controls") || "")
+                    .split(/\s+/)
+                    .includes(editor.id)) ||
+                (composer.id &&
+                  (node.getAttribute("aria-controls") || "")
+                    .split(/\s+/)
+                    .includes(composer.id))),
+          );
+          if (candidates.length > 1)
+            throw new Error(
+              label + " ownership candidates: " + candidates.length,
+            );
+          return candidates[0];
+        },
+        label,
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
     const scheduleSelector =
       "button[aria-label='Schedule post'], button[title='Schedule post']";
-    let composer = editor.parentElement;
-    for (
-      let depth = 0;
-      composer &&
-      depth < 8 &&
-      (!composer.querySelector("#attach_file_photo") ||
-        !composer.querySelector(scheduleSelector));
-      depth++
-    )
-      composer = composer.parentElement;
-    if (
-      !composer ||
-      composer === document.body ||
-      composer === document.documentElement ||
-      !composer.querySelector("#attach_file_photo") ||
-      !composer.querySelector(scheduleSelector)
-    )
-      throw new Error("OnlyFans composer ownership is unverified.");
+    await control(
+      "#attach_file_photo[aria-label='Add media']",
+      "OnlyFans media activation",
+    );
     progressScope = composer;
     const labels = () =>
       [...composer.querySelectorAll("[id^='post-label-'], .b-post-labels")].map(
@@ -1194,7 +1325,7 @@
       !context.supportsNativePicker
     ) {
       click(
-        one(
+        await control(
           "#attach_file_photo[aria-label='Add media']",
           "OnlyFans media activation",
         ),
@@ -1225,6 +1356,7 @@
     );
     await context.progress?.("configuring");
 
+    revalidate();
     fillTextControl(editor, draft.description);
     await waitFor(
       () => editor.textContent === String(draft.description || ""),
@@ -1282,7 +1414,7 @@
       return text;
     };
     click(
-      one(scheduleSelector, "OnlyFans schedule control", composer),
+      await control(scheduleSelector, "OnlyFans schedule control"),
       "OnlyFans schedule control",
     );
     await waitFor(
@@ -2063,6 +2195,10 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
+    bindPornhubDeviceAction,
+    verifyPornhubDeviceAction: (selector) =>
+      pornhubDeviceAction().matches(selector),
+    resolveOnlyFansComposer,
     runFansly: guarded(runFansly),
     runManyVidsEdit: guarded(runManyVidsEdit),
     runManyVidsUpload: guarded(runManyVidsUpload),

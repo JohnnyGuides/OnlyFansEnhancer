@@ -2754,39 +2754,82 @@ const CREATOR_UPLOAD_TERMINAL_STATUSES = new Set([
 ]);
 
 async function assertCreatorUploadPageBinding(session, target, sender) {
+  const facts = {
+    active: Boolean(session && !session.cancelled),
+    topFrame: sender?.frameId === 0,
+    tabMatch: Boolean(target && sender?.tab?.id === target.tabId),
+    documentMatch: Boolean(
+      sender?.documentId && target?.documentId === sender.documentId,
+    ),
+    routeMatch: Boolean(target?.boundUrl && sender?.url === target.boundUrl),
+  };
+  const refuse = (code) => {
+    throw Object.assign(new Error(code), {
+      rejectionCode: code,
+      bindingFacts: facts,
+    });
+  };
   if (
-    !session ||
-    session.cancelled ||
-    !target ||
-    sender?.frameId !== 0 ||
-    !sender.documentId ||
-    sender.tab?.id !== target.tabId ||
-    target.documentId !== sender.documentId ||
-    !target.boundUrl ||
-    sender.url !== target.boundUrl
+    !facts.active ||
+    !facts.topFrame ||
+    !facts.tabMatch ||
+    !facts.documentMatch ||
+    !target.boundUrl
   )
-    throw new Error("Upload page binding is stale or unauthorized.");
+    refuse("upload-page-binding-unauthorized");
   const port = creatorUploadPort(session.id);
   if (!port || session.executionPort !== port)
-    throw new Error(
-      "Upload browser connection changed; reconnect the existing draft.",
-    );
-  const frames = await chrome.webNavigation.getAllFrames({
-    tabId: target.tabId,
-  });
-  const frame = frames?.find((item) => item.frameId === 0);
-  if (
-    session.cancelled ||
-    creatorUploadPort(session.id) !== port ||
-    frame?.documentId !== sender.documentId ||
-    frame?.url !== target.boundUrl
-  )
-    throw new Error("Upload page binding changed during validation.");
+    refuse("upload-connection-changed");
+  const originalUrl = target.boundUrl;
+  const alias =
+    target.platform === "fansly" &&
+    ["https://fansly.com/", "https://fansly.com/home"].includes(originalUrl) &&
+    ["https://fansly.com/", "https://fansly.com/home"].includes(sender.url);
+  if (!facts.routeMatch && !alias) refuse("upload-page-binding-route-mismatch");
+  const inspectFrame = async () => {
+    const frames = await chrome.webNavigation.getAllFrames({
+      tabId: target.tabId,
+    });
+    const frame = frames?.find((item) => item.frameId === 0);
+    if (
+      session.cancelled ||
+      creatorUploadPort(session.id) !== port ||
+      session.executionPort !== port ||
+      target.documentId !== sender.documentId ||
+      target.boundUrl !== originalUrl ||
+      frame?.documentId !== sender.documentId ||
+      frame?.url !== sender.url
+    )
+      refuse("upload-page-binding-changed");
+  };
+  await inspectFrame();
+  if (!facts.routeMatch) {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: target.tabId, documentIds: [sender.documentId] },
+      func: (id) => {
+        const composer = globalThis.CreatorFanslyComposers?.get(id);
+        const candidates = [
+          ...document.querySelectorAll("app-post-creation"),
+        ].filter((node) => node.isConnected && node.getClientRects().length);
+        return Boolean(
+          composer &&
+          composer.isConnected &&
+          candidates.length === 1 &&
+          candidates[0] === composer,
+        );
+      },
+      args: [session.id],
+    });
+    if (result?.result !== true) refuse("upload-page-binding-composer-changed");
+    await inspectFrame();
+    target.boundUrl = sender.url;
+  }
 }
 
 function creatorUploadSessionRecord(session) {
   return {
     id: session.id,
+    launcher: session.launcher,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     draft: session.draft,
@@ -2810,6 +2853,7 @@ function creatorUploadSessionRecord(session) {
           boundUrl: target.boundUrl,
           progressSequence: target.progressSequence,
           progressStage: target.progressStage,
+          editorHandoff: target.editorHandoff,
         },
       ]),
     ),
@@ -3478,6 +3522,43 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       CREATOR_UPLOAD_ADAPTERS,
     ],
   });
+  if (platform === "fansly") {
+    const [ready] = await chrome.scripting.executeScript({
+      target: injectionTarget,
+      func: async (id) => {
+        const deadline = Date.now() + 30000;
+        while (Date.now() < deadline) {
+          const candidates = [
+            ...document.querySelectorAll("app-post-creation"),
+          ].filter((node) => node.isConnected && node.getClientRects().length);
+          if (candidates.length > 1)
+            throw new Error("Fansly composer candidates: 2 or more.");
+          if (
+            candidates.length === 1 &&
+            candidates[0].querySelector("textarea, [contenteditable='true']")
+          ) {
+            globalThis.CreatorFanslyComposers ||= new Map();
+            globalThis.CreatorFanslyComposers.set(id, candidates[0]);
+            return true;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        throw new Error("Fansly ready composer candidates: 0.");
+      },
+      args: [session.id],
+    });
+    const currentFrames = await chrome.webNavigation.getAllFrames({
+      tabId: tab.id,
+    });
+    const current = currentFrames?.find((item) => item.frameId === 0);
+    if (
+      ready?.result !== true ||
+      current?.documentId !== frame.documentId ||
+      !["https://fansly.com/", "https://fansly.com/home"].includes(current.url)
+    )
+      throw new Error("Fansly acquisition document or route changed.");
+    frame.url = current.url;
+  }
   const bridgeBase = chrome.runtime.getURL("file-bridge.html");
   const bridgeOrigin = new URL(bridgeBase).origin;
   const bridgeUrl = `${bridgeBase}?session=${encodeURIComponent(session.id)}&platform=${encodeURIComponent(platform)}&parentOrigin=${encodeURIComponent(definition.origin)}`;
@@ -3510,6 +3591,26 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
   return target;
 }
 
+async function verifyCreatorManyVidsEditor(expectedUrl, videoId) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    if (location.href !== expectedUrl) return false;
+    const titles = [...document.querySelectorAll("#Title[name='video_title']")];
+    if (titles.length > 1) return false;
+    const form = titles[0]?.closest("form");
+    if (form) {
+      const identities = [
+        ...form.querySelectorAll(
+          "input[name='video_id'], input[name='videoId']",
+        ),
+      ];
+      return identities.every((input) => input.value === videoId);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
 async function prepareCreatorManyVidsEdit(session, target) {
   const definition = CREATOR_UPLOAD_TARGETS.manyvids;
   const loaded = await chrome.tabs.get(target.tabId);
@@ -3517,6 +3618,13 @@ async function prepareCreatorManyVidsEdit(session, target) {
   if (!editRoute || editRoute.manyvidsId !== target.manyvidsId) {
     throw new Error("ManyVids left the expected edit page.");
   }
+  const [verified] = await chrome.scripting.executeScript({
+    target: { tabId: target.tabId, documentIds: [target.documentId] },
+    func: verifyCreatorManyVidsEditor,
+    args: [target.boundUrl, target.manyvidsId],
+  });
+  if (verified?.result !== true)
+    throw new Error("ManyVids destination editor identity is unverified.");
   await chrome.scripting.executeScript({
     target: { tabId: target.tabId, documentIds: [target.documentId] },
     func: markCreatorToolkitMasterRun,
@@ -3676,7 +3784,27 @@ async function invokeCreatorUploadAdapter(args) {
           return;
         }
         if (!response?.ok) {
-          reject(new Error("preparation-request-rejected"));
+          const code = response
+            ? response.rejectionCode || "preparation-request-rejected"
+            : "preparation-response-missing";
+          const facts = response?.bindingFacts;
+          reject(
+            Object.assign(
+              new Error(
+                code +
+                  " [" +
+                  message.type +
+                  ":" +
+                  (args.stage || "upload") +
+                  "]" +
+                  (facts ? " " + JSON.stringify(facts) : ""),
+              ),
+              {
+                rejectionCode: code,
+                bindingFacts: facts,
+              },
+            ),
+          );
           return;
         }
         resolve(response);
@@ -3736,7 +3864,7 @@ async function invokeCreatorUploadAdapter(args) {
         };
       });
     },
-    checkpointStep(actionId, commandId, outcome) {
+    checkpointStep(actionId, commandId, outcome, evidence) {
       return send({
         type: "CHECKPOINT_CREATOR_UPLOAD_STEP",
         sessionId: args.sessionId,
@@ -3744,6 +3872,7 @@ async function invokeCreatorUploadAdapter(args) {
         actionId,
         commandId,
         outcome,
+        evidence,
       });
     },
     attachFile: async (role, selector) => {
@@ -3850,13 +3979,20 @@ async function invokeCreatorUploadAdapter(args) {
   return promise;
 }
 
-async function resolveCreatorUploadAdapterResult(tabId, key, execution) {
+async function resolveCreatorUploadAdapterResult(
+  tabId,
+  key,
+  execution,
+  documentId,
+) {
+  if (!documentId)
+    throw new Error("Adapter result document binding is missing.");
   const direct = execution?.[0]?.result;
   if (typeof direct?.status === "string") return direct;
   let state = null;
   try {
     const [inspection] = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, documentIds: [documentId] },
       func: (runKey) =>
         globalThis.CreatorUploadRuns?.get(runKey)?.state || null,
       args: [key],
@@ -3970,6 +4106,7 @@ async function runCreatorManyVidsPlatform(session, target) {
           target.tabId,
           `${session.id}:${platform}:upload`,
           uploadExecution,
+          target.documentId,
         );
       } catch (error) {
         if (!target.editorHandoff?.documentId || target.editorHandoff.invalid)
@@ -3995,7 +4132,9 @@ async function runCreatorManyVidsPlatform(session, target) {
         !handoff.documentId ||
         editorFrame?.documentId !== handoff.documentId ||
         editorFrame.url !== handoff.url ||
-        !manyVidsRoute(editorFrame.url, "edit")
+        manyVidsRoute(editorFrame.url, "edit")?.manyvidsId !==
+          handoff.videoId ||
+        editorFrame.url !== handoff.expectedUrl
       )
         throw new Error(
           "ManyVids editor navigation is not associated with the recorded completed-card action.",
@@ -4043,6 +4182,7 @@ async function runCreatorManyVidsPlatform(session, target) {
       target.tabId,
       `${session.id}:${platform}:edit`,
       editExecution,
+      target.documentId,
     );
     if (editResult.status !== "save-clicked") {
       if (editResult.status === "manual-submit-required")
@@ -4144,7 +4284,7 @@ async function runCreatorPornhubPlatform(session, target) {
             pornhub: "input.dz-hidden-input[type='file']",
           },
           draft: session.draft,
-          nativePicker: false,
+          nativePicker: creatorUploadPort(session.id)?.desktop === true,
         },
       ],
     });
@@ -4152,6 +4292,7 @@ async function runCreatorPornhubPlatform(session, target) {
       target.tabId,
       `${session.id}:${platform}:upload`,
       execution,
+      target.documentId,
     );
     if (result?.status !== "manual-submit-required") {
       throw new Error("Pornhub metadata preparation did not finish safely.");
@@ -4274,6 +4415,7 @@ async function runCreatorUploadPlatform(session, platform) {
       target.tabId,
       `${session.id}:${platform}:upload`,
       execution,
+      target.documentId,
     );
     if (adapterResult?.status === "manual-submit-required") {
       await cancelCreatorUploadResponseObserver(
@@ -4932,36 +5074,70 @@ function handleExtensionMessage(message, sender, sendResponse) {
         ) {
           if (message.platform !== "manyvids" || target.stage !== "upload")
             throw new Error("Unauthorized editor handoff.");
+          const expected = manyVidsRoute(
+            message.evidence?.destinationUrl,
+            "edit",
+          );
+          if (
+            !expected ||
+            expected.manyvidsId !== message.evidence?.videoId ||
+            new URL(expected.url).search ||
+            new URL(expected.url).hash
+          )
+            throw new Error("ManyVids editor destination evidence is missing.");
           if (!target.editorHandoff) {
             if (!chrome.webNavigation.onCommitted)
               throw new Error("Editor navigation evidence is unavailable.");
             const handoff = {
               commandId: message.commandId,
               sourceDocumentId: sender.documentId,
+              expectedUrl: expected.url,
+              videoId: expected.manyvidsId,
               documentId: "",
               url: "",
               invalid: false,
             };
             target.editorHandoff = handoff;
-            const observe = (details) => {
+            const boundPort = session.executionPort;
+            const observe = (details, sameDocument = false) => {
               if (details.tabId !== target.tabId || details.frameId !== 0)
                 return;
-              chrome.webNavigation.onCommitted.removeListener(observe);
+              handoff.cleanup?.();
               const route = manyVidsRoute(details.url, "edit");
               if (
                 !route ||
+                route.manyvidsId !== handoff.videoId ||
+                details.url !== handoff.expectedUrl ||
+                session.cancelled ||
+                creatorUploadPort(session.id) !== boundPort ||
+                session.executionPort !== boundPort ||
+                target.documentId !== handoff.sourceDocumentId ||
                 !details.documentId ||
-                details.documentId === handoff.sourceDocumentId
+                (sameDocument
+                  ? details.documentId !== handoff.sourceDocumentId
+                  : details.documentId === handoff.sourceDocumentId)
               )
                 handoff.invalid = true;
               else {
                 handoff.documentId = details.documentId;
                 handoff.url = details.url;
               }
+              void checkpointCreatorUploadSession(session).catch(() => {
+                handoff.invalid = true;
+              });
             };
-            handoff.cleanup = () =>
+            const sameDocument = (details) => observe(details, true);
+            handoff.cleanup = () => {
               chrome.webNavigation.onCommitted.removeListener(observe);
+              chrome.webNavigation.onHistoryStateUpdated?.removeListener(
+                sameDocument,
+              );
+            };
             chrome.webNavigation.onCommitted.addListener(observe);
+            chrome.webNavigation.onHistoryStateUpdated?.addListener(
+              sameDocument,
+            );
+            await checkpointCreatorUploadSession(session);
           } else if (target.editorHandoff.commandId !== message.commandId)
             throw new Error("An editor handoff is already pending.");
         }
@@ -5136,7 +5312,26 @@ function handleExtensionMessage(message, sender, sendResponse) {
     }
   })()
     .then((payload) => sendResponse({ ok: true, ...payload }))
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+    .catch((error) =>
+      sendResponse({
+        ok: false,
+        error: error.message,
+        rejectionCode:
+          error.rejectionCode ||
+          {
+            "Preparation document changed.": "preparation-document-changed",
+            "Preparation progress is stale or cancelled.":
+              "preparation-progress-stale",
+            "File delivery has no fresh, bound, unissued selection intent.":
+              "preparation-selection-intent-invalid",
+            "Preparation progress has no document or sequence binding.":
+              "preparation-progress-binding-missing",
+            "Unauthorized preparation step.": "preparation-step-unauthorized",
+          }[error.message] ||
+          "preparation-request-rejected",
+        ...(error.bindingFacts ? { bindingFacts: error.bindingFacts } : {}),
+      }),
+    );
 
   return true;
 }
@@ -5253,16 +5448,44 @@ async function attachDesktopUploadFile(command, ports) {
     args: [pending.sessionId, pending.role, pending.token],
   });
   await validateBinding();
-  await globalThis.CreatorLocalFileAttacher.attach({
+  let pickerSelector;
+  if (pending.platform === "pornhub") {
+    const [binding] = await chrome.scripting.executeScript({
+      target: injectionTarget,
+      func: () =>
+        globalThis.CreatorUploadPlatformAdapters.bindPornhubDeviceAction(),
+    });
+    pickerSelector = binding?.result;
+    if (!pickerSelector)
+      throw new Error("Pornhub device action binding is unavailable.");
+  }
+  const receipt = await globalThis.CreatorLocalFileAttacher.attach({
+    validateBinding,
+    validatePicker: async () => {
+      await validateBinding();
+      if (pending.platform !== "pornhub") return;
+      const [verified] = await chrome.scripting.executeScript({
+        target: injectionTarget,
+        func: (selector) =>
+          globalThis.CreatorUploadPlatformAdapters.verifyPornhubDeviceAction(
+            selector,
+          ),
+        args: [pickerSelector],
+      });
+      if (verified?.result !== true)
+        throw new Error("Pornhub device action changed before activation.");
+      await validateBinding();
+    },
     tabId: pending.tabId,
     selector: target.result.selector,
     pickerSelector:
       pending.platform === "onlyfans" && pending.role === "full"
         ? "#attach_file_photo[aria-label='Add media']"
         : pending.platform === "pornhub" && pending.role === "pornhub"
-          ? "button.uploadButton"
+          ? pickerSelector
           : undefined,
     activatePicker: pending.platform === "pornhub",
+    requireConnectedInput: pending.platform === "pornhub",
     filePath: command.filePath,
     allowedOrigins: [origin],
     signal: pending.fileController.signal,
@@ -5278,6 +5501,8 @@ async function attachDesktopUploadFile(command, ports) {
   )
     throw new Error("The file request was cancelled or interrupted.");
   await validateBinding();
+  if (receipt?.attached !== true)
+    throw new Error("Native file receipt is unverified.");
   await chrome.scripting.executeScript({
     target: injectionTarget,
     func: (id, role, token, expected) =>

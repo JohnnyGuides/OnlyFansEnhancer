@@ -158,6 +158,9 @@ test("missing Chrome execution result recovers the completed bound page result",
       scripting: {
         async executeScript(details) {
           assert.equal(details.target.tabId, 42);
+          assert.deepEqual(Array.from(details.target.documentIds), [
+            "11111111-1111-4111-8111-111111111111",
+          ]);
           assert.equal(details.args[0], "session:fansly:upload");
           return [
             {
@@ -179,6 +182,7 @@ test("missing Chrome execution result recovers the completed bound page result",
     42,
     "session:fansly:upload",
     [{ frameId: 0 }],
+    "11111111-1111-4111-8111-111111111111",
   );
   assert.equal(result.platform, "fansly");
   assert.equal(result.status, "manual-submit-required");
@@ -215,9 +219,33 @@ test("missing Chrome execution result reports the bound page failure", async () 
   });
   vm.runInContext(source.slice(start, end), context);
   await assert.rejects(
-    context.resolveCreatorUploadAdapterResult(42, "session:fansly:upload", [
-      { frameId: 0 },
-    ]),
+    context.resolveCreatorUploadAdapterResult(
+      42,
+      "session:fansly:upload",
+      [{ frameId: 0 }],
+      "11111111-1111-4111-8111-111111111111",
+    ),
     /current toggle control is missing/,
   );
+});
+
+test("first progress preserves typed binding rejection before selection intent", async () => {
+  const { context, runtime, args, messages } = harness();
+  runtime.sendMessage = (message, callback) => {
+    messages.push(message);
+    callback({
+      ok: false,
+      rejectionCode: "upload-page-binding-route-mismatch",
+      bindingFacts: { documentMatch: true, routeMatch: false },
+    });
+  };
+  context.CreatorUploadPlatformAdapters.runFansly = async (run) => {
+    await run.progress("uploading-full");
+    await run.attachFile("full", "#file");
+  };
+  await assert.rejects(
+    context.invokeCreatorUploadAdapter(args),
+    /upload-page-binding-route-mismatch.*CREATOR_UPLOAD_PLATFORM_PROGRESS:upload.*routeMatch/,
+  );
+  assert.equal(messages.length, 1);
 });

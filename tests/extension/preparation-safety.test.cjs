@@ -56,7 +56,7 @@ for (const autoStart of [false, true]) {
               const card = document.createElement("article");
               card.className = "uppy-Dashboard-Item";
               card.innerHTML =
-                '<span class="uppy-Dashboard-Item-name">fixture.mp4</span><button>Edit</button>';
+                '<span class="uppy-Dashboard-Item-name">fixture.mp4</span><button data-href="https://www.manyvids.com/Edit-vid/123">Edit</button>';
               card.querySelector("button").onclick = () => edits++;
               dashboard.append(card);
               const start = () => {
@@ -112,7 +112,7 @@ test("ManyVids clicks an enabled queued upload even during a transient uploading
         async attachFile() {
           dashboard.insertAdjacentHTML(
             "beforeend",
-            '<article class="uppy-Dashboard-Item"><span class="uppy-Dashboard-Item-name">neutral-...mp4</span><button>Edit</button></article><div class="uppy-StatusBar is-uploading"><button class="uppy-StatusBar-actionBtn--upload">Upload 1 file</button></div>',
+            '<article class="uppy-Dashboard-Item"><span class="uppy-Dashboard-Item-name">neutral-...mp4</span><button data-href="https://www.manyvids.com/Edit-vid/123">Edit</button></article><div class="uppy-StatusBar is-uploading"><button class="uppy-StatusBar-actionBtn--upload">Upload 1 file</button></div>',
           );
           const card = dashboard.querySelector(".uppy-Dashboard-Item");
           card.querySelector("button").onclick = () => edits++;
@@ -162,7 +162,7 @@ test("ManyVids waits for delayed acceptance without repeating its upload click",
           async attachFile() {
             dashboard.insertAdjacentHTML(
               "beforeend",
-              '<article class="uppy-Dashboard-Item"><span class="uppy-Dashboard-Item-name">neutral-...mp4</span><button>Edit</button></article><div class="uppy-StatusBar is-waiting"><button class="uppy-StatusBar-actionBtn--upload">Upload 1 file</button></div>',
+              '<article class="uppy-Dashboard-Item"><span class="uppy-Dashboard-Item-name">neutral-...mp4</span><button data-href="https://www.manyvids.com/Edit-vid/123">Edit</button></article><div class="uppy-StatusBar is-waiting"><button class="uppy-StatusBar-actionBtn--upload">Upload 1 file</button></div>',
             );
             const card = dashboard.querySelector(".uppy-Dashboard-Item");
             card.querySelector("button").onclick = () => edits++;
@@ -349,7 +349,9 @@ for (const progressKind of ["advancing", "unknown", "stalled", "resumed"]) {
                     "Button edit video : large.mp4",
                   );
                   edit.onclick = () => edits++;
-                  document.body.append(edit);
+                  const card = dashboard.querySelector(".uppy-Dashboard-Item");
+                  card.dataset.state = "upload-complete";
+                  card.append(edit);
                   clearInterval(timer);
                 }
               }, 125);

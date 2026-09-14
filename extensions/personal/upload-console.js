@@ -1537,7 +1537,7 @@
         "pornhub",
       )
         ? contentPreset.value
-          ? "Pornhub metadata preparation was added from an exact content preset. File assignment and final Submit remain manual."
+          ? "Pornhub metadata preparation was added from an exact content preset. File assignment is automatic; final Submit remains manual."
           : "Pornhub is recommended from the empty catalogue link. Choose an exact content preset to add its trace-gated metadata step."
         : "";
       selectedCatalogueReason.textContent = proposalReason(proposal);
@@ -1663,7 +1663,7 @@
           "Pornhub",
           existing
             ? `Already linked · ${existing}`
-            : `${pornhubFile?.name || fullFile.name} · ${contentPreset.value || "preset required"} · metadata only; file and final Submit remain manual`,
+            : `${pornhubFile?.name || fullFile.name} · ${contentPreset.value || "preset required"} · file and metadata preparation; final Submit remains manual`,
         );
         if (!existing) {
           summaryRow("Pornhub saved preset", authorization.pornhub);
@@ -2082,7 +2082,9 @@
           status:
             request.role === "thumbnail"
               ? "waiting-for-thumbnail"
-              : "waiting-for-teaser",
+              : request.role === "teaser"
+                ? "waiting-for-teaser"
+                : "upload-attention-required",
         });
         return;
       }
@@ -2381,7 +2383,7 @@
           full: fullFile,
           teaser: teaserFile,
           thumbnail: thumbnailFile,
-          pornhub: pornhubFile,
+          pornhub: pornhubFile || fullFile,
           social: socialFile,
         };
         activeSession = connectSession(sessionId, {

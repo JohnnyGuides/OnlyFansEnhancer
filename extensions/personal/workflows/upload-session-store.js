@@ -31,7 +31,7 @@
       .join("");
   }
 
-  async function workIdentity(record) {
+  async function workIdentity(record, legacy = false) {
     const catalogue = record.catalogue;
     const launcher = LAUNCHERS.has(record.launcher)
       ? record.launcher
@@ -39,13 +39,13 @@
     return digest(
       catalogue?.itemId || catalogue?.id
         ? {
-            launcher,
+            ...(legacy ? {} : { launcher }),
             source: catalogue.source,
             id: catalogue.itemId || catalogue.id,
           }
         : record.draft?.fullFilename
-          ? { launcher, file: record.draft.fullFilename }
-          : { launcher, title: record.draft?.title },
+          ? { ...(legacy ? {} : { launcher }), file: record.draft.fullFilename }
+          : { ...(legacy ? {} : { launcher }), title: record.draft?.title },
     );
   }
 
@@ -93,12 +93,23 @@
   async function assertAvailable(record, platforms) {
     await migrateFinalActions();
     const work = await workIdentity(record);
+    const legacyWork = await workIdentity(record, true);
+    // Final attempts were historically written with missing launcher metadata.
+    // Preserve all hashes and refuse across launchers at the publication boundary.
+    const finalWorks = new Set(
+      await Promise.all([
+        workIdentity(record, true),
+        workIdentity({ ...record, launcher: "extension" }),
+        workIdentity({ ...record, launcher: "desktop" }),
+      ]),
+    );
     const signature = await digest(sanitizeDraft(record.draft));
     if (
       (await listRecovery()).some((item) =>
         item.steps.some(
           (step) =>
             (step.work === work ||
+              step.work === legacyWork ||
               (!step.work && step.signature === signature) ||
               item.id === record.id) &&
             platforms.includes(step.platform),
@@ -111,7 +122,7 @@
     if (
       (await actionRecords()).some(
         (item) =>
-          (item.id === record.id || item.work === work) &&
+          (item.id === record.id || finalWorks.has(item.work)) &&
           platforms.includes(item.platform),
       )
     )
@@ -149,9 +160,16 @@
           continue;
         }
         const work = await workIdentity(record);
+        const finalWorks = new Set(
+          await Promise.all([
+            workIdentity(record, true),
+            workIdentity({ ...record, launcher: "extension" }),
+            workIdentity({ ...record, launcher: "desktop" }),
+          ]),
+        );
         if (
           records.some(
-            (item) => item.work === work && item.platform === platform,
+            (item) => finalWorks.has(item.work) && item.platform === platform,
           )
         )
           throw new Error(
@@ -516,6 +534,28 @@
       output.progressSequence = progressSequence;
     for (const field of ["commitArmed", "submitAttempted"]) {
       if (Object.hasOwn(value, field)) output[field] = value[field] === true;
+    }
+    if (name === "manyvids" && value.editorHandoff) {
+      const handoff = value.editorHandoff;
+      const expected =
+        /^https:\/\/www\.manyvids\.com\/Edit-vid\/(\d+)\/?$/.exec(
+          handoff.expectedUrl || "",
+        );
+      if (
+        expected &&
+        expected[1] === handoff.videoId &&
+        /^[a-f0-9-]{36}$/i.test(handoff.commandId || "")
+      ) {
+        output.editorHandoff = {
+          commandId: handoff.commandId,
+          sourceDocumentId: clean(handoff.sourceDocumentId, 36),
+          expectedUrl: handoff.expectedUrl,
+          videoId: handoff.videoId,
+          documentId: clean(handoff.documentId, 36),
+          url: handoff.url === handoff.expectedUrl ? handoff.url : "",
+          invalid: handoff.invalid === true,
+        };
+      }
     }
     return output;
   }

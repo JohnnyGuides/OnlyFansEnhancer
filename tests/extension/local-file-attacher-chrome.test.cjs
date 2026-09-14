@@ -294,6 +294,61 @@ async function main() {
         .evaluate((input) => input.files[0].name),
       "inert-proof.mp4",
     );
+    // Reconstructed Device/Vault surface, with the production semantic resolver
+    // and real debugger picker interception. This is not an authenticated capture.
+    await page.setContent(
+      '<section aria-label="Video Upload"><button class="uploadButton">Upload from Device</button><button class="uploadButton">Upload from Vault</button></section><input type="file" class="dz-hidden-input" hidden>',
+    );
+    await page.addScriptTag({
+      path: path.join(extensionRoot, "workflows/upload-platform-adapters.js"),
+    });
+    const pickerSelector = await page.evaluate(() => {
+      globalThis.nativeProof = { clicks: 0, assignments: 0 };
+      document.querySelector("button").onclick = () => {
+        nativeProof.clicks++;
+        document.querySelector("input").remove();
+        const input = document.createElement("input");
+        input.type = "file";
+        input.className = "dz-hidden-input";
+        input.hidden = true;
+        input.onchange = () => {
+          nativeProof.assignments++;
+          input.remove();
+        };
+        document.body.append(input);
+        input.click();
+      };
+      return CreatorUploadPlatformAdapters.bindPornhubDeviceAction();
+    });
+    assert.deepEqual(
+      await worker.evaluate(
+        async ({ tabId, filePath, origin, pickerSelector, size }) =>
+          CreatorLocalFileAttacher.attach(
+            {
+              tabId,
+              filePath,
+              allowedOrigins: [origin],
+              pickerSelector,
+              activatePicker: true,
+              selector: "input.dz-hidden-input[type='file']",
+              expected: { name: "inert-proof.mp4", size },
+            },
+            chrome,
+          ),
+        {
+          tabId,
+          filePath,
+          origin,
+          pickerSelector,
+          size: fs.statSync(filePath).size,
+        },
+      ),
+      { attached: true },
+    );
+    assert.deepEqual(await page.evaluate(() => nativeProof), {
+      clicks: 1,
+      assignments: 1,
+    });
   } finally {
     await context?.close();
     await new Promise((resolve) => server.close(resolve));

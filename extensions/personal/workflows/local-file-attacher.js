@@ -410,6 +410,8 @@
         });
         intercepting = true;
         checkActive();
+        await request.validatePicker?.();
+        checkActive();
         invoked = true;
         const activated = await command(
           chromeApi,
@@ -481,8 +483,8 @@
       resolvedInput = resolved.object.objectId;
       const armed = await command(chromeApi, target, "Runtime.callFunctionOn", {
         objectId: resolvedInput,
-        functionDeclaration: `function (key, expected, selector) {
-          if (!this.matches(selector)) return false;
+        functionDeclaration: `function (key, expected, selector, requireConnected) {
+          if ((requireConnected && !this.isConnected) || this.webkitdirectory || this.hasAttribute("directory") || !this.matches(selector)) return false;
           const input = this;
           const receipt = { matched: false };
           const listener = (event) => {
@@ -509,12 +511,20 @@
               : null,
           },
           { value: prepared.selector },
+          { value: request.requireConnectedInput === true },
         ],
         returnByValue: true,
       });
       if (armed?.result?.value !== true)
         throw fail("file-chooser-control-mismatch");
       checkActive();
+      await request.validateBinding?.();
+      checkActive();
+      mainFrame(
+        await command(chromeApi, target, "Page.getFrameTree", {}),
+        prepared.allowedOrigins,
+        attachedFrame,
+      );
       await command(chromeApi, target, "DOM.setFileInputFiles", {
         files: [prepared.filePath],
         ...inputNode,

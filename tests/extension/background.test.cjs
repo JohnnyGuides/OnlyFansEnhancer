@@ -41,6 +41,7 @@ const openTabs = new Map([
   ],
 ]);
 const tabUpdatedListeners = new Set();
+const committedListeners = new Set();
 const probeExecutionOrder = [];
 const recorderInjectionTabs = [];
 const recorderShowTabs = [];
@@ -205,7 +206,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.21",
+          productVersion: "0.20.22",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -236,6 +237,10 @@ const chrome = {
     },
   },
   webNavigation: {
+    onCommitted: {
+      addListener: (fn) => committedListeners.add(fn),
+      removeListener: (fn) => committedListeners.delete(fn),
+    },
     async getAllFrames({ tabId }) {
       const tab = openTabs.get(tabId);
       return tab
@@ -568,7 +573,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.21",
+    productVersion: "0.20.22",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -588,7 +593,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.21");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.22");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -906,7 +911,13 @@ function send(message) {
       details.args[0].includes(":manyvids:")
     )
       return [{ frameId: 0, result: null }];
+    if (
+      name === "func" &&
+      details.func.toString().includes("CreatorFanslyComposers")
+    )
+      return [{ result: true }];
     uploadExecutions.push(name);
+    if (name === "verifyCreatorManyVidsEditor") return [{ result: true }];
     if (name === "markCreatorToolkitMasterRun") return [{ frameId: 0 }];
     if (name === "installCreatorUploadFileBridge") {
       fileBridgePlatforms.push(details.args[0].platform);
@@ -946,16 +957,37 @@ function send(message) {
       manyVidsStages.push(args.stage);
       const tab = openTabs.get(details.target.tabId);
       if (!args.draft.manyvidsId) {
-        tab.url = "https://www.manyvids.com/Edit-vid/7783271";
-        const target = await vm.runInContext(
-          `getCreatorUploadSession("${args.sessionId}").then((session) => session.platforms.get("manyvids"))`,
-          context,
+        const destinationUrl = "https://www.manyvids.com/Edit-vid/7783271";
+        const checkpoint = await new Promise((resolve) =>
+          messageListener(
+            {
+              type: "CHECKPOINT_CREATOR_UPLOAD_STEP",
+              sessionId: args.sessionId,
+              platform: "manyvids",
+              actionId: "open-editor",
+              commandId: "11111111-1111-4111-8111-111111111111",
+              outcome: "intent",
+              evidence: { destinationUrl, videoId: "7783271" },
+            },
+            {
+              tab: { id: tab.id },
+              frameId: 0,
+              documentId: tabDocumentId(tab),
+              url: tab.url,
+            },
+            resolve,
+          ),
         );
-        target.editorHandoff = {
-          documentId: tabDocumentId(tab),
-          url: tab.url,
-          invalid: false,
-        };
+        assert.equal(checkpoint.ok, true, checkpoint.error);
+        tab.documentVersion = (tab.documentVersion || 0) + 1;
+        tab.url = destinationUrl;
+        for (const listener of [...committedListeners])
+          listener({
+            tabId: tab.id,
+            frameId: 0,
+            documentId: tabDocumentId(tab),
+            url: tab.url,
+          });
         return [{ frameId: 0, result: { status: "edit-requested" } }];
       }
       if (manyVidsEditFailuresRemaining > 0) {
@@ -2124,7 +2156,80 @@ function send(message) {
     "Resetting identity mappings must not allow old remote pictures to be reused.",
   );
 
-  console.log("PASS: persistent aliases and unique avatar assignments");
+  // Exercise the production adapter request wrapper and coordinator together,
+  // before a durable file-selection step can be issued.
+  chrome.scripting.executeScript = async (details) => {
+    assert.ok(details.func.toString().includes("CreatorFanslyComposers"));
+    return [{ result: true }];
+  };
+  context.AbortController = AbortController;
+  context.addEventListener = () => {};
+  context.removeEventListener = () => {};
+  for (const variant of ["stable", "alias", "foreign-route", "replacement"]) {
+    const id =
+      "a".repeat(44) +
+      String(
+        ["stable", "alias", "foreign-route", "replacement"].indexOf(variant),
+      ).padStart(4, "0");
+    const tab = {
+      id: 990,
+      documentVersion: 1,
+      url: "https://fansly.com/",
+      status: "complete",
+    };
+    openTabs.set(tab.id, tab);
+    const originalDocument = tabDocumentId(tab);
+    context.integration = { id, documentId: originalDocument };
+    await vm.runInContext(
+      `
+      { const port = { creatorUploadSessionId: integration.id, postMessage() {} };
+        creatorUploadConsolePorts.add(port);
+        creatorUploadSessions.set(integration.id, { id: integration.id, launcher: "desktop", draft: {}, executionPort: port,
+          platforms: new Map([["fansly", { platform: "fansly", tabId: 990, documentId: integration.documentId, boundUrl: "https://fansly.com/", stage: "upload", progressStage: "upload", status: "uploading-full" }]]) });
+      }
+    `,
+      context,
+    );
+    if (variant === "alias") tab.url = "https://fansly.com/home";
+    if (variant === "foreign-route") tab.url = "https://fansly.com/settings";
+    if (variant === "replacement") tab.documentVersion++;
+    const sent = [];
+    chrome.runtime.sendMessage = (message, callback) => {
+      sent.push(message);
+      messageListener(
+        message,
+        {
+          tab: { id: 990 },
+          frameId: 0,
+          documentId: originalDocument,
+          url: tab.url,
+        },
+        callback,
+      );
+    };
+    context.CreatorUploadPlatformAdapters = {
+      async runFansly(run) {
+        await run.progress("uploading-full");
+        return { status: "manual-submit-required" };
+      },
+    };
+    const promise = vm.runInContext(
+      'invokeCreatorUploadAdapter({ sessionId: integration.id, platform: "fansly", draft: {}, selectors: {} })',
+      context,
+    );
+    if (["stable", "alias"].includes(variant))
+      assert.equal((await promise).status, "manual-submit-required");
+    else
+      await assert.rejects(
+        promise,
+        /upload-page-binding-.*CREATOR_UPLOAD_PLATFORM_PROGRESS:upload/,
+      );
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].type, "CREATOR_UPLOAD_PLATFORM_PROGRESS");
+  }
+  console.log(
+    "PASS: persistent aliases, upload lifecycle and exact navigation handoff",
+  );
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

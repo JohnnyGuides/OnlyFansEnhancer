@@ -517,3 +517,30 @@ test("upload session list and remove operate only on the store prefix", async ()
   assert.equal(await store.load("upload-session-one11111"), null);
   assert.deepEqual(values.unrelated, { keep: true });
 });
+
+test("desktop launcher round-trips and legacy final hash prevents new-session bypass", async () => {
+  const { store, values } = loadStore();
+  const record = {
+    id: "launcher-session-1",
+    launcher: "desktop",
+    draft: { fullFilename: "fixture.mp4", title: "Fixture" },
+    platforms: { onlyfans: { commitArmed: true, submitAttempted: true } },
+  };
+  const identity = await store.workIdentity(record);
+  await store.save(record);
+  const restored = await store.load(record.id);
+  assert.equal(restored.launcher, "desktop");
+  assert.equal(await store.workIdentity(restored), identity);
+  values.creatorUploadActionsV1[0].work = await store.workIdentity(
+    record,
+    true,
+  );
+  delete values[store.KEY_PREFIX + record.id];
+  await assert.rejects(
+    store.assertAvailable({ ...record, id: "launcher-session-2" }, [
+      "onlyfans",
+    ]),
+    /unresolved/,
+  );
+  assert.equal(values.creatorUploadActionsV1.length, 1);
+});
