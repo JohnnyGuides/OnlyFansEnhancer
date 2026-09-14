@@ -1816,7 +1816,7 @@
       clearTimeout(matchTimer);
       invalidateMatch();
       refreshReleaseSummary();
-      const value = validate();
+      const value = validate(true);
       if (!value.valid || activeSession) {
         matchStatus.textContent =
           "Complete the required fields to preview the upload.";
@@ -2188,7 +2188,10 @@
             return;
           }
           if (message.type === "platform-progress") {
-            setPlatformState(message.platform, { status: message.status });
+            setPlatformState(message.platform, {
+              status: message.status,
+              error: message.error || "",
+            });
             return;
           }
           if (message.type === "platform-result") {
@@ -2397,6 +2400,7 @@
         renderPlatformStates();
         confirmation.hidden = true;
         matchStatus.textContent = "Preparing authenticated platform composers…";
+        get("#preparationControls").hidden = false;
         if (targets.length) {
           const response = await sendMessage({
             type: "PREPARE_CREATOR_UPLOAD",

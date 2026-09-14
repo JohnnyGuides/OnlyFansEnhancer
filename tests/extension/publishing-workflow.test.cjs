@@ -2578,6 +2578,9 @@ test("upload console performs no platform mutation before the single Yes confirm
       .getByText(/Catalogue updated/i)
       .first()
       .waitFor();
+    assert.equal(await page.locator("#confirmation").isVisible(), false);
+    assert.equal(await page.locator("#cancelPreparation").isVisible(), true);
+    assert.equal(await page.locator("#exportPreparation").isVisible(), true);
     const mutationMessages = await page.evaluate(() =>
       globalThis.consoleMessages.filter((message) =>
         ["PREPARE_CREATOR_UPLOAD", "START_CREATOR_UPLOAD"].includes(
@@ -2634,6 +2637,61 @@ test("upload console performs no platform mutation before the single Yes confirm
       mutationMessages[0].draft.profileSignature,
     );
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("choose-later preview explains an empty thumbnail and recovers without a catalogue", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    const html = fs
+      .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+      .replace(/<script[^>]+><\/script>/gi, "");
+    await page.setContent(html);
+    await page.evaluate(() => {
+      globalThis.chrome = {
+        runtime: {
+          lastError: null,
+          sendMessage() {
+            throw new Error("Preview must not start an upload.");
+          },
+        },
+      };
+      globalThis.CreatorCatalogueClient = {
+        loadConfig: async () => ({ connected: true }),
+        getCatalogueSnapshot: async () => {
+          throw new Error("Choose later must not read the catalogue.");
+        },
+      };
+    });
+    await addUploadConsoleScripts(page);
+    await page.locator("#catalogueAssociation").selectOption("later");
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "neutral-full.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("neutral fixture"),
+    });
+    await page.locator("#confirmUpload").waitFor({ state: "visible" });
+    await page.locator("#uploadManyvidsThumbnail").setInputFiles({
+      name: "empty.png",
+      mimeType: "image/png",
+      buffer: Buffer.alloc(0),
+    });
+    await page.locator("#confirmUpload").waitFor({ state: "hidden" });
+    assert.match(
+      await page.locator("#draftErrors").textContent(),
+      /Choose a PNG or JPEG ManyVids thumbnail or leave it blank/,
+    );
+    await page.locator("#uploadManyvidsThumbnail").setInputFiles([]);
+    await page.locator("#confirmUpload").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    assert.equal(await page.locator("#draftErrors").textContent(), "");
+    assert.equal(
+      await page.locator("#catalogueAssociation").inputValue(),
+      "later",
+    );
   } finally {
     await browser.close();
   }

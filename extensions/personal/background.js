@@ -3659,9 +3659,18 @@ async function invokeCreatorUploadAdapter(args) {
           throw error;
         // Only idempotent, sequence/command-bound acknowledgements may be retried.
         // Never repeat file delivery or an intermediate site action here.
-        state.error =
-          "The coordinator acknowledgement was interrupted. Resume observation of this document.";
-        await context.pauseObservation();
+        state.error = `Preparation paused: ${String(error.message || error).slice(0, 350)} Resume observation of this document.`;
+        const paused = context.pauseObservation();
+        await sendOnce({
+          type: "CREATOR_UPLOAD_PLATFORM_PROGRESS",
+          sessionId: args.sessionId,
+          platform: args.platform,
+          status: "upload-attention-required",
+          error: state.error,
+          sequence: ++sequence,
+          executionStage: args.stage || "upload",
+        }).catch(() => {});
+        await paused;
       }
     }
   };
@@ -3682,6 +3691,7 @@ async function invokeCreatorUploadAdapter(args) {
           controller.signal.removeEventListener("abort", abort);
           resumeObserver = null;
           state.status = "running";
+          state.error = "";
           resolve();
         };
       });
@@ -4823,11 +4833,16 @@ function handleExtensionMessage(message, sender, sendResponse) {
         target.progressSequence = message.sequence;
         if (status === "submitted") target.submitted = true;
         target.status = status;
+        target.error =
+          status === "upload-attention-required"
+            ? creatorUploadClean(message.error, 500)
+            : "";
         await checkpointCreatorUploadSession(session);
         creatorUploadPost(session.id, {
           type: "platform-progress",
           platform: message.platform,
           status,
+          error: target.error,
         });
         return { forwarded: true };
       }

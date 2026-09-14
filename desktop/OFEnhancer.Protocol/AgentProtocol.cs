@@ -83,7 +83,7 @@ public static class AgentProtocol
 {
     public const int Version = 1;
     public const int MaxFrameBytes = 1_048_576;
-    public const string ProductVersion = "0.20.15";
+    public const string ProductVersion = "0.20.16";
     public const string GetStatusOperation = "getStatus";
 
     internal static JsonSerializerOptions JsonOptions { get; } =

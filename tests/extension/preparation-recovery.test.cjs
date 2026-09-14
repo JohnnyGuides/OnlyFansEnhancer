@@ -98,11 +98,14 @@ test("interrupted checkpoint resumes the same command before the next mutation",
   await new Promise((resolve) => setImmediate(resolve));
   const run = context.CreatorUploadRuns.get("recovery-test:fansly:upload");
   assert.equal(run.state.status, "paused");
+  assert.match(run.state.error, /worker interrupted/);
+  assert.equal(messages[1].status, "upload-attention-required");
+  assert.match(messages[1].error, /worker interrupted/);
   assert.equal(mutations, 0);
   assert.equal(run.resumeObservation(), true);
   await completion;
   assert.equal(mutations, 1);
-  assert.deepEqual(messages[0], messages[1]);
+  assert.deepEqual(messages[0], messages[2]);
 });
 
 test("uncertain file delivery is never automatically replayed", async () => {

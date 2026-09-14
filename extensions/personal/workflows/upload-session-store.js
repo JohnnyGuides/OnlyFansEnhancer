@@ -33,7 +33,9 @@
         "prepared",
       ].includes(value.outcome) ||
       !/^[a-f0-9-]{36}$/i.test(value.commandId || "") ||
-      !/^[a-f0-9-]{36}$/i.test(value.documentId || "") ||
+      !/^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(
+        value.documentId || "",
+      ) ||
       !/^[a-f0-9]{64}$/i.test(value.signature || "")
     )
       throw new Error("Invalid preparation step journal record.");
