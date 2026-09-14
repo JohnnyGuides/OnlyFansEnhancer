@@ -205,7 +205,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.17",
+          productVersion: "0.20.18",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -562,7 +562,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.17",
+    productVersion: "0.20.18",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -582,7 +582,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.17");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.18");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -915,6 +915,19 @@ function send(message) {
     }
     if (name === "invokeCreatorUploadAdapter") {
       const args = details.args[0];
+      if (args.platform === "pornhub") {
+        return [
+          {
+            frameId: 0,
+            result: {
+              platform: "pornhub",
+              status: "manual-submit-required",
+              effectiveFilename: args.draft.pornhubFilename,
+              preset: args.draft.contentPreset,
+            },
+          },
+        ];
+      }
       if (args.platform !== "manyvids") {
         return [{ frameId: 0, result: { status: "submitted" } }];
       }
@@ -1101,6 +1114,10 @@ function send(message) {
     assert.equal(directRun.retry[0].status, "uploaded-no-sheet");
     assert.equal(directRun.storedAfterSuccess, null);
     assert.equal(directRun.pornhubPrepared.platforms[0].status, "prepared");
+    assert.equal(
+      openTabs.get(directRun.pornhubPrepared.platforms[0].tabId).url,
+      "https://pornhub.mainhub.com/upload/uploader?site=ph",
+    );
     assert.deepEqual(directRun.pornhubResult, [
       {
         platform: "pornhub",
@@ -1109,7 +1126,7 @@ function send(message) {
         preset: "Straight",
       },
     ]);
-    assert.equal(fileBridgePlatforms.includes("pornhub"), false);
+    assert.equal(fileBridgePlatforms.includes("pornhub"), true);
     assert.equal(
       directRun.correctionFirst[0].status,
       "edit-failed",
@@ -1139,7 +1156,7 @@ function send(message) {
     assert.equal(
       uploadExecutions.filter((name) => name === "invokeCreatorUploadAdapter")
         .length,
-      9,
+      10,
       "Completed retries and uncertain submissions must never invoke another adapter run.",
     );
   } finally {

@@ -812,7 +812,25 @@
     }
 
     async function loadWorkflowSettingsPanel() {
-      const settings = await globalThis.CreatorToolkit.loadSettings();
+      let settings;
+      for (;;) {
+        try {
+          settings = await globalThis.CreatorToolkit.loadSettings();
+          break;
+        } catch (error) {
+          if (!globalThis.OFEnhancerDesktopUpload) throw error;
+          showWorkflowSettingsStatus(
+            "Waiting for Chrome to load workflow profiles…",
+            "loading",
+          );
+          await new Promise((resolve) =>
+            setTimeout(
+              resolve,
+              Number(globalThis.CreatorWorkflowProfileRetryDelayMs) || 1000,
+            ),
+          );
+        }
+      }
       for (const [id, control] of Object.entries(workflowControls)) {
         control.checked = settings.tools[id]?.enabled === true;
       }

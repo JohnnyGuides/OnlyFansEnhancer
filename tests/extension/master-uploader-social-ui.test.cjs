@@ -308,6 +308,8 @@ async function mountConsole(page, options = {}) {
       traceEvidence,
       catalogueRows,
       socialPollDelayMs,
+      profileLoadFailures,
+      profileRetryDelayMs,
     }) => {
       let presetRequest = 0;
       globalThis.__socialUiMessages = [];
@@ -315,13 +317,29 @@ async function mountConsole(page, options = {}) {
       const stored = {
         creatorSocialSubredditSelectionV1: ["GamesGoneWild"],
       };
+      let remainingProfileLoadFailures = profileLoadFailures;
       globalThis.__socialUiStorage = stored;
       globalThis.chrome = {
         storage: {
           local: {
             get(keys, callback) {
+              const requested = Array.isArray(keys) ? keys : [keys];
+              if (
+                remainingProfileLoadFailures > 0 &&
+                requested.includes("creatorToolkitV2")
+              ) {
+                remainingProfileLoadFailures -= 1;
+                queueMicrotask(() => {
+                  globalThis.chrome.runtime.lastError = {
+                    message: "Chrome is not connected yet.",
+                  };
+                  callback?.(undefined);
+                  globalThis.chrome.runtime.lastError = null;
+                });
+                return;
+              }
               const result = {};
-              for (const key of Array.isArray(keys) ? keys : [keys]) {
+              for (const key of requested) {
                 if (Object.hasOwn(stored, key)) result[key] = stored[key];
               }
               const value = structuredClone(result);
@@ -447,6 +465,8 @@ async function mountConsole(page, options = {}) {
       globalThis.CreatorSocialDistributionRuntimeReady = runtimeReady;
       globalThis.CreatorSocialTraceEvidence = traceEvidence;
       globalThis.CreatorSocialPollDelayMs = socialPollDelayMs;
+      globalThis.CreatorWorkflowProfileRetryDelayMs = profileRetryDelayMs;
+      if (profileLoadFailures > 0) globalThis.OFEnhancerDesktopUpload = {};
       globalThis.CreatorUploadQueueEvidence = {
         snapshot() {
           return {
@@ -461,6 +481,8 @@ async function mountConsole(page, options = {}) {
       traceEvidence: options.traceEvidence || null,
       catalogueRows: options.catalogueRows || null,
       socialPollDelayMs: options.socialPollDelayMs ?? 10,
+      profileLoadFailures: options.profileLoadFailures ?? 0,
+      profileRetryDelayMs: options.profileRetryDelayMs ?? 10,
     },
   );
   for (const relative of [
@@ -554,7 +576,7 @@ test("teaser-only prepares without a full video or catalogue entry", async () =>
   }
 });
 
-test("main-only defaults to manual preparation with no teaser and deferred catalogue", async () => {
+test("main-only defaults to confirmed autonomous scheduling with no teaser and deferred catalogue", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -577,7 +599,7 @@ test("main-only defaults to manual preparation with no teaser and deferred catal
       (message) => message.type === "PREPARE_CREATOR_UPLOAD",
     );
     assert.equal(prepared.draft.hasTeaser, false);
-    assert.equal(prepared.draft.publishMode, "manual");
+    assert.equal(prepared.draft.publishMode, "autonomous");
     assert.equal(prepared.catalogue, null);
     assert.equal(
       messages.some(
@@ -585,6 +607,26 @@ test("main-only defaults to manual preparation with no teaser and deferred catal
       ),
       false,
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("desktop profile loading recovers when Chrome connects after the page mounts", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await mountConsole(page, {
+      workflowMode: "main",
+      deferCatalogue: true,
+      profileLoadFailures: 1,
+      profileRetryDelayMs: 10,
+    });
+    assert.doesNotMatch(
+      await page.locator("#draftErrors").textContent(),
+      /profiles are still loading/i,
+    );
+    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
   } finally {
     await browser.close();
   }

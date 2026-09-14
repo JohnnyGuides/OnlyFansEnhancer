@@ -2606,7 +2606,7 @@ const CREATOR_UPLOAD_TARGETS = Object.freeze({
   }),
   pornhub: Object.freeze({
     match: "https://pornhub.mainhub.com/*",
-    landingUrl: "https://pornhub.mainhub.com/upload/uploader",
+    landingUrl: "https://pornhub.mainhub.com/upload/uploader?site=ph",
     origin: "https://pornhub.mainhub.com",
   }),
 });
@@ -2732,34 +2732,6 @@ function installCreatorUploadResponseObserver(config) {
 
 function markCreatorToolkitMasterRun() {
   globalThis.CreatorToolkitMasterRun = true;
-}
-
-async function invokeCreatorPornhubPreparation(args) {
-  const adapter = globalThis.CreatorToolkitAdapters?.phUploader;
-  const toolkit = globalThis.CreatorToolkit;
-  if (!adapter || !toolkit) {
-    throw new Error("Pornhub metadata recipe is unavailable.");
-  }
-  const resolved = adapter.resolvePreset(args.profile, "", args.contentPreset);
-  if (!resolved) throw new Error("Pornhub content preset is unavailable.");
-  const plan = adapter.inspectPreset(resolved.name, resolved.preset);
-  const result = await adapter.applyPreset(
-    plan,
-    undefined,
-    toolkit.createBudget(undefined, {
-      maxActions: 100,
-      maxDurationMs: 180_000,
-    }),
-  );
-  if (result.status !== "success") {
-    throw new Error(result.summary || "Pornhub metadata preparation stopped.");
-  }
-  return {
-    platform: "pornhub",
-    status: "manual-submit-required",
-    effectiveFilename: args.effectiveFilename,
-    preset: resolved.name,
-  };
 }
 
 function cancelCreatorUploadResponseObserverInPage(config) {
@@ -3378,63 +3350,50 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       `${platform} left its expected origin before upload preparation.`,
     );
   }
-  if (platform === "pornhub") {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: markCreatorToolkitMasterRun,
-    });
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: [
-        "workflows/registry.js",
-        "workflows/common.js",
-        "workflows/ph-uploader.js",
-      ],
-    });
-    const target = {
-      platform,
-      tabId: tab.id,
-      stage: "prepared",
-      status: "prepared",
-      createdAt: Date.now(),
-    };
-    session.platforms.set(platform, target);
-    await checkpointCreatorUploadSession(session);
-    return target;
-  }
-  const tokens = {
-    full: creatorUploadRandomToken(),
-    ...(["fansly", "manyvids"].includes(platform) &&
-    session.draft.hasTeaser !== false
-      ? { teaser: creatorUploadRandomToken() }
-      : {}),
-    ...(platform === "manyvids" && session.draft.manyvidsThumbnail
-      ? { thumbnail: creatorUploadRandomToken() }
-      : {}),
-  };
+  const tokens =
+    platform === "pornhub"
+      ? { pornhub: creatorUploadRandomToken() }
+      : {
+          full: creatorUploadRandomToken(),
+          ...(["fansly", "manyvids"].includes(platform) &&
+          session.draft.hasTeaser !== false
+            ? { teaser: creatorUploadRandomToken() }
+            : {}),
+          ...(platform === "manyvids" && session.draft.manyvidsThumbnail
+            ? { thumbnail: creatorUploadRandomToken() }
+            : {}),
+        };
   const roles =
-    platform === "onlyfans"
-      ? { full: { selector: "#file_upload_input", token: tokens.full } }
-      : platform === "fansly"
-        ? {
-            full: {
-              selector: "input[data-creator-fansly-file]",
-              token: tokens.full,
-            },
-            teaser: {
-              selector: "input[data-creator-fansly-file]",
-              token: tokens.teaser,
-            },
-          }
-        : {
-            full: {
-              selector:
-                "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])",
-              token: tokens.full,
-              kind: "video",
-            },
-          };
-  if (platform === "fansly") {
+    platform === "pornhub"
+      ? {
+          pornhub: {
+            selector: "input.dz-hidden-input[type='file']",
+            token: tokens.pornhub,
+            kind: "video",
+          },
+        }
+      : platform === "onlyfans"
+        ? { full: { selector: "#file_upload_input", token: tokens.full } }
+        : platform === "fansly"
+          ? {
+              full: {
+                selector: "input[data-creator-fansly-file]",
+                token: tokens.full,
+              },
+              teaser: {
+                selector: "input[data-creator-fansly-file]",
+                token: tokens.teaser,
+              },
+            }
+          : {
+              full: {
+                selector:
+                  "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])",
+                token: tokens.full,
+                kind: "video",
+              },
+            };
+  if (["fansly", "pornhub"].includes(platform)) {
     if (!tokens.teaser) delete roles.teaser;
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -3450,7 +3409,13 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
             "workflows/common.js",
             "workflows/fansly-prefill.js",
           ]
-        : []),
+        : platform === "pornhub"
+          ? [
+              "workflows/registry.js",
+              "workflows/common.js",
+              "workflows/ph-uploader.js",
+            ]
+          : []),
       CREATOR_UPLOAD_FILE_BRIDGE,
       CREATOR_UPLOAD_ADAPTERS,
     ],
@@ -3754,6 +3719,9 @@ async function invokeCreatorUploadAdapter(args) {
     if (args.platform === "fansly") {
       return globalThis.CreatorUploadPlatformAdapters.runFansly(context);
     }
+    if (args.platform === "pornhub") {
+      return globalThis.CreatorUploadPlatformAdapters.runPornhub(context);
+    }
     if (args.platform === "manyvids" && args.stage === "upload") {
       return globalThis.CreatorUploadPlatformAdapters.runManyVidsUpload(
         context,
@@ -4042,21 +4010,30 @@ async function runCreatorPornhubPlatform(session, target) {
     if (!creatorUrlMatches(loaded?.url, CREATOR_UPLOAD_TARGETS.pornhub)) {
       throw new Error("Pornhub left the expected uploader origin.");
     }
-    target.stage = "metadata";
-    target.status = "configuring";
+    target.stage = "upload";
+    target.status = "uploading-full";
     await checkpointCreatorUploadSession(session);
     const execution = await chrome.scripting.executeScript({
       target: { tabId: target.tabId },
-      func: invokeCreatorPornhubPreparation,
+      func: invokeCreatorUploadAdapter,
       args: [
         {
-          profile: session.draft.profiles.phUploader,
-          contentPreset: session.draft.contentPreset,
-          effectiveFilename: session.draft.pornhubFilename,
+          sessionId: session.id,
+          platform,
+          stage: "upload",
+          selectors: {
+            pornhub: "input.dz-hidden-input[type='file']",
+          },
+          draft: session.draft,
+          nativePicker: false,
         },
       ],
     });
-    const result = execution?.[0]?.result;
+    const result = await resolveCreatorUploadAdapterResult(
+      target.tabId,
+      `${session.id}:${platform}:upload`,
+      execution,
+    );
     if (result?.status !== "manual-submit-required") {
       throw new Error("Pornhub metadata preparation did not finish safely.");
     }

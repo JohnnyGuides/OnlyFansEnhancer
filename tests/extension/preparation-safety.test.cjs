@@ -139,6 +139,124 @@ test("ManyVids clicks an enabled queued upload even during a transient uploading
   }
 });
 
+test("ManyVids retries a queued upload click until the dashboard observes it", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<div class="uppy-Dashboard"><input class="uppy-Dashboard-input" type="file" hidden></div>',
+    );
+    await page.addScriptTag({ path: source });
+    const result = await page.evaluate(async () => {
+      const controller = new AbortController();
+      const abort = setTimeout(() => controller.abort(), 1500);
+      let uploads = 0;
+      let edits = 0;
+      const dashboard = document.querySelector(".uppy-Dashboard");
+      try {
+        const outcome = await CreatorUploadPlatformAdapters.runManyVidsUpload({
+          draft: { fullFilename: "neutral-full.mp4" },
+          signal: controller.signal,
+          async attachFile() {
+            dashboard.insertAdjacentHTML(
+              "beforeend",
+              '<article class="uppy-Dashboard-Item"><span class="uppy-Dashboard-Item-name">neutral-...mp4</span><button>Edit</button></article><div class="uppy-StatusBar is-waiting"><button class="uppy-StatusBar-actionBtn--upload">Upload 1 file</button></div>',
+            );
+            const card = dashboard.querySelector(".uppy-Dashboard-Item");
+            card.querySelector("button").onclick = () => edits++;
+            dashboard.querySelector(
+              ".uppy-StatusBar-actionBtn--upload",
+            ).onclick = () => {
+              uploads++;
+              if (uploads !== 2) return;
+              dashboard.querySelector(".uppy-StatusBar").className =
+                "uppy-StatusBar is-uploading";
+              setTimeout(() => {
+                card.dataset.state = "upload-complete";
+                card.querySelector(".uppy-Dashboard-Item-name").textContent =
+                  "neutral-full.mp4";
+              }, 150);
+            };
+          },
+          async checkpointStep() {},
+        });
+        return { uploads, edits, outcome };
+      } finally {
+        clearTimeout(abort);
+      }
+    });
+    assert.equal(result.uploads, 2);
+    assert.equal(result.edits, 1);
+    assert.equal(result.outcome.status, "edit-requested");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Pornhub uploads the approved file before applying its metadata preset", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <style>input,custom-dropdown,.customSelectTrigger { display:block; width:200px; min-height:24px }</style>
+      <input class="dz-hidden-input" type="file" accept=".mp4" hidden>
+    `);
+    for (const script of [
+      "registry.js",
+      "common.js",
+      "ph-uploader.js",
+      "upload-platform-adapters.js",
+    ]) {
+      await page.addScriptTag({
+        path: path.resolve(
+          __dirname,
+          `../../extensions/personal/workflows/${script}`,
+        ),
+      });
+    }
+    const result = await page.evaluate(async () => {
+      const attached = [];
+      const outcome = await CreatorUploadPlatformAdapters.runPornhub({
+        draft: {
+          contentPreset: "Straight",
+          pornhubFilename: "neutral-limited.mp4",
+          profiles: {
+            phUploader: {
+              presets: {
+                Straight: {
+                  orientation: "Straight",
+                  tags: [],
+                  categories: [],
+                },
+              },
+            },
+          },
+        },
+        async attachFile(role, selector) {
+          attached.push({ role, selector });
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            '<custom-dropdown data-key="orientation"><div class="customSelectTrigger">Straight</div></custom-dropdown><div><input name="tags"><ul id="inputTag"></ul></div><div><input name="category"><ul id="f2vCategory"></ul></div>',
+          );
+        },
+        async progress() {},
+      });
+      return { attached, outcome };
+    });
+    assert.deepEqual(result.attached, [
+      { role: "pornhub", selector: "input.dz-hidden-input[type='file']" },
+    ]);
+    assert.deepEqual(result.outcome, {
+      platform: "pornhub",
+      status: "manual-submit-required",
+      effectiveFilename: "neutral-limited.mp4",
+      preset: "Straight",
+    });
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invalid publishing mode rejects before any platform mutation", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

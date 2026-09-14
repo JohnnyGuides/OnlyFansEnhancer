@@ -12,6 +12,15 @@
   let reportProgress = null;
   let pauseObservation = null;
 
+  function newCommandId() {
+    if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return [...bytes]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   function abortIfNeeded(signal) {
     if (signal?.aborted)
       throw new DOMException("Upload cancelled.", "AbortError");
@@ -367,12 +376,16 @@
     await context.attachFile("full", MANYVIDS_FULL_INPUT);
     // Uppy has both auto-start and queued variants. Only the dashboard's
     // upload action is an intermediate action; editor Save is never used here.
-    let uploadStarted = false;
-    const uploadCommand = context.checkpointStep ? crypto.randomUUID() : "";
+    let uploadObserved = false;
+    let uploadAttempts = 0;
+    let lastUploadAttemptAt = 0;
+    const uploadCommand = context.checkpointStep ? newCommandId() : "";
     await waitFor(
       async () => {
-        if (currentEdit() || manyVidsCompletedCard(draft.fullFilename))
+        if (currentEdit() || manyVidsCompletedCard(draft.fullFilename)) {
+          uploadObserved = true;
           return true;
+        }
         const input = document.querySelector(MANYVIDS_FULL_INPUT);
         const dashboard = input?.closest(".uppy-Dashboard");
         if (!dashboard) return false;
@@ -397,32 +410,51 @@
         ].filter(visible);
         if (actions.length > 1)
           throw new Error("ManyVids intermediate upload control is ambiguous.");
-        if (!uploadStarted && actions.length === 1 && enabled(actions[0])) {
-          abortIfNeeded(signal);
-          await context.checkpointStep?.(
-            "start-upload",
-            uploadCommand,
-            "intent",
-          );
-          uploadStarted = true;
-          click(actions[0], "ManyVids queued media upload");
+        const dashboardObservedUpload = Boolean(
+          card.matches(
+            "[data-state='uploading'], .is-uploading, [data-upload-started='true']",
+          ) || dashboard.querySelector(".uppy-StatusBar.is-uploading"),
+        );
+        if (uploadAttempts > 0 && dashboardObservedUpload) {
+          uploadObserved = true;
+          return true;
+        }
+        if (!actions.length && uploadAttempts > 0) {
+          uploadObserved = true;
           return true;
         }
         if (
-          uploadStarted ||
-          card.matches(
-            "[data-state='uploading'], .is-uploading, [data-upload-started='true']",
-          ) ||
-          dashboard.querySelector(".uppy-StatusBar.is-uploading")
-        )
+          actions.length === 1 &&
+          enabled(actions[0]) &&
+          Date.now() - lastUploadAttemptAt >= 350
+        ) {
+          abortIfNeeded(signal);
+          if (!uploadAttempts)
+            await context.checkpointStep?.(
+              "start-upload",
+              uploadCommand,
+              "intent",
+            );
+          if (uploadAttempts >= 3)
+            throw new Error(
+              "ManyVids did not accept the Upload 1 file action after three attempts.",
+            );
+          uploadAttempts += 1;
+          lastUploadAttemptAt = Date.now();
+          click(actions[0], "ManyVids queued media upload");
+          return false;
+        }
+        if (!uploadAttempts && dashboardObservedUpload) {
+          uploadObserved = true;
           return true;
+        }
         return false;
       },
       "ManyVids upload initiation",
       60_000,
       signal,
     );
-    if (uploadStarted)
+    if (uploadObserved && uploadAttempts)
       await context.checkpointStep?.("start-upload", uploadCommand, "observed");
     const card = await waitFor(
       () => currentEdit() || manyVidsCompletedCard(draft.fullFilename),
@@ -439,6 +471,58 @@
     );
     await context.progress?.("edit-requested");
     return { platform: "manyvids", status: "edit-requested" };
+  }
+
+  async function runPornhub(context) {
+    const { draft, signal } = context;
+    publicationMode(draft);
+    abortIfNeeded(signal);
+    const selector = "input.dz-hidden-input[type='file']";
+    one(selector, "Pornhub video input", document, { allowHidden: true });
+    await context.progress?.("uploading-full");
+    await context.attachFile("pornhub", selector);
+    await waitFor(
+      () =>
+        document.querySelector('custom-dropdown[data-key="orientation"]') &&
+        document.querySelector('input[name="tags"]') &&
+        document.querySelector(
+          'input[name="category"], input[name="categoryInput"]',
+        ),
+      "Pornhub metadata form",
+      UPLOAD_TIMEOUT,
+      signal,
+    );
+    await context.progress?.("configuring");
+    const adapter = globalThis.CreatorToolkitAdapters?.phUploader;
+    const toolkit = globalThis.CreatorToolkit;
+    if (!adapter || !toolkit)
+      throw new Error("Pornhub metadata recipe is unavailable.");
+    const resolved = adapter.resolvePreset(
+      draft.profiles?.phUploader,
+      draft.seasonArc,
+      draft.contentPreset,
+    );
+    if (!resolved) throw new Error("Pornhub content preset is unavailable.");
+    const plan = adapter.inspectPreset(resolved.name, resolved.preset);
+    const result = await adapter.applyPreset(
+      plan,
+      signal,
+      toolkit.createBudget(signal, {
+        maxActions: 100,
+        maxDurationMs: 180_000,
+      }),
+    );
+    if (result.status !== "success")
+      throw new Error(
+        result.summary || "Pornhub metadata preparation stopped.",
+      );
+    await context.progress?.("prepared");
+    return {
+      platform: "pornhub",
+      status: "manual-submit-required",
+      effectiveFilename: draft.pornhubFilename,
+      preset: resolved.name,
+    };
   }
 
   function normalizedText(value) {
@@ -1651,7 +1735,7 @@
           result.status === "manual-submit-required" &&
           context.checkpointStep
         ) {
-          const commandId = crypto.randomUUID();
+          const commandId = newCommandId();
           abortIfNeeded(mutationSignal);
           await context.checkpointStep("verify", commandId, "intent");
           await context.checkpointStep("verify", commandId, "prepared");
@@ -1669,5 +1753,6 @@
     runManyVidsEdit: guarded(runManyVidsEdit),
     runManyVidsUpload: guarded(runManyVidsUpload),
     runOnlyFans: guarded(runOnlyFans),
+    runPornhub: guarded(runPornhub),
   });
 })();
