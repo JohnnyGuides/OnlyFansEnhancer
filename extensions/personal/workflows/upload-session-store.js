@@ -6,6 +6,7 @@
   const KEY_PREFIX = "creatorUploadSessionV1:";
   const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
   const PLATFORMS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
+  const LAUNCHERS = new Set(["extension", "desktop"]);
   const writeChains = new Map();
   const RECOVERY_KEY = "creatorUploadRecoveryV1";
   const ACTION_KEY = "creatorUploadActionsV1";
@@ -32,12 +33,19 @@
 
   async function workIdentity(record) {
     const catalogue = record.catalogue;
+    const launcher = LAUNCHERS.has(record.launcher)
+      ? record.launcher
+      : "extension";
     return digest(
       catalogue?.itemId || catalogue?.id
-        ? { source: catalogue.source, id: catalogue.itemId || catalogue.id }
+        ? {
+            launcher,
+            source: catalogue.source,
+            id: catalogue.itemId || catalogue.id,
+          }
         : record.draft?.fullFilename
-          ? { file: record.draft.fullFilename }
-          : { title: record.draft?.title },
+          ? { launcher, file: record.draft.fullFilename }
+          : { launcher, title: record.draft?.title },
     );
   }
 
@@ -520,6 +528,7 @@
     if (!ID_PATTERN.test(id))
       throw new Error("Invalid creator upload session ID.");
     const output = { id };
+    if (LAUNCHERS.has(record.launcher)) output.launcher = record.launcher;
     for (const field of ["createdAt", "updatedAt"]) {
       const timestamp = finiteInteger(record[field]);
       if (timestamp !== undefined) output[field] = timestamp;

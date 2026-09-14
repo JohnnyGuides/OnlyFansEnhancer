@@ -493,9 +493,37 @@
               Yes, upload now
             </button>
             <button id="rejectMatch" type="button">No</button>
+          </div>
+        </section>
+        <section
+          id="preparationControls"
+          class="card"
+          hidden
+          aria-label="Preparation controls"
+        >
+          <div class="confirmation-actions">
+            <button id="cancelPreparation" type="button">
+              Stop preparation
+            </button>
+            <button id="exportPreparation" type="button">
+              Preview preparation diagnostics
+            </button>
             <button id="resetPreparation" type="button">
               Reset a stuck test run
             </button>
+            <dialog id="preparationDiagnostics">
+              <p>
+                Sanitized step evidence. Review before saving or sharing. No
+                media paths, captions, or video bytes are included.
+              </p>
+              <pre id="preparationDiagnosticsText"></pre>
+              <button id="savePreparationDiagnostics" type="button">
+                Save diagnostics
+              </button>
+              <button id="closePreparationDiagnostics" type="button">
+                Close
+              </button>
+            </dialog>
           </div>
           <dialog id="resetPreparationDialog">
             <p>
@@ -512,34 +540,6 @@
               <button id="closePreparationReset" type="button">Cancel</button>
             </div>
           </dialog>
-        </section>
-        <section
-          id="preparationControls"
-          class="card"
-          hidden
-          aria-label="Preparation controls"
-        >
-          <div class="confirmation-actions">
-            <button id="cancelPreparation" type="button">
-              Stop preparation
-            </button>
-            <button id="exportPreparation" type="button">
-              Preview preparation diagnostics
-            </button>
-            <dialog id="preparationDiagnostics">
-              <p>
-                Sanitized step evidence. Review before saving or sharing. No
-                media paths, captions, or video bytes are included.
-              </p>
-              <pre id="preparationDiagnosticsText"></pre>
-              <button id="savePreparationDiagnostics" type="button">
-                Save diagnostics
-              </button>
-              <button id="closePreparationDiagnostics" type="button">
-                Close
-              </button>
-            </dialog>
-          </div>
         </section>
 
         <section id="results" class="results" aria-live="polite"></section>

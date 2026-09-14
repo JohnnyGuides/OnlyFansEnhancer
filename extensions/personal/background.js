@@ -3568,13 +3568,15 @@ async function prepareCreatorManyVidsEdit(session, target) {
   });
 }
 
-async function prepareCreatorUpload(message) {
+async function prepareCreatorUpload(message, launcher = "extension") {
   const request = validateCreatorUploadRequest(message);
+  request.launcher = launcher === "desktop" ? "desktop" : "extension";
   await CREATOR_UPLOAD_SESSION_STORE.assertAvailable(
     {
       id: request.sessionId,
       draft: request.draft,
       catalogue: request.catalogue,
+      launcher: request.launcher,
     },
     request.targets,
   );
@@ -3605,6 +3607,7 @@ async function prepareCreatorUpload(message) {
     updatedAt: Date.now(),
     draft: request.draft,
     catalogue: request.catalogue,
+    launcher: request.launcher,
     platforms: new Map(),
     commitChain: Promise.resolve(),
     cleanupTimer: null,
@@ -4764,7 +4767,10 @@ function handleExtensionMessage(message, sender, sendResponse) {
         };
       case "PREPARE_CREATOR_UPLOAD":
         return {
-          uploadSession: await prepareCreatorUpload(message),
+          uploadSession: await prepareCreatorUpload(
+            message,
+            sender?.desktopUploadRuntime ? "desktop" : "extension",
+          ),
         };
       case "START_CREATOR_UPLOAD":
         return {

@@ -295,6 +295,35 @@ test("another command or session cannot repeat a selected role after acknowledge
   ]);
 });
 
+test("desktop and extension preparation journals do not collide", async () => {
+  const { store } = loadStore();
+  const extensionRecord = {
+    id: "extension-preparation-session",
+    launcher: "extension",
+    draft: { fullFilename: "neutral.mp4" },
+  };
+  await store.recordStep(extensionRecord.id, {
+    actionId: "select-full",
+    platform: "fansly",
+    outcome: "intent",
+    commandId: "11111111-1111-4111-8111-111111111111",
+    documentId: "22222222-2222-4222-8222-222222222222",
+    signature: "a".repeat(64),
+    work: await store.workIdentity(extensionRecord),
+    tabId: 42,
+    frameId: 0,
+  });
+
+  await store.assertAvailable(
+    {
+      id: "desktop-preparation-session",
+      launcher: "desktop",
+      draft: { fullFilename: "neutral.mp4" },
+    },
+    ["fansly"],
+  );
+});
+
 test("recovery journal keeps bounded non-secret monotonic step evidence across session loss", async () => {
   const { store, values } = loadStore();
   const id = "journal-session-12345678";

@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.20
+AppVersion=0.20.21
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.20
+OutputBaseFilename=OFEnhancer-Setup-0.20.21
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes

@@ -100,7 +100,7 @@
           try {
             const handled = handleMessage(
               command.message,
-              { id: chrome.runtime.id },
+              { id: chrome.runtime.id, desktopUploadRuntime: true },
               resolve,
             );
             if (handled === false)
