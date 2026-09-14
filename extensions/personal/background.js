@@ -4883,12 +4883,9 @@ function handleExtensionMessage(message, sender, sendResponse) {
             : records,
         };
       }
-      case "RESET_CREATOR_UPLOAD_PREPARATION":
+      case "CLEAR_CREATOR_UPLOAD_PREPARATION":
         return {
-          reset: await CREATOR_UPLOAD_SESSION_STORE.resetPreparation(
-            message.sessionId,
-            message.platform,
-          ),
+          reset: await CREATOR_UPLOAD_SESSION_STORE.clearPreparation(),
         };
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };

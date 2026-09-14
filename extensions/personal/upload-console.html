@@ -508,7 +508,7 @@
               Preview preparation diagnostics
             </button>
             <button id="resetPreparation" type="button">
-              Reset a stuck test run
+              Clear all preparation evidence
             </button>
             <dialog id="preparationDiagnostics">
               <p>
@@ -526,15 +526,13 @@
           </div>
           <dialog id="resetPreparationDialog">
             <p>
-              Remove preparation evidence for one abandoned test platform. Check
-              the remote draft first: this cannot cancel or delete anything on
-              the platform.
+              Remove all locally saved preparation evidence for abandoned test
+              runs. Check remote drafts first: this cannot cancel or delete
+              anything on a platform, and durable publication records remain.
             </p>
-            <label for="resetPreparationRecord">Prepared platform</label>
-            <select id="resetPreparationRecord"></select>
             <div class="confirmation-actions">
               <button id="confirmPreparationReset" type="button">
-                Reset selected test run
+                Clear all preparation evidence
               </button>
               <button id="closePreparationReset" type="button">Cancel</button>
             </div>
