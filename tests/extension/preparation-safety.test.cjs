@@ -89,6 +89,56 @@ for (const autoStart of [false, true]) {
   });
 }
 
+test("ManyVids clicks an enabled queued upload even during a transient uploading class", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<div class="uppy-Dashboard"><input class="uppy-Dashboard-input" type="file" hidden></div>',
+    );
+    await page.addScriptTag({ path: source });
+    const result = await page.evaluate(async () => {
+      if (!crypto.randomUUID) {
+        Object.defineProperty(crypto, "randomUUID", {
+          value: () => "11111111-1111-4111-8111-111111111111",
+        });
+      }
+      let uploads = 0;
+      let edits = 0;
+      const dashboard = document.querySelector(".uppy-Dashboard");
+      const outcome = await CreatorUploadPlatformAdapters.runManyVidsUpload({
+        draft: { fullFilename: "neutral-full.mp4" },
+        async attachFile() {
+          dashboard.insertAdjacentHTML(
+            "beforeend",
+            '<article class="uppy-Dashboard-Item"><span class="uppy-Dashboard-Item-name">neutral-...mp4</span><button>Edit</button></article><div class="uppy-StatusBar is-uploading"><button class="uppy-StatusBar-actionBtn--upload">Upload 1 file</button></div>',
+          );
+          const card = dashboard.querySelector(".uppy-Dashboard-Item");
+          card.querySelector("button").onclick = () => edits++;
+          setTimeout(() => {
+            card.dataset.state = "upload-complete";
+            card.querySelector(".uppy-Dashboard-Item-name").textContent =
+              "neutral-full.mp4";
+          }, 250);
+          dashboard.querySelector(".uppy-StatusBar-actionBtn--upload").onclick =
+            () => {
+              uploads++;
+              dashboard.querySelector(".uppy-StatusBar").className =
+                "uppy-StatusBar is-waiting";
+            };
+        },
+        async checkpointStep() {},
+      });
+      return { uploads, edits, outcome };
+    });
+    assert.equal(result.uploads, 1);
+    assert.equal(result.edits, 1);
+    assert.equal(result.outcome.status, "edit-requested");
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invalid publishing mode rejects before any platform mutation", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

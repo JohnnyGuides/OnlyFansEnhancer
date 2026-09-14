@@ -3795,6 +3795,35 @@ async function invokeCreatorUploadAdapter(args) {
   return promise;
 }
 
+async function resolveCreatorUploadAdapterResult(tabId, key, execution) {
+  const direct = execution?.[0]?.result;
+  if (typeof direct?.status === "string") return direct;
+  let state = null;
+  try {
+    const [inspection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (runKey) =>
+        globalThis.CreatorUploadRuns?.get(runKey)?.state || null,
+      args: [key],
+    });
+    state = inspection?.result || null;
+  } catch (error) {
+    throw new Error(
+      `The platform adapter result was unavailable and its bound page could not be inspected: ${error.message}`,
+    );
+  }
+  if (
+    state?.status === "completed" &&
+    typeof state.result?.status === "string"
+  ) {
+    return state.result;
+  }
+  if (state?.error) throw new Error(state.error);
+  throw new Error(
+    `The platform adapter result was unavailable; bound page state: ${state?.status || "missing"}.`,
+  );
+}
+
 async function prepareCreatorUploadResponseObserver(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -3880,7 +3909,12 @@ async function runCreatorManyVidsPlatform(session, target) {
           },
         ],
       });
-      if (uploadExecution?.[0]?.result?.status !== "edit-requested") {
+      const uploadResult = await resolveCreatorUploadAdapterResult(
+        target.tabId,
+        `${session.id}:${platform}:upload`,
+        uploadExecution,
+      );
+      if (uploadResult.status !== "edit-requested") {
         throw new Error("ManyVids did not request its edit page.");
       }
       const editRoute = await waitForManyVidsRoute(
@@ -3922,8 +3956,13 @@ async function runCreatorManyVidsPlatform(session, target) {
         },
       ],
     });
-    if (editExecution?.[0]?.result?.status !== "save-clicked") {
-      if (editExecution?.[0]?.result?.status === "manual-submit-required")
+    const editResult = await resolveCreatorUploadAdapterResult(
+      target.tabId,
+      `${session.id}:${platform}:edit`,
+      editExecution,
+    );
+    if (editResult.status !== "save-clicked") {
+      if (editResult.status === "manual-submit-required")
         return recordCreatorManualPreparation(session, target);
       throw new Error("ManyVids did not confirm its final Save click.");
     }
@@ -4116,7 +4155,11 @@ async function runCreatorUploadPlatform(session, platform) {
         },
       ],
     });
-    const adapterResult = execution?.[0]?.result;
+    const adapterResult = await resolveCreatorUploadAdapterResult(
+      target.tabId,
+      `${session.id}:${platform}:upload`,
+      execution,
+    );
     if (adapterResult?.status === "manual-submit-required") {
       await cancelCreatorUploadResponseObserver(
         target.tabId,

@@ -62,7 +62,7 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
       };
     });
     const extensionsPage = await chromePageOpened;
-    await extensionsPage.waitForURL("chrome://extensions/");
+    await extensionsPage.waitForURL(/^(?:chrome|edge):\/\/extensions\/$/);
     await extensionsPage.close();
     assert.equal(chromePage.windowId, chromePage.expectedWindow);
     assert.equal(

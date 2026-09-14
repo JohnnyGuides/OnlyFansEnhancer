@@ -20,13 +20,13 @@
   }
 
   function toggleRow(composer, expectedLabel) {
-    const rows = Array.from(composer.querySelectorAll(".post-option")).filter(
-      toolkit.isVisible,
-    );
+    const rows = Array.from(
+      composer.querySelectorAll(".post-option, .post-option-chip"),
+    ).filter(toolkit.isVisible);
     const resolution = toolkit.resolveExact(rows, expectedLabel, (row) =>
       toolkit.displayText(
-        row.querySelector("label, .label, .title")?.textContent ||
-          row.textContent,
+        row.querySelector("label, .label, .title, xd-localization-string")
+          ?.textContent || row.textContent,
       ),
     );
     if (resolution.status !== "found") {
@@ -43,6 +43,9 @@
   }
 
   function toggleControl(row) {
+    if (row.matches(".post-option-chip") && toolkit.isEnabledElement(row)) {
+      return row;
+    }
     const selectors = [
       'input[type="checkbox"]',
       '[role="checkbox"]',
@@ -67,6 +70,8 @@
   }
 
   function toggleState(row) {
+    if (row.matches(".post-option-chip"))
+      return row.classList.contains("active");
     const input = row.querySelector('input[type="checkbox"]');
     if (input instanceof HTMLInputElement) return input.checked;
     const role = row.querySelector('[role="checkbox"]');

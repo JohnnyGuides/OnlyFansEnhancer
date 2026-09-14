@@ -392,13 +392,6 @@
           throw new Error(
             "ManyVids selected media does not match the approved full role.",
           );
-        if (
-          card.matches(
-            "[data-state='uploading'], .is-uploading, [data-upload-started='true']",
-          ) ||
-          dashboard.querySelector(".uppy-StatusBar.is-uploading")
-        )
-          return true;
         const actions = [
           ...dashboard.querySelectorAll(".uppy-StatusBar-actionBtn--upload"),
         ].filter(visible);
@@ -413,7 +406,16 @@
           );
           uploadStarted = true;
           click(actions[0], "ManyVids queued media upload");
+          return true;
         }
+        if (
+          uploadStarted ||
+          card.matches(
+            "[data-state='uploading'], .is-uploading, [data-upload-started='true']",
+          ) ||
+          dashboard.querySelector(".uppy-StatusBar.is-uploading")
+        )
+          return true;
         return false;
       },
       "ManyVids upload initiation",

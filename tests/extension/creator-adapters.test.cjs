@@ -287,6 +287,79 @@ test("Fansly stays inside the Master Uploader, preserves text, applies toggles, 
   }
 });
 
+test("Fansly supports the current post-option chips and reads their active state", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await preparePage(browser, {
+      url: "https://fansly.com/home",
+      html: `
+        <style>
+          app-post-creation,.post-option-chip,textarea { display:block; width:220px; min-height:24px }
+        </style>
+        <app-post-creation>
+          <textarea></textarea>
+          <div class="post-option-chip active"><xd-localization-string>Post to FYP</xd-localization-string></div>
+          <div class="post-option-chip"><xd-localization-string>Pin to Walls</xd-localization-string></div>
+          <div class="post-option-chip active"><xd-localization-string>Post to Walls</xd-localization-string><span>1</span></div>
+          <div class="post-option-chip"><xd-localization-string>Lock Replies</xd-localization-string></div>
+        </app-post-creation>
+        <script>
+          for (const chip of document.querySelectorAll(".post-option-chip")) {
+            chip.addEventListener("click", () => chip.classList.toggle("active"));
+          }
+        </script>
+      `,
+      settings: rawSettings("fanslyPrefill", {}),
+      scripts: ["fansly-prefill.js"],
+    });
+    await assertNoStandalonePanel(page, "fanslyPrefill");
+    const state = await page.evaluate(async () => {
+      const api = CreatorToolkitAdapters.fanslyPrefill;
+      const profile = {
+        message: "",
+        fillMode: "replace",
+        toggles: {
+          "Post to FYP": false,
+          "Post to Walls": true,
+          "Lock Replies": true,
+        },
+      };
+      const composer = document.querySelector("app-post-creation");
+      const plan = api.inspectComposer(composer, profile, {
+        desiredText: "Current Fansly caption",
+        forceWrite: true,
+      });
+      const result = await api.applyPlan(
+        plan,
+        profile,
+        new AbortController().signal,
+        { step() {} },
+      );
+      return {
+        status: result.status,
+        caption: composer.querySelector("textarea").value,
+        chips: [...composer.querySelectorAll(".post-option-chip")].map(
+          (chip) => ({
+            text: chip.textContent.trim().replace(/\s+/g, " "),
+            active: chip.classList.contains("active"),
+          }),
+        ),
+      };
+    });
+    assert.equal(state.status, "success");
+    assert.equal(state.caption, "Current Fansly caption");
+    assert.deepEqual(state.chips, [
+      { text: "Post to FYP", active: false },
+      { text: "Pin to Walls", active: false },
+      { text: "Post to Walls1", active: true },
+      { text: "Lock Replies", active: true },
+    ]);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
 test("OnlyFans selection Stop prevents the next mutation and Follow obeys its cap", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
