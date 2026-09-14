@@ -493,7 +493,25 @@
               Yes, upload now
             </button>
             <button id="rejectMatch" type="button">No</button>
+            <button id="resetPreparation" type="button">
+              Reset a stuck test run
+            </button>
           </div>
+          <dialog id="resetPreparationDialog">
+            <p>
+              Remove preparation evidence for one abandoned test platform. Check
+              the remote draft first: this cannot cancel or delete anything on
+              the platform.
+            </p>
+            <label for="resetPreparationRecord">Prepared platform</label>
+            <select id="resetPreparationRecord"></select>
+            <div class="confirmation-actions">
+              <button id="confirmPreparationReset" type="button">
+                Reset selected test run
+              </button>
+              <button id="closePreparationReset" type="button">Cancel</button>
+            </div>
+          </dialog>
         </section>
         <section
           id="preparationControls"

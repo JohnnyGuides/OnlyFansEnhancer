@@ -113,6 +113,53 @@ test("legacy recovery records beyond the old cap remain visible", async () => {
   assert.equal((await store.listRecovery()).length, 25);
 });
 
+test("resetting an abandoned platform removes only its preparation evidence", async () => {
+  const { store } = loadStore();
+  const step = {
+    actionId: "select-full",
+    platform: "fansly",
+    outcome: "intent",
+    commandId: "11111111-1111-4111-8111-111111111111",
+    documentId: "22222222-2222-4222-8222-222222222222",
+    signature: "a".repeat(64),
+    tabId: 42,
+    frameId: 0,
+  };
+  await store.recordStep("abandoned-test-session", step);
+  await store.recordStep("abandoned-test-session", {
+    ...step,
+    platform: "onlyfans",
+    commandId: "33333333-3333-4333-8333-333333333333",
+  });
+
+  await store.resetPreparation("abandoned-test-session", "fansly");
+
+  const records = plain(await store.listRecovery());
+  assert.equal(records.length, 1);
+  assert.equal(records[0].id, "abandoned-test-session");
+  assert.equal(records[0].steps.length, 1);
+  assert.equal(records[0].steps[0].platform, "onlyfans");
+  assert.equal(
+    records[0].steps[0].commandId,
+    "33333333-3333-4333-8333-333333333333",
+  );
+});
+
+test("resetting preparation refuses a platform with a durable publish attempt", async () => {
+  const { store } = loadStore();
+  const id = "protected-test-session";
+  await store.save({
+    id,
+    draft: { fullFilename: "neutral.mp4" },
+    platforms: { fansly: { submitAttempted: true } },
+  });
+
+  await assert.rejects(
+    store.resetPreparation(id, "fansly"),
+    /publication attempt/i,
+  );
+});
+
 test("final intent survives session loss and prevents a new session bypass", async () => {
   const { store, values } = loadStore();
   const record = {

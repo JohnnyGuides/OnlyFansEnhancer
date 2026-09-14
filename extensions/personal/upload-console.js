@@ -2582,6 +2582,70 @@
     get("#closePreparationDiagnostics")?.addEventListener("click", () =>
       get("#preparationDiagnostics").close(),
     );
+    get("#resetPreparation")?.addEventListener("click", async () => {
+      try {
+        const result = await sendMessage({
+          type: "GET_CREATOR_UPLOAD_RECOVERY",
+        });
+        const protectedPlatforms = new Set(
+          (result.publication || []).map(
+            (item) => `${item.id}:${item.platform}`,
+          ),
+        );
+        const choices = [
+          ...new Set(
+            (result.records || []).flatMap((record) =>
+              (record.steps || []).map(
+                (step) => `${record.id}:${step.platform}`,
+              ),
+            ),
+          ),
+        ].filter((value) => !protectedPlatforms.has(value));
+        const select = get("#resetPreparationRecord");
+        select.replaceChildren(
+          ...choices.map((value) => {
+            const option = document.createElement("option");
+            option.value = value;
+            const [sessionId, platform] = value.split(":");
+            option.textContent = `${platform} — ${sessionId}`;
+            return option;
+          }),
+        );
+        if (!choices.length) {
+          matchStatus.textContent =
+            "There are no resettable preparation records. A final publication attempt must be reconciled instead.";
+          return;
+        }
+        get("#resetPreparationDialog").showModal();
+      } catch (error) {
+        matchStatus.textContent = error.message;
+      }
+    });
+    get("#closePreparationReset")?.addEventListener("click", () =>
+      get("#resetPreparationDialog").close(),
+    );
+    get("#confirmPreparationReset")?.addEventListener("click", async () => {
+      const [sessionId, platform] = get("#resetPreparationRecord").value.split(
+        ":",
+      );
+      if (
+        !window.confirm(
+          `Reset ${platform} preparation for ${sessionId}? This only clears OFEnhancer's local test queue; it does not alter the remote draft.`,
+        )
+      )
+        return;
+      try {
+        await sendMessage({
+          type: "RESET_CREATOR_UPLOAD_PREPARATION",
+          sessionId,
+          platform,
+        });
+        get("#resetPreparationDialog").close();
+        matchStatus.textContent = `${platform} preparation was reset. You can start a fresh test run after checking the remote draft.`;
+      } catch (error) {
+        matchStatus.textContent = error.message;
+      }
+    });
     get("#savePreparationDiagnostics")?.addEventListener("click", () => {
       const blob = new Blob([get("#preparationDiagnosticsText").textContent], {
         type: "application/json",

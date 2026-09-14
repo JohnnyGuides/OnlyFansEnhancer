@@ -340,6 +340,37 @@
       return durable;
     });
   }
+
+  async function resetPreparation(id, platform) {
+    key(id);
+    if (!PLATFORMS.has(platform))
+      throw new Error("Invalid preparation platform.");
+    return enqueueWrite(RECOVERY_KEY, async () => {
+      if (
+        (await actionRecords()).some(
+          (record) => record.id === id && record.platform === platform,
+        )
+      )
+        throw new Error(
+          "This platform has a durable publication attempt and cannot be reset.",
+        );
+      const records = await listRecovery();
+      const record = records.find((item) => item.id === id);
+      if (!record) throw new Error("Unknown preparation recovery record.");
+      const remainingSteps = record.steps.filter(
+        (step) => step.platform !== platform,
+      );
+      if (remainingSteps.length === record.steps.length)
+        throw new Error("No preparation evidence exists for this platform.");
+      const next = records
+        .map((item) =>
+          item.id === id ? { ...item, steps: remainingSteps } : item,
+        )
+        .filter((item) => item.steps.length);
+      await chrome.storage.local.set({ [RECOVERY_KEY]: next });
+      return { id, platform, cleared: true };
+    });
+  }
   const DRAFT_STRINGS = Object.freeze({
     title: 500,
     description: 10_000,
@@ -634,6 +665,7 @@
     RECOVERY_KEY,
     listRecovery,
     recordStep,
+    resetPreparation,
     assertAvailable,
     ACTION_KEY,
     workIdentity,

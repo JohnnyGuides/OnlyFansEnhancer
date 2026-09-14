@@ -4738,6 +4738,13 @@ function handleExtensionMessage(message, sender, sendResponse) {
             : records,
         };
       }
+      case "RESET_CREATOR_UPLOAD_PREPARATION":
+        return {
+          reset: await CREATOR_UPLOAD_SESSION_STORE.resetPreparation(
+            message.sessionId,
+            message.platform,
+          ),
+        };
       case "OPEN_X_TEASER_RECORDER":
         return { recorderTabId: await openXTeaserRecorder() };
       case "GET_X_TEASER_SESSIONS":
