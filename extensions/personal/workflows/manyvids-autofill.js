@@ -184,13 +184,20 @@
         detail: `not configured; visible label is “${actualLabel || "unlabelled"}”`,
       };
     }
+    const verifiedLaunchLabel =
+      selector === "#launchCustom" &&
+      toolkit.normalizeText(expectedLabel) === "custom launch date" &&
+      /^Select a launch date according to your timezone \([A-Za-z_]+\/[A-Za-z_\-/]+\)$/.test(
+        actualLabel.trim(),
+      );
     return {
       selector,
       expectedLabel,
       control,
       safe:
+        verifiedLaunchLabel ||
         toolkit.normalizeText(actualLabel) ===
-        toolkit.normalizeText(expectedLabel),
+          toolkit.normalizeText(expectedLabel),
       detail:
         toolkit.normalizeText(actualLabel) ===
         toolkit.normalizeText(expectedLabel)

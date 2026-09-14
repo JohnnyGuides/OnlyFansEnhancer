@@ -79,7 +79,11 @@ canonical outcomes, fingerprints, and monotonic stage flags, but not File bytes,
 cookies, request bodies, or raw media paths. The open uploader still has to retain
 or deliberately reselect the exact File. X recorder/distributor checkpoints use
 their own durable allow-listed records. A persisted final-attempt marker is not
-cleared on restart or storage retry.
+cleared on restart or storage retry. The local `creatorUploadActionsV1` journal retains final intent and canonical receipts independently of session metadata. Preparation records retain hashed work/plan identity, command, platform, frame and document, including an issued file-delivery phase. New sessions cannot bypass an existing action for the same work; full journals reject new work without evicting unresolved records. Legacy records remain visible.
+
+Privileged preparation messages recheck the exact document, route, frame and current connection object before and after durable writes. Only the recorded ManyVids editor handoff can replace that document binding. File assignment and upload-start actions are not transport retries. Idempotent checkpoint/progress acknowledgements may resume; explicit refusals fail once.
+
+Final response observation is armed at the durable final-action boundary. Earlier requests are excluded and preparation time does not consume its timeout. A canonical receipt is checkpointed independently of the adapter return. Ambiguous identities and application errors do not establish acceptance. `recorded-local` is terminal independently of sibling platforms and never implies Google synchronization, including an idempotent local record.
 
 ## Catalogue and reconciliation
 

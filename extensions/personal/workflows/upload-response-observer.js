@@ -32,6 +32,13 @@
     ) {
       return null;
     }
+    if (
+      payload.success === false ||
+      payload.error ||
+      payload.errors ||
+      payload.status === "error"
+    )
+      return null;
     const urls = new Set();
     const explicitIds = new Set();
     const contextualIds = new Set();
@@ -41,6 +48,13 @@
       const current = queue.shift();
       visited += 1;
       if (!current.value || typeof current.value !== "object") continue;
+      if (
+        current.value.success === false ||
+        current.value.status === "error" ||
+        current.value.error ||
+        (Array.isArray(current.value.errors) && current.value.errors.length)
+      )
+        return null;
       for (const [key, value] of Object.entries(current.value)) {
         const normalizedKey = key.toLowerCase().replace(/_/g, "");
         const path = [...current.path, key];
@@ -73,11 +87,7 @@
       }
     }
     const candidates = new Set(urls);
-    const ids = explicitIds.size
-      ? explicitIds
-      : urls.size
-        ? new Set()
-        : contextualIds;
+    const ids = new Set([...explicitIds, ...contextualIds]);
     for (const id of ids) {
       const result = canonical(platform, id);
       if (result) candidates.add(result);
@@ -123,7 +133,11 @@
   function inspectCompletedXhr(xhr) {
     const meta = xhrMeta.get(xhr);
     for (const observer of [...observers]) {
-      if (!matchesEndpoint(meta, observer.platform)) continue;
+      if (
+        !meta?.epochs?.has(observer) ||
+        !matchesEndpoint(meta, observer.platform)
+      )
+        continue;
       if (xhr.status < 200 || xhr.status >= 300) {
         settle(
           observer,
@@ -156,6 +170,7 @@
       xhrMeta.set(this, {
         method: String(method || "").toUpperCase(),
         url: String(url || ""),
+        epochs: new Set([...observers].filter((observer) => observer.armed)),
       });
       this.addEventListener("loadend", () => inspectCompletedXhr(this), {
         once: true,
@@ -164,7 +179,12 @@
     };
   }
 
-  function install({ sessionId, platform, timeoutMs = 30 * 60_000 }) {
+  function install({
+    sessionId,
+    platform,
+    timeoutMs = 30 * 60_000,
+    deferred = false,
+  }) {
     if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(sessionId || ""))) {
       return Promise.reject(new Error("Invalid upload response session."));
     }
@@ -173,18 +193,37 @@
     }
     patchXhr();
     return new Promise((resolve, reject) => {
-      const observer = { sessionId, platform, resolve, reject, timeout: null };
-      observer.timeout = setTimeout(
-        () =>
-          settle(
-            observer,
-            null,
-            new Error(`Timed out waiting for ${platform} post confirmation.`),
-          ),
-        Math.max(1_000, Math.min(Number(timeoutMs) || 0, 60 * 60_000)),
-      );
+      const observer = {
+        sessionId,
+        platform,
+        resolve,
+        reject,
+        timeout: null,
+        armed: false,
+        timeoutMs,
+      };
       observers.add(observer);
+      if (!deferred) arm(sessionId, platform);
     });
+  }
+
+  function arm(sessionId, platform) {
+    const matches = [...observers].filter(
+      (item) => item.sessionId === sessionId && item.platform === platform,
+    );
+    if (matches.length !== 1 || matches[0].armed) return false;
+    const observer = matches[0];
+    observer.armed = true;
+    observer.timeout = setTimeout(
+      () =>
+        settle(
+          observer,
+          null,
+          new Error(`Timed out waiting for ${platform} post confirmation.`),
+        ),
+      Math.max(1_000, Math.min(Number(observer.timeoutMs) || 0, 60 * 60_000)),
+    );
+    return true;
   }
 
   function cancel(sessionId, platform) {
@@ -203,5 +242,6 @@
     cancel,
     extractPostUrl,
     install,
+    arm,
   });
 })();

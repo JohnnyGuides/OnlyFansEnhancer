@@ -97,18 +97,90 @@ function createChrome(options = {}) {
   return { calls, chrome, fileInputs, commands };
 }
 
-function load() {
+function load(timers = {}) {
   const context = vm.createContext({
     globalThis: {},
     URL,
     setTimeout,
     clearTimeout,
+    ...timers,
   });
   vm.runInContext(fs.readFileSync(modulePath, "utf8"), context, {
     filename: modulePath,
   });
   return context.globalThis.CreatorLocalFileAttacher;
 }
+
+test("late debugger attach after timeout is cleaned up and cannot overlap a new owner", async () => {
+  const timers = new Map();
+  let nextTimer = 0;
+  const attacher = load({
+    setTimeout(callback) {
+      timers.set(++nextTimer, callback);
+      return nextTimer;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+  });
+  const fake = createChrome();
+  let attached;
+  fake.chrome.debugger.attach = (_target, _version, callback) => {
+    if (attached) {
+      fake.chrome.runtime.lastError = { message: "already attached" };
+      callback();
+      fake.chrome.runtime.lastError = null;
+    } else attached = callback;
+  };
+  const first = assert.rejects(
+    attacher.attach(request(), fake.chrome),
+    /debugger-attach-failed-timeout/,
+  );
+  await new Promise(setImmediate);
+  [...timers.values()][0]();
+  await first;
+  await assert.rejects(
+    attacher.attach(request(), fake.chrome),
+    /attachment-in-progress/,
+  );
+  attached();
+  await new Promise(setImmediate);
+  assert.equal(
+    fake.calls.filter(([name]) => name === "debugger.detach").length,
+    1,
+  );
+  assert.deepEqual(fake.fileInputs, []);
+  fake.chrome.debugger.attach = (_target, _version, callback) => callback();
+  await attacher.attach(request(), fake.chrome);
+  assert.equal(
+    fake.calls.filter(([name]) => name === "debugger.detach").length,
+    2,
+  );
+});
+
+test("cancelled pending debugger attach cleans up a late success without delivering a file", async () => {
+  const fake = createChrome();
+  const attacher = load();
+  const controller = new AbortController();
+  let attached;
+  fake.chrome.debugger.attach = (_target, _version, callback) => {
+    attached = callback;
+  };
+  const stopped = assert.rejects(
+    attacher.attach(request({ signal: controller.signal }), fake.chrome),
+    /attachment-cancelled/,
+  );
+  await new Promise(setImmediate);
+  controller.abort();
+  attached();
+  await stopped;
+  await new Promise(setImmediate);
+  assert.equal(
+    fake.calls.filter(([name]) => name === "debugger.detach").length,
+    1,
+  );
+  assert.deepEqual(fake.fileInputs, []);
+});
 
 function request(overrides = {}) {
   return {

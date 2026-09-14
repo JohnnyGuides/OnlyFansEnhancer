@@ -37,7 +37,7 @@ filename nor a convenient default is permission to publish or bind identity.
 | Windows workspace                     | Tray/single-user agent; real local catalogue and thumbnails; Google connection/import/sync controls; selected-Chrome connection and shared uploader UI                                                                                                                                                   |
 | Desktop upload transport              | Authorized browser command/file channel and local upload result recording. The extension still owns browser execution and monotonic checkpoints; local recording is not a claim of Google synchronization                                                                                                |
 | OnlyFans / Fansly / ManyVids uploader | Trace-grounded field/file preparation and final-submit paths, exact identity/readback, independent outcomes, and protected catalogue commits                                                                                                                                                             |
-| Pornhub uploader                      | Exact metadata-preset preparation only. File assignment, title/description, scheduling, final submission, and result capture remain manual                                                                                                                                                               |
+| Pornhub uploader                      | Activates the uploader, assigns the approved full/Pornhub file once, applies the selected metadata preset and verifies the title. Scheduling, final submission, and result capture remain manual                                                                                                         |
 | X distributor                         | Traced main-post and paid-link first-reply phases. Manual mode stops before final controls; authorized autonomous phases require separate durable attempt checkpoints                                                                                                                                    |
 | Redgifs / Reddit                      | Manual draft preparation is implemented. Redgifs selects the exact upload file input; Reddit prepares title and inserts a verified canonical Redgifs link into the exact empty link editor. Required remaining fields and publication are manual. Autonomous publishing remains trace-gated and disabled |
 | X teaser recorder                     | Explicit file/catalogue pairing, semantic status capture, ordered local audit → catalogue append → receipt-protected Done move; separate from autonomous publication                                                                                                                                     |
@@ -50,22 +50,21 @@ change. Do not describe a package build or fixture test as successful live posti
 ## Publishing details that must survive refactoring
 
 The catalogue description is the base caption. Fansly adds the configured block
-once, applies the reviewed toggles, locks full media with exact preset `defaulT`,
+once, applies the reviewed toggles, locks full media with the reviewed first or explicitly selected preset,
 and uses the shared teaser through **Add Free Preview**. OnlyFans labels remain
-unchanged. Friday scheduling is **15:00 UTC**, converted for the browser's local
-timezone; a verified common empty Friday is required when the selected flow
+unchanged. Friday scheduling is **15:00 UTC**. Fansly and ManyVids read the timezone displayed by their scheduling UI; OnlyFans uses the approved draft timezone and requires separate live verification of that UI representation. A verified common empty Friday is required when the selected flow
 claims queue verification. Unknown queue availability is not inferred as free.
 
 ManyVids uses the saved normalized profile, including its exact ten tags, price,
-modes, and time. Full upload can take up to 45 minutes. Resume only the proven
-video's editor; its final Save remains a single attempt. Source defaults are not
+modes, and time. Upload observation can continue beyond 45 minutes; only progress in the owned upload scope can establish a stall. Resume only the proven
+video's editor through the recorded Edit action and its first verified navigation. Its final Save remains a single attempt. Returning to the upload page does not prove acceptance; an unverified Save stays unresolved and cannot be repeated. Source defaults are not
 an independently maintained product table.
 
 The optional Pornhub video falls back to the full video, never the teaser. The
 creator selects one exact content preset. Only a creator-confirmed exact
 Season/Arc mapping may preselect it; never infer orientation from performers,
 titles, filenames, descriptions, or tags. Existing metadata is preserved while
-missing exact tags/categories are added. A preparation result is not success.
+missing exact tags/categories are added. Title readback follows the preset. The file bridge supports the Pornhub role and only its approved uploader origin. A preparation result is not publication success.
 
 The manual Redgifs/Reddit preparation adapter reflects the observed composers of
 September 8, 2026. That observation is not a complete successful publishing

@@ -1867,7 +1867,7 @@
           "link-captured": "Post link captured",
           "posted-link-unresolved": "Submitted; recover link manually",
           "catalogue-commit-failed": "Posted; sheet update failed",
-          "catalogue-updated": "Catalogue updated",
+          "catalogue-updated": "Sheet updated and verified",
           "uploaded-no-sheet": "Scheduled · sheet not connected",
           "recorded-local": "Saved locally · sheet unchanged",
           "published-local": "Published · catalogue entry deferred",
@@ -2524,6 +2524,7 @@
             if (
               !new Set([
                 "manual-submit-required",
+                "recorded-local",
                 "catalogue-updated",
                 "uploaded-no-sheet",
                 "already-linked",
@@ -2565,7 +2566,11 @@
           sessionId: activeSession?.id,
         });
         get("#preparationDiagnosticsText").textContent = JSON.stringify(
-          { schemaVersion: 1, records: result.records || [] },
+          {
+            schemaVersion: 1,
+            records: result.records || [],
+            publication: result.publication || [],
+          },
           null,
           2,
         );

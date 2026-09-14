@@ -79,11 +79,12 @@ inspection-only pass. Any path that currently auto-submits after the plan's Yes
 must not be started merely to inspect its first preparation step.
 
 For OnlyFans, inspect description/file/scheduling and unchanged labels. For
-Fansly, inspect full-media lock `defaulT`, Add Free Preview, exact caption/toggles,
+Fansly, inspect the reviewed first or explicitly selected full-media preset, Add Free Preview, exact caption/toggles,
 and the reviewed local representation of 15:00 UTC. For ManyVids, verify the exact
 uploaded video identity, full-upload/editor transition, profile values and single
-Save boundary; don't resume another video's editor. Pornhub remains metadata
-preparation with its file/title/schedule/submit/result boundaries manual.
+Save boundary; don't resume another video's editor. Pornhub activation, file assignment, preset and title are automated preparation; schedule, submission and result capture remain manual.
+
+September 14 inspection confirmed the current ManyVids readonly `#dp1` calendar, `#available_time` select, and explicit timezone in the custom-launch label. Fansly's current scheduling modal also displays its timezone. Those inspections did not save or publish. OnlyFans live composer inspection was blocked by the browser tool's site policy; fixture results are not live acceptance. For the missing OnlyFans evidence, record from an empty NEW POST composer: open the intended schedule control, choose the approved date and time, confirm the picker, and stop before the final post/save action. Include the resulting schedule chip and unchanged labels in the sanitized trace. Do not substitute the Expiration Period dialog.
 
 For Redgifs/Reddit, exercise manual preparation only with the exact expected
 composer. Verify title readback, empty-field protection, canonical Redgifs link,

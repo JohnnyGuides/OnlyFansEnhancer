@@ -83,11 +83,10 @@ test("interrupted checkpoint resumes the same command before the next mutation",
   let failures = 1;
   runtime.sendMessage = (message, callback) => {
     messages.push(message);
-    callback(
-      failures-- > 0
-        ? { ok: false, error: "worker interrupted" }
-        : { ok: true },
-    );
+    runtime.lastError =
+      failures-- > 0 ? { message: "worker interrupted" } : null;
+    callback({ ok: true });
+    runtime.lastError = null;
   };
   context.CreatorUploadPlatformAdapters.runFansly = async (run) => {
     await run.checkpointStep("attach-media", "command-identity", "intent");
@@ -98,14 +97,31 @@ test("interrupted checkpoint resumes the same command before the next mutation",
   await new Promise((resolve) => setImmediate(resolve));
   const run = context.CreatorUploadRuns.get("recovery-test:fansly:upload");
   assert.equal(run.state.status, "paused");
-  assert.match(run.state.error, /worker interrupted/);
+  assert.match(run.state.error, /transport-acknowledgement-lost/);
   assert.equal(messages[1].status, "upload-attention-required");
-  assert.match(messages[1].error, /worker interrupted/);
+  assert.match(messages[1].error, /transport-acknowledgement-lost/);
   assert.equal(mutations, 0);
   assert.equal(run.resumeObservation(), true);
   await completion;
   assert.equal(mutations, 1);
   assert.deepEqual(messages[0], messages[2]);
+});
+
+test("permanent checkpoint rejection fails once without pausing or replaying", async () => {
+  const { context, runtime, messages, args } = harness();
+  runtime.sendMessage = (message, callback) => {
+    messages.push(message);
+    callback({ ok: false, error: "Unauthorized preparation step." });
+  };
+  context.CreatorUploadPlatformAdapters.runFansly = (run) =>
+    run.checkpointStep("attach-media", "command-identity", "intent");
+  const completion = context.invokeCreatorUploadAdapter(args);
+  const rejection = assert.rejects(completion, /preparation-request-rejected/);
+  await new Promise((resolve) => setImmediate(resolve));
+  const run = context.CreatorUploadRuns.get("recovery-test:fansly:upload");
+  assert.equal(run.state.status, "failed");
+  await rejection;
+  assert.equal(messages.length, 1);
 });
 
 test("uncertain file delivery is never automatically replayed", async () => {

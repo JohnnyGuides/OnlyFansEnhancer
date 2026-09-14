@@ -8,11 +8,194 @@
   const PLATFORMS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
   const writeChains = new Map();
   const RECOVERY_KEY = "creatorUploadRecoveryV1";
+  const ACTION_KEY = "creatorUploadActionsV1";
+
+  async function digest(value) {
+    const bytes = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(
+        JSON.stringify(value, (_key, item) =>
+          item && typeof item === "object" && !Array.isArray(item)
+            ? Object.fromEntries(
+                Object.keys(item)
+                  .sort()
+                  .map((field) => [field, item[field]]),
+              )
+            : item,
+        ),
+      ),
+    );
+    return [...new Uint8Array(bytes)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function workIdentity(record) {
+    const catalogue = record.catalogue;
+    return digest(
+      catalogue?.itemId || catalogue?.id
+        ? { source: catalogue.source, id: catalogue.itemId || catalogue.id }
+        : record.draft?.fullFilename
+          ? { file: record.draft.fullFilename }
+          : { title: record.draft?.title },
+    );
+  }
+
+  async function actionRecords() {
+    const stored = (await chrome.storage.local.get(ACTION_KEY))[ACTION_KEY];
+    if (stored === undefined) return [];
+    if (
+      !Array.isArray(stored) ||
+      stored.some(
+        (item) =>
+          item?.schemaVersion !== 1 ||
+          !ID_PATTERN.test(item.id || "") ||
+          !PLATFORMS.has(item.platform) ||
+          !/^[a-f0-9]{64}$/.test(item.work || "") ||
+          !/^[a-f0-9]{64}$/.test(item.plan || "") ||
+          item.submitAttempted !== true,
+      )
+    )
+      throw new Error(
+        "Publication recovery journal is invalid; reconcile existing attempts before continuing.",
+      );
+    return stored.map((item) => ({
+      schemaVersion: 1,
+      id: item.id,
+      platform: item.platform,
+      work: item.work,
+      plan: item.plan,
+      ...(finiteInteger(item.tabId) !== undefined
+        ? { tabId: finiteInteger(item.tabId) }
+        : {}),
+      ...(/^[a-f0-9-]{32,36}$/i.test(item.documentId || "")
+        ? { documentId: item.documentId }
+        : {}),
+      commitArmed: true,
+      submitAttempted: true,
+      ...(globalThis.CreatorCatalogueContract?.canonicalPostUrl(
+        item.platform,
+        item.postUrl,
+      ) === item.postUrl && item.postUrl
+        ? { postUrl: item.postUrl }
+        : {}),
+    }));
+  }
+
+  async function assertAvailable(record, platforms) {
+    await migrateFinalActions();
+    const work = await workIdentity(record);
+    const signature = await digest(sanitizeDraft(record.draft));
+    if (
+      (await listRecovery()).some((item) =>
+        item.steps.some(
+          (step) =>
+            (step.work === work ||
+              (!step.work && step.signature === signature) ||
+              item.id === record.id) &&
+            platforms.includes(step.platform),
+        ),
+      )
+    )
+      throw new Error(
+        "An existing prepared or uncertain draft exists for this work item. Reconcile the existing draft before starting another session.",
+      );
+    if (
+      (await actionRecords()).some(
+        (item) =>
+          (item.id === record.id || item.work === work) &&
+          platforms.includes(item.platform),
+      )
+    )
+      throw new Error(
+        "An unresolved publication attempt already exists for this work item. Recover the existing result; do not start another upload.",
+      );
+  }
+
+  async function persistActions(record) {
+    const targets = Object.entries(record.platforms || {}).filter(
+      ([, target]) => target.commitArmed || target.submitAttempted,
+    );
+    if (!targets.length) return;
+    await enqueueWrite(ACTION_KEY, async () => {
+      const records = await actionRecords();
+      for (const [platform, target] of targets) {
+        const previous = records.find(
+          (item) => item.id === record.id && item.platform === platform,
+        );
+        const postUrl =
+          globalThis.CreatorCatalogueContract?.canonicalPostUrl(
+            platform,
+            target.postUrl,
+          ) || "";
+        if (previous) {
+          if (record.draft && previous.plan !== (await digest(record.draft)))
+            throw new Error(
+              "The approved publication plan changed after its durable intent.",
+            );
+          if (postUrl && previous.postUrl && previous.postUrl !== postUrl)
+            throw new Error(
+              "Publication result identity changed; reconcile the existing result.",
+            );
+          if (postUrl) previous.postUrl = postUrl;
+          continue;
+        }
+        const work = await workIdentity(record);
+        if (
+          records.some(
+            (item) => item.work === work && item.platform === platform,
+          )
+        )
+          throw new Error(
+            "An unresolved publication attempt already exists for this work item.",
+          );
+        if (records.length >= 200)
+          throw new Error(
+            "Publication recovery journal is full. Reconcile existing attempts before new publication; no records were removed.",
+          );
+        records.push({
+          schemaVersion: 1,
+          id: record.id,
+          platform,
+          work,
+          plan: await digest(record.draft || {}),
+          ...(finiteInteger(target.tabId) !== undefined
+            ? { tabId: finiteInteger(target.tabId) }
+            : {}),
+          ...(/^[a-f0-9-]{32,36}$/i.test(target.documentId || "")
+            ? { documentId: target.documentId }
+            : {}),
+          commitArmed: true,
+          submitAttempted: true,
+          ...(postUrl ? { postUrl } : {}),
+        });
+      }
+      await chrome.storage.local.set({ [ACTION_KEY]: records });
+      const readback = await actionRecords();
+      if (JSON.stringify(readback) !== JSON.stringify(records))
+        throw new Error("Publication recovery checkpoint was not durable.");
+    });
+  }
+  async function migrateFinalActions() {
+    const stored = await chrome.storage.session.get(null);
+    for (const [storageKey, record] of Object.entries(stored)) {
+      if (!storageKey.startsWith(KEY_PREFIX)) continue;
+      const safe = sanitize(record);
+      if (
+        Object.values(safe.platforms || {}).some(
+          (target) => target.commitArmed || target.submitAttempted,
+        )
+      )
+        await persistActions(safe);
+    }
+  }
   const STEP_KINDS = new Set([
     "select-full",
+    "select-pornhub",
     "select-teaser",
     "select-thumbnail",
     "start-upload",
+    "open-editor",
     "attach-media",
     "confirm-preview",
     "confirm-thumbnail",
@@ -27,6 +210,7 @@
       !PLATFORMS.has(value.platform) ||
       ![
         "intent",
+        "issued",
         "observed",
         "attention-required",
         "cancelled",
@@ -50,6 +234,7 @@
       commandId: value.commandId,
       documentId: value.documentId,
       signature: value.signature,
+      ...(/^[a-f0-9]{64}$/.test(value.work || "") ? { work: value.work } : {}),
       tabId,
       frameId,
       recipeVersion: 1,
@@ -59,24 +244,26 @@
 
   async function listRecovery() {
     const stored = await chrome.storage.local.get(RECOVERY_KEY);
-    if (!Array.isArray(stored[RECOVERY_KEY])) return [];
-    return stored[RECOVERY_KEY].slice(-20)
-      .filter(
+    if (stored[RECOVERY_KEY] === undefined) return [];
+    if (
+      !Array.isArray(stored[RECOVERY_KEY]) ||
+      stored[RECOVERY_KEY].some(
         (record) =>
-          ID_PATTERN.test(record?.id || "") && Array.isArray(record.steps),
+          !ID_PATTERN.test(record?.id || "") || !Array.isArray(record.steps),
       )
-      .map((record) => ({
-        id: record.id,
-        schemaVersion: 1,
-        explicitResumeRequired: true,
-        steps: record.steps.slice(0, 64).flatMap((step) => {
-          try {
-            return [{ ...recoveryStep(step), at: finiteInteger(step.at) || 0 }];
-          } catch {
-            return [];
-          }
-        }),
-      }));
+    )
+      throw new Error(
+        "Preparation recovery journal is invalid; reconcile existing drafts before continuing.",
+      );
+    return stored[RECOVERY_KEY].map((record) => ({
+      id: record.id,
+      schemaVersion: 1,
+      explicitResumeRequired: true,
+      steps: record.steps.map((step) => ({
+        ...recoveryStep(step),
+        at: finiteInteger(step.at) || 0,
+      })),
+    }));
   }
 
   async function recordStep(id, value) {
@@ -86,6 +273,10 @@
       const records = await listRecovery();
       let record = records.find((item) => item.id === id);
       if (!record) {
+        if (records.length >= 20)
+          throw new Error(
+            "Preparation recovery journal is full. Inspect and reconcile existing drafts before starting new work; no recovery records were removed.",
+          );
         record = {
           id,
           schemaVersion: 1,
@@ -103,22 +294,44 @@
           "platform",
           "documentId",
           "signature",
+          "work",
           "tabId",
           "frameId",
         ])
           if (previous[field] !== step[field])
             throw new Error("Preparation command identity changed.");
-        if (previous.outcome !== "intent") return previous;
+        if (previous.outcome !== "intent" && previous.outcome !== "issued")
+          return previous;
         if (step.outcome === "intent") return previous;
+        if (previous.outcome === "issued" && step.outcome === "issued")
+          return previous;
         Object.assign(previous, step);
       } else {
         if (step.outcome !== "intent")
           throw new Error("Preparation outcome has no recorded intent.");
+        if (
+          step.actionId !== "configure" &&
+          step.actionId !== "verify" &&
+          records.some(
+            (item) =>
+              (item.id === id ||
+                (step.work &&
+                  item.steps.some((entry) => entry.work === step.work))) &&
+              item.steps.some(
+                (entry) =>
+                  entry.platform === step.platform &&
+                  entry.actionId === step.actionId,
+              ),
+          )
+        )
+          throw new Error(
+            "An existing preparation action cannot be repeated after an uncertain or completed attempt.",
+          );
         if (record.steps.length >= 64)
           throw new Error("Preparation recovery journal is full.");
         record.steps.push(step);
       }
-      await chrome.storage.local.set({ [RECOVERY_KEY]: records.slice(-20) });
+      await chrome.storage.local.set({ [RECOVERY_KEY]: records });
       const durable = (await listRecovery())
         .find((item) => item.id === id)
         ?.steps.find((item) => item.commandId === step.commandId);
@@ -249,6 +462,7 @@
       ["postUrl", 500],
       ["error", 500],
       ["documentId", 36],
+      ["boundUrl", 500],
       ["progressStage", 20],
     ]) {
       if (Object.hasOwn(value, field))
@@ -342,7 +556,30 @@
   async function load(id) {
     const storageKey = key(id);
     const stored = await chrome.storage.session.get(storageKey);
-    return stored[storageKey] ? sanitize(stored[storageKey]) : null;
+    let record = stored[storageKey] ? sanitize(stored[storageKey]) : null;
+    for (const action of await actionRecords()) {
+      if (action.id !== id) continue;
+      record ||= { id, platforms: {} };
+      record.platforms ||= {};
+      record.platforms[action.platform] = mergePlatform(
+        record.platforms[action.platform],
+        {
+          platform: action.platform,
+          tabId: action.tabId,
+          documentId: action.documentId,
+          commitArmed: true,
+          submitAttempted: true,
+          ...(action.postUrl &&
+          globalThis.CreatorCatalogueContract?.canonicalPostUrl(
+            action.platform,
+            action.postUrl,
+          ) === action.postUrl
+            ? { postUrl: action.postUrl }
+            : {}),
+        },
+      );
+    }
+    return record;
   }
 
   function enqueueWrite(id, operation) {
@@ -359,6 +596,7 @@
     return enqueueWrite(next.id, async () => {
       const previous = await load(next.id);
       const value = sanitize(merge(previous, next));
+      await persistActions(value);
       await chrome.storage.session.set({ [key(next.id)]: value });
       return value;
     });
@@ -372,10 +610,17 @@
   }
 
   async function list() {
+    await migrateFinalActions();
     const stored = await chrome.storage.session.get(null);
-    return Object.entries(stored)
-      .filter(([storageKey]) => storageKey.startsWith(KEY_PREFIX))
-      .map(([, record]) => sanitize(record))
+    const ids = new Set([
+      ...Object.entries(stored)
+        .filter(([storageKey]) => storageKey.startsWith(KEY_PREFIX))
+        .map(([, record]) => sanitize(record).id),
+      ...(await actionRecords()).map((record) => record.id),
+    ]);
+    const records = await Promise.all([...ids].map(load));
+    return records
+      .filter(Boolean)
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -389,5 +634,12 @@
     RECOVERY_KEY,
     listRecovery,
     recordStep,
+    assertAvailable,
+    ACTION_KEY,
+    workIdentity,
+    async listPublication() {
+      await migrateFinalActions();
+      return actionRecords();
+    },
   });
 })();

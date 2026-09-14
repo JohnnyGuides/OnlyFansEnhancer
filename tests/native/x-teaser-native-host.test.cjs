@@ -150,6 +150,19 @@ function invoke(value, request) {
   return { ...output, exitCode: result.status, stderr: result.stderr };
 }
 
+test("configuration filesystem failures return a static native error without private paths", () => {
+  const value = fixture();
+  try {
+    fs.unlinkSync(path.join(value.root, "config.json"));
+    const result = invoke(value, { operation: "audit" });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "native-filesystem-failure");
+    assert.ok(!JSON.stringify(result).includes(value.root));
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
 test("native host writes one durable audit before an idempotent final move", () => {
   const value = fixture();
   try {

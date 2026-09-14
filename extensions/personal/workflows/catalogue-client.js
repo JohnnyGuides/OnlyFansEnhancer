@@ -322,7 +322,12 @@
                 "Open OFEnhancer on this PC to connect your catalogue.",
             ),
           );
-        resolve(response.result);
+        resolve(
+          operation === "recordUploadResult" &&
+            response.result?.status === "idempotent"
+            ? { ...response.result, status: "recorded-local" }
+            : response.result,
+        );
       };
       if (chrome.runtime.sendNativeMessage)
         chrome.runtime.sendNativeMessage(

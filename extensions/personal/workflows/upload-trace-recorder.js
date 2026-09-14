@@ -154,6 +154,68 @@
   let ownerId = "";
   let assetRole = "full";
   const documentGeneration = globalThis.crypto?.randomUUID?.() || "";
+  const opaqueTokens = new Map();
+  const structuralTokens = new Set([
+    "button",
+    "file",
+    "text",
+    "hidden",
+    "checkbox",
+    "radio",
+    "submit",
+    "number",
+    "datetime-local",
+    "select-one",
+    "textbox",
+    "dialog",
+    "menuitem",
+    "option",
+    "tab",
+    "file_upload_input",
+    "attach_file_photo",
+    "Title",
+    "video_title",
+    "video_description",
+    "saveVideo",
+    "save_thumb",
+    "launchCustom",
+    "co-performer",
+    "fileUploader",
+    "image",
+    "uploadButton",
+    "dz-hidden-input",
+    "uppy-Dashboard",
+    "uppy-Dashboard-input",
+    "uppy-Dashboard-Item",
+    "uppy-Dashboard-Item-name",
+    "uppy-StatusBar-actionBtn--upload",
+    "vdatetime-popup",
+    "vdatetime-popup__tab",
+    "time",
+    "date",
+    "vdatetime-calendar__month__day",
+    "vdatetime-time-picker__list",
+    "vdatetime-time-picker__item",
+    "new-post-btn",
+    "confirm-btn",
+    "btn",
+    "modal",
+    "b-dropzone__preview__delete",
+    "tiptap",
+    "ProseMirror",
+    "js-text-editor",
+    "video/mp4",
+    "video/webm",
+    "image/png",
+    "image/jpeg",
+    "video/*",
+    "image/*",
+    "ready",
+    "success",
+    "failed",
+    "running",
+    "completed",
+  ]);
 
   function ownsTrace(trace) {
     return Boolean(
@@ -170,11 +232,7 @@
         ? new URL(String(value), String(base))
         : new URL(String(value));
       if (!/^https?:$/.test(url.protocol)) return "";
-      const sanitized = `${url.protocol}//${url.host}${url.pathname}`;
-      const viewkey = url.searchParams.get("viewkey");
-      return viewkey && /^[a-z0-9_-]{1,100}$/i.test(viewkey)
-        ? `${sanitized}?viewkey=${encodeURIComponent(viewkey)}`
-        : sanitized;
+      return sanitizeResourceUrl(url.href);
     } catch {
       return "";
     }
@@ -245,7 +303,12 @@
     if (!token || token.includes("[email]") || token.includes("[url]")) {
       return "";
     }
-    return token;
+    if (structuralTokens.has(token)) return token;
+    if (!opaqueTokens.has(token) && opaqueTokens.size >= 4096)
+      return "opaque-overflow";
+    if (!opaqueTokens.has(token))
+      opaqueTokens.set(token, `opaque-${opaqueTokens.size + 1}`);
+    return opaqueTokens.get(token);
   }
 
   function safeActionText(value) {
@@ -264,12 +327,31 @@
     if (!element || element.nodeType !== 1) return null;
     const tag = String(element.tagName || "").toLowerCase();
     const type = stableToken(element.getAttribute?.("type"), 30).toLowerCase();
-    const signature = { tag };
+    const signature = {
+      tag,
+      hidden: !isVisible(element),
+      disabled: Boolean(
+        element.disabled || element.getAttribute?.("aria-disabled") === "true",
+      ),
+      busy: element.getAttribute?.("aria-busy") === "true",
+    };
     if (type) signature.type = type;
     if (tag === "input" && type === "file") {
       signature.connected = Boolean(element.isConnected);
       signature.accept = stableToken(element.getAttribute("accept"), 160);
       signature.multiple = Boolean(element.multiple);
+      signature.directory = Boolean(
+        element.webkitdirectory || element.hasAttribute("webkitdirectory"),
+      );
+      const locator = `input[type='file']${
+        element.id
+          ? `#${CSS.escape(element.id)}`
+          : Array.from(element.classList)
+              .slice(0, 5)
+              .map((value) => `.${CSS.escape(value)}`)
+              .join("")
+      }${signature.directory ? "[webkitdirectory]" : ":not([webkitdirectory])"}`;
+      signature.locatorMatches = document.querySelectorAll(locator).length;
     }
 
     for (const [attribute, key] of [
@@ -291,7 +373,8 @@
           !/\d{5,}/.test(value) &&
           !/^[a-f0-9]{12,}$/i.test(value),
       )
-      .slice(0, 5);
+      .slice(0, 5)
+      .map((value) => stableToken(value));
     if (classes.length) signature.classes = classes;
 
     const mayUseText =
@@ -312,6 +395,12 @@
         ? safeActionText(element.textContent)
         : "";
     if (label) signature.label = label;
+    if (explicitLabel)
+      signature.labelSource = element.hasAttribute?.("aria-label")
+        ? "aria-label"
+        : element.hasAttribute?.("title")
+          ? "title"
+          : "form-label";
     return signature;
   }
 
@@ -427,7 +516,7 @@
     const platform = platformFor(location.hostname);
     const trace = {
       schemaVersion: 1,
-      diagnosticVersion: 2,
+      diagnosticVersion: 3,
       ownerId,
       id: sessionId(),
       platform,
@@ -623,11 +712,11 @@
       sanitized.label = stableToken(data.label, 160);
     } else if (kind === "run-result") {
       sanitized.status = stableToken(data.status, 30);
-      sanitized.summary = sanitizeText(data.summary, 240);
+      sanitized.summary = stableToken(data.summary, 240);
       sanitized.items = Array.from(data.items || [])
         .slice(0, 100)
         .map((item) => ({
-          label: sanitizeText(item?.label, 160),
+          label: stableToken(item?.label, 160),
           status: stableToken(item?.status, 30),
         }))
         .filter((item) => item.label || item.status);
@@ -640,9 +729,13 @@
     value,
     sourceHostname = globalThis.location?.hostname,
   ) {
-    const sanitized = sanitizeUrl(value, globalThis.location?.href);
-    if (!sanitized) return "";
-    const url = new URL(sanitized);
+    let url;
+    try {
+      url = new URL(value, globalThis.location?.href);
+    } catch {
+      return "";
+    }
+    if (url.protocol !== "https:" || url.username || url.password) return "";
     const platform = platformFor(sourceHostname);
 
     if (platform === "X") {
@@ -675,7 +768,7 @@
       ["pornhub.com", "www.pornhub.com"].includes(url.hostname) &&
       url.pathname.toLowerCase() === "/view_video.php"
     ) {
-      const viewkey = stableToken(url.searchParams.get("viewkey"), 80);
+      const viewkey = String(url.searchParams.get("viewkey") || "");
       return /^[a-z0-9]+$/i.test(viewkey)
         ? `${url.origin}/view_video.php?viewkey=${encodeURIComponent(viewkey)}`
         : "";
@@ -721,6 +814,11 @@
     const data = {
       ...interactionContext(event, element),
       control: actionElementSignature(element),
+      leaf: elementSignature(eventElement(event)),
+      ancestors: (event.composedPath?.() || [])
+        .filter((node) => node?.nodeType === 1 && !isRecorderNode(node))
+        .slice(0, 6)
+        .map(elementSignature),
     };
     const href =
       element.tagName?.toLowerCase() === "a"
@@ -875,7 +973,7 @@
       statuses.push({
         control: elementSignature(element),
         ...(states.length ? { states } : {}),
-        ...(progress ? { progress: stableToken(progress, 30) } : {}),
+        ...(/^\d{1,3}(?:\.\d{1,3})?$/.test(progress) ? { progress } : {}),
       });
     }
     return statuses;
@@ -887,21 +985,10 @@
     for (const element of document.querySelectorAll('input[type="file"]')) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || fileInputs.length >= 8) break;
-      if (
-        !isRecorderNode(element) &&
-        inPublishingScope(element) &&
-        (isVisible(element) ||
-          element.closest(
-            "form, app-post-creation, .uppy-Dashboard, [role='dialog'], .modal",
-          ))
-      ) {
+      if (!isRecorderNode(element) && inPublishingScope(element) && true) {
         fileInputs.push({
           ...elementSignature(element),
           hidden: !isVisible(element),
-          locatorMatches: Math.min(
-            document.querySelectorAll("input[type='file']").length,
-            MAX_SNAPSHOT_CANDIDATES,
-          ),
         });
       }
     }
@@ -909,7 +996,7 @@
     const actions = [];
     candidates = 0;
     for (const element of document.querySelectorAll(
-      'button,input[type="button"],input[type="submit"],[role="button"]',
+      'button,input[type="button"],input[type="submit"],[role="button"],.vdatetime-popup__tab,.confirm-btn,.new-post-btn',
     )) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || actions.length >= 12) break;

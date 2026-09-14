@@ -99,13 +99,13 @@ test("recorder sanitizers remove private data and bound duplicate events", () =>
     hooks.sanitizeUrl(
       "https://fansly.com/post/123?token=secret&caption=private#comments",
     ),
-    "https://fansly.com/post/123",
+    "https://fansly.com/post/[id]",
   );
   assert.equal(
     hooks.sanitizeUrl(
       "https://www.pornhub.com/view_video.php?token=secret&viewkey=phabc123#x",
     ),
-    "https://www.pornhub.com/view_video.php?viewkey=phabc123",
+    "https://www.pornhub.com/[file].php",
   );
   assert.equal(
     hooks.sanitizeFilename("C:\\private\\creator\\episode (full).mp4"),
@@ -278,6 +278,23 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
     await page.addScriptTag({ path: recorderPath });
     await page.addScriptTag({ path: registryPath });
     await page.addScriptTag({ path: commonPath });
+    const controlIds = await page.evaluate(() =>
+      Object.fromEntries(
+        [
+          "rich-caption",
+          "native-caption",
+          "plain-caption",
+          "custom-schedule",
+          "schedule-day",
+          "upload-button",
+        ].map((id) => [
+          id,
+          CreatorUploadTraceRecorder.elementSignature(
+            document.getElementById(id),
+          ).id,
+        ]),
+      ),
+    );
     assert.equal(
       await page.locator("#creator-upload-trace-recorder-host").count(),
       0,
@@ -527,7 +544,7 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
       downloadedTrace.events.some(
         (event) =>
           event.type === "control-change" &&
-          event.data.control?.id === "rich-caption" &&
+          event.data.control?.id === controlIds["rich-caption"] &&
           event.data.valueState === "nonempty",
       ),
       "contenteditable description changes must be captured without their text",
@@ -536,7 +553,7 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
       downloadedTrace.events.find(
         (event) =>
           event.type === "control-change" &&
-          event.data.control?.id === "native-caption",
+          event.data.control?.id === controlIds["native-caption"],
       )?.data.valueState,
       "nonempty",
       "native role=textbox inputs must read state from value, not textContent",
@@ -546,7 +563,7 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
         .filter(
           (event) =>
             event.type === "control-change" &&
-            event.data.control?.id === "plain-caption",
+            event.data.control?.id === controlIds["plain-caption"],
         )
         .map((event) => event.data.valueState),
       ["empty", "nonempty"],
@@ -556,7 +573,7 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
       downloadedTrace.events.some(
         (event) =>
           event.type === "click" &&
-          event.data.control?.id === "custom-schedule" &&
+          event.data.control?.id === controlIds["custom-schedule"] &&
           event.data.control?.label === "Schedule post",
       ),
       "a nested click must resolve to its custom actionable ancestor",
@@ -565,7 +582,7 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
       downloadedTrace.events.some(
         (event) =>
           event.type === "click" &&
-          event.data.control?.id === "schedule-day" &&
+          event.data.control?.id === controlIds["schedule-day"] &&
           event.data.control?.label === "28",
       ),
       "a numeric calendar choice must retain its non-private label",
@@ -573,7 +590,8 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
     assert.ok(
       downloadedTrace.events.some(
         (event) =>
-          event.type === "click" && event.data.control?.id === "upload-button",
+          event.type === "click" &&
+          event.data.control?.id === controlIds["upload-button"],
       ),
       "a click on button content must resolve to the containing button",
     );
@@ -607,9 +625,9 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
     assert.doesNotMatch(serialized, /episode(?:%25?20| )\(full\)\.mp4/i);
     assert.match(serialized, /https:\/\/fansly\.com\/post\/123/);
     assert.match(serialized, /"actor":"user"/);
-    assert.match(serialized, /"selectedLabels":\["Gay"\]/);
-    assert.match(serialized, /"toolId":"testAutofill"/);
-    assert.match(serialized, /"label":"Audience Bisexual"/);
+    assert.match(serialized, /"selectedLabels":\["opaque-\d+"\]/);
+    assert.match(serialized, /"toolId":"opaque-\d+"/);
+    assert.doesNotMatch(serialized, /Audience Bisexual|testAutofill|"Gay"/);
     assert.doesNotMatch(serialized, /top-secret-video-bytes/);
     assert.doesNotMatch(serialized, /private caption/);
     assert.doesNotMatch(serialized, /manual private learning text/);

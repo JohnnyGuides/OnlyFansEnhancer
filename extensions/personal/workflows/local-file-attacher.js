@@ -4,6 +4,7 @@
   if (globalThis.CreatorLocalFileAttacher) return;
 
   const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:\\|\\\\[^\\]+\\[^\\]+\\)/;
+  const operationOwners = new WeakMap();
 
   function fail(code) {
     return new Error(code);
@@ -70,9 +71,17 @@
     return { tabId: request.tabId, selector, filePath, allowedOrigins };
   }
 
-  function callbackCall(chromeApi, owner, method, args, errorCode) {
+  function callbackCall(
+    chromeApi,
+    owner,
+    method,
+    args,
+    errorCode,
+    lifecycle = {},
+  ) {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let completed = false;
       const timer = setTimeout(
         () => finish(reject, fail(`${errorCode}-timeout`)),
         30_000,
@@ -81,25 +90,39 @@
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        lifecycle.signal?.removeEventListener("abort", abort);
         action(value);
+      };
+      const abort = () => finish(reject, fail("attachment-cancelled"));
+      const complete = (action, value) => {
+        if (completed) return;
+        completed = true;
+        lifecycle.completed?.();
+        if (settled) lifecycle.late?.(action === resolve);
+        else finish(action, value);
       };
       const callback = (value) => {
         if (chromeApi.runtime?.lastError) {
-          finish(reject, fail(errorCode));
+          complete(reject, fail(errorCode));
           return;
         }
-        finish(resolve, value);
+        complete(resolve, value);
       };
       try {
+        if (lifecycle.signal?.aborted) {
+          complete(reject, fail("attachment-cancelled"));
+          return;
+        }
+        lifecycle.signal?.addEventListener("abort", abort, { once: true });
         const pending = owner[method](...args, callback);
         if (pending?.then) {
           pending.then(
-            (value) => finish(resolve, value),
-            () => finish(reject, fail(errorCode)),
+            (value) => complete(resolve, value),
+            () => complete(reject, fail(errorCode)),
           );
         }
       } catch {
-        finish(reject, fail(errorCode));
+        complete(reject, fail(errorCode));
       }
     });
   }
@@ -183,12 +206,28 @@
     }
 
     const target = { tabId: prepared.tabId };
+    let owners = operationOwners.get(chromeApi);
+    if (!owners) {
+      owners = new Map();
+      operationOwners.set(chromeApi, owners);
+    }
+    if (owners.has(prepared.tabId)) throw fail("attachment-in-progress");
+    const owner = {};
+    owners.set(prepared.tabId, owner);
+    let attachmentPending = true;
+    let closing = false;
+    let cleanupRunning = false;
+    const releaseOwner = () => {
+      if (owners.get(prepared.tabId) === owner) owners.delete(prepared.tabId);
+      chromeApi.debugger.onDetach?.removeListener(onDetach);
+    };
     let attached = false;
     let detached = false;
     const onDetach = (source) => {
       if (source.tabId !== prepared.tabId) return;
       attached = false;
       detached = true;
+      if (closing && !cleanupRunning && !attachmentPending) releaseOwner();
     };
     const checkActive = () => {
       if (request.signal?.aborted) throw fail("attachment-cancelled");
@@ -209,6 +248,34 @@
         "attach",
         [target, "1.3"],
         "debugger-attach-failed",
+        {
+          signal: request.signal,
+          completed() {
+            attachmentPending = false;
+          },
+          late(success) {
+            if (!success) {
+              releaseOwner();
+              return;
+            }
+            if (owners.get(prepared.tabId) !== owner) return;
+            // Retain the slot until the debugger actually acknowledges cleanup.
+            void callbackCall(
+              chromeApi,
+              chromeApi.debugger,
+              "detach",
+              [target],
+              "debugger-detach-failed",
+              {
+                late(success) {
+                  if (success) releaseOwner();
+                },
+              },
+            )
+              .then(releaseOwner)
+              .catch(() => {});
+          },
+        },
       );
       attached = true;
       checkActive();
@@ -283,7 +350,11 @@
       );
       /** @type {{nodeId?: number, backendNodeId?: number}} */
       let inputNode = { nodeId: queryResult?.nodeIds?.[0] };
-      if (queryResult?.nodeIds?.length === 0 && request.pickerSelector) {
+      if (
+        (queryResult?.nodeIds?.length === 0 ||
+          request.activatePicker === true) &&
+        request.pickerSelector
+      ) {
         if (!chromeApi.debugger.onEvent)
           throw fail("file-chooser-events-unavailable");
         const pickers = await command(
@@ -488,8 +559,10 @@
       operationError =
         error instanceof Error ? error : fail("debugger-command-failed");
     } finally {
+      closing = true;
+      cleanupRunning = true;
       cleanupChooser();
-      if (attached) {
+      if (attached && owners.get(prepared.tabId) === owner) {
         if (intercepting) {
           try {
             await command(
@@ -502,7 +575,7 @@
             /* Detaching below releases interception if the document vanished. */
           }
         }
-        if (resolvedInput) {
+        if (attached && resolvedInput && owners.get(prepared.tabId) === owner) {
           try {
             await command(chromeApi, target, "Runtime.callFunctionOn", {
               objectId: resolvedInput,
@@ -516,18 +589,27 @@
           }
         }
         try {
-          await callbackCall(
-            chromeApi,
-            chromeApi.debugger,
-            "detach",
-            [target],
-            "debugger-detach-failed",
-          );
+          if (attached && owners.get(prepared.tabId) === owner) {
+            await callbackCall(
+              chromeApi,
+              chromeApi.debugger,
+              "detach",
+              [target],
+              "debugger-detach-failed",
+              {
+                late(success) {
+                  if (success) releaseOwner();
+                },
+              },
+            );
+            attached = false;
+          }
         } catch (error) {
           detachError = error;
         }
       }
-      chromeApi.debugger.onDetach?.removeListener(onDetach);
+      cleanupRunning = false;
+      if (!attachmentPending && !attached) releaseOwner();
     }
     if (operationError) throw operationError;
     if (detachError) throw detachError;

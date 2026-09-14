@@ -2745,12 +2745,44 @@ const creatorUploadConsolePorts = new Set();
 const creatorUploadFileRequests = new Map();
 let creatorUploadRequestCounter = 0;
 const CREATOR_UPLOAD_TERMINAL_STATUSES = new Set([
+  "recorded-local",
   "catalogue-updated",
   "uploaded-no-sheet",
   "manual-submit-required",
   "already-linked",
   "idempotent",
 ]);
+
+async function assertCreatorUploadPageBinding(session, target, sender) {
+  if (
+    !session ||
+    session.cancelled ||
+    !target ||
+    sender?.frameId !== 0 ||
+    !sender.documentId ||
+    sender.tab?.id !== target.tabId ||
+    target.documentId !== sender.documentId ||
+    !target.boundUrl ||
+    sender.url !== target.boundUrl
+  )
+    throw new Error("Upload page binding is stale or unauthorized.");
+  const port = creatorUploadPort(session.id);
+  if (!port || session.executionPort !== port)
+    throw new Error(
+      "Upload browser connection changed; reconnect the existing draft.",
+    );
+  const frames = await chrome.webNavigation.getAllFrames({
+    tabId: target.tabId,
+  });
+  const frame = frames?.find((item) => item.frameId === 0);
+  if (
+    session.cancelled ||
+    creatorUploadPort(session.id) !== port ||
+    frame?.documentId !== sender.documentId ||
+    frame?.url !== target.boundUrl
+  )
+    throw new Error("Upload page binding changed during validation.");
+}
 
 function creatorUploadSessionRecord(session) {
   return {
@@ -2775,6 +2807,7 @@ function creatorUploadSessionRecord(session) {
           postUrl: target.postUrl,
           error: target.error,
           documentId: target.documentId,
+          boundUrl: target.boundUrl,
           progressSequence: target.progressSequence,
           progressStage: target.progressStage,
         },
@@ -3092,6 +3125,14 @@ function creatorUploadRequestFile(session, platform, role) {
     );
   const port = creatorUploadPort(session.id);
   if (!port) return Promise.reject(new Error("The upload console was closed."));
+  target.requestedRoles ||= new Set();
+  if (target.requestedRoles.has(role))
+    return Promise.reject(
+      new Error(
+        "This upload role has already been requested; inspect its existing attachment.",
+      ),
+    );
+  target.requestedRoles.add(role);
   creatorUploadRequestCounter += 1;
   const requestId = `${session.id}:${creatorUploadRequestCounter}`;
   return new Promise((resolve, reject) => {
@@ -3110,6 +3151,8 @@ function creatorUploadRequestFile(session, platform, role) {
       role,
       token,
       tabId: target.tabId,
+      documentId: target.documentId,
+      boundUrl: target.boundUrl,
       resolve,
       reject,
       timeout,
@@ -3221,6 +3264,8 @@ function creatorUploadHandlePortMessage(port, message) {
           });
           return;
         }
+        if (session.restored && !session.executionPort)
+          session.executionPort = port;
         port.postMessage({
           type: "session-restored",
           sessionId,
@@ -3252,6 +3297,10 @@ function creatorUploadHandlePortMessage(port, message) {
 
 chrome.runtime.onConnect?.addListener((port) => {
   if (port.name !== "creator-upload-console") return;
+  if (port.sender?.url !== chrome.runtime.getURL("upload-console.html")) {
+    port.disconnect();
+    return;
+  }
   creatorUploadConsolePorts.add(port);
   port.onMessage.addListener((message) =>
     creatorUploadHandlePortMessage(port, message),
@@ -3350,6 +3399,15 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       `${platform} left its expected origin before upload preparation.`,
     );
   }
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+  const frame = frames?.find((item) => item.frameId === 0);
+  if (
+    !frame?.documentId ||
+    (frame.url !== definition.landingUrl &&
+      !(platform === "fansly" && frame.url === "https://fansly.com/home"))
+  )
+    throw new Error("The exact upload route or document is unavailable.");
+  const injectionTarget = { tabId: tab.id, documentIds: [frame.documentId] };
   const tokens =
     platform === "pornhub"
       ? { pornhub: creatorUploadRandomToken() }
@@ -3396,12 +3454,12 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
   if (["fansly", "pornhub"].includes(platform)) {
     if (!tokens.teaser) delete roles.teaser;
     await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: injectionTarget,
       func: markCreatorToolkitMasterRun,
     });
   }
   await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
+    target: injectionTarget,
     files: [
       ...(platform === "fansly"
         ? [
@@ -3424,7 +3482,7 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
   const bridgeOrigin = new URL(bridgeBase).origin;
   const bridgeUrl = `${bridgeBase}?session=${encodeURIComponent(session.id)}&platform=${encodeURIComponent(platform)}&parentOrigin=${encodeURIComponent(definition.origin)}`;
   await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
+    target: injectionTarget,
     func: installCreatorUploadFileBridge,
     args: [
       {
@@ -3439,6 +3497,9 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
   const target = {
     platform,
     tabId: tab.id,
+    documentId: frame.documentId,
+    boundUrl: frame.url,
+    progressStage: "upload",
     tokens,
     stage: "prepared",
     status: "prepared",
@@ -3457,11 +3518,11 @@ async function prepareCreatorManyVidsEdit(session, target) {
     throw new Error("ManyVids left the expected edit page.");
   }
   await chrome.scripting.executeScript({
-    target: { tabId: target.tabId },
+    target: { tabId: target.tabId, documentIds: [target.documentId] },
     func: markCreatorToolkitMasterRun,
   });
   await chrome.scripting.executeScript({
-    target: { tabId: target.tabId },
+    target: { tabId: target.tabId, documentIds: [target.documentId] },
     files: [
       "workflows/registry.js",
       "workflows/common.js",
@@ -3493,7 +3554,7 @@ async function prepareCreatorManyVidsEdit(session, target) {
       : {}),
   };
   await chrome.scripting.executeScript({
-    target: { tabId: target.tabId },
+    target: { tabId: target.tabId, documentIds: [target.documentId] },
     func: installCreatorUploadFileBridge,
     args: [
       {
@@ -3509,6 +3570,14 @@ async function prepareCreatorManyVidsEdit(session, target) {
 
 async function prepareCreatorUpload(message) {
   const request = validateCreatorUploadRequest(message);
+  await CREATOR_UPLOAD_SESSION_STORE.assertAvailable(
+    {
+      id: request.sessionId,
+      draft: request.draft,
+      catalogue: request.catalogue,
+    },
+    request.targets,
+  );
   if (request.catalogue?.source === "desktop") {
     const snapshot = await CREATOR_CATALOGUE_CLIENT.getCatalogueSnapshot();
     const current = snapshot.rows?.find(
@@ -3596,13 +3665,15 @@ async function invokeCreatorUploadAdapter(args) {
     new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+          reject(
+            Object.assign(new Error("transport-acknowledgement-lost"), {
+              transientTransport: true,
+            }),
+          );
           return;
         }
         if (!response?.ok) {
-          reject(
-            new Error(response?.error || "Creator upload request failed."),
-          );
+          reject(new Error("preparation-request-rejected"));
           return;
         }
         resolve(response);
@@ -3616,6 +3687,7 @@ async function invokeCreatorUploadAdapter(args) {
         return await sendOnce(message);
       } catch (error) {
         if (
+          error.transientTransport !== true ||
           ![
             "CREATOR_UPLOAD_PLATFORM_PROGRESS",
             "CHECKPOINT_CREATOR_UPLOAD_STEP",
@@ -3679,11 +3751,23 @@ async function invokeCreatorUploadAdapter(args) {
       }
       const commandId = crypto.randomUUID();
       await context.checkpointStep(`select-${role}`, commandId, "intent");
+      if (args.platform === "pornhub" && !context.supportsNativePicker) {
+        const input =
+          await globalThis.CreatorUploadPlatformAdapters.activatePornhubUploader(
+            context.signal,
+          );
+        globalThis.CreatorUploadFileBridge.bindActivatedInput(
+          args.sessionId,
+          role,
+          input,
+        );
+      }
       await send({
         type: "DELIVER_CREATOR_UPLOAD_FILE",
         sessionId: args.sessionId,
         platform: args.platform,
         role,
+        commandId,
       });
       const selected = await globalThis.CreatorUploadFileBridge.waitFor(
         args.sessionId,
@@ -3808,7 +3892,7 @@ function startCreatorUploadResponseObserver(tabId, sessionId, platform) {
     target: { tabId },
     world: "MAIN",
     func: installCreatorUploadResponseObserver,
-    args: [{ sessionId, platform }],
+    args: [{ sessionId, platform, deferred: true }],
   });
 }
 
@@ -3862,26 +3946,33 @@ async function runCreatorManyVidsPlatform(session, target) {
         platform,
         status: target.status,
       });
-      const uploadExecution = await chrome.scripting.executeScript({
-        target: { tabId: target.tabId },
-        func: invokeCreatorUploadAdapter,
-        args: [
-          {
-            sessionId: session.id,
-            platform,
-            stage: "upload",
-            selectors: {
-              full: "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])",
+      let uploadResult;
+      try {
+        const uploadExecution = await chrome.scripting.executeScript({
+          target: { tabId: target.tabId, documentIds: [target.documentId] },
+          func: invokeCreatorUploadAdapter,
+          args: [
+            {
+              sessionId: session.id,
+              platform,
+              stage: "upload",
+              selectors: {
+                full: "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])",
+              },
+              draft: session.draft,
             },
-            draft: session.draft,
-          },
-        ],
-      });
-      const uploadResult = await resolveCreatorUploadAdapterResult(
-        target.tabId,
-        `${session.id}:${platform}:upload`,
-        uploadExecution,
-      );
+          ],
+        });
+        uploadResult = await resolveCreatorUploadAdapterResult(
+          target.tabId,
+          `${session.id}:${platform}:upload`,
+          uploadExecution,
+        );
+      } catch (error) {
+        if (!target.editorHandoff?.documentId || target.editorHandoff.invalid)
+          throw error;
+        uploadResult = { status: "edit-requested" };
+      }
       if (uploadResult.status !== "edit-requested") {
         throw new Error("ManyVids did not request its edit page.");
       }
@@ -3890,6 +3981,27 @@ async function runCreatorManyVidsPlatform(session, target) {
         "edit",
         2 * 60_000,
       );
+      const handoff = target.editorHandoff;
+      const frames = await chrome.webNavigation.getAllFrames({
+        tabId: target.tabId,
+      });
+      const editorFrame = frames?.find((frame) => frame.frameId === 0);
+      if (
+        !handoff ||
+        handoff.invalid ||
+        !handoff.documentId ||
+        editorFrame?.documentId !== handoff.documentId ||
+        editorFrame.url !== handoff.url ||
+        !manyVidsRoute(editorFrame.url, "edit")
+      )
+        throw new Error(
+          "ManyVids editor navigation is not associated with the recorded completed-card action.",
+        );
+      target.documentId = editorFrame.documentId;
+      target.boundUrl = editorFrame.url;
+      target.progressSequence = 0;
+      target.progressStage = "edit";
+      handoff.cleanup?.();
       target.manyvidsId = editRoute.manyvidsId;
       await checkpointCreatorUploadSession(session);
     }
@@ -3912,7 +4024,7 @@ async function runCreatorManyVidsPlatform(session, target) {
         : {}),
     };
     const editExecution = await chrome.scripting.executeScript({
-      target: { tabId: target.tabId },
+      target: { tabId: target.tabId, documentIds: [target.documentId] },
       func: invokeCreatorUploadAdapter,
       args: [
         {
@@ -3943,7 +4055,11 @@ async function runCreatorManyVidsPlatform(session, target) {
       platform,
       status: target.status,
     });
-    await waitForManyVidsRoute(target.tabId, "success", 5 * 60_000);
+    if (editResult.accepted !== true) {
+      throw new Error(
+        "ManyVids Save was attempted once. Site acceptance is unverified; recover the existing result before any retry.",
+      );
+    }
     const postUrl = CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(
       platform,
       target.manyvidsId,
@@ -4014,7 +4130,7 @@ async function runCreatorPornhubPlatform(session, target) {
     target.status = "uploading-full";
     await checkpointCreatorUploadSession(session);
     const execution = await chrome.scripting.executeScript({
-      target: { tabId: target.tabId },
+      target: { tabId: target.tabId, documentIds: [target.documentId] },
       func: invokeCreatorUploadAdapter,
       args: [
         {
@@ -4107,10 +4223,29 @@ async function runCreatorUploadPlatform(session, platform) {
         target.tabId,
         session.id,
         platform,
-      ).then(
-        (value) => ({ ok: true, value }),
-        (error) => ({ ok: false, error }),
-      );
+      )
+        .then(
+          async (value) => {
+            const receipt = value?.[0]?.result;
+            const postUrl = CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(
+              platform,
+              receipt?.postUrl,
+            );
+            if (
+              target.submitAttempted &&
+              receipt?.sessionId === session.id &&
+              receipt.status === "link-captured" &&
+              postUrl
+            ) {
+              target.postUrl = postUrl;
+              target.status = "link-captured";
+              await checkpointCreatorUploadSession(session);
+            }
+            return { ok: true, value };
+          },
+          (error) => ({ ok: false, error }),
+        )
+        .catch((error) => ({ ok: false, error }));
     }
     const selectors =
       platform === "onlyfans"
@@ -4120,7 +4255,7 @@ async function runCreatorUploadPlatform(session, platform) {
             teaser: "input[data-creator-fansly-file]",
           };
     const execution = await chrome.scripting.executeScript({
-      target: { tabId: target.tabId },
+      target: { tabId: target.tabId, documentIds: [target.documentId] },
       func: invokeCreatorUploadAdapter,
       args: [
         {
@@ -4247,6 +4382,7 @@ async function startCreatorUpload(sessionId, targets) {
     throw new Error("Invalid creator upload targets.");
   }
   if (!session.execution) {
+    session.executionPort = creatorUploadPort(session.id);
     await checkpointCreatorUploadSession(session);
     session.execution = Promise.allSettled(
       requested.map(async (platform) => {
@@ -4280,14 +4416,7 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
   if (!session || !target || !Object.hasOwn(CREATOR_UPLOAD_TARGETS, platform)) {
     throw new Error("Unknown creator upload retry target.");
   }
-  if (
-    [
-      "catalogue-updated",
-      "uploaded-no-sheet",
-      "manual-submit-required",
-    ].includes(target.status)
-  )
-    return [target];
+  if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) return [target];
   if (target.postUrl) {
     try {
       const commit = await commitCreatorUploadResult(
@@ -4341,10 +4470,7 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
       "The platform submission may already exist; manual link recovery is required before any retry.",
     );
   }
-  if (
-    session.draft.publishMode !== "autonomous" &&
-    target.stage !== "prepared"
-  ) {
+  if (target.stage !== "prepared") {
     if (session.cancelled || target.stage === "cancelled")
       throw new Error(
         "Preparation was cancelled. The existing draft is preserved.",
@@ -4393,38 +4519,15 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
       "Preparation requires inspection of the existing bound draft. An uncertain upload will not be replayed or navigated away from.",
     );
   }
-  if (platform === "manyvids" && target.manyvidsId) {
-    if (!target.tokens) {
-      target.tokens = {
-        ...(session.draft.hasTeaser !== false
-          ? { teaser: creatorUploadRandomToken() }
-          : {}),
-        ...(session.draft.manyvidsThumbnail
-          ? { thumbnail: creatorUploadRandomToken() }
-          : {}),
-      };
-    }
-    const editUrl = `https://www.manyvids.com/Edit-vid/${target.manyvidsId}`;
-    await chrome.tabs.update(target.tabId, { active: true, url: editUrl });
-    await waitForCreatorTab(target.tabId);
-    const route = await waitForManyVidsRoute(target.tabId, "edit", 20_000);
-    if (route.manyvidsId !== target.manyvidsId) {
-      throw new Error("ManyVids retry opened a different video.");
-    }
-    target.status = "prepared";
-    target.stage = "edit";
-    await checkpointCreatorUploadSession(session);
-    return [await runCreatorUploadPlatform(session, platform)];
-  }
-  const prepared = await prepareCreatorUploadPlatform(
-    session,
-    platform,
-    target.tabId,
-  );
-  return [await runCreatorUploadPlatform(session, prepared.platform)];
+  return [await runCreatorUploadPlatform(session, platform)];
 }
 
-async function checkpointCreatorUploadCommit(sessionId, platform, tabId) {
+async function checkpointCreatorUploadCommit(
+  sessionId,
+  platform,
+  tabId,
+  sender,
+) {
   const session = await getCreatorUploadSession(sessionId);
   const target = session?.platforms.get(platform);
   if (session?.draft?.publishMode !== "autonomous")
@@ -4443,6 +4546,7 @@ async function checkpointCreatorUploadCommit(sessionId, platform, tabId) {
       "The platform submission may already exist; manual link recovery is required before any retry.",
     );
   }
+  await assertCreatorUploadPageBinding(session, target, sender);
   target.stage = "submit-attempted";
   target.commitArmed = true;
   target.submitAttempted = true;
@@ -4451,6 +4555,21 @@ async function checkpointCreatorUploadCommit(sessionId, platform, tabId) {
   const durable = persisted?.platforms?.[platform];
   if (!durable?.commitArmed || !durable.submitAttempted) {
     throw new Error("The creator upload commit checkpoint was not durable.");
+  }
+  await assertCreatorUploadPageBinding(session, target, sender);
+  if (platform === "onlyfans" || platform === "fansly") {
+    const armed = await chrome.scripting.executeScript({
+      target: { tabId: target.tabId, documentIds: [target.documentId] },
+      world: "MAIN",
+      func: (id, name) =>
+        globalThis.CreatorUploadResponseObserver?.arm(id, name) === true,
+      args: [session.id, platform],
+    });
+    if (armed?.[0]?.result !== true)
+      throw new Error(
+        "Publication response observer could not be armed in the bound document.",
+      );
+    await assertCreatorUploadPageBinding(session, target, sender);
   }
   return { armed: true };
 }
@@ -4561,6 +4680,20 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 function handleExtensionMessage(message, sender, sendResponse) {
   (async () => {
+    if (
+      sender?.tab &&
+      /CREATOR_UPLOAD/.test(message?.type || "") &&
+      !new Set([
+        "CHECKPOINT_CREATOR_UPLOAD_COMMIT",
+        "CHECKPOINT_CREATOR_UPLOAD_STEP",
+        "DELIVER_CREATOR_UPLOAD_FILE",
+        "CREATOR_UPLOAD_PLATFORM_PROGRESS",
+      ]).has(message.type) &&
+      !String(sender.url || "").startsWith(chrome.runtime.getURL(""))
+    )
+      throw new Error(
+        "Upload administration is restricted to the uploader console.",
+      );
     switch (message?.type) {
       case "GET_SETTINGS":
         return { settings: await getSettings() };
@@ -4594,7 +4727,12 @@ function handleExtensionMessage(message, sender, sendResponse) {
         return { ownerId: sender.tab?.id ? `tab-${sender.tab.id}` : "" };
       case "GET_CREATOR_UPLOAD_RECOVERY": {
         const records = await CREATOR_UPLOAD_SESSION_STORE.listRecovery();
+        const publication =
+          await CREATOR_UPLOAD_SESSION_STORE.listPublication();
         return {
+          publication: message.sessionId
+            ? publication.filter((record) => record.id === message.sessionId)
+            : publication,
           records: message.sessionId
             ? records.filter((record) => record.id === message.sessionId)
             : records,
@@ -4644,7 +4782,10 @@ function handleExtensionMessage(message, sender, sendResponse) {
           if (target.tabId) {
             try {
               await chrome.scripting.executeScript({
-                target: { tabId: target.tabId },
+                target: {
+                  tabId: target.tabId,
+                  documentIds: [target.documentId],
+                },
                 func: (sessionId) => {
                   for (const [key, run] of globalThis.CreatorUploadRuns || [])
                     if (key.startsWith(`${sessionId}:`)) run.controller.abort();
@@ -4724,6 +4865,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
           message.sessionId,
           message.platform,
           sender.tab?.id,
+          sender,
         );
       case "CHECKPOINT_CREATOR_UPLOAD_STEP": {
         const session = await getCreatorUploadSession(message.sessionId);
@@ -4738,12 +4880,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
           target.stage === "cancelled"
         )
           throw new Error("Unauthorized preparation step.");
-        if (
-          target.documentId &&
-          target.documentId !== sender.documentId &&
-          target.progressStage !== "upload"
-        )
-          throw new Error("Preparation document changed.");
+        await assertCreatorUploadPageBinding(session, target, sender);
         const signatureBytes = new TextEncoder().encode(
           JSON.stringify(
             CREATOR_UPLOAD_SESSION_STORE.sanitize({
@@ -4773,7 +4910,48 @@ function handleExtensionMessage(message, sender, sendResponse) {
           frameId: sender.frameId,
           tabId: target.tabId,
           signature,
+          work: await CREATOR_UPLOAD_SESSION_STORE.workIdentity(session),
         });
+        await assertCreatorUploadPageBinding(session, target, sender);
+        if (
+          message.actionId === "open-editor" &&
+          message.outcome === "intent"
+        ) {
+          if (message.platform !== "manyvids" || target.stage !== "upload")
+            throw new Error("Unauthorized editor handoff.");
+          if (!target.editorHandoff) {
+            if (!chrome.webNavigation.onCommitted)
+              throw new Error("Editor navigation evidence is unavailable.");
+            const handoff = {
+              commandId: message.commandId,
+              sourceDocumentId: sender.documentId,
+              documentId: "",
+              url: "",
+              invalid: false,
+            };
+            target.editorHandoff = handoff;
+            const observe = (details) => {
+              if (details.tabId !== target.tabId || details.frameId !== 0)
+                return;
+              chrome.webNavigation.onCommitted.removeListener(observe);
+              const route = manyVidsRoute(details.url, "edit");
+              if (
+                !route ||
+                !details.documentId ||
+                details.documentId === handoff.sourceDocumentId
+              )
+                handoff.invalid = true;
+              else {
+                handoff.documentId = details.documentId;
+                handoff.url = details.url;
+              }
+            };
+            handoff.cleanup = () =>
+              chrome.webNavigation.onCommitted.removeListener(observe);
+            chrome.webNavigation.onCommitted.addListener(observe);
+          } else if (target.editorHandoff.commandId !== message.commandId)
+            throw new Error("An editor handoff is already pending.");
+        }
         return { step };
       }
       case "DELIVER_CREATOR_UPLOAD_FILE": {
@@ -4788,6 +4966,28 @@ function handleExtensionMessage(message, sender, sendResponse) {
         ) {
           throw new Error("Unauthorized creator upload file request.");
         }
+        await assertCreatorUploadPageBinding(session, target, sender);
+        const journal = (
+          await CREATOR_UPLOAD_SESSION_STORE.listRecovery()
+        ).find((record) => record.id === session.id);
+        const intent = journal?.steps.find(
+          (step) =>
+            step.commandId === message.commandId &&
+            step.actionId === `select-${message.role}` &&
+            step.platform === message.platform &&
+            step.documentId === sender.documentId &&
+            step.tabId === target.tabId &&
+            step.frameId === 0,
+        );
+        if (!intent || intent.outcome !== "intent" || session.restored)
+          throw new Error(
+            "File delivery has no fresh, bound, unissued selection intent.",
+          );
+        await CREATOR_UPLOAD_SESSION_STORE.recordStep(session.id, {
+          ...intent,
+          outcome: "issued",
+        });
+        await assertCreatorUploadPageBinding(session, target, sender);
         await creatorUploadRequestFile(session, message.platform, message.role);
         return { delivered: true };
       }
@@ -4797,6 +4997,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
         if (!session || !target || sender.tab?.id !== target.tabId) {
           throw new Error("Unauthorized creator upload progress update.");
         }
+        await assertCreatorUploadPageBinding(session, target, sender);
         if (
           !sender.documentId ||
           !Number.isSafeInteger(message.sequence) ||
@@ -4839,6 +5040,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
             "upload-progress-unknown",
             "upload-attention-required",
             "configuring",
+            "prepared",
             "waiting-for-teaser",
             "upload-ready",
             "edit-requested",
@@ -4992,8 +5194,35 @@ async function attachDesktopUploadFile(command, ports) {
     throw new Error(
       "The selected file no longer belongs to this upload request.",
     );
+  if (pending.deliveryStarted)
+    throw new Error("This file assignment has already been attempted.");
+  pending.deliveryStarted = true;
+  const validateBinding = async () => {
+    if (new Set(["x", "redgifs"]).has(pending.platform)) return;
+    const session = await getCreatorUploadSession(pending.sessionId);
+    const target = session?.platforms.get(pending.platform);
+    if (
+      !session ||
+      session.executionPort !== pending.port ||
+      target?.documentId !== pending.documentId ||
+      target?.boundUrl !== pending.boundUrl
+    )
+      throw new Error("The upload file request binding changed.");
+    await assertCreatorUploadPageBinding(session, target, {
+      tab: { id: pending.tabId },
+      frameId: 0,
+      documentId: pending.documentId,
+      url: pending.boundUrl,
+    });
+  };
+  await validateBinding();
+  const injectionTarget = {
+    tabId: pending.tabId,
+    ...(pending.documentId ? { documentIds: [pending.documentId] } : {}),
+  };
   const origins = {
     onlyfans: "https://onlyfans.com",
+    pornhub: "https://pornhub.mainhub.com",
     fansly: "https://fansly.com",
     manyvids: "https://www.manyvids.com",
     x: "https://x.com",
@@ -5005,18 +5234,22 @@ async function attachDesktopUploadFile(command, ports) {
   if (!origin || new URL(tab.url).origin !== origin)
     throw new Error("The upload page changed.");
   const [target] = await chrome.scripting.executeScript({
-    target: { tabId: pending.tabId },
+    target: injectionTarget,
     func: (id, role, token) =>
       globalThis.CreatorUploadFileBridge.attachmentTarget(id, role, token),
     args: [pending.sessionId, pending.role, pending.token],
   });
+  await validateBinding();
   await globalThis.CreatorLocalFileAttacher.attach({
     tabId: pending.tabId,
     selector: target.result.selector,
     pickerSelector:
       pending.platform === "onlyfans" && pending.role === "full"
         ? "#attach_file_photo[aria-label='Add media']"
-        : undefined,
+        : pending.platform === "pornhub" && pending.role === "pornhub"
+          ? "button.uploadButton"
+          : undefined,
+    activatePicker: pending.platform === "pornhub",
     filePath: command.filePath,
     allowedOrigins: [origin],
     signal: pending.fileController.signal,
@@ -5031,8 +5264,9 @@ async function attachDesktopUploadFile(command, ports) {
     !creatorUploadFileRequests.has(command.requestId)
   )
     throw new Error("The file request was cancelled or interrupted.");
+  await validateBinding();
   await chrome.scripting.executeScript({
-    target: { tabId: pending.tabId },
+    target: injectionTarget,
     func: (id, role, token, expected) =>
       globalThis.CreatorUploadFileBridge.acknowledgeNative(
         id,

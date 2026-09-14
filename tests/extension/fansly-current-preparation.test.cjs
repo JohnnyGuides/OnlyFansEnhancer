@@ -15,7 +15,8 @@ for (const publicAlternative of [false, true]) {
         <div class="icon-stack"><i class="fa-clock"></i><i class="fa-calendar"></i></div>
         <div class="new-post-btn">Post</div>
       </app-post-creation>
-      <app-post-schedule-modal hidden><div class="modal">
+      <app-post-schedule-modal hidden><div class="modal-content">
+        <div class="timezone">Time Zone</div><div>Europe/Zurich</div>
         <div class="header"><div class="month">September 2026</div></div>
         <table><tr><td class="current-month-day">18</td></tr></table>
         <select data-time="hour">${Array.from({ length: 24 }, (_, i) => `<option>${String(i).padStart(2, "0")}</option>`).join("")}</select>

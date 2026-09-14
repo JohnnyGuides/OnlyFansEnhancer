@@ -44,7 +44,14 @@
   function install({ sessionId, platform, bridgeUrl, bridgeOrigin, roles }) {
     assertToken(sessionId, "upload session");
     if (
-      !new Set(["onlyfans", "fansly", "manyvids", "x", "redgifs"]).has(platform)
+      !new Set([
+        "onlyfans",
+        "fansly",
+        "manyvids",
+        "pornhub",
+        "x",
+        "redgifs",
+      ]).has(platform)
     ) {
       throw new Error("Unsupported upload platform.");
     }
@@ -53,10 +60,13 @@
     }
     if (sessions.has(sessionId)) dispose(sessionId);
 
-    /** @type {Array<[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[]}]>} */
+    /** @type {Array<[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]>} */
     const roleEntries = Object.entries(roles).map(([role, definition]) => {
       if (
-        !new Set(["full", "teaser", "thumbnail", "social"]).has(role) ||
+        !new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
+          role,
+        ) ||
+        (platform === "pornhub") !== (role === "pornhub") ||
         (["x", "redgifs"].includes(platform) && role !== "social") ||
         (!["x", "redgifs"].includes(platform) && role === "social")
       ) {
@@ -70,7 +80,7 @@
       if (!String(definition?.selector || "").trim()) {
         throw new Error(`Missing ${role} file selector.`);
       }
-      return /** @type {[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[]}]} */ ([
+      return /** @type {[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]} */ ([
         role,
         {
           selector: definition.selector,
@@ -119,8 +129,16 @@
         return;
       }
       const candidates = document.querySelectorAll(entry.selector);
-      const input = candidates.length === 1 ? candidates[0] : null;
-      if (!(input instanceof HTMLInputElement) || input.type !== "file") {
+      const input =
+        entry.activatedInput ||
+        (candidates.length === 1 ? candidates[0] : null);
+      if (
+        !(input instanceof HTMLInputElement) ||
+        !input.isConnected ||
+        !input.matches(entry.selector) ||
+        input.type !== "file" ||
+        (platform === "pornhub" && !entry.activatedInput)
+      ) {
         postAck(event, {
           sessionId,
           platform,
@@ -132,6 +150,7 @@
       }
       const transfer = new DataTransfer();
       transfer.items.add(data.file);
+      entry.used = true;
       input.files = transfer.files;
       input.dispatchEvent(
         new Event("input", { bubbles: true, composed: true }),
@@ -139,7 +158,6 @@
       input.dispatchEvent(
         new Event("change", { bubbles: true, composed: true }),
       );
-      entry.used = true;
       entry.value = Object.freeze({
         name: data.file.name,
         size: data.file.size,
@@ -194,6 +212,23 @@
     return { selector: entry.selector, kind: entry.kind };
   }
 
+  function bindActivatedInput(sessionId, role, input) {
+    const session = sessions.get(sessionId);
+    const entry = session?.roleMap.get(role);
+    if (
+      session?.platform !== "pornhub" ||
+      role !== "pornhub" ||
+      !entry ||
+      entry.used ||
+      entry.activatedInput ||
+      !(input instanceof HTMLInputElement) ||
+      !input.isConnected ||
+      !input.matches(entry.selector)
+    )
+      throw new Error("The activated upload input is not owned by this role.");
+    entry.activatedInput = input;
+  }
+
   // Called only by the extension after its native file attacher verified the
   // exact input and origin. A capture-phase receipt also handles sites that clear
   // or remove their input in the change handler; site acceptance remains separate.
@@ -230,5 +265,6 @@
     waitFor,
     attachmentTarget,
     acknowledgeNative,
+    bindActivatedInput,
   });
 })();

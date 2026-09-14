@@ -11,6 +11,7 @@
   let mutationSignal = null;
   let reportProgress = null;
   let pauseObservation = null;
+  let progressScope = null;
 
   function newCommandId() {
     if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
@@ -40,6 +41,8 @@
     return Boolean(
       element &&
       !element.disabled &&
+      !element.hasAttribute("disabled") &&
+      !element.classList.contains("disabled") &&
       element.getAttribute("aria-disabled") !== "true" &&
       !element.closest("fieldset[disabled],[aria-disabled='true']"),
     );
@@ -165,11 +168,10 @@
       const value = await probe();
       if (value) return value;
       if (longUpload) {
-        const scopes = [
-          ...document.querySelectorAll(
-            ".uppy-Dashboard, app-account-media-upload, app-post-creation",
-          ),
-        ].filter(visible);
+        const scopes =
+          progressScope?.isConnected && visible(progressScope)
+            ? [progressScope]
+            : [];
         const bars = scopes
           .flatMap((scope) => [
             ...scope.querySelectorAll(
@@ -329,6 +331,10 @@
     const candidates = [...card.querySelectorAll("button")].filter(
       (button) =>
         enabled(button) &&
+        (/^Button edit video : /.test(
+          button.getAttribute("aria-label") || "",
+        ) ||
+          /^(edit|continue)$/i.test(button.textContent.trim())) &&
         !button.matches(
           ".uppy-Dashboard-Item-action--remove, [aria-label*='remove' i], [aria-label*='delete' i], [title*='delete' i]",
         ),
@@ -345,11 +351,24 @@
     const { draft, signal } = context;
     publicationMode(draft);
     abortIfNeeded(signal);
-    one(MANYVIDS_FULL_INPUT, "ManyVids full-video input", document, {
-      allowHidden: true,
-    });
+    const initialInput = one(
+      MANYVIDS_FULL_INPUT,
+      "ManyVids full-video input",
+      document,
+      {
+        allowHidden: true,
+      },
+    );
+    const dashboard = initialInput.closest(".uppy-Dashboard");
+    if (!dashboard || !visible(dashboard))
+      throw new Error("ManyVids owned upload dashboard is unavailable.");
+    progressScope = dashboard;
     const previousEdits = new Set(
-      document.querySelectorAll("button[aria-label^='Button edit video :']"),
+      [
+        ...document.querySelectorAll(
+          "button[aria-label^='Button edit video :']",
+        ),
+      ].map((control) => control.getAttribute("aria-label")),
     );
     const previousQueue = new Set(
       document.querySelectorAll(".uppy-Dashboard-Item"),
@@ -365,7 +384,7 @@
         ),
       ].filter(
         (control) =>
-          !previousEdits.has(control) &&
+          !previousEdits.has(control.getAttribute("aria-label")) &&
           control.getAttribute("aria-label") ===
             `Button edit video : ${draft.fullFilename}`,
       );
@@ -373,12 +392,11 @@
         throw new Error("ManyVids new editor association is ambiguous.");
       return controls[0] || null;
     };
-    await context.attachFile("full", MANYVIDS_FULL_INPUT);
+    const fileReceipt = await context.attachFile("full", MANYVIDS_FULL_INPUT);
     // Uppy has both auto-start and queued variants. Only the dashboard's
     // upload action is an intermediate action; editor Save is never used here.
     let uploadObserved = false;
     let uploadAttempts = 0;
-    let lastUploadAttemptAt = 0;
     const uploadCommand = context.checkpointStep ? newCommandId() : "";
     await waitFor(
       async () => {
@@ -386,9 +404,10 @@
           uploadObserved = true;
           return true;
         }
-        const input = document.querySelector(MANYVIDS_FULL_INPUT);
-        const dashboard = input?.closest(".uppy-Dashboard");
-        if (!dashboard) return false;
+        if (!dashboard.isConnected || !visible(dashboard))
+          throw new Error(
+            "ManyVids owned dashboard changed; inspect the existing queue.",
+          );
         const cards = [...dashboard.querySelectorAll(".uppy-Dashboard-Item")];
         if (!cards.length) return false;
         if (cards.length !== 1)
@@ -396,11 +415,20 @@
         const card = cards[0];
         const name =
           card.querySelector(".uppy-Dashboard-Item-name")?.textContent || "";
+        const exactName =
+          normalizedFilename(name) === normalizedFilename(draft.fullFilename);
+        const receiptMatches =
+          fileReceipt?.role === "full" &&
+          normalizedFilename(fileReceipt.name) ===
+            normalizedFilename(draft.fullFilename) &&
+          Number.isSafeInteger(fileReceipt.size) &&
+          fileReceipt.size > 0;
         if (
-          name &&
-          !name.includes("...") &&
-          !name.includes("…") &&
-          normalizedFilename(name) !== normalizedFilename(draft.fullFilename)
+          !exactName &&
+          !(
+            (!name || name.includes("...") || name.includes("…")) &&
+            receiptMatches
+          )
         )
           throw new Error(
             "ManyVids selected media does not match the approved full role.",
@@ -419,14 +447,10 @@
           uploadObserved = true;
           return true;
         }
-        if (!actions.length && uploadAttempts > 0) {
-          uploadObserved = true;
-          return true;
-        }
         if (
           actions.length === 1 &&
           enabled(actions[0]) &&
-          Date.now() - lastUploadAttemptAt >= 350
+          uploadAttempts === 0
         ) {
           abortIfNeeded(signal);
           if (!uploadAttempts)
@@ -435,13 +459,25 @@
               uploadCommand,
               "intent",
             );
-          if (uploadAttempts >= 3)
+          const currentAction = one(
+            ".uppy-StatusBar-actionBtn--upload",
+            "ManyVids queued upload",
+            dashboard,
+          );
+          const currentCards = [
+            ...dashboard.querySelectorAll(".uppy-Dashboard-Item"),
+          ];
+          if (
+            !dashboard.isConnected ||
+            currentCards.length !== 1 ||
+            currentCards[0] !== card ||
+            currentAction.textContent.trim() !== "Upload 1 file"
+          )
             throw new Error(
-              "ManyVids did not accept the Upload 1 file action after three attempts.",
+              "ManyVids queue changed while recording upload intent.",
             );
           uploadAttempts += 1;
-          lastUploadAttemptAt = Date.now();
-          click(actions[0], "ManyVids queued media upload");
+          click(currentAction, "ManyVids queued media upload");
           return false;
         }
         if (!uploadAttempts && dashboardObservedUpload) {
@@ -463,14 +499,58 @@
       signal,
     );
     await context.progress?.("upload-ready");
-    click(
-      card.matches("button[aria-label^='Button edit video :']")
-        ? card
-        : manyVidsEditControl(card),
-      "ManyVids continue/edit control",
-    );
-    await context.progress?.("edit-requested");
+    const edit = card.matches("button[aria-label^='Button edit video :']")
+      ? card
+      : manyVidsEditControl(card);
+    const editorCommand = context.checkpointStep ? newCommandId() : "";
+    await context.checkpointStep?.("open-editor", editorCommand, "intent");
+    if (
+      !card.isConnected ||
+      !edit.isConnected ||
+      !enabled(edit) ||
+      (currentEdit() || manyVidsCompletedCard(draft.fullFilename)) !== card
+    )
+      throw new Error(
+        "ManyVids completed card changed during the editor checkpoint.",
+      );
+    click(edit, "ManyVids continue/edit control");
     return { platform: "manyvids", status: "edit-requested" };
+  }
+
+  async function activatePornhubUploader(signal) {
+    abortIfNeeded(signal);
+    const button = one("button.uploadButton", "Pornhub visible uploader");
+    let activated = null;
+    let ambiguous = false;
+    const capture = (event) => {
+      const input = event.target;
+      if (
+        !(input instanceof HTMLInputElement) ||
+        !input.matches("input.dz-hidden-input[type='file']")
+      )
+        return;
+      event.preventDefault();
+      if (activated && activated !== input) ambiguous = true;
+      activated = input;
+    };
+    globalThis.addEventListener("click", capture, true);
+    try {
+      click(button, "Pornhub visible uploader");
+      const chosen = await waitFor(
+        () => activated,
+        "Pornhub activated file input",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+      abortIfNeeded(signal);
+      if (ambiguous || !chosen.isConnected)
+        throw new Error(
+          "Pornhub activated file input changed or is ambiguous.",
+        );
+      return chosen;
+    } finally {
+      globalThis.removeEventListener("click", capture, true);
+    }
   }
 
   async function runPornhub(context) {
@@ -478,7 +558,6 @@
     publicationMode(draft);
     abortIfNeeded(signal);
     const selector = "input.dz-hidden-input[type='file']";
-    one(selector, "Pornhub video input", document, { allowHidden: true });
     await context.progress?.("uploading-full");
     await context.attachFile("pornhub", selector);
     await waitFor(
@@ -516,6 +595,18 @@
       throw new Error(
         result.summary || "Pornhub metadata preparation stopped.",
       );
+    const title = one('input[name="title"]', "Pornhub title");
+    if (!draft.title) throw new Error("Pornhub approved title is missing.");
+    fillTextControl(title, draft.title);
+    await waitFor(
+      () => {
+        const current = one('input[name="title"]', "Pornhub title readback");
+        return current.value === draft.title;
+      },
+      "Pornhub approved title readback",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
     await context.progress?.("prepared");
     return {
       platform: "pornhub",
@@ -533,29 +624,105 @@
       .toLowerCase();
   }
 
-  function selectByOption(root, expectedValues, label, excluded = new Set()) {
-    const expected = expectedValues.map(normalizedText);
-    const matches = [...root.querySelectorAll("select")].filter(
-      (select) =>
-        !excluded.has(select) &&
-        [...select.options].some((option) =>
-          expected.includes(normalizedText(option.value || option.textContent)),
-        ),
-    );
-    if (matches.length !== 1) {
+  async function configureManyVidsSchedule(form, draft, signal) {
+    const launch = one("#launchCustom", "ManyVids custom launch", form, {
+      allowHidden: true,
+    });
+    const labels = [...(launch.labels || [])].filter(visible);
+    const zones = labels
+      .map(
+        (label) =>
+          label.textContent.match(
+            /timezone\s*\(([A-Za-z_]+\/[A-Za-z_\-/]+)\)/i,
+          )?.[1],
+      )
+      .filter(Boolean);
+    if (zones.length !== 1 || !launch.checked)
       throw new Error(
-        `${label} select is ${matches.length ? "ambiguous" : "missing"}.`,
+        "ManyVids site timezone or custom launch selection is unverified.",
       );
-    }
-    const select = matches[0];
-    const option = [...select.options].find((candidate) =>
-      expected.includes(
-        normalizedText(candidate.value || candidate.textContent),
+    const parts = zonedParts(draft.scheduledIso, zones[0]);
+    const input = one(
+      "#dp1[name='available_date']",
+      "ManyVids launch date",
+      form,
+    );
+    click(input, "ManyVids launch calendar");
+    const calendar = await waitFor(
+      () => {
+        const candidates = [
+          ...document.querySelectorAll(".datepicker-dropdown .datepicker-days"),
+        ].filter(visible);
+        if (candidates.length > 1)
+          throw new Error("ManyVids launch calendar is ambiguous.");
+        return candidates[0];
+      },
+      "ManyVids launch calendar",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    const months = Array.from({ length: 12 }, (_, index) =>
+      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
+        new Date(Date.UTC(2020, index, 1)),
       ),
     );
-    selectOption(select, option.value, label);
-    excluded.add(select);
-    return select;
+    const [year, month] = parts.date.split("-").map(Number);
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const header = one(
+        ".datepicker-switch",
+        "ManyVids calendar month",
+        calendar,
+      ).textContent.trim();
+      const match = header.match(/^([A-Za-z]+)\s+(\d{4})$/);
+      const currentMonth = match ? months.indexOf(match[1]) : -1;
+      if (!match || currentMonth < 0)
+        throw new Error("ManyVids calendar month is unverified.");
+      const delta =
+        year * 12 + month - 1 - (Number(match[2]) * 12 + currentMonth);
+      if (!delta) {
+        click(
+          exactText(
+            "td.day:not(.old):not(.new):not(.disabled)",
+            parts.day,
+            "ManyVids launch day",
+            calendar,
+          ),
+          "ManyVids launch day",
+        );
+        break;
+      }
+      click(
+        one(
+          delta > 0 ? ".next" : ".prev",
+          "ManyVids calendar navigation",
+          calendar,
+        ),
+        "ManyVids calendar navigation",
+      );
+      await waitFor(
+        () =>
+          calendar.querySelector(".datepicker-switch")?.textContent.trim() !==
+          header,
+        "ManyVids calendar navigation readback",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
+    if (input.value !== parts.date)
+      throw new Error("ManyVids launch date readback failed.");
+    const time = one(
+      "#available_time[name='available_time']",
+      "ManyVids launch time",
+      form,
+      { allowHidden: true },
+    );
+    selectOption(time, `${parts.hour}:${parts.minute}`, "ManyVids launch time");
+    if (
+      time.value !== `${parts.hour}:${parts.minute}` ||
+      input.value !== parts.date
+    )
+      throw new Error("ManyVids launch instant readback failed.");
+    return { date: parts.date, time: time.value, timeZone: zones[0] };
   }
 
   async function runManyVidsEdit(context) {
@@ -574,6 +741,7 @@
     );
     const form = titleControl.closest("form");
     if (!form) throw new Error("ManyVids edit form is missing.");
+    progressScope = form;
     await context.progress?.("configuring");
 
     if (draft.hasTeaser !== false) {
@@ -723,39 +891,11 @@
       40,
     );
 
-    const coPerformer = one(
-      "select#co-performer",
-      "ManyVids co-performer control",
-      form,
-    );
+    one("select#co-performer", "ManyVids co-performer control", form);
 
+    let scheduleProof = null;
     if (sharedManyVidsProfile.launchModeSelector === "#launchCustom") {
-      const release = new Date(`${draft.releaseDate}T00:00:00.000Z`);
-      if (Number.isNaN(release.getTime())) {
-        throw new Error("ManyVids release date is invalid.");
-      }
-      const excluded = new Set([coPerformer]);
-      selectByOption(
-        form,
-        [
-          String(release.getUTCMonth() + 1).padStart(2, "0"),
-          release.toLocaleString("en-US", { month: "long", timeZone: "UTC" }),
-        ],
-        "ManyVids launch month",
-        excluded,
-      );
-      selectByOption(
-        form,
-        [String(release.getUTCDate())],
-        "ManyVids launch day",
-        excluded,
-      );
-      selectByOption(
-        form,
-        [String(release.getUTCFullYear())],
-        "ManyVids launch year",
-        excluded,
-      );
+      scheduleProof = await configureManyVidsSchedule(form, draft, signal);
     }
     if (
       title.value !== String(draft.title || "") ||
@@ -802,6 +942,20 @@
         manyvidsId,
       };
     await beforeCommit(context, "ManyVids");
+    verifyNoBlockingErrors(form, "ManyVids");
+    if (
+      !form.isConnected ||
+      !save.isConnected ||
+      title.value !== String(draft.title || "") ||
+      description.value !== String(draft.description || "") ||
+      (scheduleProof &&
+        (form.querySelector("#dp1")?.value !== scheduleProof.date ||
+          form.querySelector("#available_time")?.value !== scheduleProof.time ||
+          !form.querySelector("#launchCustom")?.checked))
+    )
+      throw new Error(
+        "ManyVids prepared state changed during the durable checkpoint.",
+      );
     click(save, "ManyVids final Save control");
     await context.progress?.("save-clicked");
     return { platform: "manyvids", status: "save-clicked", manyvidsId };
@@ -871,13 +1025,13 @@
     click(byDay[0], `${platform} publication date`);
   }
 
-  function findOnlyFansTimeList(part, target) {
-    const explicit = document.querySelector(
+  function findOnlyFansTimeList(part, target, root = document) {
+    const explicit = root.querySelector(
       `.vdatetime-time-picker__list[data-part="${part}"]`,
     );
     if (explicit && visible(explicit)) return explicit;
     const typed = [
-      ...document.querySelectorAll(".vdatetime-time-picker__list"),
+      ...root.querySelectorAll(".vdatetime-time-picker__list"),
     ].filter((list) => {
       const items = [...list.querySelectorAll(".vdatetime-time-picker__item")];
       return (
@@ -890,7 +1044,7 @@
     });
     if (typed.length === 1) return typed[0];
     const candidates = [
-      ...document.querySelectorAll(".vdatetime-time-picker__list"),
+      ...root.querySelectorAll(".vdatetime-time-picker__list"),
     ].filter(
       (list) =>
         visible(list) &&
@@ -918,6 +1072,54 @@
     return candidates[0];
   }
 
+  async function chooseOnlyFansDate(root, parts, signal) {
+    if (
+      [...root.querySelectorAll(`[data-date="${parts.date}"]`)].filter(visible)
+        .length === 1
+    )
+      return chooseDate(root, parts, "OnlyFans");
+    const months = Array.from({ length: 12 }, (_, index) =>
+      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
+        new Date(Date.UTC(2020, index, 1)),
+      ),
+    );
+    const [year, month] = parts.date.split("-").map(Number);
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const header = one(
+        ".vdatetime-calendar__current--month",
+        "OnlyFans calendar month",
+        root,
+      );
+      const previous = header.textContent.trim();
+      const match = previous.match(/^([A-Za-z]+)\s+(\d{4})$/);
+      const currentMonth = match ? months.indexOf(match[1]) : -1;
+      if (!match || currentMonth < 0)
+        throw new Error("OnlyFans calendar month/year is unverified.");
+      const delta =
+        year * 12 + month - 1 - (Number(match[2]) * 12 + currentMonth);
+      if (!delta) return chooseDate(root, parts, "OnlyFans");
+      click(
+        one(
+          delta > 0
+            ? ".vdatetime-calendar__navigation--next"
+            : ".vdatetime-calendar__navigation--previous",
+          "OnlyFans calendar navigation",
+          root,
+        ),
+        "OnlyFans calendar navigation",
+      );
+      await waitFor(
+        () => header.textContent.trim() !== previous,
+        "OnlyFans changed calendar month",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
+    throw new Error(
+      "OnlyFans date exceeds supported calendar navigation range.",
+    );
+  }
+
   async function runOnlyFans(context) {
     const { draft, signal } = context;
     publicationMode(draft);
@@ -931,8 +1133,33 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
+    const editor = one(
+      ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
+      "OnlyFans description editor",
+    );
+    const scheduleSelector =
+      "button[aria-label='Schedule post'], button[title='Schedule post']";
+    let composer = editor.parentElement;
+    for (
+      let depth = 0;
+      composer &&
+      depth < 8 &&
+      (!composer.querySelector("#attach_file_photo") ||
+        !composer.querySelector(scheduleSelector));
+      depth++
+    )
+      composer = composer.parentElement;
+    if (
+      !composer ||
+      composer === document.body ||
+      composer === document.documentElement ||
+      !composer.querySelector("#attach_file_photo") ||
+      !composer.querySelector(scheduleSelector)
+    )
+      throw new Error("OnlyFans composer ownership is unverified.");
+    progressScope = composer;
     const labels = () =>
-      [...document.querySelectorAll("[id^='post-label-'], .b-post-labels")].map(
+      [...composer.querySelectorAll("[id^='post-label-'], .b-post-labels")].map(
         (control) => ({
           node: control,
           checked:
@@ -942,7 +1169,23 @@
         }),
       );
     const labelsBefore = labels();
-    if (document.querySelector(".b-dropzone__preview__delete"))
+    const mediaPreviews = () =>
+      [...composer.querySelectorAll(".b-dropzone__preview__delete")].filter(
+        (control) => visible(control) && !control.closest(".m-schedule"),
+      );
+    const mediaReady = () => {
+      const previews = mediaPreviews();
+      const media = previews[0]?.closest(".b-dropzone__preview");
+      return (
+        previews.length === 1 &&
+        media &&
+        !/\b(processing|uploading|verifying)\b/i.test(media.textContent) &&
+        ![
+          ...media.querySelectorAll("[aria-busy='true'], [role='progressbar']"),
+        ].some(visible)
+      );
+    };
+    if (mediaPreviews().length)
       throw new Error(
         "OnlyFans existing attachments require association review before selecting media.",
       );
@@ -969,9 +1212,7 @@
     await context.attachFile("full", "#file_upload_input");
     await waitFor(
       () => {
-        const previews = [
-          ...document.querySelectorAll(".b-dropzone__preview__delete"),
-        ].filter(visible);
+        const previews = mediaPreviews();
         if (previews.length > 1)
           throw new Error(
             "OnlyFans selected attachment association is ambiguous.",
@@ -984,10 +1225,6 @@
     );
     await context.progress?.("configuring");
 
-    const editor = one(
-      ".tiptap.ProseMirror[role='textbox'], .js-text-editor[role='textbox']",
-      "OnlyFans description editor",
-    );
     fillTextControl(editor, draft.description);
     await waitFor(
       () => editor.textContent === String(draft.description || ""),
@@ -1000,8 +1237,52 @@
       draft.scheduledIso,
       draft.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     );
+    const scheduleReadback = () => {
+      const chip = one(
+        ".b-dropzone__preview.m-schedule",
+        "OnlyFans schedule readback",
+        composer,
+      );
+      const datetime = chip
+        .querySelector("time[datetime]")
+        ?.getAttribute("datetime");
+      if (
+        datetime &&
+        /(?:Z|[+-]\d{2}:\d{2})$/.test(datetime) &&
+        new Date(datetime).getTime() === new Date(draft.scheduledIso).getTime()
+      )
+        return `${datetime}|${chip.textContent}`;
+      const text = (chip.getAttribute("title") || chip.textContent)
+        .trim()
+        .replace(
+          /^(?:scheduled\s+(?:for|on)|will\s+(?:send|be sent)\s+on)\s*/i,
+          "",
+        )
+        .replace(/\s+at\s+/i, " ");
+      if (
+        !/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b/i.test(
+          text,
+        ) ||
+        !/\b\d{4}\b/.test(text) ||
+        !/\d{1,2}:\d{2}/.test(text)
+      )
+        throw new Error(
+          "OnlyFans exact scheduled instant is unverified; inspect the schedule chip before publication.",
+        );
+      const parsed = new Date(text);
+      const date = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+      if (
+        date !== parts.date ||
+        String(parsed.getHours()).padStart(2, "0") !== parts.hour ||
+        String(parsed.getMinutes()).padStart(2, "0") !== parts.minute
+      )
+        throw new Error(
+          "OnlyFans schedule readback does not match the approved instant.",
+        );
+      return text;
+    };
     click(
-      one("button[aria-label='Schedule post']", "OnlyFans schedule control"),
+      one(scheduleSelector, "OnlyFans schedule control", composer),
       "OnlyFans schedule control",
     );
     await waitFor(
@@ -1013,9 +1294,10 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    chooseDate(document, parts, "OnlyFans");
+    const popup = one(".vdatetime-popup", "OnlyFans schedule popup");
+    await chooseOnlyFansDate(popup, parts, signal);
     click(
-      exactText("button", "Next", "OnlyFans date confirmation"),
+      one(".vdatetime-popup__tab.time", "OnlyFans time tab", popup),
       "OnlyFans date confirmation",
     );
     await waitFor(
@@ -1027,7 +1309,7 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    const hourList = findOnlyFansTimeList("hour", parts.hour);
+    const hourList = findOnlyFansTimeList("hour", parts.hour, popup);
     const hourItems = [
       ...hourList.querySelectorAll(".vdatetime-time-picker__item"),
     ];
@@ -1048,7 +1330,7 @@
     );
     if (twelveHour) {
       const periods = [
-        ...document.querySelectorAll(".vdatetime-time-picker__list"),
+        ...popup.querySelectorAll(".vdatetime-time-picker__list"),
       ].filter(
         (list) =>
           visible(list) &&
@@ -1071,7 +1353,7 @@
         "OnlyFans AM/PM",
       );
     }
-    const minuteList = findOnlyFansTimeList("minute", parts.minute);
+    const minuteList = findOnlyFansTimeList("minute", parts.minute, popup);
     click(
       exactText(
         ".vdatetime-time-picker__item",
@@ -1082,16 +1364,18 @@
       "OnlyFans minute",
     );
     click(
-      exactText("button", "OK", "OnlyFans time confirmation"),
+      exactText("button", "OK", "OnlyFans time confirmation", popup),
       "OnlyFans time confirmation",
     );
 
     const commit = await waitFor(
       () => {
-        const candidates = [...document.querySelectorAll("button")].filter(
+        if (!mediaReady()) return null;
+        const candidates = [...composer.querySelectorAll("button")].filter(
           (button) =>
             visible(button) &&
             enabled(button) &&
+            !button.closest(".vdatetime-popup, [role='dialog']") &&
             new Set(["save", "schedule"]).has(
               button.textContent.trim().toLowerCase(),
             ),
@@ -1103,13 +1387,9 @@
       signal,
     );
     const labelsAfter = labels();
+    const scheduleProof = scheduleReadback();
     verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
-    if (
-      editor.textContent !== String(draft.description || "") ||
-      [...document.querySelectorAll(".b-dropzone__preview__delete")].filter(
-        visible,
-      ).length !== 1
-    )
+    if (editor.textContent !== String(draft.description || "") || !mediaReady())
       throw new Error(
         "OnlyFans attachment or description changed before verification.",
       );
@@ -1128,6 +1408,32 @@
     if (publicationMode(draft) === "manual")
       return { platform: "onlyfans", status: "manual-submit-required" };
     await beforeCommit(context, "OnlyFans");
+    if (scheduleReadback() !== scheduleProof)
+      throw new Error(
+        "OnlyFans schedule changed during the durable checkpoint.",
+      );
+    verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
+    if (
+      !editor.isConnected ||
+      editor.textContent !== String(draft.description || "") ||
+      !commit.isConnected ||
+      !enabled(commit) ||
+      !mediaReady()
+    )
+      throw new Error(
+        "OnlyFans prepared state changed during the durable checkpoint.",
+      );
+    const checkpointLabels = labels();
+    if (
+      labelsBefore.length !== checkpointLabels.length ||
+      labelsBefore.some(
+        (item, index) =>
+          item.checked !== checkpointLabels[index].checked ||
+          item.value !== checkpointLabels[index].value ||
+          item.text !== checkpointLabels[index].text,
+      )
+    )
+      throw new Error("OnlyFans labels changed during the durable checkpoint.");
     click(commit, "OnlyFans final Save control");
     await context.progress?.("submitted");
     return { platform: "onlyfans", status: "submitted" };
@@ -1420,7 +1726,12 @@
         return (
           !modal.isConnected &&
           cards.length === 1 &&
-          !/\b(Verifying|Uploading|Processing)\b/i.test(composer.textContent)
+          !/\b(Verifying|Uploading|Processing)\b/i.test(cards[0].textContent) &&
+          ![
+            ...cards[0].querySelectorAll(
+              "[aria-busy='true'], [role='progressbar'], .upload-progress, .verification-progress",
+            ),
+          ].some(visible)
         );
       },
       "Fansly processed composer attachment",
@@ -1484,6 +1795,7 @@
       signal,
     );
     const composer = one("app-post-creation", "Fansly post composer");
+    progressScope = composer;
     if (composer.querySelector("app-account-media-template"))
       throw new Error(
         "Fansly existing media requires association review before attachment.",
@@ -1610,10 +1922,6 @@
       signal,
       10,
     );
-    const parts = zonedParts(
-      draft.scheduledIso,
-      draft.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    );
     const calendarIcons = [
       ...composer.querySelectorAll(".icon-stack:has(.fa-clock) .fa-calendar"),
     ].filter(visible);
@@ -1627,18 +1935,24 @@
     click(scheduleControl, "Fansly schedule control");
     const dateRoot = await waitFor(
       () => {
-        const day = [...document.querySelectorAll(".current-month-day")].find(
-          visible,
-        );
-        return (
-          day?.closest("[role='dialog'], .modal, #schedule-modal") ||
-          day?.parentElement
-        );
+        const roots = [
+          ...document.querySelectorAll(
+            "app-post-schedule-modal .modal-content, #schedule-modal",
+          ),
+        ].filter(visible);
+        if (roots.length > 1)
+          throw new Error("Fansly schedule dialog is ambiguous.");
+        return roots[0];
       },
       "Fansly schedule dialog",
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
+    const zoneTitle = one(".timezone", "Fansly displayed timezone", dateRoot);
+    const siteZone = zoneTitle.nextElementSibling?.textContent.trim();
+    if (!/^[A-Za-z_]+\/[A-Za-z_\-/]+$/.test(siteZone || ""))
+      throw new Error("Fansly schedule timezone is unverified.");
+    const parts = zonedParts(draft.scheduledIso, siteZone);
     await chooseFanslyDate(dateRoot, parts, signal);
     const selects = [...dateRoot.querySelectorAll("select")].filter(visible);
     const format = selects.find((select) =>
@@ -1663,6 +1977,12 @@
     selectOption(format, "24H", "Fansly time format");
     selectOption(hour, parts.hour, "Fansly hour");
     selectOption(minute, parts.minute, "Fansly minute");
+    if (
+      hour.value !== parts.hour ||
+      minute.value !== parts.minute ||
+      format.selectedOptions[0]?.textContent.trim() !== "24H"
+    )
+      throw new Error("Fansly schedule time readback failed.");
     click(
       exactText(
         ".confirm-btn, .btn",
@@ -1697,26 +2017,19 @@
     if (publicationMode(draft) === "manual")
       return { platform: "fansly", status: "manual-submit-required" };
     await beforeCommit(context, "Fansly");
+    verifyNoBlockingErrors(composer, "Fansly");
+    if (
+      !composer.isConnected ||
+      composer.querySelector(".new-post-btn") !== schedule ||
+      !enabled(schedule) ||
+      schedule.textContent.trim().toLowerCase() !== "schedule" ||
+      (draft.fanslyCaption !== undefined &&
+        composer.querySelector("textarea")?.value !== draft.fanslyCaption)
+    )
+      throw new Error(
+        "Fansly prepared state changed during the durable checkpoint.",
+      );
     click(schedule, "Fansly Schedule control");
-    const confirm = await waitFor(
-      () => {
-        const candidates = [
-          ...document.querySelectorAll(".btn, button"),
-        ].filter(
-          (control) =>
-            control !== schedule &&
-            visible(control) &&
-            enabled(control) &&
-            control.textContent.trim().toLowerCase() === "post",
-        );
-        return candidates.length === 1 ? candidates[0] : null;
-      },
-      "Fansly final Post confirmation",
-      DEFAULT_DOM_TIMEOUT,
-      signal,
-    );
-    abortIfNeeded(signal);
-    click(confirm, "Fansly final Post confirmation");
     await context.progress?.("submitted");
     return { platform: "fansly", status: "submitted" };
   }
@@ -1745,6 +2058,7 @@
         mutationSignal = null;
         reportProgress = null;
         pauseObservation = null;
+        progressScope = null;
       }
     };
   }
@@ -1754,5 +2068,6 @@
     runManyVidsUpload: guarded(runManyVidsUpload),
     runOnlyFans: guarded(runOnlyFans),
     runPornhub: guarded(runPornhub),
+    activatePornhubUploader,
   });
 })();

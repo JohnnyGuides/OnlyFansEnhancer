@@ -642,18 +642,20 @@ test("ManyVids upload adapter clicks only the completed file card edit control",
   const page = await browser.newPage();
   try {
     await page.setContent(`
+      <div class="uppy-Dashboard" style="min-height:100px">
       <input class="uppy-Dashboard-input" hidden type="file" name="files[]" multiple>
       <input class="uppy-Dashboard-input" hidden webkitdirectory type="file" name="files[]" multiple>
       <template><article class="uppy-Dashboard-Item" data-state="upload-complete">
         <span class="uppy-Dashboard-Item-name">episode-full.mp4</span>
         <button class="uppy-Dashboard-Item-action--remove" aria-label="Remove file"></button>
-        <button class="edit-upload"></button>
+        <button class="edit-upload" aria-label="Button edit video : episode-full.mp4"></button>
       </article></template>
+      </div>
       <script>
         globalThis.manyvidsEditClicks = 0;
         globalThis.manyvidsRemoveClicks = 0;
         document.querySelector("input:not([webkitdirectory])").addEventListener("change", () => {
-          document.body.append(document.querySelector("template").content.cloneNode(true));
+          document.querySelector(".uppy-Dashboard").append(document.querySelector("template").content.cloneNode(true));
           document.querySelector(".edit-upload").addEventListener("click", () => manyvidsEditClicks += 1);
           document.querySelector(".uppy-Dashboard-Item-action--remove").addEventListener("click", () => manyvidsRemoveClicks += 1);
         });
@@ -707,11 +709,7 @@ test("ManyVids upload adapter clicks only the completed file card edit control",
     assert.equal(state.assignedInput, "episode-full.mp4");
     assert.equal(state.editClicks, 1);
     assert.equal(state.removeClicks, 0);
-    assert.deepEqual(state.progress, [
-      "attached:full",
-      "upload-ready",
-      "edit-requested",
-    ]);
+    assert.deepEqual(state.progress, ["attached:full", "upload-ready"]);
   } finally {
     await browser.close();
   }
@@ -756,11 +754,10 @@ for (const scenario of [
         <select id="co-performer"><option value="NO">No</option><option value="YES">Yes</option></select>
         <input id="free_vid_0" name="free_vid" type="radio"><label for="free_vid_0">Set Your Price</label>
         <input id="appendedPrependedInput" name="video_cost" type="text">
-        <input id="launchCustom" name="launchOption" type="radio"><label for="launchCustom">Custom launch date</label>
-        <select id="launch-month"><option value="08">August</option></select>
-        <select id="launch-day"><option value="28">28</option></select>
-        <select id="launch-year"><option value="2026">2026</option></select>
-        <select id="available_time"><option value="15:00">03:00 PM</option></select>
+        <input id="launchCustom" name="launchOption" type="radio"><label for="launchCustom">Select a launch date according to your timezone (Europe/Amsterdam)</label>
+        <input id="dp1" name="available_date" readonly value="2026-08-01" onclick="document.querySelector('.datepicker-dropdown').hidden=false">
+        <div class="datepicker-dropdown" hidden><div class="datepicker-days"><table><thead><tr><th class="datepicker-switch">August 2026</th></tr></thead><tbody><tr><td class="day" onclick="document.querySelector('#dp1').value='2026-08-28';document.querySelector('.datepicker-dropdown').hidden=true">28</td></tr></tbody></table></div></div>
+        <select id="available_time" name="available_time"><option value="15:00">03:00 PM</option><option value="17:00">05:00 PM</option></select>
         <input id="membership3" name="membership" type="radio"><label for="membership3">This vid is not included in your Vid Bundle</label>
         <input id="premium2" name="premiumState" type="radio"><label for="premium2">Include this Vid to Premium</label>
         <div class="multi-dropdown-list">
@@ -939,15 +936,19 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
     const page = await browser.newPage();
     try {
       await page.setContent(`
+      <form id="onlyfans-composer">
       <button id="attach_file_photo" aria-label="Add media"></button>
       <input id="file_upload_input" type="file" accept="video/*">
       <div class="tiptap ProseMirror b-text-editor js-text-editor" role="textbox" contenteditable="true"></div>
       <input id="post-label-1" type="checkbox" checked>
       <input id="post-label-2" type="checkbox">
       <button id="schedule" aria-label="Schedule post"></button>
-      <div id="date-dialog" hidden>
-        <div class="vdatetime-calendar__month__day" data-date="2026-08-28">28</div>
+      <div id="date-dialog" class="vdatetime-popup" hidden>
+        <div class="vdatetime-calendar__current--month">July 2026</div>
+        <button type="button" class="vdatetime-calendar__navigation--next" onclick="document.querySelector('.vdatetime-calendar__current--month').textContent='August 2026'">Next month</button>
+        <div class="vdatetime-calendar__month__day">28</div>
         <button type="button">Next</button>
+        <div class="vdatetime-popup__tab time">Time</div>
         <div id="time" hidden>
           <div class="vdatetime-time-picker__list" data-part="hour">
             <div class="vdatetime-time-picker__item">16</div>
@@ -961,20 +962,28 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
         </div>
       </div>
       <button id="save" type="button">Save</button>
+      </form>
       <script>
         document.querySelector("#schedule").addEventListener("click", () => document.querySelector("#date-dialog").hidden = false);
-        document.querySelector("#date-dialog button").addEventListener("click", () => document.querySelector("#time").hidden = false);
+        document.querySelector(".vdatetime-popup__tab.time").addEventListener("click", () => document.querySelector("#time").hidden = false);
+        [...document.querySelectorAll("#date-dialog button")].find(button => button.textContent === "Next").addEventListener("click", () => { throw new Error("Next must not select the time tab"); });
         document.querySelectorAll(".vdatetime-calendar__month__day,.vdatetime-time-picker__item").forEach((item) => {
           item.addEventListener("click", () => item.dataset.selected = "true");
         });
-        document.querySelector("#time button").addEventListener("click", () => document.querySelector("#date-dialog").hidden = true);
+        document.querySelector("#time button").addEventListener("click", () => {
+          document.querySelector("#date-dialog").hidden = true;
+          document.querySelector("#onlyfans-composer").insertAdjacentHTML("beforeend", '<div class="b-dropzone__preview m-schedule"><time datetime="2026-08-28T15:00:00.000Z">Scheduled August 28, 2026 17:00</time><button class="b-dropzone__preview__delete" type="button">Delete schedule</button></div>');
+        });
         globalThis.onlyfansSaveClicks = 0;
         document.querySelector("#file_upload_input").addEventListener("change", () => {
           const preview = document.createElement("button");
           preview.type = "button";
           preview.className = "b-dropzone__preview__delete";
           preview.textContent = "Delete";
-          document.body.append(preview);
+          const media = document.createElement("div");
+          media.className = "b-dropzone__preview";
+          media.append(preview);
+          document.querySelector("#onlyfans-composer").append(media);
         });
         globalThis.onlyfansCommitEvents = [];
         document.querySelector("#save").addEventListener("click", () => {
@@ -1028,8 +1037,9 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
             document.querySelectorAll('[id^="post-label-"]'),
           ).map((input) => input.checked),
           caption: document.querySelector('[role="textbox"]').textContent,
-          selectedDate: document.querySelector('[data-date="2026-08-28"]')
-            .dataset.selected,
+          selectedDate: document.querySelector(
+            ".vdatetime-calendar__month__day",
+          ).dataset.selected,
           selectedHour: document.querySelector(
             '[data-part="hour"] [data-selected="true"]',
           )?.textContent,
@@ -1105,6 +1115,7 @@ for (const scenario of [
       <div id="preset-menu" hidden><div class="dropdown-item">default</div><div class="dropdown-item">defaulT</div><div class="dropdown-item">Other</div></div>
       <div id="preview-menu" hidden><div class="dropdown-item">Upload New</div></div>
       <div id="schedule-modal" hidden>
+        <div class="timezone">Time Zone</div><div>Europe/Zurich</div>
         <table><tr><td class="current-month-day" data-date="2026-08-28">28</td></tr></table>
         <select data-time="hour">${hourOptions}</select>
         <select data-time="minute"><option>00</option><option>30</option></select>
@@ -1278,9 +1289,7 @@ for (const scenario of [
       assert.deepEqual(result.events, [
         "uploaded:full:episode-full.mp4",
         ...(scenario.hasTeaser ? ["preview:episode-teaser.mp4"] : []),
-        ...(scenario.publishMode !== "autonomous"
-          ? []
-          : ["checkpoint:fansly", "click:post"]),
+        ...(scenario.publishMode !== "autonomous" ? [] : ["checkpoint:fansly"]),
       ]);
       assert.equal(result.mediaCardCount, 1);
       assert.equal(result.full.locked, "true");
@@ -1299,10 +1308,7 @@ for (const scenario of [
       assert.equal(result.hour, "17");
       assert.equal(result.minute, "00");
       assert.equal(result.format, "24H");
-      assert.equal(
-        result.postClicks,
-        scenario.publishMode !== "autonomous" ? 0 : 1,
-      );
+      assert.equal(result.postClicks, 0);
       assert.equal(
         result.scheduleClicks,
         scenario.publishMode === "autonomous" ? 1 : 0,
@@ -2575,7 +2581,7 @@ test("upload console performs no platform mutation before the single Yes confirm
 
     await page.locator("#confirmUpload").click();
     await page
-      .getByText(/Catalogue updated/i)
+      .getByText(/Sheet updated and verified/i)
       .first()
       .waitFor();
     assert.equal(await page.locator("#confirmation").isVisible(), false);

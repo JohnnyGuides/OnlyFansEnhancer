@@ -6,18 +6,20 @@
   const sessionId = params.get("session");
   const platform = params.get("platform");
   const parentOrigin = params.get("parentOrigin");
+  const platformOrigins = {
+    onlyfans: "https://onlyfans.com",
+    fansly: "https://fansly.com",
+    manyvids: "https://www.manyvids.com",
+    pornhub: "https://pornhub.mainhub.com",
+    x: "https://x.com",
+    redgifs: "https://studio.redgifs.com",
+  };
   if (
     !/^[A-Za-z0-9_-]{16,128}$/.test(sessionId || "") ||
-    !new Set(["onlyfans", "fansly", "manyvids", "x", "redgifs"]).has(
+    !new Set(["onlyfans", "fansly", "manyvids", "pornhub", "x", "redgifs"]).has(
       platform,
     ) ||
-    !new Set([
-      "https://onlyfans.com",
-      "https://fansly.com",
-      "https://x.com",
-      "https://www.manyvids.com",
-      "https://studio.redgifs.com",
-    ]).has(parentOrigin)
+    platformOrigins[platform] !== parentOrigin
   ) {
     return;
   }
@@ -44,7 +46,10 @@
       data?.source !== "creator-upload-console" ||
       data.sessionId !== sessionId ||
       data.platform !== platform ||
-      !new Set(["full", "teaser", "thumbnail", "social"]).has(data.role) ||
+      !new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
+        data.role,
+      ) ||
+      (platform === "pornhub") !== (data.role === "pornhub") ||
       (["x", "redgifs"].includes(platform) && data.role !== "social") ||
       (!["x", "redgifs"].includes(platform) && data.role === "social") ||
       !(data.file instanceof File)

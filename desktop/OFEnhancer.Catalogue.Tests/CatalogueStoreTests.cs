@@ -6,6 +6,17 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class CatalogueStoreTests
 {
     [TestMethod]
+    public void NativeSqliteIncludesTheAggregateMemoryCorruptionFix()
+    {
+        using SqliteConnection connection = new("Data Source=:memory:");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT sqlite_version()";
+        Version version = Version.Parse((string)command.ExecuteScalar()!);
+        Assert.IsTrue(version >= new Version(3, 50, 2), $"Native SQLite {version} predates CVE-2025-6965 remediation.");
+    }
+
+    [TestMethod]
     public void VersionTwoUpgradePreservesRowsAndAddsEmptySourceLinkEvidence()
     {
         using TempDirectory temp = new();

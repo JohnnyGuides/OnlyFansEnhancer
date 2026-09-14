@@ -46,7 +46,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
     require("../../packaging/extensions.json").personal,
   );
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.20.18");
+  assert.equal(manifest.version, "0.20.19");
   assert.ok(manifest.permissions.includes("debugger"));
   assert.ok(manifest.permissions.includes("nativeMessaging"));
   assert.equal(
@@ -115,6 +115,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
     {
       resources: ["file-bridge.html", "file-bridge.js"],
       matches: [
+        "https://pornhub.mainhub.com/*",
         "https://onlyfans.com/*",
         "https://fansly.com/*",
         "https://www.manyvids.com/*",

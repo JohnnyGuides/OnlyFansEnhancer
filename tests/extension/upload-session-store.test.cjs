@@ -44,8 +44,18 @@ function loadStore() {
       },
     },
     structuredClone,
+    crypto: require("node:crypto").webcrypto,
+    TextEncoder,
+    URL,
   });
   context.chrome.storage.local = context.chrome.storage.session;
+  vm.runInContext(
+    fs.readFileSync(
+      path.join(repositoryRoot, "workflows/catalogue-contract.js"),
+      "utf8",
+    ),
+    context,
+  );
   vm.runInContext(
     fs.readFileSync(
       path.join(repositoryRoot, "workflows/upload-session-store.js"),
@@ -66,6 +76,177 @@ function loadStore() {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("recovery capacity refuses new work without evicting unresolved sessions", async () => {
+  const { store } = loadStore();
+  const step = {
+    actionId: "start-upload",
+    platform: "manyvids",
+    outcome: "intent",
+    commandId: "11111111-1111-1111-1111-111111111111",
+    documentId: "22222222-2222-2222-2222-222222222222",
+    signature: "a".repeat(64),
+    tabId: 42,
+    frameId: 0,
+  };
+  for (let index = 0; index < 20; index++)
+    await store.recordStep(`capacity-session-${index}`, step);
+  await assert.rejects(
+    store.recordStep("capacity-session-overflow", step),
+    /journal is full/i,
+  );
+  assert.equal((await store.listRecovery())[0].id, "capacity-session-0");
+  assert.equal((await store.listRecovery()).length, 20);
+  await store.recordStep("capacity-session-0", {
+    ...step,
+    outcome: "observed",
+  });
+  assert.equal((await store.listRecovery())[0].steps[0].outcome, "observed");
+});
+
+test("legacy recovery records beyond the old cap remain visible", async () => {
+  const { store, values } = loadStore();
+  values[store.RECOVERY_KEY] = Array.from({ length: 25 }, (_, index) => ({
+    id: `legacy-session-${index}`,
+    steps: [],
+  }));
+  assert.equal((await store.listRecovery()).length, 25);
+});
+
+test("final intent survives session loss and prevents a new session bypass", async () => {
+  const { store, values } = loadStore();
+  const record = {
+    id: "durable-session-1111",
+    draft: {
+      title: "private caption",
+      fullFilename: "private.mp4",
+      scheduledIso: "2026-09-18T15:00:00Z",
+    },
+    catalogue: { source: "desktop", itemId: "private-item" },
+    platforms: {
+      onlyfans: {
+        tabId: 42,
+        documentId: "22222222-2222-2222-2222-222222222222",
+        commitArmed: true,
+        submitAttempted: true,
+      },
+    },
+  };
+  await store.save(record);
+  delete values[store.KEY_PREFIX + record.id];
+  const recovered = await store.load(record.id);
+  assert.equal(recovered.platforms.onlyfans.submitAttempted, true);
+  assert.equal(
+    (await store.list()).find((item) => item.id === record.id).platforms
+      .onlyfans.submitAttempted,
+    true,
+  );
+  assert.doesNotMatch(JSON.stringify(values), /private|caption|Filename/);
+  await assert.rejects(
+    store.assertAvailable({ ...record, id: "durable-session-2222" }, [
+      "onlyfans",
+    ]),
+    /unresolved/i,
+  );
+  await store.save({
+    id: record.id,
+    platforms: { onlyfans: { submitAttempted: false } },
+  });
+  assert.equal(
+    (await store.load(record.id)).platforms.onlyfans.submitAttempted,
+    true,
+  );
+  await store.remove(record.id);
+  assert.equal(
+    (await store.load(record.id)).platforms.onlyfans.submitAttempted,
+    true,
+  );
+});
+
+test("durable receipt retains a canonical result independently of session metadata", async () => {
+  const { store, values } = loadStore();
+  const id = "canonical-result-session";
+  await store.save({
+    id,
+    draft: { title: "private" },
+    platforms: {
+      fansly: {
+        submitAttempted: true,
+        postUrl: "https://fansly.com/post/123456789",
+      },
+    },
+  });
+  delete values[store.KEY_PREFIX + id];
+  assert.equal(
+    (await store.load(id)).platforms.fansly.postUrl,
+    "https://fansly.com/post/123456789",
+  );
+  assert.doesNotMatch(JSON.stringify(values), /private/);
+});
+
+test("export migrates available legacy final flags before session storage is lost", async () => {
+  const { store, values } = loadStore();
+  const id = "legacy-final-session";
+  values[store.KEY_PREFIX + id] = {
+    id,
+    draft: { fullFilename: "neutral.mp4", title: "private caption" },
+    platforms: { fansly: { commitArmed: true, tabId: 7 } },
+  };
+  const exported = plain(await store.listPublication());
+  assert.equal(exported.length, 1);
+  assert.equal(exported[0].submitAttempted, true);
+  assert.doesNotMatch(JSON.stringify(exported), /neutral|caption|Filename/);
+  delete values[store.KEY_PREFIX + id];
+  assert.equal((await store.load(id)).platforms.fansly.commitArmed, true);
+  await assert.rejects(
+    store.assertAvailable(
+      { id: "new-final-session", draft: { fullFilename: "neutral.mp4" } },
+      ["fansly"],
+    ),
+    /unresolved/,
+  );
+});
+
+test("another command or session cannot repeat a selected role after acknowledgement loss", async () => {
+  const { store } = loadStore();
+  const record = {
+    id: "first-preparation-session",
+    draft: { fullFilename: "neutral.mp4" },
+  };
+  const step = {
+    actionId: "select-full",
+    platform: "onlyfans",
+    outcome: "intent",
+    commandId: "11111111-1111-4111-8111-111111111111",
+    documentId: "22222222-2222-4222-8222-222222222222",
+    signature: "a".repeat(64),
+    work: await store.workIdentity(record),
+    tabId: 42,
+    frameId: 0,
+  };
+  await store.recordStep(record.id, step);
+  await assert.rejects(
+    store.recordStep(record.id, {
+      ...step,
+      commandId: "33333333-3333-4333-8333-333333333333",
+    }),
+    /existing.*action/i,
+  );
+  await assert.rejects(
+    store.assertAvailable(
+      {
+        ...record,
+        id: "new-preparation-session",
+        draft: { ...record.draft, title: "A changed title" },
+      },
+      ["onlyfans"],
+    ),
+    /existing.*draft/i,
+  );
+  await store.assertAvailable({ ...record, id: "new-preparation-session" }, [
+    "fansly",
+  ]);
+});
 
 test("recovery journal keeps bounded non-secret monotonic step evidence across session loss", async () => {
   const { store, values } = loadStore();

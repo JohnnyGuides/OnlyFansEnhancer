@@ -7,6 +7,13 @@ using System.Text.RegularExpressions;
 
 namespace CreatorTeaserNativeHost;
 
+// Only authored, static validation text may cross the native message boundary.
+internal sealed class HostValidationException(string publicMessage, Exception? inner = null)
+    : Exception(publicMessage, inner)
+{
+    public string PublicMessage { get; } = publicMessage;
+}
+
 internal sealed class HostConfig
 {
     public string TeaserRoot { get; set; } = "";
@@ -110,12 +117,12 @@ internal sealed class TeaserHost
             || config.DoneName is "." or ".."
         )
         {
-            throw new InvalidOperationException("Invalid configured Done directory name.");
+            throw new HostValidationException("Invalid configured Done directory name.");
         }
         doneRoot = Path.GetFullPath(Path.Combine(teaserRoot, config.DoneName));
         EnsureInside(teaserRoot, doneRoot, "Done directory");
         if (!Directory.Exists(doneRoot))
-            throw new InvalidOperationException("The configured Done directory is missing.");
+            throw new HostValidationException("The configured Done directory is missing.");
         RejectReparsePath(doneRoot);
     }
 
@@ -125,7 +132,7 @@ internal sealed class TeaserHost
         {
             "audit" => Audit(request),
             "move" => Move(request),
-            _ => throw new InvalidOperationException("Unsupported native host operation."),
+            _ => throw new HostValidationException("Unsupported native host operation."),
         };
     }
 
@@ -134,14 +141,14 @@ internal sealed class TeaserHost
         FileProof proof = RequireProof(request);
         string source = ResolveOneSource(request.Basename, proof);
         StatusProof status = request.Status
-            ?? throw new InvalidOperationException("Audit status metadata is missing.");
+            ?? throw new HostValidationException("Audit status metadata is missing.");
         CatalogueProof catalogue = request.Catalogue
-            ?? throw new InvalidOperationException("Audit catalogue metadata is missing.");
+            ?? throw new HostValidationException("Audit catalogue metadata is missing.");
         ValidateStatus(status);
         if (catalogue.Row < 2 || catalogue.Row > 5002 || !SafeIdPattern.IsMatch(catalogue.Id))
-            throw new InvalidOperationException("Invalid audit catalogue row or ID.");
+            throw new HostValidationException("Invalid audit catalogue row or ID.");
         if (request.Frames is not { Length: 3 })
-            throw new InvalidOperationException("Exactly three audit frames are required.");
+            throw new HostValidationException("Exactly three audit frames are required.");
 
         byte[][] frames = request.Frames.Select(ParseJpegDataUrl).ToArray();
         string[] frameHashes = frames.Select(Sha256).ToArray();
@@ -179,7 +186,7 @@ internal sealed class TeaserHost
 
         string framesRoot = Path.Combine(auditRoot, "frames");
         if (!Directory.Exists(framesRoot))
-            throw new InvalidOperationException("The configured audit frames directory is missing.");
+            throw new HostValidationException("The configured audit frames directory is missing.");
         RejectReparsePath(framesRoot);
         for (int index = 0; index < frames.Length; index++)
         {
@@ -198,7 +205,7 @@ internal sealed class TeaserHost
         AppendUrl(catalogueRow, status.StatusUrl);
 
         JsonArray entries = frameData["entries"]?.AsArray()
-            ?? throw new InvalidOperationException("Audit frame-data entries are missing.");
+            ?? throw new HostValidationException("Audit frame-data entries are missing.");
         JsonObject? existingEntry = entries
             .OfType<JsonObject>()
             .SingleOrDefault(entry => StringValue(entry, "url") == status.StatusUrl);
@@ -209,7 +216,7 @@ internal sealed class TeaserHost
                 IntValue(existingEntry, "row") != catalogue.Row
                 || StringValue(existingEntry, "id") != catalogue.Id
             )
-                throw new InvalidOperationException("Existing audit entry conflicts with the confirmed catalogue row.");
+                throw new HostValidationException("Existing audit entry conflicts with the confirmed catalogue row.");
             auditEntry = existingEntry;
         }
         else
@@ -226,7 +233,7 @@ internal sealed class TeaserHost
         UpdateSummary(frameData);
         string template = File.ReadAllText(templatePath, Encoding.UTF8);
         if (template.Split("__AUDIT_DATA__").Length != 2)
-            throw new InvalidOperationException("Audit template must contain one data marker.");
+            throw new HostValidationException("Audit template must contain one data marker.");
         string frameJson = frameData.ToJsonString(JsonOptions);
         string generatedHtml = template.Replace("__AUDIT_DATA__", frameJson, StringComparison.Ordinal);
 
@@ -257,7 +264,7 @@ internal sealed class TeaserHost
     {
         FileProof proof = RequireProof(request);
         if (!Regex.IsMatch(request.StatusId ?? "", @"^\d{1,30}$"))
-            throw new InvalidOperationException("Invalid move status ID.");
+            throw new HostValidationException("Invalid move status ID.");
         string receiptPath = Path.Combine(
             auditRoot,
             ".creator-x-teaser-receipts",
@@ -265,7 +272,7 @@ internal sealed class TeaserHost
         );
         RejectReparsePath(Path.GetDirectoryName(receiptPath)!);
         if (!File.Exists(receiptPath))
-            throw new InvalidOperationException("A durable audit receipt is required before moving.");
+            throw new HostValidationException("A durable audit receipt is required before moving.");
         RejectReparsePath(receiptPath);
         ReceiptRecord receipt = ReadReceipt(receiptPath);
         VerifyReceiptToken(receipt);
@@ -275,7 +282,7 @@ internal sealed class TeaserHost
             || receipt.Basename != proof.Basename
             || receipt.FileSha256 != proof.Sha256
         )
-            throw new InvalidOperationException("The audit receipt does not match this source file.");
+            throw new HostValidationException("The audit receipt does not match this source file.");
         VerifyReceiptFrames(receipt);
         VerifyReceiptAggregates(receipt);
 
@@ -294,9 +301,9 @@ internal sealed class TeaserHost
             };
         }
         if (sources.Count != 1)
-            throw new InvalidOperationException("Expected exactly one matching source file.");
+            throw new HostValidationException("Expected exactly one matching source file.");
         if (File.Exists(destination))
-            throw new InvalidOperationException("Done destination collision; nothing was moved.");
+            throw new HostValidationException("Done destination collision; nothing was moved.");
         VerifyIdentity(sources[0], proof);
         File.Move(sources[0], destination);
         return new HostResponse
@@ -312,7 +319,7 @@ internal sealed class TeaserHost
     {
         ValidateBasename(request.Basename);
         FileProof proof = request.FileProof
-            ?? throw new InvalidOperationException("Stable file identity is missing.");
+            ?? throw new HostValidationException("Stable file identity is missing.");
         if (
             proof.Basename != request.Basename
             || proof.Size <= 0
@@ -321,7 +328,7 @@ internal sealed class TeaserHost
             || proof.Duration > 8 * 60 * 60
             || !Regex.IsMatch(proof.Sha256 ?? "", @"^[a-f0-9]{64}$")
         )
-            throw new InvalidOperationException("Invalid stable file identity.");
+            throw new HostValidationException("Invalid stable file identity.");
         return proof;
     }
 
@@ -336,14 +343,14 @@ internal sealed class TeaserHost
             || basename.Contains('\\')
             || basename is "." or ".."
         )
-            throw new InvalidOperationException("Invalid source basename or path.");
+            throw new HostValidationException("Invalid source basename or path.");
     }
 
     private string ResolveOneSource(string basename, FileProof proof)
     {
         List<string> candidates = FindSources(basename);
         if (candidates.Count != 1)
-            throw new InvalidOperationException("Expected exactly one matching source file.");
+            throw new HostValidationException("Expected exactly one matching source file.");
         VerifyIdentity(candidates[0], proof);
         return candidates[0];
     }
@@ -384,14 +391,14 @@ internal sealed class TeaserHost
         RejectReparsePath(path);
         FileInfo info = new(path);
         if (!info.Exists || info.Length != proof.Size)
-            throw new InvalidOperationException("Source file identity size mismatch.");
+            throw new HostValidationException("Source file identity size mismatch.");
         double modified = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds();
         if (Math.Abs(modified - proof.LastModified) > 2000)
-            throw new InvalidOperationException("Source file identity timestamp mismatch.");
+            throw new HostValidationException("Source file identity timestamp mismatch.");
         using FileStream stream = File.OpenRead(path);
         string hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
         if (hash != proof.Sha256)
-            throw new InvalidOperationException("Source file identity SHA-256 mismatch.");
+            throw new HostValidationException("Source file identity SHA-256 mismatch.");
     }
 
     private static void ValidateStatus(StatusProof status)
@@ -408,14 +415,14 @@ internal sealed class TeaserHost
             || poster.Scheme != Uri.UriSchemeHttps
             || !(poster.Host == "pbs.twimg.com" || poster.Host.EndsWith(".twimg.com"))
         )
-            throw new InvalidOperationException("Invalid captured X status metadata.");
+            throw new HostValidationException("Invalid captured X status metadata.");
     }
 
     private static byte[] ParseJpegDataUrl(string value)
     {
         const string prefix = "data:image/jpeg;base64,";
         if (value is null || !value.StartsWith(prefix, StringComparison.Ordinal) || value.Length > 7_000_000)
-            throw new InvalidOperationException("Invalid bounded JPEG audit frame.");
+            throw new HostValidationException("Invalid bounded JPEG audit frame.");
         byte[] bytes;
         try
         {
@@ -423,7 +430,7 @@ internal sealed class TeaserHost
         }
         catch (FormatException error)
         {
-            throw new InvalidOperationException("Invalid bounded JPEG audit frame.", error);
+            throw new HostValidationException("Invalid bounded JPEG audit frame.", error);
         }
         if (
             bytes.Length < 4
@@ -432,7 +439,7 @@ internal sealed class TeaserHost
             || bytes[^2] != 0xff
             || bytes[^1] != 0xd9
         )
-            throw new InvalidOperationException("Invalid bounded JPEG audit frame.");
+            throw new HostValidationException("Invalid bounded JPEG audit frame.");
         return bytes;
     }
 
@@ -480,20 +487,20 @@ internal sealed class TeaserHost
     private static void VerifyReceiptToken(ReceiptRecord receipt)
     {
         if (receipt.Receipt != ReceiptToken(receipt))
-            throw new InvalidOperationException("Audit receipt token does not match its durable proof.");
+            throw new HostValidationException("Audit receipt token does not match its durable proof.");
     }
 
     private void VerifyReceiptFrames(ReceiptRecord receipt)
     {
         if (receipt.FrameFiles.Length != 3 || receipt.FrameSha256.Length != 3)
-            throw new InvalidOperationException("Audit receipt frame proof is incomplete.");
+            throw new HostValidationException("Audit receipt frame proof is incomplete.");
         for (int index = 0; index < 3; index++)
         {
             string path = Path.GetFullPath(Path.Combine(auditRoot, receipt.FrameFiles[index]));
             EnsureInside(auditRoot, path, "Receipt frame");
             RejectReparsePath(path);
             if (!File.Exists(path) || Sha256(File.ReadAllBytes(path)) != receipt.FrameSha256[index])
-                throw new InvalidOperationException("Audit receipt frame proof does not match disk.");
+                throw new HostValidationException("Audit receipt frame proof does not match disk.");
         }
     }
 
@@ -501,7 +508,7 @@ internal sealed class TeaserHost
     {
         string[] expectedFiles = ["catalogue.json", "frame-data.json", "index.html"];
         if (!receipt.AggregateFiles.SequenceEqual(expectedFiles) || !Regex.IsMatch(receipt.AuditEntrySha256, "^[a-f0-9]{64}$"))
-            throw new InvalidOperationException("Audit receipt aggregate proof is incomplete.");
+            throw new HostValidationException("Audit receipt aggregate proof is incomplete.");
         string cataloguePath = AuditFile(expectedFiles[0]);
         string frameDataPath = AuditFile(expectedFiles[1]);
         string indexPath = AuditFile(expectedFiles[2]);
@@ -509,16 +516,16 @@ internal sealed class TeaserHost
         JsonObject catalogueRow = FindCatalogueRow(catalogueData, receipt.Row, receipt.CatalogueId);
         string[] urls = catalogueRow["urls"]?.AsArray().Select(value => value?.GetValue<string>() ?? "").ToArray() ?? [];
         if (!urls.Contains(receipt.StatusUrl))
-            throw new InvalidOperationException("Audit receipt aggregate catalogue proof does not match disk.");
+            throw new HostValidationException("Audit receipt aggregate catalogue proof does not match disk.");
         JsonArray entries = ReadObject(frameDataPath)["entries"]?.AsArray()
-            ?? throw new InvalidOperationException("Audit receipt aggregate entries are missing.");
+            ?? throw new HostValidationException("Audit receipt aggregate entries are missing.");
         JsonObject entry = entries.OfType<JsonObject>().SingleOrDefault(value => StringValue(value, "url") == receipt.StatusUrl)
-            ?? throw new InvalidOperationException("Audit receipt aggregate entry does not match disk.");
+            ?? throw new HostValidationException("Audit receipt aggregate entry does not match disk.");
         if (IntValue(entry, "row") != receipt.Row || StringValue(entry, "id") != receipt.CatalogueId || Sha256(Encoding.UTF8.GetBytes(entry.ToJsonString(JsonOptions))) != receipt.AuditEntrySha256)
-            throw new InvalidOperationException("Audit receipt aggregate entry proof does not match disk.");
+            throw new HostValidationException("Audit receipt aggregate entry proof does not match disk.");
         string index = File.ReadAllText(indexPath, Encoding.UTF8);
         if (!index.Contains(receipt.StatusUrl, StringComparison.Ordinal) || receipt.FrameFiles.Any(frame => !index.Contains(frame, StringComparison.Ordinal)))
-            throw new InvalidOperationException("Audit receipt aggregate index proof does not match disk.");
+            throw new HostValidationException("Audit receipt aggregate index proof does not match disk.");
     }
 
     private static void RequireMatchingReceipt(ReceiptRecord left, ReceiptRecord right)
@@ -533,13 +540,13 @@ internal sealed class TeaserHost
             || !left.FrameFiles.SequenceEqual(right.FrameFiles)
             || !left.FrameSha256.SequenceEqual(right.FrameSha256)
         )
-            throw new InvalidOperationException("Existing audit receipt conflicts with this request.");
+            throw new HostValidationException("Existing audit receipt conflicts with this request.");
     }
 
     private static ReceiptRecord ReadReceipt(string path)
     {
         return JsonSerializer.Deserialize<ReceiptRecord>(File.ReadAllText(path), JsonOptions)
-            ?? throw new InvalidOperationException("Invalid audit receipt.");
+            ?? throw new HostValidationException("Invalid audit receipt.");
     }
 
     private static JsonObject BuildAuditEntry(
@@ -593,7 +600,7 @@ internal sealed class TeaserHost
     private static JsonObject FindCatalogueRow(JsonObject root, int row, string id)
     {
         JsonArray rows = root["rows"]?.AsArray()
-            ?? throw new InvalidOperationException("Audit catalogue rows are missing.");
+            ?? throw new HostValidationException("Audit catalogue rows are missing.");
         return FindRow(rows, row, id);
     }
 
@@ -604,14 +611,14 @@ internal sealed class TeaserHost
             .Where(item => IntValue(item, "row") == row && StringValue(item, "id") == id)
             .ToArray();
         if (matches.Length != 1)
-            throw new InvalidOperationException("The audit catalogue row is missing or ambiguous.");
+            throw new HostValidationException("The audit catalogue row is missing or ambiguous.");
         return matches[0];
     }
 
     private static void UpdateSummary(JsonObject frameData)
     {
         JsonArray entries = frameData["entries"]?.AsArray()
-            ?? throw new InvalidOperationException("Audit entries are missing.");
+            ?? throw new HostValidationException("Audit entries are missing.");
         JsonObject summary = frameData["summary"]?.AsObject() ?? new JsonObject();
         frameData["summary"] = summary;
         int complete = entries.OfType<JsonObject>().Count(entry => entry["frames"]?.AsArray().Count == 3);
@@ -637,7 +644,7 @@ internal sealed class TeaserHost
         string path = Path.GetFullPath(Path.Combine(auditRoot, name));
         EnsureInside(auditRoot, path, "Audit file");
         if (mustExist && !File.Exists(path))
-            throw new InvalidOperationException($"Required audit file is missing: {name}");
+            throw new HostValidationException("Required audit file is missing.");
         if (File.Exists(path)) RejectReparsePath(path);
         return path;
     }
@@ -645,7 +652,7 @@ internal sealed class TeaserHost
     private static JsonObject ReadObject(string path)
     {
         return JsonNode.Parse(File.ReadAllText(path, Encoding.UTF8))?.AsObject()
-            ?? throw new InvalidOperationException($"Invalid JSON file: {Path.GetFileName(path)}");
+            ?? throw new HostValidationException("Invalid audit JSON file.");
     }
 
     private static string StringValue(JsonObject value, string name) =>
@@ -670,7 +677,7 @@ internal sealed class TeaserHost
         {
             RejectReparsePath(path);
             if (Sha256(File.ReadAllBytes(path)) != expectedHash)
-                throw new InvalidOperationException("Existing audit artifact collision.");
+                throw new HostValidationException("Existing audit artifact collision.");
             return;
         }
         using FileStream output = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -681,10 +688,10 @@ internal sealed class TeaserHost
     private static string ResolveConfiguredRoot(string value, string label)
     {
         if (string.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value))
-            throw new InvalidOperationException($"The configured {label} root must be absolute.");
+            throw new HostValidationException("The configured root must be absolute.");
         string full = Path.GetFullPath(value);
         if (!Directory.Exists(full))
-            throw new InvalidOperationException($"The configured {label} root is missing.");
+            throw new HostValidationException("The configured root is missing.");
         RejectReparsePath(full);
         return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
@@ -696,14 +703,14 @@ internal sealed class TeaserHost
             !candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase)
         )
-            throw new InvalidOperationException($"{label} escapes its configured root.");
+            throw new HostValidationException("Path escapes its configured root.");
     }
 
     private static void RejectReparsePath(string path)
     {
         string full = Path.GetFullPath(path);
         string? current = Path.GetPathRoot(full);
-        if (current is null) throw new InvalidOperationException("Invalid filesystem path.");
+        if (current is null) throw new HostValidationException("Invalid filesystem path.");
         foreach (string part in full[current.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, part);
@@ -714,7 +721,7 @@ internal sealed class TeaserHost
     private static void RejectReparse(string path)
     {
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("Reparse points are not allowed inside configured roots.");
+            throw new HostValidationException("Reparse points are not allowed inside configured roots.");
     }
 
     private static string Sha256(byte[] value) =>
@@ -756,14 +763,25 @@ internal static class Program
             HostConfig config = JsonSerializer.Deserialize<HostConfig>(
                 File.ReadAllText(configPath, Encoding.UTF8),
                 JsonOptions
-            ) ?? throw new InvalidOperationException("Invalid native host configuration.");
+            ) ?? throw new HostValidationException("Invalid native host configuration.");
             HostRequest request = JsonSerializer.Deserialize<HostRequest>(requestJson, JsonOptions)
-                ?? throw new InvalidOperationException("Invalid native host request.");
+                ?? throw new HostValidationException("Invalid native host request.");
             return new TeaserHost(config).Handle(request);
         }
         catch (Exception error)
         {
-            return new HostResponse { Ok = false, Error = error.Message };
+            return new HostResponse
+            {
+                Ok = false,
+                Error = error switch
+                {
+                    HostValidationException validation => validation.PublicMessage,
+                    IOException => "native-filesystem-failure",
+                    UnauthorizedAccessException => "native-access-denied",
+                    JsonException => "native-invalid-json",
+                    _ => "native-operation-failed",
+                },
+            };
         }
     }
 
@@ -777,7 +795,7 @@ internal static class Program
         ReadExact(input, lengthBytes[1..]);
         int length = BitConverter.ToInt32(lengthBytes);
         if (length <= 0 || length > 20_000_000)
-            throw new InvalidOperationException("Native message exceeds the bounded size.");
+            throw new HostValidationException("Native message exceeds the bounded size.");
         byte[] bytes = new byte[length];
         ReadExact(input, bytes);
         message = Encoding.UTF8.GetString(bytes);

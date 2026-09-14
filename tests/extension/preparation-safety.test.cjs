@@ -51,6 +51,7 @@ for (const autoStart of [false, true]) {
         const context = {
           draft: { fullFilename: "fixture.mp4" },
           async attachFile() {
+            dashboard.querySelector("input:not([webkitdirectory])").remove();
             setTimeout(() => {
               const card = document.createElement("article");
               card.className = "uppy-Dashboard-Item";
@@ -126,6 +127,7 @@ test("ManyVids clicks an enabled queued upload even during a transient uploading
               dashboard.querySelector(".uppy-StatusBar").className =
                 "uppy-StatusBar is-waiting";
             };
+          return { role: "full", name: "neutral-full.mp4", size: 100 };
         },
         async checkpointStep() {},
       });
@@ -139,7 +141,7 @@ test("ManyVids clicks an enabled queued upload even during a transient uploading
   }
 });
 
-test("ManyVids retries a queued upload click until the dashboard observes it", async () => {
+test("ManyVids waits for delayed acceptance without repeating its upload click", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
@@ -168,15 +170,13 @@ test("ManyVids retries a queued upload click until the dashboard observes it", a
               ".uppy-StatusBar-actionBtn--upload",
             ).onclick = () => {
               uploads++;
-              if (uploads !== 2) return;
-              dashboard.querySelector(".uppy-StatusBar").className =
-                "uppy-StatusBar is-uploading";
               setTimeout(() => {
                 card.dataset.state = "upload-complete";
                 card.querySelector(".uppy-Dashboard-Item-name").textContent =
                   "neutral-full.mp4";
-              }, 150);
+              }, 900);
             };
+            return { role: "full", name: "neutral-full.mp4", size: 100 };
           },
           async checkpointStep() {},
         });
@@ -185,7 +185,7 @@ test("ManyVids retries a queued upload click until the dashboard observes it", a
         clearTimeout(abort);
       }
     });
-    assert.equal(result.uploads, 2);
+    assert.equal(result.uploads, 1);
     assert.equal(result.edits, 1);
     assert.equal(result.outcome.status, "edit-requested");
   } finally {
@@ -218,6 +218,7 @@ test("Pornhub uploads the approved file before applying its metadata preset", as
       const attached = [];
       const outcome = await CreatorUploadPlatformAdapters.runPornhub({
         draft: {
+          title: "Neutral approved title",
           contentPreset: "Straight",
           pornhubFilename: "neutral-limited.mp4",
           profiles: {
@@ -236,7 +237,7 @@ test("Pornhub uploads the approved file before applying its metadata preset", as
           attached.push({ role, selector });
           document.body.insertAdjacentHTML(
             "beforeend",
-            '<custom-dropdown data-key="orientation"><div class="customSelectTrigger">Straight</div></custom-dropdown><div><input name="tags"><ul id="inputTag"></ul></div><div><input name="category"><ul id="f2vCategory"></ul></div>',
+            '<input name="title"><custom-dropdown data-key="orientation"><div class="customSelectTrigger">Straight</div></custom-dropdown><div><input name="tags"><ul id="inputTag"></ul></div><div><input name="category"><ul id="f2vCategory"></ul></div>',
           );
         },
         async progress() {},
@@ -352,6 +353,7 @@ for (const progressKind of ["advancing", "unknown", "stalled", "resumed"]) {
                   clearInterval(timer);
                 }
               }, 125);
+              return { role: "full", name: "large.mp4", size: 100 };
             },
           });
           return { edits, progress, attachments };

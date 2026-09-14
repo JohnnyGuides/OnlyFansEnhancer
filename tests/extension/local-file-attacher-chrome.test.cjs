@@ -221,6 +221,39 @@ async function main() {
       "inert-proof.mp4",
     );
     await page.evaluate(() => {
+      proof.detachedName = "";
+      const stale = document.createElement("input");
+      stale.type = "file";
+      stale.id = "detached";
+      document.body.append(stale);
+    });
+    await worker.evaluate(
+      async ({ filePath, origin, tabId, size }) =>
+        CreatorLocalFileAttacher.attach(
+          {
+            tabId,
+            selector: "#detached",
+            pickerSelector: "#activate",
+            activatePicker: true,
+            filePath,
+            allowedOrigins: [origin],
+            expected: { name: "inert-proof.mp4", size },
+          },
+          chrome,
+        ),
+      { filePath, origin, tabId, size: fs.statSync(filePath).size },
+    );
+    assert.equal(
+      await page.evaluate(() => proof.detachedName),
+      "inert-proof.mp4",
+      "visible activation must run even with an existing input",
+    );
+    assert.equal(
+      await page.locator("#detached").evaluate((input) => input.files.length),
+      0,
+      "the unrelated pre-existing input must not receive the file",
+    );
+    await page.evaluate(() => {
       const host = document.createElement("div");
       host.id = "shadow-host";
       host.attachShadow({ mode: "open" }).innerHTML =

@@ -55,7 +55,7 @@ const nativeMessages = [];
 let nextNativeError = "";
 
 function tabDocumentId(tab) {
-  return `document-${tab.id}-${tab.documentVersion || 0}`;
+  return `${String(tab.id).padStart(8, "0")}-0000-4000-8000-${String(tab.documentVersion || 0).padStart(12, "0")}`;
 }
 
 const gelbooruPosts = [
@@ -205,7 +205,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.18",
+          productVersion: "0.20.19",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -368,6 +368,11 @@ const chrome = {
         recorderShowTabs.push(details.target.tabId);
         return [{ frameId: 0, result: true }];
       }
+      if (
+        details.world === "MAIN" &&
+        String(details.func).includes("CreatorUploadResponseObserver?.arm")
+      )
+        return [{ frameId: 0, result: true }];
       throw new Error("Unexpected function-based capability probe.");
     },
   },
@@ -411,6 +416,7 @@ const chrome = {
 
 let context;
 context = vm.createContext({
+  TextEncoder,
   Blob,
   btoa,
   chrome,
@@ -562,7 +568,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.18",
+    productVersion: "0.20.19",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -582,7 +588,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.18");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.19");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -894,6 +900,12 @@ function send(message) {
   chrome.scripting.executeScript = async (details) => {
     if (details.files) return [{ frameId: 0 }];
     const name = details.func.name;
+    if (
+      name === "func" &&
+      typeof details.args?.[0] === "string" &&
+      details.args[0].includes(":manyvids:")
+    )
+      return [{ frameId: 0, result: null }];
     uploadExecutions.push(name);
     if (name === "markCreatorToolkitMasterRun") return [{ frameId: 0 }];
     if (name === "installCreatorUploadFileBridge") {
@@ -935,6 +947,15 @@ function send(message) {
       const tab = openTabs.get(details.target.tabId);
       if (!args.draft.manyvidsId) {
         tab.url = "https://www.manyvids.com/Edit-vid/7783271";
+        const target = await vm.runInContext(
+          `getCreatorUploadSession("${args.sessionId}").then((session) => session.platforms.get("manyvids"))`,
+          context,
+        );
+        target.editorHandoff = {
+          documentId: tabDocumentId(tab),
+          url: tab.url,
+          invalid: false,
+        };
         return [{ frameId: 0, result: { status: "edit-requested" } }];
       }
       if (manyVidsEditFailuresRemaining > 0) {
@@ -994,10 +1015,12 @@ function send(message) {
       try {
         const prepared = await prepareCreatorUpload(uploadOnlyRequest);
         const first = await startAndObserveCreatorUpload(uploadOnlyRequest.sessionId, uploadOnlyRequest.targets);
+        if (first.find((result) => result.platform === "fansly")?.status !== "uploaded-no-sheet") throw new Error(JSON.stringify(first));
         const retry = await retryCreatorUploadPlatform(uploadOnlyRequest.sessionId, "fansly");
         const storedAfterSuccess = await CreatorUploadSessionStore.load(uploadOnlyRequest.sessionId);
         const correctionRequest = {
           ...uploadOnlyRequest,
+          draft: { ...uploadOnlyRequest.draft, title: "Independent correction fixture", fullFilename: "correction.mp4" },
           sessionId: "111111111111111111111111111111111111111111111111",
           targets: ["manyvids"]
         };
@@ -1009,9 +1032,12 @@ function send(message) {
         armManyVidsEditFailure();
         await prepareCreatorUpload(correctionRequest);
         const correctionFirst = await startAndObserveCreatorUpload(correctionRequest.sessionId, ["manyvids"]);
-        const correctionRetry = await retryCreatorUploadPlatform(correctionRequest.sessionId, "manyvids");
+        let correctionRetryError = "";
+        try { await retryCreatorUploadPlatform(correctionRequest.sessionId, "manyvids"); }
+        catch (error) { correctionRetryError = error.message; }
         const uncertainRequest = {
           ...uploadOnlyRequest,
+          draft: { ...uploadOnlyRequest.draft, title: "Independent uncertain fixture", fullFilename: "uncertain.mp4" },
           sessionId: "333333333333333333333333333333333333333333333333",
           targets: ["manyvids"]
         };
@@ -1066,7 +1092,7 @@ function send(message) {
           retry,
           storedAfterSuccess,
           correctionFirst,
-          correctionRetry,
+          correctionRetryError,
           uncertainResult,
           uncertainRetryError,
           storedAfterUncertain,
@@ -1107,12 +1133,18 @@ function send(message) {
       },
       {
         platform: "manyvids",
-        postUrl: "https://www.manyvids.com/Video/7783271",
-        status: "uploaded-no-sheet",
+        manyvidsId: "7783271",
+        submitted: true,
+        status: "posted-link-unresolved",
+        error:
+          "ManyVids Save was attempted once. Site acceptance is unverified; recover the existing result before any retry.",
       },
     ]);
     assert.equal(directRun.retry[0].status, "uploaded-no-sheet");
-    assert.equal(directRun.storedAfterSuccess, null);
+    assert.equal(
+      directRun.storedAfterSuccess.platforms.manyvids.submitAttempted,
+      true,
+    );
     assert.equal(directRun.pornhubPrepared.platforms[0].status, "prepared");
     assert.equal(
       openTabs.get(directRun.pornhubPrepared.platforms[0].tabId).url,
@@ -1133,7 +1165,7 @@ function send(message) {
       JSON.stringify(directRun.correctionFirst[0]),
     );
     assert.equal(directRun.correctionFirst[0].manyvidsId, "7783271");
-    assert.equal(directRun.correctionRetry[0].status, "uploaded-no-sheet");
+    assert.match(directRun.correctionRetryError, /existing bound draft/i);
     assert.equal(
       directRun.uncertainResult[0].status,
       "posted-link-unresolved",
@@ -1149,14 +1181,13 @@ function send(message) {
       "edit",
       "upload",
       "edit",
-      "edit",
       "upload",
       "edit",
     ]);
     assert.equal(
       uploadExecutions.filter((name) => name === "invokeCreatorUploadAdapter")
         .length,
-      10,
+      9,
       "Completed retries and uncertain submissions must never invoke another adapter run.",
     );
   } finally {
@@ -1255,8 +1286,10 @@ function send(message) {
           _session.platforms.set(platform, prepared);
           return prepared;
         };
-        const retry = await retryCreatorUploadPlatform(id, "fansly");
-        return JSON.stringify({ first, retry, calls });
+        let retryError = "";
+        try { await retryCreatorUploadPlatform(id, "fansly"); }
+        catch (error) { retryError = error.message; }
+        return JSON.stringify({ first, retryError, calls });
       })()`,
       context,
     ),
@@ -1267,17 +1300,19 @@ function send(message) {
     { platform: "manyvids", status: "catalogue-updated" },
     { platform: "pornhub", status: "manual-submit-required" },
   ]);
-  assert.deepEqual(coordinator.retry, [
-    { platform: "fansly", status: "failed", error: "fixture failure" },
-  ]);
+  assert.match(coordinator.retryError, /existing bound draft/i);
   assert.deepEqual(coordinator.calls, [
     "onlyfans",
     "fansly",
     "manyvids",
     "pornhub",
-    "prepare:fansly:50",
-    "fansly",
   ]);
+  context.fixtureUploadSender = {
+    tab: { id: 41 },
+    frameId: 0,
+    documentId: tabDocumentId(openTabs.get(41)),
+    url: openTabs.get(41).url,
+  };
   const safeRetries = JSON.parse(
     await vm.runInContext(
       `(async () => {
@@ -1329,19 +1364,25 @@ function send(message) {
         session.platforms.set("onlyfans", {
           platform: "onlyfans",
           tabId: 41,
+          documentId: fixtureUploadSender.documentId,
+          boundUrl: fixtureUploadSender.url,
           status: "prepared"
         });
+        const port = { creatorUploadSessionId: id, postMessage() {} };
+        creatorUploadConsolePorts.add(port);
+        session.executionPort = port;
         let manualCheckpointError = "";
         try { await checkpointCreatorUploadCommit(id, "onlyfans", 41); }
         catch (error) { manualCheckpointError = error.message; }
         session.draft = { publishMode: "autonomous" };
-        const checkpoint = await checkpointCreatorUploadCommit(id, "onlyfans", 41);
+        const checkpoint = await checkpointCreatorUploadCommit(id, "onlyfans", 41, fixtureUploadSender);
         let duplicateCheckpointError = "";
         try {
-          await checkpointCreatorUploadCommit(id, "onlyfans", 41);
+          await checkpointCreatorUploadCommit(id, "onlyfans", 41, fixtureUploadSender);
         } catch (error) {
           duplicateCheckpointError = error.message;
         }
+        creatorUploadConsolePorts.delete(port);
         return JSON.stringify({
           commitRetry,
           unresolvedError,
