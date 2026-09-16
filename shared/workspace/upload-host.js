@@ -143,6 +143,10 @@
   }
   async function ensureBrowser() {
     await refreshBrowsers();
+    if (browserStatus?.updateRequired)
+      throw new Error(
+        "Reload the existing OFEnhancer extension in chrome://extensions after reviewing existing uploads, then reopen this Upload Hub. The running extension does not match the installed desktop version.",
+      );
     // Sole-browser selection belongs to a requested operation, never an observation.
     if (
       !browserStatus?.connected &&
@@ -278,13 +282,15 @@
       choose: "Choose Chrome browser",
       connected: "Chrome connected",
     };
-    statusView.message.textContent = readiness?.state
-      ? `${labels[readiness.state] || "Checking Chrome"}. ${readiness.message}`
-      : browserStatus.connected
-        ? "A browser exchange is live. Chrome setup diagnostics are unavailable."
-        : ids.length
-          ? "Choose the browser to use for uploads."
-          : "Open Chrome with the OFEnhancer extension to connect uploads.";
+    statusView.message.textContent = browserStatus.updateRequired
+      ? "Chrome extension update required. Review existing uploads, reload the existing extension in chrome://extensions, then reopen the Upload Hub. Keep its settings and recovery data."
+      : readiness?.state
+        ? `${labels[readiness.state] || "Checking Chrome"}. ${readiness.message}`
+        : browserStatus.connected
+          ? "A browser exchange is live. Chrome setup diagnostics are unavailable."
+          : ids.length
+            ? "Choose the browser to use for uploads."
+            : "Open Chrome with the OFEnhancer extension to connect uploads.";
     statusView.select.replaceChildren();
     const placeholder = document.createElement("option");
     placeholder.value = "";

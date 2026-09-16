@@ -58,7 +58,7 @@ async function main() {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus") {
             return {
-              productVersion: "0.20.24",
+              productVersion: "0.20.25",
               protocolVersion: 1,
               capabilities: [
                 "desktop-shell",
@@ -161,7 +161,7 @@ async function testChromeExtensionsHasItsOwnActionRow(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.24",
+          productVersion: "0.20.25",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };
@@ -216,7 +216,7 @@ async function testChromeReadinessStates(browser, port) {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus")
             return {
-              productVersion: "0.20.24",
+              productVersion: "0.20.25",
               protocolVersion: 1,
               capabilities: ["chrome-readiness"],
             };
@@ -275,7 +275,7 @@ async function testStaleChromeObservation(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.24",
+          productVersion: "0.20.25",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };

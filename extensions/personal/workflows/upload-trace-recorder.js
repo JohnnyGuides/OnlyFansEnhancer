@@ -170,6 +170,7 @@
   let performanceObserver = null;
   let lastRoute = "";
   let lastSnapshot = "";
+  let lastVisibility = "";
   let ownerId = "";
   let assetRole = "full";
   const documentGeneration = globalThis.crypto?.randomUUID?.() || "";
@@ -598,7 +599,7 @@
     const platform = platformFor(location.hostname);
     const trace = {
       schemaVersion: 1,
-      diagnosticVersion: 3,
+      diagnosticVersion: 4,
       ownerId,
       id: sessionId(),
       platform,
@@ -1226,17 +1227,37 @@
     }
   }
 
+  function recordPageVisibility() {
+    if (!ownsTrace(currentTrace)) return;
+    const state = {
+      visibility: document.visibilityState === "visible" ? "visible" : "hidden",
+      focused: document.hasFocus(),
+      documentGeneration,
+      frame: globalThis.top === globalThis.window ? "top" : "child",
+    };
+    const signature = JSON.stringify(state);
+    if (signature === lastVisibility) return;
+    lastVisibility = signature;
+    void appendEvent("page-visibility", state);
+    scheduleSnapshot();
+  }
+
   function startObservers() {
     stopObservers();
     if (!currentTrace?.active || currentTrace.origin !== location.origin)
       return;
     lastRoute = sanitizeUrl(location.href);
     lastSnapshot = "";
+    lastVisibility = "";
     document.addEventListener("click", handleClick, true);
     document.addEventListener("change", handleChange, true);
     document.addEventListener("input", handleInput, true);
     document.addEventListener("submit", handleSubmit, true);
     document.addEventListener("keydown", handleKeydown, true);
+    document.addEventListener("visibilitychange", recordPageVisibility);
+    globalThis.addEventListener("focus", recordPageVisibility);
+    globalThis.addEventListener("blur", recordPageVisibility);
+    recordPageVisibility();
     observeMutations();
     observeResources();
     routeTimer = setInterval(pollRouteAndTimeout, ROUTE_POLL_MS);
@@ -1259,6 +1280,9 @@
     document.removeEventListener("input", handleInput, true);
     document.removeEventListener("submit", handleSubmit, true);
     document.removeEventListener("keydown", handleKeydown, true);
+    document.removeEventListener("visibilitychange", recordPageVisibility);
+    globalThis.removeEventListener("focus", recordPageVisibility);
+    globalThis.removeEventListener("blur", recordPageVisibility);
   }
 
   function showPanelError(error) {

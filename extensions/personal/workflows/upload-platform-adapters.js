@@ -494,8 +494,34 @@
     );
     if (uploadObserved && uploadAttempts)
       await context.checkpointStep?.("start-upload", uploadCommand, "observed");
+    let nextForegroundCheck = 0;
+    const foregroundForObservation = async () => {
+      if (
+        !context.focusPage ||
+        (document.visibilityState === "visible" && document.hasFocus())
+      )
+        return true;
+      if (!currentCard()) return false;
+      if (Date.now() < nextForegroundCheck) return false;
+      const proof = await context.focusPage();
+      abortIfNeeded(signal);
+      nextForegroundCheck = Date.now() + (proof?.deferred ? 1000 : 30000);
+      if (proof?.deferred) return false;
+      if (proof?.focused !== true)
+        throw new Error(
+          "ManyVids [foreground-observation]: Upload-tab focus was not verified. Inspect the existing upload; do not attach it again.",
+        );
+      await waitFor(
+        () => document.visibilityState === "visible" && document.hasFocus(),
+        "ManyVids real foreground visibility after activation",
+        5000,
+        signal,
+      );
+      return true;
+    };
     const card = await waitFor(
-      () => {
+      async () => {
+        if (!(await foregroundForObservation())) return null;
         const card = currentEdit();
         return card && manyVidsEditControl(card, true) ? card : null;
       },
@@ -530,6 +556,8 @@
     if (
       !card.isConnected ||
       !edit.isConnected ||
+      (context.focusPage &&
+        (document.visibilityState !== "visible" || !document.hasFocus())) ||
       !enabled(edit) ||
       currentEdit() !== card ||
       (edit.getAttribute("href") ||
@@ -682,6 +710,22 @@
       signal,
     );
     await context.progress?.("configuring");
+    const title = one('input[name="title"]', "Pornhub title");
+    if (!draft.title) throw new Error("Pornhub approved title is missing.");
+    if (!enabled(title) || title.readOnly)
+      throw new Error(
+        "Pornhub [title]: The title input is unavailable; inspect the existing upload before retrying.",
+      );
+    fillTextControl(title, draft.title);
+    await waitFor(
+      () => {
+        const current = one('input[name="title"]', "Pornhub title readback");
+        return current.value === draft.title;
+      },
+      "Pornhub approved title readback",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
     const adapter = globalThis.CreatorToolkitAdapters?.phUploader;
     const toolkit = globalThis.CreatorToolkit;
     if (!adapter || !toolkit)
@@ -701,26 +745,27 @@
         maxDurationMs: 180_000,
       }),
     );
-    if (result.status !== "success")
+    if (result.status !== "success") {
+      const failure = result.items?.find((item) => item.status === "failed");
       throw new Error(
-        result.summary || "Pornhub metadata preparation stopped.",
+        "Pornhub [metadata-preset]: " +
+          (failure
+            ? failure.label + ": " + failure.detail
+            : result.summary || "Metadata preparation stopped."),
       );
-    const title = one('input[name="title"]', "Pornhub title");
-    if (!draft.title) throw new Error("Pornhub approved title is missing.");
-    fillTextControl(title, draft.title);
-    await waitFor(
-      () => {
-        const current = one('input[name="title"]', "Pornhub title readback");
-        return current.value === draft.title;
-      },
-      "Pornhub approved title readback",
-      DEFAULT_DOM_TIMEOUT,
-      signal,
-    );
+    }
+    if (
+      one('input[name="title"]', "Pornhub final title readback").value !==
+      draft.title
+    )
+      throw new Error(
+        "Pornhub [title]: Approved title changed during metadata preparation.",
+      );
     await context.progress?.("prepared");
     return {
       platform: "pornhub",
       status: "manual-submit-required",
+      manualFields: ["schedule", "custom thumbnail (optional)", "final Submit"],
       effectiveFilename: draft.pornhubFilename,
       preset: resolved.name,
     };
@@ -1886,15 +1931,18 @@
             return false;
           if (name === "media")
             assertActionLabels(node, ["media"], "Fansly media menu");
-          // Retain the existing component only when its own source choices identify it.
+          // The recorded homepage image identifies this owned source menu.
+          // Its choices may be created only after activation; resolve them then.
           const scope =
             node.matches(".default-dropdown > .dropdown-title") &&
             node.closest(".default-dropdown");
-          return (
+          const imageControl = node.querySelectorAll(":scope > i.fa-image");
+          return Boolean(
             scope &&
-            [...scope.querySelectorAll(".dropdown-item")].some(
-              (item) => normalizedText(item.textContent) === "upload new",
-            )
+            (imageControl.length === 1 ||
+              [...scope.querySelectorAll(".dropdown-item")].some(
+                (item) => normalizedText(item.textContent) === "upload new",
+              )),
           );
         });
         if (candidates.length !== 1)
@@ -2182,29 +2230,58 @@
     const { draft, signal } = context;
     if (draft.hasTeaser !== false) {
       await context.progress?.("waiting-for-teaser");
-      click(
-        exactText(
-          "xd-localization-string",
-          "Add Free Preview",
-          "Fansly free preview",
-          fullCard,
-        ),
-        "Fansly free preview",
-      );
-      click(
-        exactText(
-          ".dropdown-item",
-          "Upload New",
-          "Fansly preview source",
-          fullCard,
-        ),
-        "Fansly preview source",
-      );
-      const input = one(
-        "input[type='file']:not([multiple])",
-        "Fansly preview input",
-        fullCard,
-        { allowHidden: true },
+      const input = await preparationBoundary(
+        "Fansly",
+        "preview-source",
+        async () => {
+          assertFanslyComposer(composer);
+          if (
+            !fullCard.isConnected ||
+            !modal.contains(fullCard) ||
+            one(
+              "app-account-media-upload.active-modal",
+              "Fansly owned media modal",
+            ) !== modal
+          )
+            throw new Error("Fansly preview media ownership changed.");
+          click(
+            exactText(
+              "xd-localization-string",
+              "Add Free Preview",
+              "Fansly free preview",
+              fullCard,
+            ),
+            "Fansly free preview",
+          );
+          const source = exactText(
+            ".dropdown-item",
+            "Upload New",
+            "Fansly preview source",
+            fullCard,
+          );
+          assertActionLabels(source, ["upload new"], "Fansly preview source");
+          const selection = fanslySourceActivation(
+            source,
+            "Fansly preview Upload New",
+          );
+          const ownedInput = one(
+            "input[type='file']:not([multiple]):not([webkitdirectory]):not([directory])",
+            "Fansly preview input",
+            fullCard,
+            { allowHidden: true },
+          );
+          if (
+            !ownedInput.isConnected ||
+            !enabled(ownedInput) ||
+            !fullCard.isConnected ||
+            !modal.contains(fullCard) ||
+            !selection.activated.has(ownedInput)
+          )
+            throw new Error(
+              "Fansly preview-input activation belongs to a changed or foreign media source.",
+            );
+          return ownedInput;
+        },
       );
       for (const old of document.querySelectorAll("[data-creator-fansly-file]"))
         old.removeAttribute("data-creator-fansly-file");
@@ -2605,6 +2682,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
+    revision: "upload-hub-0.20.25",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

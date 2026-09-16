@@ -63,7 +63,7 @@ public sealed class ChromeIntegrationTests
         fixture.Integration.Prepare();
         var browser = Guid.NewGuid().ToString();
         var connection = Guid.NewGuid().ToString();
-        JsonElement Exchange(string? generation, string id) => JsonSerializer.SerializeToElement(fixture.Channel.Exchange(JsonSerializer.SerializeToElement(new { browserId = id, connectionId = connection, extensionId = ChromeIntegration.CanonicalExtensionId, bridgeExtensionId = ChromeIntegration.CanonicalExtensionId, setupGeneration = generation })));
+        JsonElement Exchange(string? generation, string id) => JsonSerializer.SerializeToElement(fixture.Channel.Exchange(JsonSerializer.SerializeToElement(new { browserId = id, connectionId = connection, extensionId = ChromeIntegration.CanonicalExtensionId, bridgeExtensionId = ChromeIntegration.CanonicalExtensionId, extensionVersion = OFEnhancer.Protocol.AgentProtocol.ProductVersion, setupGeneration = generation })));
         string challenge = Exchange(null, browser).GetProperty("setupGeneration").GetString()!;
         Assert.AreEqual("offline", fixture.Integration.Get().State);
         Exchange(challenge, browser);

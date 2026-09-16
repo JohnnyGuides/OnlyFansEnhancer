@@ -10,6 +10,8 @@
   const writeChains = new Map();
   const RECOVERY_KEY = "creatorUploadRecoveryV1";
   const ACTION_KEY = "creatorUploadActionsV1";
+  const RUNTIME_VERSION_KEY = "creatorUploadRuntimeVersionV1";
+  const VERSION = /^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/;
 
   async function digest(value) {
     const bytes = await crypto.subtle.digest(
@@ -285,6 +287,10 @@
       id: record.id,
       schemaVersion: 1,
       explicitResumeRequired: true,
+      ...(record.archivedVersion === "legacy" ||
+      VERSION.test(record.archivedVersion || "")
+        ? { archivedVersion: record.archivedVersion }
+        : {}),
       steps: record.steps.map((step) => ({
         ...recoveryStep(step),
         at: finiteInteger(step.at) || 0,
@@ -374,6 +380,74 @@
       return { cleared: records.length };
     });
   }
+  async function ensureRuntimeVersion(version) {
+    if (typeof version !== "string" || !VERSION.test(version))
+      throw new Error(
+        "Upload runtime version is invalid; no queue state was changed.",
+      );
+    return enqueueWrite(RUNTIME_VERSION_KEY, async () => {
+      const previous = (await chrome.storage.local.get(RUNTIME_VERSION_KEY))[
+        RUNTIME_VERSION_KEY
+      ];
+      if (previous === version) return { changed: false, version };
+      if (
+        previous !== undefined &&
+        (typeof previous !== "string" || !VERSION.test(previous))
+      )
+        throw new Error(
+          "Stored upload runtime version is invalid; preserve recovery data and repair the installation.",
+        );
+      if (typeof previous === "string") {
+        const old = previous.split(".").map(Number),
+          next = version.split(".").map(Number);
+        const first = next.findIndex((value, index) => value !== old[index]);
+        if (first >= 0 && next[first] < old[first])
+          throw new Error(
+            "Upload runtime downgrade is not allowed to adopt a newer queue. Reload the matching installed version.",
+          );
+      }
+      // An upgrade retires execution bindings, not evidence of effects on a site.
+      await migrateFinalActions();
+      return enqueueWrite(RECOVERY_KEY, async () => {
+        const records = await listRecovery();
+        const archived = records.map((record) => ({
+          ...record,
+          archivedVersion: record.archivedVersion || previous || "legacy",
+        }));
+        await chrome.storage.local.set({ [RECOVERY_KEY]: archived });
+        if ((await digest(await listRecovery())) !== (await digest(archived)))
+          throw new Error(
+            "Upload upgrade archive was not durable. Old bindings were preserved.",
+          );
+        const stored = await chrome.storage.session.get(null);
+        const keys = Object.keys(stored).filter((name) =>
+          name.startsWith(KEY_PREFIX),
+        );
+        // Recheck legacy final flags before removing any transient session token.
+        await migrateFinalActions();
+        if (keys.length) await chrome.storage.session.remove(keys);
+        const current = await chrome.storage.session.get(keys);
+        if (keys.some((name) => Object.hasOwn(current, name)))
+          throw new Error(
+            "Old upload queue bindings could not be retired. No new run may start.",
+          );
+        await chrome.storage.local.set({ [RUNTIME_VERSION_KEY]: version });
+        if (
+          (await chrome.storage.local.get(RUNTIME_VERSION_KEY))[
+            RUNTIME_VERSION_KEY
+          ] !== version
+        )
+          throw new Error("Upload runtime version checkpoint was not durable.");
+        return {
+          changed: true,
+          version,
+          retiredSessions: keys.length,
+          archivedPreparations: archived.length,
+        };
+      });
+    });
+  }
+
   const DRAFT_STRINGS = Object.freeze({
     title: 500,
     description: 10_000,
@@ -692,6 +766,7 @@
     listRecovery,
     recordStep,
     clearPreparation,
+    ensureRuntimeVersion,
     assertAvailable,
     ACTION_KEY,
     workIdentity,

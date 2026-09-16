@@ -32,7 +32,16 @@ function harness() {
     addEventListener() {},
     removeEventListener() {},
     chrome: { runtime },
-    CreatorUploadPlatformAdapters: {},
+    CreatorUploadPlatformAdapters: {
+      revision:
+        "upload-hub-" +
+        JSON.parse(
+          fs.readFileSync(
+            path.join(__dirname, "../../extensions/personal/manifest.json"),
+            "utf8",
+          ),
+        ).version,
+    },
     CreatorUploadFileBridge: {
       async waitFor() {
         return { selected: true };

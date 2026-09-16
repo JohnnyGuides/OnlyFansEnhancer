@@ -187,3 +187,33 @@ acquisition URL forms never makes those URLs interchangeable during execution.
 Top frame, tab, document ID, active session and live connection checks remain.
 This narrow contract is not a claim of complete authenticated live acceptance;
 see the dated limitations in [acceptance](acceptance.md).
+
+## Upload runtime versions and foreground observation
+
+The desktop browser exchange requires a matching extension product version in
+addition to the existing identity, native-origin, connection and setup-generation
+proofs. An incompatible worker receives no new commands and the UI requests a
+reload of the existing extension. Pending commands are rejected, not replayed
+when a compatible worker later connects. Page adapters carry a product-coupled
+revision and must match before file-bridge installation or adapter execution.
+
+A version transition archives preparation records and durably preserves final
+attempts before removing only transient upload-session bindings. Archived steps
+still participate in same-work conflict checks. Same-version startup changes
+nothing; malformed version state and downgrades fail without adopting a queue.
+A durable final receipt without an approved draft is review evidence, not an
+executable session. No broad browser-storage or catalogue reset is involved.
+
+ManyVids foreground assistance is a privileged upload-observation request. It
+revalidates the exact session, port, top frame, tab, document and route before and
+after real Chrome tab/window activation. A short lease prevents overlap with
+file handoff; pending files and sibling composer/editor work defer activation.
+The adapter verifies actual visibility/focus, throttles subsequent requests and
+retains the same-card/exact-destination guard at Edit. Focus transport failures
+are not automatically retried. Other platform workflows do not receive a generic
+button-click or navigation facility.
+
+New draft retires only a settled Upload Hub view and its file/port handles. Late
+old-port, retry and social-observation replies cannot populate the next view.
+Active runs and unresolved handoffs refuse the reset. Remote drafts, archived
+preparation and durable final-attempt evidence are not deleted.

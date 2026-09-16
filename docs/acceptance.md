@@ -204,3 +204,51 @@ surface headings, while rejecting arbitrary text and long numeric identifiers.
 Its redacted routes do not by themselves prove exact account/video identity;
 that proof must still come from the bound runtime and same-card editor checks.
 A compiled installer or a green fixture run does not close these live gates.
+
+## Upload Hub trace follow-up — 0.20.25
+
+The owner supplied separate manual Fansly and ManyVids traces on September 16, 2026. These are evidence of current controls and manual actions, not recordings
+of a successful automated four-platform run. Private trace JSON and screenshots
+remain outside the repository.
+
+Fansly's trace shows the homepage image control inside its source dropdown,
+Upload New activating the composer's hidden multiple-file input, and an active
+media modal after selection. That modal contains a single-select preview input
+inside the full-media card as well as other inputs. The source resolver no longer
+requires Upload New children before opening the image menu. The preview path
+requires the exact input activated by the owned card's Upload New action; a
+foreign input, conflicting label, no-op or multiple activation stops before the
+teaser handoff. The trace does not independently establish whether source choices
+are lazy, successful processing completion, or the approved preset's final state.
+Those are separate fixture/acceptance claims.
+
+ManyVids' trace records a manual button action followed by an edit-vid document,
+then editor title/description, preview, thumbnail and launch controls. It begins
+after the main transfer and does not retain the exact completion-card identity or
+visibility changes. The owner separately reports that activating the tab reveals
+Edit. The adapter now requests a bounded real foreground activation while
+observing its owned upload. Tests cover exact tab/window/document binding,
+sibling-interaction deferral, foreground denial and same-card editor ownership.
+An isolated Chrome extension test verifies the actual tabs/windows APIs and
+unchanged document ID with inert intercepted pages. It is not authenticated
+ManyVids acceptance. Recorder diagnostic version 4 includes bounded visibility
+and focus events so future evidence can show that transition explicitly.
+
+Pornhub's approved title is now filled and read back before preset iteration,
+then verified again afterward. A partially completed preset no longer prevents
+the title from being attempted. Schedule and optional custom thumbnail still
+require manual review and are listed on the platform card; their current DOM
+contracts have not been established by the supplied screenshot.
+
+The repeated OnlyFans Expiration Period screenshot is an unresolved live failure.
+An installed package does not prove that Chrome's running worker or page adapters
+were reloaded. Version checks now reject incompatible workers and page adapters
+before a new file bridge or run, without replacing an active page. This is a
+runtime safety fix, not proof of the current schedule control. The actual current
+Schedule post action and scheduler surface still need a bounded trace after
+checking the running version. Do not repeat a previous file selection to obtain
+it; inspect the existing draft and stop before final Save/Post.
+
+All new preparation and test shortcuts remain manual. No production-site final
+Save, Post or Submit is authorized by a fixture pass. Full authenticated retests,
+installed-upgrade acceptance and current-site completion remain separate gates.

@@ -106,6 +106,8 @@ internal sealed class ChromeIntegration
             int live = browserStatus.GetProperty("browsers").GetArrayLength();
             bool selected = browserStatus.GetProperty("connected").GetBoolean();
             bool selectionRequired = browserStatus.GetProperty("selectionRequired").GetBoolean();
+            if (prepared && browserStatus.TryGetProperty("updateRequired", out var update) && update.GetBoolean())
+                error = BrowserUploadChannel.ExtensionReloadMessage;
             string state = !chrome ? "not-found" : error is not null ? "repair" : !prepared ? "setup" : live == 0 ? "offline" : (live > 1 || selectionRequired) && !selected ? "choose" : "connected";
             string message = state switch
             {

@@ -3388,3 +3388,192 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
     }
   });
 }
+
+test("Neutral test preset fills the actual Upload Hub without starting or saving profiles", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const folder = fs.mkdtempSync(
+    path.join(require("node:os").tmpdir(), "ofenhancer-neutral-"),
+  );
+  for (const name of [
+    "neutral-full.mp4",
+    "neutral-teaser.mp4",
+    "neutral-thumbnail-valid.png",
+  ])
+    fs.writeFileSync(path.join(folder, name), "inert fixture");
+  try {
+    const page = await browser.newPage();
+    await page.clock.setFixedTime(new Date("2026-09-16T10:00:00Z"));
+    await page.setContent(
+      fs
+        .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+        .replace(/<script[^>]+><\/script>/gi, ""),
+    );
+    await page.evaluate(() => {
+      window.sent = [];
+      window.CreatorCatalogueClient = {
+        loadConfig: async () => ({ connected: false }),
+      };
+      window.chrome = {
+        runtime: {
+          connect() {
+            const listeners = [];
+            window.deliverOld = (message) =>
+              listeners.forEach((listener) => listener(message));
+            return {
+              onMessage: {
+                addListener: (listener) => listeners.push(listener),
+              },
+              onDisconnect: { addListener() {} },
+              disconnect() {},
+              postMessage(message) {
+                window.boundSession = message.sessionId;
+              },
+            };
+          },
+          sendMessage(message, callback) {
+            sent.push(message.type);
+            if (message.type === "PREPARE_CREATOR_UPLOAD") {
+              window.preparedDraft = message.draft;
+              return callback({
+                ok: true,
+                uploadSession: {
+                  sessionId: message.sessionId,
+                  platforms: message.targets.map((platform) => ({
+                    platform,
+                    status: "prepared",
+                  })),
+                },
+              });
+            }
+            if (message.type === "START_CREATOR_UPLOAD") {
+              window.finishNeutralStart = () =>
+                callback({
+                  ok: true,
+                  results: message.targets.map((platform) => ({
+                    platform,
+                    status: "manual-submit-required",
+                  })),
+                });
+              return;
+            }
+            callback({
+              ok: true,
+              creatorTools: { registered: [], skipped: [] },
+            });
+          },
+        },
+      };
+    });
+    await addUploadConsoleScripts(page);
+    assert.equal(await page.locator("#neutralTestPreset").count(), 1);
+    const saved = await page.evaluate(async () =>
+      JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
+    );
+    await page.locator("#neutralTestFolder").setInputFiles(folder);
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "Neutral upload verification",
+    );
+    assert.equal(
+      await page.locator("#uploadDescription").inputValue(),
+      "Neutral upload verification. Unpublished test.",
+    );
+    assert.equal(await page.locator("#mainPublishMode").inputValue(), "manual");
+    assert.equal(await page.locator("#mainPublishMode").isDisabled(), true);
+    assert.equal(
+      await page.locator("#catalogueAssociation").inputValue(),
+      "later",
+    );
+    assert.equal(
+      await page.locator("#contentPreset").inputValue(),
+      "Neutral test (manual)",
+    );
+    assert.equal(await page.locator("#releaseDate").inputValue(), "2026-09-18");
+    assert.match(
+      await page.locator("#fullFileSummary").textContent(),
+      /neutral-full/,
+    );
+    assert.match(
+      await page.locator("#teaserFileSummary").textContent(),
+      /neutral-teaser/,
+    );
+    assert.match(
+      await page.locator("#manyvidsThumbnailSummary").textContent(),
+      /neutral-thumbnail-valid/,
+    );
+    assert.equal(
+      (await page.evaluate(() => sent)).some((x) =>
+        /START|PREPARE_CREATOR_UPLOAD|CLEAR_CREATOR_UPLOAD/.test(x),
+      ),
+      false,
+    );
+    assert.equal(
+      await page.evaluate(async () =>
+        JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
+      ),
+      saved,
+    );
+    await page.locator("#confirmUpload").waitFor({ state: "visible" });
+    await page.locator("#confirmUpload").click();
+    await page.waitForFunction(() => typeof finishNeutralStart === "function");
+    await page.locator("#newUploadDraft").click();
+    assert.match(
+      await page.locator("#neutralTestStatus").textContent(),
+      /still active|unresolved/,
+    );
+    assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
+    const prepared = await page.evaluate(() => preparedDraft);
+    assert.equal(prepared.publishMode, "manual");
+    assert.equal(
+      prepared.description,
+      "Neutral upload verification. Unpublished test.",
+    );
+    assert.deepEqual(
+      prepared.profiles.phUploader.presets["Neutral test (manual)"].tags,
+      [],
+    );
+    await page.evaluate(() => finishNeutralStart());
+    await page
+      .locator('.result-status[data-state="manual-submit-required"]')
+      .first()
+      .waitFor();
+    assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
+    await page.locator("#newUploadDraft").click();
+    assert.equal(await page.locator("#uploadFullVideo").isDisabled(), false);
+    assert.equal(await page.locator("#uploadFullVideo").inputValue(), "");
+    assert.equal(await page.locator(".result-card").count(), 0);
+    await page.evaluate(() =>
+      deliverOld({
+        type: "platform-result",
+        sessionId: boundSession,
+        platform: "fansly",
+        result: { status: "failed", error: "stale previous run" },
+      }),
+    );
+    assert.equal(await page.locator(".result-card").count(), 0);
+    assert.equal(
+      (await page.evaluate(() => sent)).includes(
+        "CLEAR_CREATOR_UPLOAD_PREPARATION",
+      ),
+      false,
+    );
+    await page.locator("#uploadTitle").fill("changed test title");
+    await page.locator("#neutralTestPreset").click();
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "Neutral upload verification",
+    );
+    await page.locator("#leaveNeutralTest").click();
+    assert.equal(await page.locator("#mainPublishMode").isDisabled(), false);
+    assert.equal(await page.locator("#contentPreset").inputValue(), "");
+    assert.equal(
+      await page.evaluate(async () =>
+        JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
+      ),
+      saved,
+    );
+  } finally {
+    await browser.close();
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});

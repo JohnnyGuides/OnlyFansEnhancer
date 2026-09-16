@@ -73,6 +73,33 @@
             <span class="local-badge">Kept in this tab</span>
           </div>
 
+          <div class="neutral-test-tools">
+            <button id="neutralTestPreset" type="button">
+              Neutral test preset
+            </button>
+            <button id="newUploadDraft" type="button">New draft</button>
+            <button id="chooseNeutralTestFolder" type="button">
+              Choose test folder
+            </button>
+            <button id="leaveNeutralTest" type="button" hidden>
+              Use saved presets
+            </button>
+            <input
+              id="neutralTestFolder"
+              type="file"
+              webkitdirectory
+              multiple
+              hidden
+              aria-label="Neutral test media folder"
+            />
+            <p id="neutralTestStatus" class="hint" role="status">
+              Choose your test-media folder once per open Upload Hub. Loads
+              neutral-full.mp4, neutral-teaser.mp4 and
+              neutral-thumbnail-valid.png, neutral text and the next Friday.
+              Manual only; does not start uploads or change saved presets.
+            </p>
+          </div>
+
           <label for="uploadFullVideo">Full video</label>
           <input
             id="uploadFullVideo"

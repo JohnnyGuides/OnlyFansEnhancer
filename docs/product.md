@@ -155,3 +155,35 @@ The following intent is retained so it is not mistaken for discarded scope:
 These statements preserve product direction, not permission to fill evidence gaps
 or remove current safeguards. No unresolved public-platform trace is silently
 promoted to a tested implementation.
+
+## Neutral test preset and fresh drafts
+
+Upload Hub provides **Neutral test preset** and **Choose test folder**. Select a
+folder containing exactly one direct child with each required name:
+`neutral-full.mp4`, `neutral-teaser.mp4` and `neutral-thumbnail-valid.png`.
+File references remain in the open Hub; the shortcut does not read a
+multi-gigabyte video into JavaScript memory or persist its path in settings.
+Reopening the Hub requires selecting the folder again.
+
+The shortcut fills neutral title/description, the files, all four main-video
+destinations and the next Friday at 15:00 UTC. It locks manual mode and skips
+catalogue association. Fansly's saved caption and promotional FYP toggle, plus
+saved media tags/categories, do not leak into this draft. Existing pricing/access
+permissions are not silently replaced. Saved presets are unchanged. Review the
+plan and use the ordinary confirmation to start; the shortcut never starts an
+upload by itself.
+
+**New draft** is available after the run has settled. It clears this view and
+selected files, but preserves remote uploads and recovery/publication evidence.
+The test folder's file references can be reused through Neutral test preset in
+the same Hub. This does not authorize repeating an uncertain upload; the normal
+same-work safeguards still apply. An active run or pending file request prevents
+New draft. **Use saved presets** exits neutral mode on a fresh draft.
+
+Updates replace the application in its existing installation and retain the
+extension identity and settings. They do not run a destructive uninstall or
+remove/reinstall the Chrome extension. Review active uploads before updating,
+then reload the existing extension and reopen the Hub when instructed. A
+mismatched running extension is shown as reload-required rather than connected.
+Old execution bindings are retired on the version transition, while uncertainty
+and final-action evidence remain available for review and duplicate prevention.

@@ -250,6 +250,7 @@ test("Pornhub uploads the approved file before applying its metadata preset", as
     assert.deepEqual(result.outcome, {
       platform: "pornhub",
       status: "manual-submit-required",
+      manualFields: ["schedule", "custom thumbnail (optional)", "final Submit"],
       effectiveFilename: "neutral-limited.mp4",
       preset: "Straight",
     });

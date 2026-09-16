@@ -224,6 +224,7 @@
                 browserId,
                 connectionId,
                 extensionId: chrome.runtime.id,
+                extensionVersion: chrome.runtime.getManifest?.().version || "",
                 setupGeneration,
                 replies: replies.splice(0, 64),
                 events: events.splice(0, 64),

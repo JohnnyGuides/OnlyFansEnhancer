@@ -92,6 +92,65 @@
       : "";
   }
 
+  const NEUTRAL_TEST_PRESET = "Neutral test (manual)";
+  function neutralTestSelection(files) {
+    const selected = [...files];
+    const roles = {
+      fullFile: "neutral-full.mp4",
+      teaserFile: "neutral-teaser.mp4",
+      thumbnailFile: "neutral-thumbnail-valid.png",
+    };
+    const result = {};
+    for (const [role, name] of Object.entries(roles)) {
+      const candidates = selected.filter(
+        (file) => file.name?.toLowerCase() === name,
+      );
+      if (candidates.length !== 1)
+        throw new Error(
+          "Neutral test " +
+            name +
+            " is missing or ambiguous. Choose the test-media folder.",
+        );
+      const file = candidates[0];
+      const relative = String(file.webkitRelativePath || "").split("/");
+      if (relative.length > 2)
+        throw new Error(
+          "Neutral test files must be directly inside the selected folder.",
+        );
+      if (!(role === "thumbnailFile" ? isImageFile(file) : isVideoFile(file)))
+        throw new Error(
+          "Neutral test " +
+            name +
+            " must be a nonempty " +
+            (role === "thumbnailFile" ? "image" : "video") +
+            ".",
+        );
+      result[role] = file;
+    }
+    return result;
+  }
+
+  function neutralTestProfiles(saved) {
+    const profiles = structuredClone(saved);
+    profiles.fanslyPrefill = {
+      ...profiles.fanslyPrefill,
+      message: "",
+      toggles: { ...profiles.fanslyPrefill.toggles, "Post to FYP": false },
+    };
+    profiles.manyvidsAutofill = { ...profiles.manyvidsAutofill, tags: [] };
+    profiles.phUploader = {
+      presets: {
+        [NEUTRAL_TEST_PRESET]: {
+          orientation: "Straight",
+          tags: [],
+          categories: [],
+        },
+      },
+      seriesPresets: {},
+    };
+    return profiles;
+  }
+
   function profileAuthorizationSummary(profiles = {}, contentPreset = "") {
     const fansly = profiles.fanslyPrefill || {};
     const manyvids = profiles.manyvidsAutofill || {};
@@ -690,9 +749,12 @@
     let manualTargets = null;
     let uploadWithoutSheet = catalogueAssociation?.value === "later";
     let activeSession = null;
+    let runBusy = false;
     let socialPollTimer = null;
     let workflowProfiles = null;
     let profilesLoaded = false;
+    let neutralTestMode = false;
+    let neutralTestFiles = null;
     let subredditSnapshot = null;
     let subredditLoadPromise = null;
     let lastSubredditSelection = [];
@@ -1246,7 +1308,9 @@
     function draft() {
       const value = normalizeDraft({
         workflowMode: workflowMode?.value || "both",
-        publishMode: mainPublishMode?.value || "manual",
+        publishMode: neutralTestMode
+          ? "manual"
+          : mainPublishMode?.value || "manual",
         fullFile,
         teaserFile,
         thumbnailFile,
@@ -1278,11 +1342,7 @@
         value.valid = false;
         return value;
       }
-      const profiles = {
-        fanslyPrefill: structuredClone(workflowProfiles.fanslyPrefill),
-        manyvidsAutofill: structuredClone(workflowProfiles.manyvidsAutofill),
-        phUploader: structuredClone(workflowProfiles.phUploader),
-      };
+      const profiles = profilesForDraft();
       if (
         value.targets.includes("pornhub") &&
         !Object.hasOwn(profiles.phUploader.presets, value.contentPreset)
@@ -1302,15 +1362,20 @@
       return value;
     }
 
+    function profilesForDraft() {
+      const profiles = {
+        fanslyPrefill: structuredClone(workflowProfiles.fanslyPrefill),
+        manyvidsAutofill: structuredClone(workflowProfiles.manyvidsAutofill),
+        phUploader: structuredClone(workflowProfiles.phUploader),
+      };
+      return neutralTestMode ? neutralTestProfiles(profiles) : profiles;
+    }
+
     async function refreshProfiles() {
       const settings = await globalThis.CreatorToolkit.loadSettings();
       workflowProfiles = settings.profiles;
       profilesLoaded = true;
-      return JSON.stringify({
-        fanslyPrefill: workflowProfiles.fanslyPrefill,
-        manyvidsAutofill: workflowProfiles.manyvidsAutofill,
-        phUploader: workflowProfiles.phUploader,
-      });
+      return JSON.stringify(profilesForDraft());
     }
 
     function refreshReleaseSummary() {
@@ -1888,6 +1953,7 @@
 
     function renderPlatformStates() {
       results.replaceChildren();
+      if (!activeSession && platformStates.size === 0) return;
       for (const platform of selectedRunTargets()) {
         const state = platformStates.get(platform) || { status: "prepared" };
         const card = document.createElement("article");
@@ -2015,10 +2081,12 @@
             type: "RESUME_CREATOR_SOCIAL_DISTRIBUTION",
             sessionId,
           });
+          if (activeSession?.id !== sessionId || activeSession.closed) return;
           const resumed = response.socialDistribution?.jobs?.x;
           applySocialJob(resumed);
           scheduleSocialResume(sessionId, resumed);
         } catch (error) {
+          if (activeSession?.id !== sessionId || activeSession.closed) return;
           setPlatformState("x", {
             status: "failed",
             error: error.message,
@@ -2202,7 +2270,12 @@
         const port = chrome.runtime.connect({ name: "creator-upload-console" });
         session.port = port;
         port.onMessage.addListener((message) => {
-          if (message?.sessionId !== sessionId) return;
+          if (
+            session.closed ||
+            session.port !== port ||
+            message?.sessionId !== sessionId
+          )
+            return;
           if (message.type === "file-request") {
             deliverFile(session, message);
             return;
@@ -2253,17 +2326,20 @@
 
     async function retryPlatform(platform, button) {
       if (!activeSession) return;
+      const session = activeSession;
       button.disabled = true;
       setPlatformState(platform, { status: "prepared", error: "" });
       try {
         const response = await sendMessage({
           type: "RETRY_CREATOR_UPLOAD_PLATFORM",
-          sessionId: activeSession.id,
+          sessionId: session.id,
           platform,
         });
+        if (activeSession !== session || session.closed) return;
         for (const result of response.results || [])
           setPlatformState(result.platform, result);
       } catch (error) {
+        if (activeSession !== session || session.closed) return;
         setPlatformState(platform, { status: "failed", error: error.message });
       } finally {
         button.disabled = false;
@@ -2338,6 +2414,7 @@
       )
         return;
       let targets = [];
+      runBusy = true;
       confirmUpload.disabled = true;
       rejectMatch.disabled = true;
       try {
@@ -2544,6 +2621,8 @@
         }
         confirmUpload.disabled = false;
         rejectMatch.disabled = false;
+      } finally {
+        runBusy = false;
       }
     }
 
@@ -2618,6 +2697,184 @@
       anchor.download = "ofenhancer-preparation-diagnostics.json";
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    function newUploadDraft() {
+      const settled = new Set([
+        "manual-submit-required",
+        "failed",
+        "cancelled",
+        "edit-failed",
+        "posted-link-unresolved",
+        "catalogue-commit-failed",
+        "recorded-local",
+        "catalogue-updated",
+        "uploaded-no-sheet",
+        "already-linked",
+        "idempotent",
+      ]);
+      if (
+        runBusy ||
+        activeSession?.pendingFiles?.size ||
+        (activeSession &&
+          (platformStates.size === 0 ||
+            [...platformStates.values()].some(
+              (state) => !settled.has(state.status),
+            )))
+      )
+        throw new Error(
+          "This run is still active or its file delivery is unresolved. Stop or finish observation before starting a new draft; nothing was reset.",
+        );
+      if (activeSession) {
+        activeSession.closed = true;
+        activeSession.channel?.close();
+        activeSession.port?.disconnect();
+      }
+      activeSession = null;
+      selectedCatalogueRow = null;
+      clearTimeout(socialPollTimer);
+      clearTimeout(matchTimer);
+      platformStates.clear();
+      renderPlatformStates();
+      for (const input of [
+        fullInput,
+        teaserInput,
+        thumbnailInput,
+        pornhubInput,
+        socialInput,
+      ]) {
+        input.disabled = false;
+        input.value = "";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      title.value = "";
+      description.value = "";
+      if (workflowMode) workflowMode.disabled = neutralTestMode;
+      if (catalogueAssociation) catalogueAssociation.disabled = neutralTestMode;
+      mainPublishMode.disabled = neutralTestMode;
+      contentPreset.disabled = neutralTestMode;
+      rejectMatch.disabled = false;
+      get("#preparationControls").hidden = true;
+      get("#savedCatalogueAssociation").hidden = true;
+      get("#redditLinkStep").hidden = true;
+      invalidateMatch();
+      scheduleMatch();
+      get("#neutralTestStatus").textContent =
+        "New local draft. Remote uploads and recovery evidence were preserved; the neutral preset button can reuse your chosen test folder. Review previous remote drafts before reusing the same file.";
+    }
+    get("#newUploadDraft")?.addEventListener("click", () => {
+      try {
+        newUploadDraft();
+      } catch (error) {
+        get("#neutralTestStatus").textContent = error.message;
+      }
+    });
+
+    function applyNeutralTestPreset() {
+      if (activeSession)
+        throw new Error(
+          "Finish or stop the current preparation, then start a new draft before loading a test preset. Existing uploads were not changed.",
+        );
+      if (!neutralTestFiles) {
+        get("#neutralTestFolder").click();
+        return;
+      }
+      neutralTestMode = true;
+      workflowMode.value = "main";
+      workflowMode.disabled = true;
+      mainPublishMode.value = "manual";
+      mainPublishMode.disabled = true;
+      catalogueAssociation.value = "later";
+      catalogueAssociation.disabled = true;
+      uploadWithoutSheet = true;
+      if (
+        ![...contentPreset.options].some(
+          (option) => option.value === NEUTRAL_TEST_PRESET,
+        )
+      )
+        contentPreset.add(new Option(NEUTRAL_TEST_PRESET, NEUTRAL_TEST_PRESET));
+      contentPreset.value = NEUTRAL_TEST_PRESET;
+      contentPreset.disabled = true;
+      title.value = "Neutral upload verification";
+      description.value = "Neutral upload verification. Unpublished test.";
+      releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
+      for (const [input, file] of [
+        [fullInput, neutralTestFiles.fullFile],
+        [teaserInput, neutralTestFiles.teaserFile],
+        [thumbnailInput, neutralTestFiles.thumbnailFile],
+      ]) {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      pornhubInput.value = "";
+      pornhubFile = null;
+      get("#pornhubFileSummary").textContent =
+        "Neutral test uses the full-video file. Final Submit remains manual.";
+      for (const control of [onlyfans, fansly, manyvids, pornhub])
+        control.checked = true;
+      socialX.checked = false;
+      socialReddit.checked = false;
+      get("#leaveNeutralTest").hidden = false;
+      get("#neutralTestStatus").textContent =
+        "Neutral test loaded. Manual preparation only; no catalogue writes or saved preset changes. Review destinations and click Yes to start. File handles stay in this tab.";
+      updateWorkflowVisibility();
+      refreshReleaseSummary();
+      invalidateMatch();
+      scheduleMatch();
+    }
+    function leaveNeutralTest() {
+      if (activeSession)
+        throw new Error("Start a new draft before changing test mode.");
+      neutralTestMode = false;
+      for (const control of [
+        workflowMode,
+        mainPublishMode,
+        catalogueAssociation,
+        contentPreset,
+      ])
+        control.disabled = false;
+      for (const option of [...contentPreset.options])
+        if (option.value === NEUTRAL_TEST_PRESET) option.remove();
+      contentPreset.value = "";
+      get("#leaveNeutralTest").hidden = true;
+      get("#neutralTestStatus").textContent =
+        "Saved presets restored for this draft. Previously chosen test files remain selected; nothing was uploaded.";
+      scheduleMatch();
+    }
+    for (const [selector, action] of [
+      ["#neutralTestPreset", applyNeutralTestPreset],
+      ["#leaveNeutralTest", leaveNeutralTest],
+      [
+        "#chooseNeutralTestFolder",
+        () => {
+          if (activeSession)
+            throw new Error("Start a new draft before changing test files.");
+          get("#neutralTestFolder").click();
+        },
+      ],
+    ])
+      get(selector)?.addEventListener("click", () => {
+        try {
+          action();
+        } catch (error) {
+          get("#neutralTestStatus").textContent = error.message;
+        }
+      });
+    get("#neutralTestFolder")?.addEventListener("change", () => {
+      try {
+        if (activeSession)
+          throw new Error(
+            "Current preparation is unchanged. Start a new draft before selecting test files.",
+          );
+        neutralTestFiles = neutralTestSelection(
+          get("#neutralTestFolder").files,
+        );
+        applyNeutralTestPreset();
+      } catch (error) {
+        get("#neutralTestStatus").textContent = error.message;
+      }
     });
 
     fullInput.addEventListener("change", () => {
@@ -2940,6 +3197,8 @@
     nextFridayLocalValue,
     learnSeriesPresetMap,
     normalizeDraft,
+    neutralTestSelection,
+    neutralTestProfiles,
     normalizeSocialDraft,
     profileAuthorizationSummary,
     proposalSignature,

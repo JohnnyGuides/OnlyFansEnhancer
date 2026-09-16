@@ -38,7 +38,7 @@ for (const publicAlternative of [false, true]) {
           function preview() { card.insertAdjacentHTML('beforeend','<div class="preview-image">Preview</div>'); }
           if (review) { permissions(); preview(); }
           card.querySelector('xd-localization-string').onclick = () => card.querySelector('.dropdown-item').hidden = false;
-          card.querySelector('.dropdown-item').onclick = () => card.querySelector('.dropdown-item').hidden = true;
+          card.querySelector('.dropdown-item').onclick = () => { card.querySelector('.dropdown-item').hidden = true; card.querySelector('input').click(); };
           card.querySelector('input').onchange = event => { actions.push('teaser'); preview(); event.target.value = ''; };
           const load = modal.querySelector('.transparent-dropdown .btn');
           load.onclick = () => modal.querySelector('.dropdown-list').hidden = false;

@@ -149,6 +149,7 @@ const chrome = {
   },
   runtime: {
     id: "test-extension",
+    getManifest: () => JSON.parse(fs.readFileSync(manifestPath, "utf8")),
     lastError: null,
     getURL(relativePath) {
       return `chrome-extension://test-extension/${relativePath}`;
@@ -206,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.24",
+          productVersion: "0.20.25",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -581,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.24",
+    productVersion: "0.20.25",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -601,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.24");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.25");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -640,6 +641,7 @@ function send(message) {
     await vm.runInContext(
       `(async () => {
         const id = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef";
+        await ensureCreatorUploadRuntimeVersion();
         await CreatorUploadSessionStore.save({
           id,
           draft: { title: "Restored episode" },
@@ -2224,6 +2226,7 @@ function send(message) {
       );
     };
     context.CreatorUploadPlatformAdapters = {
+      revision: `upload-hub-${manifest.version}`,
       async runFansly(run) {
         await run.progress("uploading-full");
         return { status: "manual-submit-required" };

@@ -2725,6 +2725,12 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
   "workflows/upload-response-observer.js";
 
 function installCreatorUploadFileBridge(config) {
+  if (
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.25"
+  )
+    throw new Error(
+      "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
+    );
   return globalThis.CreatorUploadFileBridge.install(config);
 }
 
@@ -2745,6 +2751,7 @@ function cancelCreatorUploadResponseObserverInPage(config) {
 const creatorUploadSessions = new Map();
 const creatorUploadConsolePorts = new Set();
 const creatorUploadFileRequests = new Map();
+let creatorUploadForeground = null;
 let creatorUploadRequestCounter = 0;
 const CREATOR_UPLOAD_TERMINAL_STATUSES = new Set([
   "recorded-local",
@@ -2882,13 +2889,21 @@ async function checkpointCreatorUploadSession(session) {
   return saved;
 }
 
+async function ensureCreatorUploadRuntimeVersion() {
+  return CREATOR_UPLOAD_SESSION_STORE.ensureRuntimeVersion(
+    chrome.runtime.getManifest().version,
+  );
+}
+
 async function getCreatorUploadSession(sessionId) {
+  await ensureCreatorUploadRuntimeVersion();
   const id = creatorUploadClean(sessionId, 64);
   if (!CREATOR_UPLOAD_SESSION_PATTERN.test(id)) return null;
   const active = creatorUploadSessions.get(id);
   if (active) return active;
   const stored = await CREATOR_UPLOAD_SESSION_STORE.load(id);
-  if (!stored) return null;
+  // Durable final-action receipts remain reviewable, but are not executable drafts.
+  if (!stored?.draft) return null;
   const session = {
     id,
     createdAt: stored.createdAt || Date.now(),
@@ -3135,6 +3150,99 @@ function validateCreatorUploadRequest(message) {
   return { sessionId, targets, draft, catalogue };
 }
 
+async function focusCreatorUploadObservation(session, target, sender) {
+  await assertCreatorUploadPageBinding(session, target, sender);
+  if (
+    target.platform !== "manyvids" ||
+    target.stage !== "upload" ||
+    target.boundUrl !== "https://www.manyvids.com/upload-video" ||
+    target.submitAttempted ||
+    target.submitted ||
+    target.editorHandoff ||
+    ![
+      "uploading-full",
+      "upload-observing",
+      "upload-progress-unknown",
+      "upload-ready",
+    ].includes(target.status)
+  )
+    throw new Error(
+      "ManyVids [foreground-observation]: This document is not an active owned upload observation.",
+    );
+  const interactiveStages = new Set([
+    "configuring",
+    "waiting-for-teaser",
+    "waiting-for-thumbnail",
+    "upload-ready",
+    "edit-requested",
+  ]);
+  const interactionBusy = () =>
+    creatorUploadFileRequests.size > 0 ||
+    [...session.platforms.values()].some(
+      (other) => other !== target && interactiveStages.has(other.status),
+    );
+  if (creatorUploadForeground || interactionBusy())
+    return { focused: false, deferred: true };
+  let release;
+  const lease = new Promise((resolve) => {
+    release = resolve;
+  });
+  creatorUploadForeground = lease;
+  try {
+    const tab = await chrome.tabs.get(target.tabId);
+    await assertCreatorUploadPageBinding(session, target, sender);
+    if (
+      !Number.isSafeInteger(tab?.windowId) ||
+      tab.windowId < 0 ||
+      tab.id !== target.tabId ||
+      tab.url !== target.boundUrl
+    )
+      throw new Error(
+        "ManyVids [foreground-observation]: The owned tab/window changed.",
+      );
+    if (interactionBusy()) return { focused: false, deferred: true };
+    const window = await chrome.windows.get(tab.windowId);
+    await assertCreatorUploadPageBinding(session, target, sender);
+    if (interactionBusy()) return { focused: false, deferred: true };
+    if (!tab.active) {
+      await chrome.tabs.update(target.tabId, { active: true });
+      await assertCreatorUploadPageBinding(session, target, sender);
+    }
+    if (!window.focused) {
+      const beforeFocus = await chrome.tabs.get(target.tabId);
+      await assertCreatorUploadPageBinding(session, target, sender);
+      if (
+        beforeFocus.id !== target.tabId ||
+        beforeFocus.windowId !== tab.windowId ||
+        beforeFocus.url !== target.boundUrl ||
+        !beforeFocus.active
+      )
+        throw new Error(
+          "ManyVids [foreground-observation]: The upload tab/window changed before window activation; no window was focused.",
+        );
+      if (interactionBusy()) return { focused: false, deferred: true };
+      await chrome.windows.update(tab.windowId, { focused: true });
+      await assertCreatorUploadPageBinding(session, target, sender);
+    }
+    const current = await chrome.tabs.get(target.tabId);
+    const focusedWindow = await chrome.windows.get(tab.windowId);
+    await assertCreatorUploadPageBinding(session, target, sender);
+    if (
+      current.id !== target.tabId ||
+      current.windowId !== tab.windowId ||
+      !current.active ||
+      !focusedWindow.focused
+    )
+      throw new Error(
+        "ManyVids [foreground-observation]: Chrome did not focus the upload tab. Activate that existing tab; no upload or Edit action was repeated.",
+      );
+    return { focused: true };
+  } finally {
+    if (creatorUploadForeground === lease) creatorUploadForeground = null;
+    release();
+  }
+}
+
 function creatorUploadRandomToken() {
   const values = crypto.getRandomValues(new Uint8Array(24));
   return [...values]
@@ -3214,7 +3322,14 @@ function creatorUploadRequestFile(session, platform, role) {
   });
 }
 
-function creatorSocialRequestFile({ sessionId, platform, role, token, tabId }) {
+async function creatorSocialRequestFile({
+  sessionId,
+  platform,
+  role,
+  token,
+  tabId,
+}) {
+  while (creatorUploadForeground) await creatorUploadForeground;
   if (
     !["x", "redgifs"].includes(platform) ||
     role !== "social" ||
@@ -3824,6 +3939,7 @@ async function prepareCreatorManyVidsEdit(session, target) {
 }
 
 async function prepareCreatorUpload(message, launcher = "extension") {
+  await ensureCreatorUploadRuntimeVersion();
   const request = validateCreatorUploadRequest(message);
   request.launcher = launcher === "desktop" ? "desktop" : "extension";
   await CREATOR_UPLOAD_SESSION_STORE.assertAvailable(
@@ -4057,6 +4173,13 @@ async function invokeCreatorUploadAdapter(args) {
       await context.checkpointStep(`select-${role}`, commandId, "observed");
       return selected;
     },
+    focusPage() {
+      return send({
+        type: "FOREGROUND_CREATOR_UPLOAD_OBSERVATION",
+        sessionId: args.sessionId,
+        platform: args.platform,
+      });
+    },
     progress(status) {
       return send({
         type: "CREATOR_UPLOAD_PLATFORM_PROGRESS",
@@ -4076,6 +4199,13 @@ async function invokeCreatorUploadAdapter(args) {
     },
   };
   const execute = () => {
+    if (
+      globalThis.CreatorUploadPlatformAdapters?.revision !==
+      "upload-hub-0.20.25"
+    )
+      throw new Error(
+        "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
+      );
     if (args.platform === "onlyfans") {
       return globalThis.CreatorUploadPlatformAdapters.runOnlyFans(context);
     }
@@ -4909,6 +5039,7 @@ async function openUploadConsole() {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await ensureCreatorUploadRuntimeVersion();
   const current = await chrome.storage.local.get([
     SETTINGS_KEY,
     STATE_KEY,
@@ -4980,6 +5111,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
         "CHECKPOINT_CREATOR_UPLOAD_STEP",
         "DELIVER_CREATOR_UPLOAD_FILE",
         "CREATOR_UPLOAD_PLATFORM_PROGRESS",
+        "FOREGROUND_CREATOR_UPLOAD_OBSERVATION",
       ]).has(message.type) &&
       !String(sender.url || "").startsWith(chrome.runtime.getURL(""))
     )
@@ -5018,6 +5150,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
       case "GET_UPLOAD_TRACE_CONTEXT":
         return { ownerId: sender.tab?.id ? `tab-${sender.tab.id}` : "" };
       case "GET_CREATOR_UPLOAD_RECOVERY": {
+        await ensureCreatorUploadRuntimeVersion();
         const records = await CREATOR_UPLOAD_SESSION_STORE.listRecovery();
         const publication =
           await CREATOR_UPLOAD_SESSION_STORE.listPublication();
@@ -5287,6 +5420,11 @@ function handleExtensionMessage(message, sender, sendResponse) {
         }
         return { step };
       }
+      case "FOREGROUND_CREATOR_UPLOAD_OBSERVATION": {
+        const session = await getCreatorUploadSession(message.sessionId);
+        const target = session?.platforms.get(message.platform);
+        return focusCreatorUploadObservation(session, target, sender);
+      }
       case "DELIVER_CREATOR_UPLOAD_FILE": {
         const session = await getCreatorUploadSession(message.sessionId);
         const target = session?.platforms.get(message.platform);
@@ -5320,6 +5458,9 @@ function handleExtensionMessage(message, sender, sendResponse) {
           ...intent,
           outcome: "issued",
         });
+        await assertCreatorUploadPageBinding(session, target, sender);
+        // Foreground observation never overlaps a native chooser or file handoff.
+        while (creatorUploadForeground) await creatorUploadForeground;
         await assertCreatorUploadPageBinding(session, target, sender);
         await creatorUploadRequestFile(session, message.platform, message.role);
         return { delivered: true };

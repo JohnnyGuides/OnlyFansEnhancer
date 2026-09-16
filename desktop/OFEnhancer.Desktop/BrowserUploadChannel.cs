@@ -1,4 +1,5 @@
 using System.Text.Json;
+using OFEnhancer.Protocol;
 
 namespace OFEnhancer.Desktop;
 
@@ -9,6 +10,8 @@ public sealed class BrowserUploadChannel : IDisposable
     private readonly object gate = new();
     private readonly Dictionary<string, DateTimeOffset> browsers = [];
     private readonly Dictionary<string, string> connections = [];
+    private readonly Dictionary<string, DateTimeOffset> versionMismatches = [];
+    internal const string ExtensionReloadMessage = "Chrome is running a different or unverified OFEnhancer extension. Review existing uploads, reload the existing extension in chrome://extensions, and reopen the Upload Hub. Do not remove the extension or its recovery data.";
     private readonly HashSet<string> retiredConnections = [];
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> pending = [];
     private readonly Dictionary<string, object> commands = [];
@@ -36,6 +39,7 @@ public sealed class BrowserUploadChannel : IDisposable
             commands.Clear();
             browsers.Clear();
             connections.Clear();
+            versionMismatches.Clear();
             selected = null;
         }
     }
@@ -87,6 +91,21 @@ public sealed class BrowserUploadChannel : IDisposable
                 || !payload.TryGetProperty("bridgeExtensionId", out var bridge) || bridge.GetString() != integrationIdentity
                 || !payload.TryGetProperty("setupGeneration", out var generation) || generation.GetString() != setupGeneration))
                 return new { commands = Array.Empty<object>(), connectionId, setupGeneration };
+            if (requireIdentity && (!payload.TryGetProperty("extensionVersion", out var runtimeVersion)
+                || runtimeVersion.ValueKind != JsonValueKind.String || runtimeVersion.GetString() != AgentProtocol.ProductVersion))
+            {
+                if (!versionMismatches.ContainsKey(id) && versionMismatches.Count >= 128)
+                    throw new InvalidOperationException("browser-limit");
+                versionMismatches[id] = clock.GetUtcNow();
+                browsers.Remove(id);
+                if (selected == id)
+                {
+                    foreach (var waiting in pending.Values) waiting.TrySetException(new InvalidOperationException(ExtensionReloadMessage));
+                    pending.Clear(); commands.Clear(); selected = null; selectionRequired = true;
+                }
+                return new { commands = Array.Empty<object>(), connectionId, setupGeneration, requiredExtensionVersion = AgentProtocol.ProductVersion };
+            }
+            versionMismatches.Remove(id);
             if (selected == id && connections.TryGetValue(id, out var previous) && previous != connectionId)
             {
                 foreach (var waiting in pending.Values)
@@ -120,7 +139,7 @@ public sealed class BrowserUploadChannel : IDisposable
             if (selected == id) commands.Clear();
         }
         foreach (var value in events) EventReceived?.Invoke(value);
-        return new { commands = work, connectionId, setupGeneration };
+        return new { commands = work, connectionId, setupGeneration, requiredExtensionVersion = AgentProtocol.ProductVersion };
     }
 
     public object Status()
@@ -132,7 +151,8 @@ public sealed class BrowserUploadChannel : IDisposable
                 .Select(pair => pair.Key).ToArray();
             var relevant = selected is not null && live.Contains(selected) ? browsers[selected] : live.Select(id => browsers[id]).DefaultIfEmpty(DateTimeOffset.MinValue).Max();
             double expiresInMilliseconds = live.Length == 0 ? 0 : Math.Max(0, 10000 - (clock.GetUtcNow() - relevant).TotalMilliseconds);
-            return new { browsers = live, selected, connected = selected is not null && live.Contains(selected), expiresInMilliseconds, selectionRequired };
+            bool updateRequired = live.Length == 0 && versionMismatches.Any(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10));
+            return new { browsers = live, selected, connected = selected is not null && live.Contains(selected), expiresInMilliseconds, selectionRequired, updateRequired };
         }
     }
 
@@ -190,6 +210,8 @@ public sealed class BrowserUploadChannel : IDisposable
             Expire();
             var live = browsers.Where(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)).ToArray();
             if (selected is null && live.Length == 1 && !selectionRequired) selected = live[0].Key;
+            if (selected is null && live.Length == 0 && versionMismatches.Any(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)))
+                throw new InvalidOperationException(ExtensionReloadMessage);
             if (selected is null) throw new InvalidOperationException(live.Length > 1 ? "choose-upload-browser" : "Open Chrome with the OFEnhancer extension to connect uploads.");
             if (!live.Any(pair => pair.Key == selected)) throw new InvalidOperationException("The selected browser disconnected. Reopen it before continuing.");
             if (pending.Count >= 64) throw new InvalidOperationException("browser-busy");
