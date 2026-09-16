@@ -230,3 +230,21 @@ registration, actual Chrome loading and update/uninstall acceptance remain
 separately authorized runtime checks.
 
 Uploader recovery preserves launcher identity and legacy publication hashes. Fansly home-route aliases require the original composer and top document. ManyVids continuation requires completion on the owned upload card and an exact Edit destination; missing destination evidence stops preparation before Edit. Pornhub uses one device activation per transport and the confirmed optional file or full-file fallback. Current semantic ownership fixtures are reconstructed, not authenticated captures.
+
+## Repository-local browser cache
+
+When Playwright browsers have been installed under `.local/playwright`, point
+the verification process at that cache before running the gates:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = (Resolve-Path .local/playwright).Path
+$env:OFENHANCER_HEADLESS = '1'
+npm run build:extensions
+npm run check
+```
+
+Use the Playwright Chromium/Chrome for Testing binary for fixture extension
+loading, not regular branded Chrome's removed side-loading flags. See the
+[official Playwright extension guide](https://playwright.dev/docs/chrome-extensions).
+These process-local settings do not modify the installed personal Chrome profile
+or establish authenticated browser acceptance.

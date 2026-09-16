@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
-const { chromium } = require("playwright");
+const { chromium } = require("../support/browser.cjs");
 
 for (const publicAlternative of [false, true]) {
   test(`Fansly current modal access alternatives public=${publicAlternative}`, async () => {
@@ -27,6 +27,7 @@ for (const publicAlternative of [false, true]) {
       <script>
         window.actions = [];
         const composer = document.querySelector('app-post-creation');
+        composer.querySelector('.dropdown-item').onclick = () => composer.querySelector('input[type=file]').click();
         const schedule = document.querySelector('app-post-schedule-modal');
         function openMedia(review=false) {
           const modal = document.createElement('app-account-media-upload');

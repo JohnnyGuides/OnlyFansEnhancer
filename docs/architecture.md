@@ -166,3 +166,24 @@ Catalogue URL evidence requires HTTPS, exact platform authority, no credentials
 or nondefault port, and exact route identity. Query/fragment ambiguity is rejected;
 Pornhub allows one `viewkey` parameter on `view_video.php` or `video/show`.
 Creator-specific legacy OnlyFans normalization remains unchanged.
+
+## Upload Hub action and acquisition contracts
+
+Action identity includes independent accessible labels, scoped ownership, a
+unique candidate and the expected post-click surface. Conflicting names do not
+fall back to a nearby action. OnlyFans checks for expiration before interacting
+with the supported scheduler. Fansly requires file-input activation caused by
+its exact Upload New click, not merely the existence of a visible file modal.
+Pre-file errors carry the composer/media-menu/upload-new/file-input stage into
+the existing per-platform Upload Hub error presentation.
+
+Pornhub acquisition starts at the signed-in Upload Video session entry
+`https://www.pornhub.com/upload/videodata`; no execution is injected there.
+Execution is permitted only on `https://pornhub.mainhub.com/upload/uploader`,
+with either no query or the sole `site=ph` parameter, after positive unambiguous
+device capability validation. Login/non-uploader pages, unknown redirects and
+occupied uploaders fail closed. The final URL is stored exactly; accepting two
+acquisition URL forms never makes those URLs interchangeable during execution.
+Top frame, tab, document ID, active session and live connection checks remain.
+This narrow contract is not a claim of complete authenticated live acceptance;
+see the dated limitations in [acceptance](acceptance.md).

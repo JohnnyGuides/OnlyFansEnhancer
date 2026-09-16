@@ -206,7 +206,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.23",
+          productVersion: "0.20.24",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -392,7 +392,15 @@ const chrome = {
       return tabs;
     },
     async create({ url, active }) {
-      const tab = { id: nextTabId, url, active, status: "complete" };
+      const tab = {
+        id: nextTabId,
+        url:
+          url === "https://www.pornhub.com/upload/videodata"
+            ? "https://pornhub.mainhub.com/upload/uploader?site=ph"
+            : url,
+        active,
+        status: "complete",
+      };
       nextTabId += 1;
       openTabs.set(tab.id, tab);
       return structuredClone(tab);
@@ -573,7 +581,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.23",
+    productVersion: "0.20.24",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -593,7 +601,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.23");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.24");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -917,6 +925,14 @@ function send(message) {
     )
       return [{ result: true }];
     uploadExecutions.push(name);
+    if (name === "inspectCreatorPornhubUploader")
+      return [
+        {
+          frameId: 0,
+          documentId: tabDocumentId(openTabs.get(details.target.tabId)),
+          result: { uploader: true, deviceActions: 1 },
+        },
+      ];
     if (name === "verifyCreatorManyVidsEditor") return [{ result: true }];
     if (name === "markCreatorToolkitMasterRun") return [{ frameId: 0 }];
     if (name === "installCreatorUploadFileBridge") {

@@ -152,3 +152,55 @@ them. Unknown legacy location evidence must stop safely.
 Verify Start-menu setup and installer guidance use the same desktop setup surface;
 installer profiles alone must not establish installation/liveness. Cover actual
 update, repair and uninstall retention separately from staged inventory/hash tests.
+
+## Upload Hub repair candidate — September 16, 2026
+
+This candidate is **not live-accepted**. Automated regressions exercise the
+contracts below; they do not establish the current authenticated site DOM.
+Earlier task logs report partial signed-in inspection, but no complete benign
+four-platform preparation trace is available. Do not promote those notes or
+manufactured calendar/media fixtures into a successful live run.
+
+| Platform | Automated boundary covered                                                                                                                                                                                                                   | Live evidence still required                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| OnlyFans | Independent schedule-action labels must agree; competing expiration actions, existing dialogs, arbitrary date dialogs and expiration surfaces stop before date/time mutation. Exact readback, labels and manual final-action guards remain.  | Actual Schedule post action, current scheduler implementation, attached benign media, schedule chip and unchanged labels. |
+| Fansly   | One homepage composer; its own Add Media/Media source menu; exact Upload New; one synchronously activated and uniquely scoped file input. No-op, delayed foreign activation, source conflicts and ambiguity fail with stage-specific errors. | Actual source-to-file path and complete current media/preset/preview/permissions, caption/toggles and scheduling flow.    |
+| Pornhub  | Session-entry navigation is separate from narrow MainHub uploader-route recognition, positive device capability and exact resolved document binding. Login, wrong pages, disabled/conflicting actions and document changes are rejected.     | Complete authenticated entry/redirect chain, real device activation, owned benign file and metadata preparation.          |
+| ManyVids | Existing upload logic is unchanged. Fixtures cover one selected card, one upload attempt, its completion/Edit destination and foreign/replaced/duplicate rejection.                                                                          | Actual upload-complete to same-video editor handoff, metadata and manual Save boundary.                                   |
+
+The OnlyFans scheduler currently supported by this candidate is the positively
+identified `vdatetime` surface. A different live scheduler is deliberately
+unsupported until its actual structure is captured; no generic dialog or nearby
+icon is accepted as a substitute.
+
+Fansly failure propagation is exercised through both prepare results and runtime
+platform-result messages into the actual Upload Hub card. A sibling platform
+remains intact and a foreign-session event cannot clear the failure. These tests
+do not authorize retrying an uncertain file delivery or final action.
+
+### Bounded recorder acceptance still pending
+
+Enable Settings → Upload trace recorder, then use the extension popup's Show
+trace recorder on this tab. Start one trace per platform in an empty composer
+or uploader. Use only a generated non-explicit clip and neutral text. Select a
+file only once and use the approved future Friday at 15:00 UTC when scheduling.
+
+For OnlyFans, capture attachment, caption, the intended Schedule post action,
+its actual scheduler, picker confirmation and resulting chip; check labels and
+stop before final Save/Post. For Fansly, capture Add Media → Upload New → file
+handoff, media preparation, preview/permissions/preset, caption/toggles and date
+confirmation; stop before Post. For Pornhub, reach the uploader through the
+signed-in Upload Video entry and record the final uploader/device-file/metadata
+flow; stop before Submit. Do not record credentials or authentication forms.
+
+For ManyVids, first review any existing selection/upload intent. Do not repeat
+an uncertain assignment. Record the owned benign file through completion, its
+single Edit/Continue action and the same-video editor; stop before final Save.
+An upload-start record alone is not upload completion or editor acceptance.
+
+Use Stop and download and review the sanitized JSON before sharing. The recorder
+now retains independent safe action labels, opaque control relationships and
+surface headings, while rejecting arbitrary text and long numeric identifiers.
+Its redacted routes do not by themselves prove exact account/video identity;
+that proof must still come from the bound runtime and same-card editor checks.
+A compiled installer or a green fixture run does not close these live gates.

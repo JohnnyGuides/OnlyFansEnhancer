@@ -557,12 +557,62 @@
         "Pornhub device upload candidates: " + intended.length + ".",
       );
     const button = intended[0];
+    assertActionLabels(
+      button,
+      ["upload from device", "select video"],
+      "Pornhub device-upload action",
+    );
     const surface = button.closest(
       "form, section, [role='region'], [role='dialog']",
     );
     if (surface && /vault/i.test(surface.getAttribute("aria-label") || ""))
       throw new Error("Pornhub device action belongs to a foreign surface.");
     return button;
+  }
+
+  function inspectPornhubUploader() {
+    if ([...document.querySelectorAll("input[type='password']")].some(visible))
+      throw new Error(
+        "Pornhub authentication is required; sign in before preparation.",
+      );
+    const candidates = [
+      ...document.querySelectorAll("button.uploadButton"),
+    ].filter(visible);
+    if (!candidates.length) return null;
+    const button = pornhubDeviceAction();
+    if (!enabled(button))
+      throw new Error(
+        "Pornhub device-upload capability is unavailable (disabled action).",
+      );
+    const inputs = [
+      ...document.querySelectorAll("input.dz-hidden-input[type='file']"),
+    ];
+    if (inputs.length > 1)
+      throw new Error("Pornhub uploader file-input capability is ambiguous.");
+    if (
+      inputs.some(
+        (input) =>
+          !enabled(input) ||
+          input.hasAttribute("webkitdirectory") ||
+          input.hasAttribute("directory"),
+      )
+    )
+      throw new Error("Pornhub device-upload capability is unavailable.");
+    if (
+      inputs.some(
+        (input) => input instanceof HTMLInputElement && input.files?.length,
+      ) ||
+      [...document.querySelectorAll("input[name='title']")].some(
+        (input) =>
+          input instanceof HTMLInputElement &&
+          visible(input) &&
+          input.value.trim(),
+      )
+    )
+      throw new Error(
+        "Pornhub uploader contains existing media or metadata; inspect that draft. No file was handed off.",
+      );
+    return { uploader: true, deviceActions: 1 };
   }
 
   function bindPornhubDeviceAction() {
@@ -1233,6 +1283,204 @@
     return { editor, composer };
   }
 
+  async function preparationBoundary(platform, stage, operation) {
+    try {
+      return await operation();
+    } catch (error) {
+      // Cancellation must remain cancellation, and an uncertain handoff is never retried.
+      if (error?.name === "AbortError" || error?.preparationStage) throw error;
+      throw Object.assign(
+        new Error(`${platform} [${stage}]: ${error.message}`, { cause: error }),
+        { preparationStage: stage },
+      );
+    }
+  }
+
+  function referencedLabel(element, attribute) {
+    const ids = (element.getAttribute(attribute) || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const labels = ids.map((id) => [
+      ...document.querySelectorAll(`#${CSS.escape(id)}`),
+    ]);
+    return labels.every((matches) => matches.length === 1)
+      ? labels.map((matches) => matches[0].textContent).join(" ")
+      : "";
+  }
+
+  function actionName(element) {
+    // Honour explicit relationships first; do not fall back through a broken label.
+    if (element.hasAttribute("aria-labelledby"))
+      return normalizedText(referencedLabel(element, "aria-labelledby"));
+    return normalizedText(
+      element.getAttribute("aria-label") ||
+        element.getAttribute("title") ||
+        element.textContent,
+    );
+  }
+
+  function assertActionLabels(element, names, label) {
+    const labels = [
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      referencedLabel(element, "aria-labelledby"),
+      element.textContent,
+    ]
+      .map(normalizedText)
+      .filter(Boolean);
+    if (labels.some((name) => !names.includes(name)))
+      throw new Error(
+        label +
+          " has conflicting action labels; no action was clicked. Capture the control identity before retrying.",
+      );
+  }
+
+  function onlyFansOwnsControl({ composer, editor }, node) {
+    return (
+      composer.contains(node) ||
+      (node instanceof HTMLButtonElement && node.form === composer) ||
+      [editor.id, composer.id].some(
+        (id) =>
+          id &&
+          (node.getAttribute("aria-controls") || "").split(/\s+/).includes(id),
+      )
+    );
+  }
+
+  function onlyFansScheduleAction(owned) {
+    const candidates = [
+      ...document.querySelectorAll("button, [role='button']"),
+    ].filter((node) => {
+      if (
+        !visible(node) ||
+        !onlyFansOwnsControl(owned, node) ||
+        actionName(node) !== "schedule post"
+      )
+        return false;
+      assertActionLabels(node, ["schedule post"], "OnlyFans schedule action");
+      const evidence = [
+        node.getAttribute("aria-label"),
+        node.getAttribute("title"),
+        referencedLabel(node, "aria-labelledby"),
+        referencedLabel(node, "aria-describedby"),
+        node.textContent,
+      ];
+      // A stale schedule tooltip must never override expiration's own identity.
+      return !evidence.some((label) =>
+        /\b(expiration|expire|expires|expiry|delete|remove)\b/i.test(
+          label || "",
+        ),
+      );
+    });
+    if (candidates.length !== 1)
+      throw new Error(
+        `OnlyFans schedule action is ${candidates.length ? "ambiguous" : "missing"} (${candidates.length} matches). Inspect Schedule post, not Expiration period; capture a trace if the toolbar changed.`,
+      );
+    return candidates[0];
+  }
+
+  function onlyFansDialogs(composer) {
+    return [
+      ...document.querySelectorAll(
+        "[role='dialog'], [aria-modal='true'], .vdatetime-popup",
+      ),
+    ].filter(
+      (node) => visible(node) && node !== composer && !node.contains(composer),
+    );
+  }
+
+  function onlyFansSchedulerSurface(composer, phase = "date") {
+    const dialogs = onlyFansDialogs(composer);
+    const names = (node) =>
+      [
+        actionName(node),
+        node.getAttribute("aria-label") || "",
+        node.getAttribute("title") || "",
+        referencedLabel(node, "aria-labelledby"),
+        ...node.querySelectorAll("h1,h2,h3,[role='heading']"),
+      ].map((value) =>
+        normalizedText(typeof value === "string" ? value : value.textContent),
+      );
+    if (
+      dialogs.some((node) =>
+        names(node).some((value) =>
+          /\b(expiration|expiry|expires)\b/.test(value),
+        ),
+      )
+    )
+      throw new Error(
+        "Expiration period opened instead of the OnlyFans scheduler. No date or time was changed; inspect the toolbar and capture a trace before retrying.",
+      );
+    const candidates = dialogs.filter((node) =>
+      node.matches(".vdatetime-popup"),
+    );
+    if (candidates.length > 1)
+      throw new Error("OnlyFans scheduler surface is ambiguous.");
+    const popup = candidates[0];
+    if (!popup) {
+      if (dialogs.length)
+        throw new Error(
+          "Unsupported OnlyFans scheduler surface; capture the current scheduling dialog. No date or time was changed.",
+        );
+      return null;
+    }
+    if (
+      dialogs.some(
+        (node) =>
+          node !== popup && !node.contains(popup) && !popup.contains(node),
+      )
+    )
+      throw new Error(
+        "OnlyFans scheduler surface is ambiguous; another dialog opened.",
+      );
+    const surfaces = dialogs.filter(
+      (node) => node === popup || node.contains(popup),
+    );
+    if (
+      !surfaces.some((node) =>
+        names(node).some(
+          (name) => name === "schedule post" || name === "schedule",
+        ),
+      )
+    )
+      throw new Error(
+        "OnlyFans scheduler identity is unverified; an arbitrary date dialog is not accepted. Capture the scheduling surface before retrying.",
+      );
+    const controls =
+      phase === "time"
+        ? ".vdatetime-time-picker__item"
+        : ".vdatetime-calendar__month__day";
+    return [...popup.querySelectorAll(controls)].some(visible) &&
+      popup.querySelector(".vdatetime-popup__tab.time")
+      ? popup
+      : null;
+  }
+
+  async function openOnlyFansScheduler(owned, revalidate, signal) {
+    return preparationBoundary("OnlyFans", "schedule-surface", async () => {
+      revalidate();
+      if (onlyFansDialogs(owned.composer).length)
+        throw new Error(
+          "An existing OnlyFans dialog requires review before scheduling; no action was clicked.",
+        );
+      const action = onlyFansScheduleAction(owned);
+      revalidate();
+      if (!action.isConnected || onlyFansScheduleAction(owned) !== action)
+        throw new Error("OnlyFans schedule action ownership changed.");
+      click(action, "OnlyFans Schedule post action");
+      return waitFor(
+        () => {
+          revalidate();
+          return onlyFansSchedulerSurface(owned.composer);
+        },
+        "OnlyFans positively identified scheduler surface (not Expiration period)",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    });
+  }
+
   async function runOnlyFans(context) {
     const { draft, signal } = context;
     publicationMode(draft);
@@ -1259,18 +1507,7 @@
         () => {
           revalidate();
           const candidates = [...document.querySelectorAll(selector)].filter(
-            (node) =>
-              visible(node) &&
-              (composer.contains(node) ||
-                (node instanceof HTMLButtonElement && node.form === composer) ||
-                (editor.id &&
-                  (node.getAttribute("aria-controls") || "")
-                    .split(/\s+/)
-                    .includes(editor.id)) ||
-                (composer.id &&
-                  (node.getAttribute("aria-controls") || "")
-                    .split(/\s+/)
-                    .includes(composer.id))),
+            (node) => visible(node) && onlyFansOwnsControl(owned, node),
           );
           if (candidates.length > 1)
             throw new Error(
@@ -1282,8 +1519,6 @@
         DEFAULT_DOM_TIMEOUT,
         signal,
       );
-    const scheduleSelector =
-      "button[aria-label='Schedule post'], button[title='Schedule post']";
     await control(
       "#attach_file_photo[aria-label='Add media']",
       "OnlyFans media activation",
@@ -1413,30 +1648,22 @@
         );
       return text;
     };
-    click(
-      await control(scheduleSelector, "OnlyFans schedule control"),
-      "OnlyFans schedule control",
-    );
-    await waitFor(
-      () =>
-        [...document.querySelectorAll(".vdatetime-calendar__month__day")].some(
-          visible,
-        ),
-      "OnlyFans date picker",
-      DEFAULT_DOM_TIMEOUT,
-      signal,
-    );
-    const popup = one(".vdatetime-popup", "OnlyFans schedule popup");
+    const popup = await openOnlyFansScheduler(owned, revalidate, signal);
     await chooseOnlyFansDate(popup, parts, signal);
     click(
       one(".vdatetime-popup__tab.time", "OnlyFans time tab", popup),
       "OnlyFans date confirmation",
     );
     await waitFor(
-      () =>
-        [...document.querySelectorAll(".vdatetime-time-picker__item")].some(
-          visible,
-        ),
+      () => {
+        revalidate();
+        const current = onlyFansSchedulerSurface(composer, "time");
+        if (!popup.isConnected || (current && current !== popup))
+          throw new Error(
+            "OnlyFans scheduler ownership changed before time selection.",
+          );
+        return current === popup;
+      },
       "OnlyFans time picker",
       DEFAULT_DOM_TIMEOUT,
       signal,
@@ -1571,79 +1798,247 @@
     return { platform: "onlyfans", status: "submitted" };
   }
 
-  function fanslyUploadNew(composer) {
-    click(
-      one(".default-dropdown > .dropdown-title", "Fansly media menu", composer),
-      "Fansly media menu",
+  function assertFanslyComposer(composer) {
+    const candidates = [
+      ...document.querySelectorAll("app-post-creation"),
+    ].filter(visible);
+    if (
+      !composer.isConnected ||
+      candidates.length !== 1 ||
+      candidates[0] !== composer
+    )
+      throw new Error(
+        "Fansly composer ownership changed; inspect the existing draft before retrying.",
+      );
+  }
+
+  function fanslySourceScope(control, composer) {
+    const ids = (control.getAttribute("aria-controls") || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (ids.length) {
+      if (ids.length !== 1)
+        throw new Error("Fansly media source relationship is ambiguous.");
+      const scopes = [...document.querySelectorAll(`#${CSS.escape(ids[0])}`)];
+      if (scopes.length !== 1)
+        throw new Error(
+          "Fansly owned media source menu is missing or ambiguous.",
+        );
+      return scopes[0];
+    }
+    const scope = control.closest(".default-dropdown");
+    if (!scope || !composer.contains(scope))
+      throw new Error(
+        "Fansly Add Media source ownership is unverified; capture its current menu relationship.",
+      );
+    return scope;
+  }
+
+  function fanslySourceActivation(source, label) {
+    assertActionLabels(source, ["upload new"], label);
+    const activated = new Set();
+    const capture = (event) => {
+      if (
+        !(event.target instanceof HTMLInputElement) ||
+        event.target.type !== "file"
+      )
+        return;
+      event.preventDefault();
+      activated.add(event.target);
+    };
+    globalThis.addEventListener("click", capture, true);
+    try {
+      click(source, label);
+      // Only nested activation during this exact source click proves causality.
+      if (activated.size !== 1)
+        throw new Error(
+          `${label} activated ${activated.size} file inputs; its file-picker postcondition is missing or ambiguous. No file was handed off. Capture the source selection before retrying.`,
+        );
+      return { activated };
+    } finally {
+      globalThis.removeEventListener("click", capture, true);
+    }
+  }
+
+  async function fanslyUploadNew(context, composer) {
+    let menuControl;
+    const sourceScope = await preparationBoundary(
+      "Fansly",
+      "media-menu",
+      async () => {
+        assertFanslyComposer(composer);
+        const candidates = [
+          ...composer.querySelectorAll(
+            "button, [role='button'], .default-dropdown > .dropdown-title",
+          ),
+        ].filter((node) => {
+          if (!visible(node)) return false;
+          if (actionName(node) === "add media") {
+            assertActionLabels(node, ["add media"], "Fansly Add Media action");
+            return true;
+          }
+          const name = actionName(node);
+          if (
+            (name && name !== "media") ||
+            (!name && node.hasAttribute("aria-labelledby"))
+          )
+            return false;
+          if (name === "media")
+            assertActionLabels(node, ["media"], "Fansly media menu");
+          // Retain the existing component only when its own source choices identify it.
+          const scope =
+            node.matches(".default-dropdown > .dropdown-title") &&
+            node.closest(".default-dropdown");
+          return (
+            scope &&
+            [...scope.querySelectorAll(".dropdown-item")].some(
+              (item) => normalizedText(item.textContent) === "upload new",
+            )
+          );
+        });
+        if (candidates.length !== 1)
+          throw new Error(
+            `Add Media action is ${candidates.length ? "ambiguous" : "missing"} (${candidates.length} matches). Open an empty homepage composer and capture the source menu.`,
+          );
+        menuControl = candidates[0];
+        const scope = fanslySourceScope(menuControl, composer);
+        click(menuControl, "Fansly Add Media");
+        return scope;
+      },
     );
-    click(
-      exactText(".dropdown-item", "Upload New", "Fansly Upload New", composer),
-      "Fansly Upload New",
-    );
+    return preparationBoundary("Fansly", "upload-new", async () => {
+      const source = await waitFor(
+        () => {
+          assertFanslyComposer(composer);
+          if (
+            !menuControl.isConnected ||
+            !sourceScope.isConnected ||
+            fanslySourceScope(menuControl, composer) !== sourceScope
+          )
+            throw new Error("Fansly media source ownership changed.");
+          const candidates = [
+            ...sourceScope.querySelectorAll(
+              ".dropdown-item, button, [role='option'], [role='menuitem']",
+            ),
+          ].filter(
+            (node) => visible(node) && actionName(node) === "upload new",
+          );
+          if (candidates.length > 1)
+            throw new Error("Fansly Upload New source is ambiguous.");
+          return candidates[0];
+        },
+        "Fansly owned Upload New source (not From Vault or Copied Media)",
+        DEFAULT_DOM_TIMEOUT,
+        context.signal,
+      );
+      assertFanslyComposer(composer);
+      return {
+        sourceScope,
+        ...fanslySourceActivation(source, "Fansly owned Upload New"),
+      };
+    });
   }
 
   async function attachFanslyMedia(context, composer, role) {
     const before = composer.querySelectorAll(
       "app-account-media-template",
     ).length;
-    fanslyUploadNew(composer);
-    const scope = await fanslyFileScope(context, composer);
-    await context.attachFile(role, "input[data-creator-fansly-file]");
-    return waitFor(
-      () => {
-        const currentScope =
-          document.querySelector("app-account-media-upload.active-modal") ||
-          scope;
-        const cards = [
-          ...currentScope.querySelectorAll("app-account-media-template"),
-        ];
-        if (cards.length > (scope === composer ? before : 0) + 1)
-          throw new Error("Fansly selected media association is ambiguous.");
-        return cards.length > (currentScope === composer ? before : 0)
-          ? cards.at(-1)
-          : null;
-      },
-      `Fansly ${role} media card`,
-      DEFAULT_DOM_TIMEOUT,
-      context.signal,
+    const selection = await fanslyUploadNew(context, composer);
+    const scope = await fanslyFileScope(context, composer, selection);
+    await preparationBoundary("Fansly", "file-handoff", async () => {
+      assertFanslyComposer(composer);
+      await context.attachFile(role, "input[data-creator-fansly-file]");
+    });
+    return preparationBoundary("Fansly", "processing", () =>
+      waitFor(
+        () => {
+          assertFanslyComposer(composer);
+          const modals = [
+            ...document.querySelectorAll(
+              "app-account-media-upload.active-modal",
+            ),
+          ].filter(visible);
+          if (modals.length > 1)
+            throw new Error("Fansly media processing surface is ambiguous.");
+          const currentScope = modals[0] || scope;
+          const cards = [
+            ...currentScope.querySelectorAll("app-account-media-template"),
+          ];
+          if (cards.length > (scope === composer ? before : 0) + 1)
+            throw new Error("Fansly selected media association is ambiguous.");
+          return cards.length > (currentScope === composer ? before : 0)
+            ? cards.at(-1)
+            : null;
+        },
+        `Fansly ${role} media card`,
+        DEFAULT_DOM_TIMEOUT,
+        context.signal,
+      ),
     );
   }
 
-  async function fanslyFileScope(context, composer) {
-    return waitFor(
-      () => {
-        const dialogs = [
-          ...document.querySelectorAll(
-            "[role='dialog'], app-media-upload-modal, .media-upload-modal",
-          ),
-        ].filter(
-          (node) => visible(node) && node.querySelector("input[type='file']"),
-        );
-        const deepest = dialogs.filter(
-          (node) =>
-            !dialogs.some((other) => other !== node && node.contains(other)),
-        );
-        if (deepest.length > 1)
-          throw new Error("Fansly media source dialog is ambiguous.");
-        const scope = deepest[0] || composer;
-        const inputs = [
-          ...scope.querySelectorAll(
-            "input[type='file']:not([webkitdirectory])",
-          ),
-        ];
-        if (!inputs.length) return false;
-        if (inputs.length !== 1)
-          throw new Error("Fansly media input is ambiguous.");
-        for (const old of document.querySelectorAll(
-          "[data-creator-fansly-file]",
-        ))
-          old.removeAttribute("data-creator-fansly-file");
-        inputs[0].setAttribute("data-creator-fansly-file", "");
-        return scope;
-      },
-      "Fansly media input",
-      DEFAULT_DOM_TIMEOUT,
-      context.signal,
+  async function fanslyFileScope(context, composer, selection = null) {
+    return preparationBoundary("Fansly", "file-input", () =>
+      waitFor(
+        () => {
+          assertFanslyComposer(composer);
+          const activated = [...(selection?.activated || [])];
+          if (activated.length > 1)
+            throw new Error("Fansly activated file input is ambiguous.");
+          if (selection && activated.length !== 1)
+            throw new Error(
+              "Fansly Upload New file-picker activation is unverified; no file was handed off.",
+            );
+          const inputs = activated;
+          if (!inputs.length) return false;
+          if (inputs.length !== 1)
+            throw new Error("Fansly media input is ambiguous.");
+          const input = inputs[0];
+          const dialog = input.closest("[role='dialog'], [aria-modal='true']");
+          if (
+            !input.isConnected ||
+            !enabled(input) ||
+            input.webkitdirectory ||
+            input.hasAttribute("directory")
+          )
+            throw new Error(
+              "Fansly owned file input changed or is unavailable.",
+            );
+          if (dialog && !visible(dialog)) return null;
+          if (dialog && /\b(vault|copied media)\b/.test(actionName(dialog)))
+            throw new Error(
+              "Fansly activated file input belongs to a foreign source.",
+            );
+          // An arbitrary visible modal is not evidence of ownership. External inputs
+          // require the observed click from the uniquely selected Upload New action.
+          if (!composer.contains(input) && !activated.includes(input))
+            throw new Error(
+              "Fansly external file input ownership is unverified.",
+            );
+          for (const old of document.querySelectorAll(
+            "[data-creator-fansly-file]",
+          ))
+            old.removeAttribute("data-creator-fansly-file");
+          const scope = composer.contains(input)
+            ? composer
+            : dialog || input.parentElement;
+          if (
+            !scope ||
+            scope.querySelectorAll(
+              "input[type='file']:not([webkitdirectory]):not([directory])",
+            ).length !== 1
+          )
+            throw new Error(
+              "Fansly owned source file-input scope is ambiguous.",
+            );
+          input.setAttribute("data-creator-fansly-file", "");
+          return scope;
+        },
+        "Fansly owned Upload New file input",
+        DEFAULT_DOM_TIMEOUT,
+        context.signal,
+      ),
     );
   }
 
@@ -1672,8 +2067,16 @@
         `Fansly free-preview Upload New control is ${uploadNewCandidates.length ? "ambiguous" : "missing"} (${uploadNewCandidates.length} matches).`,
       );
     }
-    click(uploadNewCandidates[0], "Fansly free-preview Upload New control");
-    await fanslyFileScope(context, composer);
+    const selection = await preparationBoundary(
+      "Fansly",
+      "preview-source",
+      () =>
+        fanslySourceActivation(
+          uploadNewCandidates[0],
+          "Fansly free-preview Upload New control",
+        ),
+    );
+    await fanslyFileScope(context, composer, selection);
     await context.attachFile("teaser", "input[data-creator-fansly-file]");
     return waitFor(
       () => {
@@ -1920,13 +2323,20 @@
     const { draft, signal } = context;
     publicationMode(draft);
     abortIfNeeded(signal);
-    await waitFor(
-      () => document.querySelector("app-post-creation"),
-      "Fansly composer readiness",
-      DEFAULT_DOM_TIMEOUT,
-      signal,
+    const composer = await preparationBoundary(
+      "Fansly",
+      "composer-acquisition",
+      async () => {
+        await waitFor(
+          () =>
+            [...document.querySelectorAll("app-post-creation")].some(visible),
+          "Fansly homepage composer; sign in and open an empty composer",
+          DEFAULT_DOM_TIMEOUT,
+          signal,
+        );
+        return one("app-post-creation", "Fansly post composer");
+      },
     );
-    const composer = one("app-post-creation", "Fansly post composer");
     progressScope = composer;
     if (composer.querySelector("app-account-media-template"))
       throw new Error(
@@ -2195,6 +2605,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
+    inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
       pornhubDeviceAction().matches(selector),

@@ -2606,6 +2606,8 @@ const CREATOR_UPLOAD_TARGETS = Object.freeze({
   }),
   pornhub: Object.freeze({
     match: "https://pornhub.mainhub.com/*",
+    // Session bootstrap entry; execution is never injected into this origin.
+    entryUrl: "https://www.pornhub.com/upload/videodata",
     landingUrl: "https://pornhub.mainhub.com/upload/uploader?site=ph",
     origin: "https://pornhub.mainhub.com",
   }),
@@ -3424,30 +3426,131 @@ async function probeCreatorUploadTargets(targets) {
   return results;
 }
 
+function creatorPornhubUploaderRoute(value) {
+  try {
+    const url = new URL(value);
+    const query = [...url.searchParams];
+    return (
+      url.origin === "https://pornhub.mainhub.com" &&
+      url.pathname === "/upload/uploader" &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      (query.length === 0 ||
+        (query.length === 1 && query[0][0] === "site" && query[0][1] === "ph"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function resolveCreatorPornhubDocument(tabId) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    const main = (frames || []).filter((frame) => frame.frameId === 0);
+    if (main.length > 1)
+      throw new Error(
+        "Pornhub [uploader-acquisition]: The top-frame document is ambiguous.",
+      );
+    const frame = main[0];
+    if (frame?.documentId && creatorPornhubUploaderRoute(frame.url))
+      return frame;
+    if (frame?.url && frame.url !== "about:blank") {
+      let url;
+      try {
+        url = new URL(frame.url);
+      } catch {
+        throw new Error(
+          "Pornhub [uploader-acquisition]: Untrusted redirect origin; no file was delivered.",
+        );
+      }
+      if (
+        !["https://www.pornhub.com", "https://pornhub.mainhub.com"].includes(
+          url.origin,
+        ) ||
+        url.username ||
+        url.password
+      )
+        throw new Error(
+          "Pornhub [uploader-acquisition]: Untrusted redirect origin; no file was delivered.",
+        );
+      if (
+        /^\/(?:login|signin|sign-in|auth)(?:\/|$)/i.test(url.pathname) ||
+        (url.origin === "https://www.pornhub.com" && url.pathname === "/")
+      )
+        throw new Error(
+          "Pornhub [uploader-acquisition]: Authentication did not reach the uploader. Sign in, open Upload Video, and retry preparation; no file was delivered.",
+        );
+      if (
+        frame.url !== CREATOR_UPLOAD_TARGETS.pornhub.entryUrl &&
+        !creatorPornhubUploaderRoute(frame.url)
+      )
+        throw new Error(
+          "Pornhub [uploader-acquisition]: Unsupported uploader route or page. Open Upload Video in the signed-in session and capture a trace; no file was delivered.",
+        );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    "Pornhub [uploader-acquisition]: Timed out resolving the authenticated uploader document. Sign in and inspect Upload Video; no file was delivered.",
+  );
+}
+
+async function inspectCreatorPornhubUploader(expectedUrl) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    if (window !== top || location.href !== expectedUrl)
+      throw new Error(
+        "Pornhub [uploader-capability]: The uploader document binding changed.",
+      );
+    let proof;
+    try {
+      proof = globalThis.CreatorUploadPlatformAdapters.inspectPornhubUploader();
+    } catch (error) {
+      throw new Error(`Pornhub [uploader-capability]: ${error.message}`, {
+        cause: error,
+      });
+    }
+    if (proof?.uploader === true && proof.deviceActions === 1) return proof;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    "Pornhub [uploader-capability]: The current page has no unique device-upload capability. Sign in, use Upload Video and capture a trace; no file was delivered.",
+  );
+}
+
 async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
   const definition = CREATOR_UPLOAD_TARGETS[platform];
   const existing = tabId
     ? [await chrome.tabs.get(tabId)]
     : await chrome.tabs.query({ url: definition.match });
-  const useExisting = existing.length === 1;
+  // Do not navigate away from an unrelated, possibly occupied MainHub uploader.
+  const useExisting =
+    existing.length === 1 && (platform !== "pornhub" || tabId !== null);
+  const navigationUrl = definition.entryUrl || definition.landingUrl;
   const tab = useExisting
     ? await chrome.tabs.update(existing[0].id, {
         active: true,
-        url: definition.landingUrl,
+        url: navigationUrl,
       })
-    : await chrome.tabs.create({ url: definition.landingUrl, active: true });
+    : await chrome.tabs.create({ url: navigationUrl, active: true });
   await waitForCreatorTab(tab.id);
   const loaded = await chrome.tabs.get(tab.id);
-  if (!creatorUrlMatches(loaded?.url, definition)) {
+  if (platform !== "pornhub" && !creatorUrlMatches(loaded?.url, definition)) {
     throw new Error(
       `${platform} left its expected origin before upload preparation.`,
     );
   }
   const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
-  const frame = frames?.find((item) => item.frameId === 0);
+  const frame =
+    platform === "pornhub"
+      ? await resolveCreatorPornhubDocument(tab.id)
+      : frames?.find((item) => item.frameId === 0);
   if (
     !frame?.documentId ||
-    (frame.url !== definition.landingUrl &&
+    (platform !== "pornhub" &&
+      frame.url !== definition.landingUrl &&
       !(platform === "fansly" && frame.url === "https://fansly.com/home"))
   )
     throw new Error("The exact upload route or document is unavailable.");
@@ -3522,6 +3625,31 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       CREATOR_UPLOAD_ADAPTERS,
     ],
   });
+  if (platform === "pornhub") {
+    const [proof] = await chrome.scripting.executeScript({
+      target: injectionTarget,
+      func: inspectCreatorPornhubUploader,
+      args: [frame.url],
+    });
+    const currentFrames = await chrome.webNavigation.getAllFrames({
+      tabId: tab.id,
+    });
+    const current = currentFrames?.filter((item) => item.frameId === 0);
+    if (proof?.result?.uploader !== true || proof.result.deviceActions !== 1)
+      throw new Error(
+        "Pornhub [uploader-capability]: Positive uploader capability verification failed; no file was delivered.",
+      );
+    if (
+      proof.frameId !== 0 ||
+      proof.documentId !== frame.documentId ||
+      current?.length !== 1 ||
+      current[0].documentId !== frame.documentId ||
+      current[0].url !== frame.url
+    )
+      throw new Error(
+        "Pornhub [uploader-acquisition]: The resolved uploader document changed during capability validation.",
+      );
+  }
   if (platform === "fansly") {
     const [ready] = await chrome.scripting.executeScript({
       target: injectionTarget,
@@ -3532,7 +3660,9 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
             ...document.querySelectorAll("app-post-creation"),
           ].filter((node) => node.isConnected && node.getClientRects().length);
           if (candidates.length > 1)
-            throw new Error("Fansly composer candidates: 2 or more.");
+            throw new Error(
+              "Fansly [composer-acquisition]: Homepage composer is ambiguous (2 or more). Close the extra composer before retrying; no file was delivered.",
+            );
           if (
             candidates.length === 1 &&
             candidates[0].querySelector("textarea, [contenteditable='true']")
@@ -3543,7 +3673,9 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
           }
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        throw new Error("Fansly ready composer candidates: 0.");
+        throw new Error(
+          "Fansly [composer-acquisition]: No ready homepage composer. Sign in, use the desktop homepage and expand the browser viewport; capture Add Media if it remains unavailable. No file was delivered.",
+        );
       },
       args: [session.id],
     });
@@ -3575,6 +3707,21 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
       },
     ],
   });
+  if (platform === "pornhub") {
+    const finalFrames = await chrome.webNavigation.getAllFrames({
+      tabId: tab.id,
+    });
+    const final = finalFrames?.filter((item) => item.frameId === 0);
+    if (
+      session.cancelled ||
+      final?.length !== 1 ||
+      final[0].documentId !== frame.documentId ||
+      final[0].url !== frame.url
+    )
+      throw new Error(
+        "Pornhub [uploader-acquisition]: The uploader document changed before binding; no file was delivered.",
+      );
+  }
   const target = {
     platform,
     tabId: tab.id,

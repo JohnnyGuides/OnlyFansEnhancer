@@ -943,7 +943,7 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
       <input id="post-label-1" type="checkbox" checked>
       <input id="post-label-2" type="checkbox">
       <button id="schedule" aria-label="Schedule post"></button>
-      <div id="date-dialog" class="vdatetime-popup" hidden>
+      <div id="date-dialog" class="vdatetime-popup" role="dialog" aria-label="Schedule post" hidden>
         <div class="vdatetime-calendar__current--month">July 2026</div>
         <button type="button" class="vdatetime-calendar__navigation--next" onclick="document.querySelector('.vdatetime-calendar__current--month').textContent='August 2026'">Next month</button>
         <div class="vdatetime-calendar__month__day">28</div>
@@ -1124,6 +1124,7 @@ for (const scenario of [
       </div>
       <div id="confirm-modal" hidden><div class="btn large solid-blue margin-left-1">Post</div></div>
       <script>
+        document.querySelector(".default-dropdown .dropdown-item").addEventListener("click", () => document.querySelector("#fansly-file").click());
         let uploadRole = "";
         globalThis.fanslyPostClicks = 0;
         globalThis.fanslyScheduleClicks = 0;
@@ -1160,6 +1161,7 @@ for (const scenario of [
         }));
         document.querySelector("#preview-menu .dropdown-item").addEventListener("click", () => {
           document.querySelector("#preview-menu").hidden = true;
+          document.querySelector("#fansly-file").click();
         });
         document.querySelector(".icon-stack").addEventListener("click", () => document.querySelector("#schedule-modal").hidden = false);
         document.querySelector(".current-month-day").addEventListener("click", (event) => event.target.dataset.selected = "true");
@@ -3229,6 +3231,157 @@ for (const scenario of [
         await page.evaluate(() => globalThis.permissionRequests),
         0,
         "Required creator-site access must not prompt during an upload.",
+      );
+    } finally {
+      await browser.close();
+    }
+  });
+}
+
+for (const failureDelivery of ["prepare", "platform-result"]) {
+  test(`early Fansly failure reaches its Upload Hub card via ${failureDelivery}`, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const site = await browser.newPage();
+      await site.setContent(
+        '<app-post-creation><textarea></textarea><button type="button">From Vault</button></app-post-creation>',
+      );
+      await site.addScriptTag({
+        path: path.join(
+          repositoryRoot,
+          "workflows/upload-platform-adapters.js",
+        ),
+      });
+      const failure = await site.evaluate(async () => {
+        let handoffs = 0;
+        const result = await CreatorUploadPlatformAdapters.runFansly({
+          draft: { hasTeaser: false, publishMode: "manual" },
+          signal: AbortSignal.timeout(2000),
+          attachFile: async () => {
+            handoffs++;
+            throw new Error("Unexpected file handoff");
+          },
+        }).catch((error) => ({ status: "failed", error: error.message }));
+        return { result, handoffs };
+      });
+      assert.equal(failure.handoffs, 0);
+      assert.match(failure.result.error, /Fansly \[media-menu\].*Add Media/);
+      const page = await browser.newPage();
+      await page.clock.setFixedTime(new Date("2026-09-16T10:00:00Z"));
+      await page.setContent(
+        fs
+          .readFileSync(
+            path.join(repositoryRoot, "upload-console.html"),
+            "utf8",
+          )
+          .replace(/<script[^>]+><\/script>/gi, ""),
+      );
+      await page.evaluate(
+        ({ failureDelivery, error }) => {
+          const listeners = [];
+          window.deliverStatus = (message) =>
+            listeners.forEach((listener) => listener(message));
+          const port = {
+            onMessage: { addListener: (listener) => listeners.push(listener) },
+            onDisconnect: { addListener() {} },
+            postMessage() {},
+            disconnect() {},
+          };
+          window.CreatorCatalogueClient = {
+            loadConfig: async () => ({}),
+            getCatalogueSnapshot: async () => {
+              throw new Error("No catalogue access in this fixture");
+            },
+          };
+          window.chrome = {
+            permissions: { request: async () => true },
+            runtime: {
+              lastError: null,
+              connect: () => port,
+              sendMessage(message, callback) {
+                if (message.type === "SYNC_CREATOR_TOOLS")
+                  return callback({
+                    ok: true,
+                    creatorTools: { registered: [], skipped: [] },
+                  });
+                if (message.type === "PREPARE_CREATOR_UPLOAD")
+                  return callback({
+                    ok: true,
+                    uploadSession: {
+                      sessionId: message.sessionId,
+                      platforms: message.targets.map((platform) => ({
+                        platform,
+                        ...(platform === "fansly" &&
+                        failureDelivery === "prepare"
+                          ? { status: "failed", error }
+                          : { status: "prepared" }),
+                      })),
+                    },
+                  });
+                if (message.type === "START_CREATOR_UPLOAD") {
+                  if (failureDelivery === "platform-result")
+                    window.deliverStatus({
+                      type: "platform-result",
+                      sessionId: message.sessionId,
+                      platform: "fansly",
+                      result: { platform: "fansly", status: "failed", error },
+                    });
+                  return callback({
+                    ok: true,
+                    results: message.targets.map((platform) => ({
+                      platform,
+                      ...(platform === "fansly"
+                        ? { status: "failed", error }
+                        : { status: "manual-submit-required" }),
+                    })),
+                  });
+                }
+                callback({ ok: true, sessions: [] });
+              },
+            },
+          };
+        },
+        { failureDelivery, error: failure.result.error },
+      );
+      await addUploadConsoleScripts(page);
+      await page.locator("#catalogueAssociation").selectOption("later");
+      await page.locator("#targetOnlyfans").check();
+      await page.locator("#targetFansly").check();
+      await page.locator("#targetManyvids").uncheck();
+      await page.locator("#targetPornhub").uncheck();
+      await page.locator("#uploadFullVideo").setInputFiles({
+        name: "neutral-verification.mp4",
+        mimeType: "video/mp4",
+        buffer: Buffer.from("inert test media"),
+      });
+      await page.locator("#confirmUpload").waitFor({ state: "visible" });
+      await page.locator("#confirmUpload").click();
+      const fansly = page.locator(".result-card").filter({
+        has: page.getByRole("heading", { name: "Fansly", exact: true }),
+      });
+      await fansly.locator('.result-status[data-state="failed"]').waitFor();
+      assert.equal(
+        await fansly.locator(".error").textContent(),
+        failure.result.error,
+      );
+      const sibling = page.locator(".result-card").filter({
+        has: page.getByRole("heading", { name: "OnlyFans", exact: true }),
+      });
+      await sibling
+        .locator('.result-status[data-state="manual-submit-required"]')
+        .waitFor();
+      assert.equal(await sibling.locator(".error").count(), 0);
+      await page.evaluate(() =>
+        window.deliverStatus({
+          type: "platform-result",
+          sessionId: "foreign-session",
+          platform: "fansly",
+          result: { status: "prepared", error: "" },
+        }),
+      );
+      assert.equal(
+        await fansly.locator(".error").textContent(),
+        failure.result.error,
       );
     } finally {
       await browser.close();

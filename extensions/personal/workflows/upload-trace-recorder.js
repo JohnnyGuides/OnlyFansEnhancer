@@ -31,8 +31,24 @@
     ["transcode", /\btranscod(?:e|ed|ing)?\b/i],
   ]);
   const ACTION_PATTERN =
-    /\b(add|attach|back|calendar|cancel|close|confirm|continue|date|delete|done|edit|finish|later|next|now|ok|post|previous|publish|remove|save|schedule|submit|time|upload|view)\b/i;
+    /\b(add|attach|back|calendar|cancel|close|confirm|continue|date|delete|done|edit|finish|later|next|now|ok|post|previous|publish|remove|save|schedule|submit|time|upload|view|expiration|expiry|source|select)\b/i;
   const SAFE_ACTION_LABEL_WORDS = new Set([
+    "expiration",
+    "period",
+    "expiry",
+    "expires",
+    "limit",
+    "no",
+    "day",
+    "days",
+    "from",
+    "device",
+    "vault",
+    "copied",
+    "pick",
+    "source",
+    "select",
+    "permissions",
     "add",
     "apply",
     "attach",
@@ -82,6 +98,9 @@
     "view",
   ]);
   const SAFE_RESOURCE_PATH_SEGMENTS = new Set([
+    "uploader",
+    "videodata",
+    "edit-vid",
     "account",
     "chat",
     "complete",
@@ -156,6 +175,16 @@
   const documentGeneration = globalThis.crypto?.randomUUID?.() || "";
   const opaqueTokens = new Map();
   const structuralTokens = new Set([
+    "default-dropdown",
+    "dropdown-title",
+    "dropdown-item",
+    "fa-image",
+    "fal",
+    "fa-fw",
+    "active-modal",
+    "menu",
+    "region",
+    "heading",
     "button",
     "file",
     "text",
@@ -313,6 +342,8 @@
 
   function safeActionText(value) {
     const text = sanitizeText(value, 120);
+    // Keep only the bounded English UI vocabulary, never IDs or arbitrary suffixes.
+    if (/[^a-z0-9\s.,:/()_-]/i.test(text) || /\d{5,}/.test(text)) return "";
     if (/^\d{1,4}(?:(?:[.:/-]\d{1,4})+|\s*(?:am|pm))?$/i.test(text)) {
       return text;
     }
@@ -320,6 +351,25 @@
     return words.length > 0 &&
       words.every((word) => SAFE_ACTION_LABEL_WORDS.has(word))
       ? text
+      : "";
+  }
+
+  function signatureReferences(element, attribute) {
+    return (element.getAttribute?.(attribute) || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 4);
+  }
+
+  function signatureReferencedText(element, attribute) {
+    const ids = signatureReferences(element, attribute);
+    if (!ids.length || typeof document === "undefined") return "";
+    const matches = ids.map((id) => [
+      ...document.querySelectorAll(`#${CSS.escape(id)}`),
+    ]);
+    return matches.every((nodes) => nodes.length === 1)
+      ? safeActionText(matches.map((nodes) => nodes[0].textContent).join(" "))
       : "";
   }
 
@@ -379,13 +429,43 @@
 
     const mayUseText =
       ["button", "a"].includes(tag) ||
-      element.getAttribute?.("role") === "button";
+      ["button", "menuitem", "option", "heading", "dialog"].includes(
+        element.getAttribute?.("role"),
+      ) ||
+      element.matches?.(
+        "h1,h2,h3,.dropdown-title,.dropdown-item,.vdatetime-popup__tab",
+      );
     const formLabel = ["input", "select", "textarea"].includes(tag)
       ? Array.from(element.labels || [])
           .map((candidate) => candidate.textContent)
           .find(Boolean)
       : "";
+    const identity = Object.fromEntries(
+      Object.entries({
+        ariaLabel: safeActionText(element.getAttribute?.("aria-label")),
+        title: safeActionText(element.getAttribute?.("title")),
+        labelledBy: signatureReferencedText(element, "aria-labelledby"),
+        describedBy: signatureReferencedText(element, "aria-describedby"),
+        text: mayUseText ? safeActionText(element.textContent) : "",
+      }).filter(([, value]) => value),
+    );
+    if (Object.keys(identity).length) signature.identity = identity;
+    const relationships = Object.fromEntries(
+      [
+        ["controls", "aria-controls"],
+        ["labelledBy", "aria-labelledby"],
+        ["describedBy", "aria-describedby"],
+      ]
+        .map(([key, attr]) => [
+          key,
+          signatureReferences(element, attr).map((id) => stableToken(id)),
+        ])
+        .filter(([, values]) => values.length),
+    );
+    if (Object.keys(relationships).length)
+      signature.relationships = relationships;
     const explicitLabel =
+      identity.labelledBy ||
       element.getAttribute?.("aria-label") ||
       element.getAttribute?.("title") ||
       formLabel;
@@ -396,11 +476,13 @@
         : "";
     if (label) signature.label = label;
     if (explicitLabel)
-      signature.labelSource = element.hasAttribute?.("aria-label")
-        ? "aria-label"
-        : element.hasAttribute?.("title")
-          ? "title"
-          : "form-label";
+      signature.labelSource = identity.labelledBy
+        ? "aria-labelledby"
+        : element.hasAttribute?.("aria-label")
+          ? "aria-label"
+          : element.hasAttribute?.("title")
+            ? "title"
+            : "form-label";
     return signature;
   }
 
@@ -996,7 +1078,7 @@
     const actions = [];
     candidates = 0;
     for (const element of document.querySelectorAll(
-      'button,input[type="button"],input[type="submit"],[role="button"],.vdatetime-popup__tab,.confirm-btn,.new-post-btn',
+      'button,input[type="button"],input[type="submit"],[role="button"],[role="menuitem"],[role="option"],.default-dropdown > .dropdown-title,.dropdown-item,.vdatetime-popup__tab,.confirm-btn,.new-post-btn',
     )) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || actions.length >= 12) break;
@@ -1025,6 +1107,24 @@
       fileInputs,
       actions,
       statuses: statusSnapshot(),
+      surfaces: [
+        ...document.querySelectorAll(
+          "[role='dialog'],[aria-modal='true'],.vdatetime-popup,app-account-media-upload.active-modal,app-post-schedule-modal",
+        ),
+      ]
+        .slice(0, MAX_SNAPSHOT_CANDIDATES)
+        .filter(
+          (node) =>
+            isVisible(node) && !isRecorderNode(node) && inPublishingScope(node),
+        )
+        .slice(0, 6)
+        .map((node) => ({
+          control: elementSignature(node),
+          headings: [...node.querySelectorAll("h1,h2,h3,[role='heading']")]
+            .slice(0, 4)
+            .map((heading) => safeActionText(heading.textContent))
+            .filter(Boolean),
+        })),
       calendar: [
         ...document.querySelectorAll(
           "[class*='calendar'] [class*='month'], [class*='calendar'] [class*='year']",
