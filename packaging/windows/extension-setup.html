@@ -3,77 +3,170 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Connect Chrome to OFEnhancer</title>
+    <title>Connect Chrome · OFEnhancer</title>
     <style>
       :root {
         color-scheme: dark;
         font-family: "Segoe UI", system-ui, sans-serif;
         background: #090b10;
-        color: #f4f5f7;
+        color: #eff3f8;
       }
       * {
         box-sizing: border-box;
       }
       body {
         margin: 0;
-        min-width: 320px;
       }
       main {
-        width: min(720px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 64px 0;
+        width: min(660px, calc(100% - 32px));
+        margin: 32px auto;
       }
       header {
         display: flex;
         align-items: center;
-        gap: 16px;
-        margin-bottom: 42px;
+        gap: 12px;
+        margin-bottom: 24px;
       }
-      img {
-        width: 56px;
-        height: 56px;
-        border-radius: 14px;
-      }
-      h1,
-      h2,
-      p {
-        margin-top: 0;
+      header img {
+        width: 36px;
+        height: 36px;
       }
       h1 {
-        margin-bottom: 4px;
-        font-size: clamp(2rem, 7vw, 3.8rem);
-        letter-spacing: -0.04em;
+        font-size: 1.6rem;
+        letter-spacing: -0.025em;
+        margin: 0;
       }
-      header p,
-      li,
-      .note {
-        color: #aeb6c3;
-        line-height: 1.6;
+      h2 {
+        font-size: 1rem;
+        margin: 0 0 6px;
+      }
+      p {
+        color: #b5bfce;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        margin: 6px 0 12px;
       }
       ol {
-        padding-left: 1.5rem;
+        counter-reset: step;
+        padding: 0;
+        list-style: none;
       }
       li {
-        margin: 18px 0;
+        position: relative;
+        counter-increment: step;
+        padding: 0 0 20px 42px;
+      }
+      li:before {
+        content: counter(step);
+        position: absolute;
+        left: 0;
+        top: 0;
+        border: 1px solid #425268;
+        border-radius: 50%;
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        color: #95dcfc;
+        font-size: 0.82rem;
       }
       code {
-        display: block;
+        font-family: Consolas, monospace;
+        font-size: 0.85rem;
         overflow-wrap: anywhere;
-        margin-top: 8px;
-        padding: 14px;
-        border: 1px solid #303744;
-        border-radius: 10px;
-        background: #111722;
-        color: #dceef7;
+        color: #e3f2fb;
       }
-      .note {
-        margin-top: 34px;
-        padding-top: 22px;
-        border-top: 1px solid #303744;
+      .copy-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid #3b495d;
+        background: #121a25;
+        border-radius: 7px;
+      }
+      .copy-row code {
+        flex: 1;
+        min-width: 0;
+      }
+      button,
+      .primary-link {
+        font: inherit;
+        font-size: 0.85rem;
+        min-height: 40px;
+        padding: 9px 14px;
+        border-radius: 6px;
+        border: 1px solid #3b495d;
+        background: #1c2938;
+        color: #eff3f8;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .primary-link,
+      #copy-address {
+        background: #62cbf6;
+        color: #081019;
+        border-color: #62cbf6;
+        font-weight: 650;
+      }
+      a {
+        color: #95dcfc;
+      }
+      button:hover,
+      .primary-link:hover {
+        filter: brightness(1.12);
       }
       :focus-visible {
-        outline: 3px solid #65cfff;
+        outline: 3px solid #95dcfc;
         outline-offset: 3px;
+      }
+      details {
+        border-top: 1px solid #2d3746;
+        padding: 10px 0;
+      }
+      summary {
+        cursor: pointer;
+        min-height: 36px;
+        padding: 8px 0;
+        font-size: 0.85rem;
+      }
+      details p {
+        margin-top: 10px;
+      }
+      aside {
+        border-left: 3px solid #e7bd76;
+        background: #282117;
+        padding: 12px 16px;
+        margin-bottom: 24px;
+      }
+      aside p {
+        margin-bottom: 0;
+      }
+      #copy-status {
+        min-height: 1.3em;
+        color: #95dcfc;
+        font-size: 0.82rem;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 420px) {
+        main {
+          margin: 20px auto;
+        }
+        li {
+          padding-left: 36px;
+        }
+        .copy-row {
+          flex-wrap: wrap;
+        }
+        .copy-row code {
+          flex-basis: 100%;
+        }
       }
     </style>
   </head>
@@ -81,51 +174,121 @@
     <main>
       <header>
         <img src="assets/finalLogo.png" alt="" />
-        <div>
-          <h1>Connect Chrome</h1>
-          <p>
-            Prepare the integration, then finish the required steps in Chrome.
-          </p>
-        </div>
+        <h1>Connect Chrome</h1>
       </header>
+      <aside id="fresh-reset" hidden>
+        <strong>Remove the previous extension first</strong>
+        <p>
+          In Chrome, remove <strong>Creator Workflow Toolkit</strong>.<br />ID:
+          <code id="previous-extension"></code>
+        </p>
+        <p>Reloading does not finish Fresh reset.</p>
+      </aside>
       <ol>
         <li>
-          Open OFEnhancer and select the Chrome connection button in the
-          sidebar, or choose Connect Chrome from the Start menu.
+          <h2>Open Chrome extensions</h2>
+          <p>Copy this address and paste it into Chrome.</p>
+          <div class="copy-row">
+            <code id="chrome-address" translate="no">chrome://extensions</code
+            ><button id="copy-address" type="button">Copy</button>
+          </div>
         </li>
         <li>
-          For a fresh installation, choose <strong>Prepare integration</strong>.
-          OFEnhancer validates its installed package and registers its own
-          current-user native bridge. This does not load the extension.
+          <h2>Turn on Developer mode</h2>
+          <p>
+            In the top-right of the Extensions page, turn on
+            <strong>Developer mode</strong>.
+          </p>
         </li>
         <li>
-          Choose <strong>Open Chrome extensions</strong>. If necessary, paste
-          <code>chrome://extensions</code> into Chrome's address bar.
+          <h2>Click Load unpacked</h2>
+          <p>The button is at the top-left of the Extensions page.</p>
         </li>
         <li>
-          Enable Developer mode, choose <strong>Load unpacked</strong>, and
-          select the exact <strong>extension-keyed</strong> folder displayed by
-          OFEnhancer.
+          <h2>Select the OFEnhancer extension folder</h2>
+          <p>Choose this exact <strong>extension-keyed</strong> folder.</p>
+          <div class="copy-row">
+            <code id="extension-folder" translate="no"></code
+            ><button id="copy-folder" type="button">Copy folder</button>
+          </div>
         </li>
         <li>
-          Leave OFEnhancer open. Its status changes only after fresh matching
-          extension messages arrive; no desktop restart or copied extension ID
-          is needed.
+          <h2>Check connection</h2>
+          <a class="primary-link" href="ofenhancer://chrome-setup"
+            >Check connection in OFEnhancer</a
+          >
         </li>
       </ol>
-      <p class="note">
-        Already using the extension? Preserve its existing load folder, ID,
-        settings and upload checkpoints. Open Chrome and check again first;
-        reload the existing extension after an update. Do not remove it or load
-        the new keyed folder to repair a legacy installation. OFEnhancer stops
-        with specific guidance when legacy installation evidence is
-        insufficient.
-      </p>
-      <p class="note">
-        Chrome will mention debugger access. OFEnhancer uses it only to attach a
-        local file to the exact upload control, then detaches. This setup does
-        not post anything.
-      </p>
+      <p id="copy-status" role="status" aria-live="polite"></p>
+      <details>
+        <summary>Why does Chrome mention debugger access?</summary>
+        <p>
+          OFEnhancer uses it to attach your selected file to the upload form,
+          then detaches. Setup does not publish anything.
+        </p>
+      </details>
+      <details>
+        <summary>Existing installation / troubleshooting</summary>
+        <p>
+          Updating?
+          <a href="extension-reload.html">Reload your existing extension</a> to
+          keep its settings. For a clean installation, choose
+          <strong>Fresh reset</strong> in OFEnhancer. Your desktop catalogue,
+          Google connection and history stay intact.
+        </p>
+        <p>
+          The address cannot be opened directly from this guide. Copy it into
+          Chrome, or use Open Chrome extensions in OFEnhancer after a connection
+          is established.
+        </p>
+      </details>
     </main>
+    <script>
+      const status = document.querySelector("#copy-status");
+      async function copy(id) {
+        const node = document.getElementById(id);
+        try {
+          await navigator.clipboard.writeText(node.textContent);
+          status.textContent = "Copied.";
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const selection = getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          status.textContent = "Text selected. Press Ctrl+C to copy it.";
+        }
+      }
+      document
+        .querySelector("#copy-address")
+        .addEventListener("click", () => copy("chrome-address"));
+      const options = new URLSearchParams(location.hash.slice(1));
+      let folder = options.get("folder") || "";
+      if (!/^[a-z]:\\.{1,1000}\\extension-keyed$/i.test(folder)) {
+        folder =
+          location.protocol === "file:"
+            ? decodeURIComponent(
+                new URL("extension-keyed", location.href).pathname,
+              )
+                .replace(/^\/(?=[a-z]:)/i, "")
+                .replaceAll("/", "\\")
+            : "";
+      }
+      document.querySelector("#extension-folder").textContent =
+        folder ||
+        "Use Show folder in OFEnhancer to find the installed extension-keyed folder.";
+      document.querySelector("#copy-folder").disabled = !folder;
+      document
+        .querySelector("#copy-folder")
+        .addEventListener("click", () => copy("extension-folder"));
+      if (options.get("reset") === "1") {
+        document.querySelector("#fresh-reset").hidden = false;
+        const previous = options.get("previous") || "";
+        document.querySelector("#previous-extension").textContent =
+          /^[a-p]{32}$/.test(previous)
+            ? previous
+            : "aocoaajmhccmefmfebgiiogfdojciild";
+      }
+    </script>
   </body>
 </html>

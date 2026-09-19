@@ -288,6 +288,7 @@ test("native transport correlates responses, deduplicates commands, and never re
   fixture.respond([command]);
   await flush();
   fixture.tick(500);
+  await flush();
   fixture.respond([command]);
   await flush();
   assert.equal(fixture.actions.length, 1);

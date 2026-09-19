@@ -182,10 +182,17 @@ async function main() {
   );
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
+  assert.match(installer, /Fresh reinstall - reset Chrome extension only/);
+  assert.match(installer, /CurStep = ssPostInstall\) and IsFreshReset\(\)/);
+  assert.match(installer, /--mark-chrome-reset.*ewWaitUntilTerminated/);
+  assert.match(installer, /SelectedValueIndex <> 2/);
   assert.doesNotMatch(
-    installer,
-    /procedure CurStepChanged/,
-    "Compiling a personal profile must not automatically register a native host",
+    installer.slice(
+      installer.indexOf("[Run]"),
+      installer.indexOf("[UninstallRun]"),
+    ),
+    /register-native-host|CreateSubKey|NativeMessagingHosts/,
+    "The installer may mark an explicit reset, but cannot implicitly register Chrome or edit its profile",
   );
   assert.match(
     installer,
@@ -533,7 +540,7 @@ async function main() {
         assert.equal(
           await page
             .getByRole("heading", {
-              name: "Reload the Chrome extension",
+              name: "Update your Chrome extension",
             })
             .isVisible(),
           true,
@@ -543,12 +550,89 @@ async function main() {
           viewport.width,
         );
       }
-      await page.getByRole("button", { name: "Copy Chrome address" }).click();
+      await page.getByRole("button", { name: "Copy", exact: true }).click();
       assert.equal(
         await page.evaluate(() => globalThis.__copiedChromeUrl),
         "chrome://extensions",
       );
       assert.match(await page.getByRole("status").innerText(), /Copied/i);
+      await page.addInitScript(() =>
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            async writeText(value) {
+              globalThis.__copiedChromeUrl = value;
+            },
+          },
+        }),
+      );
+      const folder = path.join(stage, "extension-keyed");
+      await page.goto(
+        require("node:url").pathToFileURL(
+          path.join(stage, "extension-setup.html"),
+        ).href +
+          "#folder=" +
+          encodeURIComponent(folder),
+      );
+      assert.equal(
+        await page.locator("#extension-folder").textContent(),
+        folder,
+      );
+      assert.deepEqual(await page.locator("ol li h2").allTextContents(), [
+        "Open Chrome extensions",
+        "Turn on Developer mode",
+        "Click Load unpacked",
+        "Select the OFEnhancer extension folder",
+        "Check connection",
+      ]);
+      await page.locator("#copy-address").click();
+      assert.equal(
+        await page.evaluate(() => globalThis.__copiedChromeUrl),
+        "chrome://extensions",
+      );
+      await page.locator("#copy-folder").click();
+      assert.equal(
+        await page.evaluate(() => globalThis.__copiedChromeUrl),
+        folder,
+      );
+      assert.equal(await page.locator("details[open]").count(), 0);
+      assert.equal(
+        await page.locator('a[href="ofenhancer://chrome-setup"]').count(),
+        1,
+      );
+      for (const width of [1280, 800, 390, 320]) {
+        await page.setViewportSize({ width, height: 800 });
+        assert.equal(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+          true,
+        );
+        if (process.env.OFENHANCER_REVIEW_DIR)
+          await page.screenshot({
+            path: path.join(
+              process.env.OFENHANCER_REVIEW_DIR,
+              "chrome-setup-" + width + ".png",
+            ),
+            fullPage: true,
+          });
+      }
+      await page.evaluate(() =>
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            async writeText() {
+              throw new Error("clipboard-unavailable");
+            },
+          },
+        }),
+      );
+      await page.locator("#copy-address").click();
+      assert.equal(
+        await page.evaluate(() => getSelection().toString()),
+        "chrome://extensions",
+      );
+      assert.match(await page.getByRole("status").textContent(), /Ctrl\+C/);
     } finally {
       await browser.close();
     }
@@ -566,7 +650,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.25",
+      productVersion: "0.20.26",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -666,7 +750,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.25");
+    assert.equal(manifest.productVersion, "0.20.26");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

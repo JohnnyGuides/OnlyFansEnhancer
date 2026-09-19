@@ -131,4 +131,31 @@ public sealed class ChromeIntegrationTests
         Exchange(generation, canonical, canonical);
         Assert.AreEqual(0, JsonSerializer.SerializeToElement(fixture.Channel.Status()).GetProperty("browsers").GetArrayLength());
     }
+    [TestMethod]
+    public void ExplicitResetCanReplaceLegacyIdentityWhileKeepingDesktopDataAndInterruptedCutoff()
+    {
+        using var fixture = new Fixture();
+        string legacy = new('b', 32), journal = Path.Combine(fixture.Root, "data", "reset.json");
+        fixture.Settings.Save(new(legacy, null, "edge"));
+        fixture.Targets = [fixture.Manifest];
+        fixture.Channel.Reset = new ChromeExtensionReset(journal);
+        fixture.Integration.Prepare();
+        Assert.IsFalse(fixture.Channel.Reset.Pending, "Normal update is not a reset.");
+        Directory.CreateDirectory(Path.Combine(fixture.Root, "data"));
+        string[] preservedFiles = ["catalogue.db", "google-oauth-token.dat", "upload-history.json"];
+        foreach (string name in preservedFiles) File.WriteAllText(Path.Combine(fixture.Root, "data", name), "unchanged fixture data");
+        var result = fixture.Integration.FreshReset();
+        foreach (string name in preservedFiles) Assert.AreEqual("unchanged fixture data", File.ReadAllText(Path.Combine(fixture.Root, "data", name)));
+        Assert.IsTrue(result.ResetPending);
+        Assert.AreEqual(legacy, result.ResetExtensionId);
+        Assert.AreEqual(ChromeIntegration.CanonicalExtensionId, result.ExtensionId);
+        Assert.AreEqual("edge", fixture.Settings.Load().BrowserId);
+        Assert.AreEqual(Path.Combine(fixture.Root, "extension-keyed"), result.ExtensionFolder);
+        string cutoff = File.ReadAllText(journal);
+        fixture.Integration.Prepare();
+        Assert.AreEqual(cutoff, File.ReadAllText(journal), "Resume must not move the original reset cutoff.");
+        Assert.AreEqual("reset-pending", fixture.Integration.Get().State);
+        Assert.IsFalse(fixture.Integration.Get().CanOpenExtensions);
+    }
+
 }

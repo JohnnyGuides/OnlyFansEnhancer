@@ -3389,17 +3389,8 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
   });
 }
 
-test("Neutral test preset fills the actual Upload Hub without starting or saving profiles", async () => {
+test("Load Template fills the actual Upload Console with path descriptors without starting or saving profiles", async () => {
   const browser = await chromium.launch({ headless: true });
-  const folder = fs.mkdtempSync(
-    path.join(require("node:os").tmpdir(), "ofenhancer-neutral-"),
-  );
-  for (const name of [
-    "neutral-full.mp4",
-    "neutral-teaser.mp4",
-    "neutral-thumbnail-valid.png",
-  ])
-    fs.writeFileSync(path.join(folder, name), "inert fixture");
   try {
     const page = await browser.newPage();
     await page.clock.setFixedTime(new Date("2026-09-16T10:00:00Z"));
@@ -3432,6 +3423,36 @@ test("Neutral test preset fills the actual Upload Hub without starting or saving
           },
           sendMessage(message, callback) {
             sent.push(message.type);
+            if (message.type === "LOAD_DEVELOPMENT_TEMPLATE")
+              return callback({
+                ok: true,
+                files: [
+                  {
+                    source: "development-fixture",
+                    fixtureToken: "11111111-1111-4111-8111-111111111111",
+                    name: "neutral-full.mp4",
+                    type: "video/mp4",
+                    size: 3429630660,
+                    lastModified: 1789812000000,
+                  },
+                  {
+                    source: "development-fixture",
+                    fixtureToken: "22222222-2222-4222-8222-222222222222",
+                    name: "neutral-teaser.mp4",
+                    type: "video/mp4",
+                    size: 32543668,
+                    lastModified: 1789812000000,
+                  },
+                  {
+                    source: "development-fixture",
+                    fixtureToken: "33333333-3333-4333-8333-333333333333",
+                    name: "neutral-thumbnail-valid.png",
+                    type: "image/png",
+                    size: 31324,
+                    lastModified: 1789812000000,
+                  },
+                ],
+              });
             if (message.type === "PREPARE_CREATOR_UPLOAD") {
               window.preparedDraft = message.draft;
               return callback({
@@ -3465,11 +3486,24 @@ test("Neutral test preset fills the actual Upload Hub without starting or saving
       };
     });
     await addUploadConsoleScripts(page);
-    assert.equal(await page.locator("#neutralTestPreset").count(), 1);
+    assert.equal(await page.locator("#loadTemplate").count(), 1);
     const saved = await page.evaluate(async () =>
       JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
     );
-    await page.locator("#neutralTestFolder").setInputFiles(folder);
+    await page.locator("#loadTemplate").click();
+    assert.equal(
+      await page
+        .locator("#uploadFullVideo")
+        .evaluate((input) => input.files.length),
+      0,
+    );
+    assert.equal(await page.locator("#neutralTestFolder").count(), 0);
+    assert.equal(
+      (await page.evaluate(() => sent)).filter(
+        (type) => type === "LOAD_DEVELOPMENT_TEMPLATE",
+      ).length,
+      1,
+    );
     assert.equal(
       await page.locator("#uploadTitle").inputValue(),
       "Neutral upload verification",
@@ -3516,6 +3550,7 @@ test("Neutral test preset fills the actual Upload Hub without starting or saving
     await page.locator("#confirmUpload").waitFor({ state: "visible" });
     await page.locator("#confirmUpload").click();
     await page.waitForFunction(() => typeof finishNeutralStart === "function");
+    await page.locator(".draft-actions summary").click();
     await page.locator("#newUploadDraft").click();
     assert.match(
       await page.locator("#neutralTestStatus").textContent(),
@@ -3558,12 +3593,12 @@ test("Neutral test preset fills the actual Upload Hub without starting or saving
       false,
     );
     await page.locator("#uploadTitle").fill("changed test title");
-    await page.locator("#neutralTestPreset").click();
+    await page.locator("#loadTemplate").click();
     assert.equal(
       await page.locator("#uploadTitle").inputValue(),
       "Neutral upload verification",
     );
-    await page.locator("#leaveNeutralTest").click();
+    await page.locator("#newUploadDraft").click();
     assert.equal(await page.locator("#mainPublishMode").isDisabled(), false);
     assert.equal(await page.locator("#contentPreset").inputValue(), "");
     assert.equal(
@@ -3574,6 +3609,5 @@ test("Neutral test preset fills the actual Upload Hub without starting or saving
     );
   } finally {
     await browser.close();
-    fs.rmSync(folder, { recursive: true, force: true });
   }
 });

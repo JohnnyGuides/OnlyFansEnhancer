@@ -94,7 +94,7 @@
 
   const NEUTRAL_TEST_PRESET = "Neutral test (manual)";
   function neutralTestSelection(files) {
-    const selected = [...files];
+    const selected = Array.isArray(files) ? files : [];
     const roles = {
       fullFile: "neutral-full.mp4",
       teaserFile: "neutral-teaser.mp4",
@@ -102,30 +102,33 @@
     };
     const result = {};
     for (const [role, name] of Object.entries(roles)) {
-      const candidates = selected.filter(
-        (file) => file.name?.toLowerCase() === name,
-      );
-      if (candidates.length !== 1)
-        throw new Error(
-          "Neutral test " +
-            name +
-            " is missing or ambiguous. Choose the test-media folder.",
-        );
+      const candidates = selected.filter((file) => file.name === name);
       const file = candidates[0];
-      const relative = String(file.webkitRelativePath || "").split("/");
-      if (relative.length > 2)
+      if (
+        candidates.length !== 1 ||
+        file.source !== "development-fixture" ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+          file.fixtureToken || "",
+        ) ||
+        !Number.isSafeInteger(file.lastModified) ||
+        file.lastModified <= 0 ||
+        !Number.isSafeInteger(file.size) ||
+        file.filePath ||
+        file.path ||
+        file.webkitRelativePath ||
+        !(role === "thumbnailFile" ? isImageFile(file) : isVideoFile(file))
+      )
         throw new Error(
-          "Neutral test files must be directly inside the selected folder.",
+          "Template file is missing or invalid. Check the development fixtures and click Load Template again.",
         );
-      if (!(role === "thumbnailFile" ? isImageFile(file) : isVideoFile(file)))
-        throw new Error(
-          "Neutral test " +
-            name +
-            " must be a nonempty " +
-            (role === "thumbnailFile" ? "image" : "video") +
-            ".",
-        );
-      result[role] = file;
+      result[role] = Object.freeze({
+        source: file.source,
+        fixtureToken: file.fixtureToken,
+        name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+      });
     }
     return result;
   }
@@ -670,6 +673,16 @@
   function mount() {
     const get = (selector) => document.querySelector(selector);
     const workflowMode = get("#workflowMode");
+    // Preserve the main/teaser/both state contract while native radios provide
+    // labels, arrow-key navigation and fieldset disabled semantics.
+    if (workflowMode?.tagName === "FIELDSET")
+      Object.defineProperty(workflowMode, "value", {
+        get: () => workflowMode.querySelector("input:checked")?.value || "main",
+        set: (value) => {
+          for (const radio of workflowMode.querySelectorAll("input"))
+            radio.checked = radio.value === value;
+        },
+      });
     const mainPublishMode = get("#mainPublishMode");
     const catalogueAssociation = get("#catalogueAssociation");
     const fullInput = get("#uploadFullVideo");
@@ -755,6 +768,10 @@
     let profilesLoaded = false;
     let neutralTestMode = false;
     let neutralTestFiles = null;
+    let templateRevision = 0;
+    document.addEventListener("input", () => {
+      templateRevision++;
+    });
     let subredditSnapshot = null;
     let subredditLoadPromise = null;
     let lastSubredditSelection = [];
@@ -1393,9 +1410,7 @@
     }
 
     function fileSummary(file, emptyText) {
-      return file
-        ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB · kept only in this tab`
-        : emptyText;
+      return file ? file.name : emptyText;
     }
 
     function invalidateMatch() {
@@ -2129,6 +2144,9 @@
             size: file.size,
             type: file.type,
             lastModified: file.lastModified,
+            ...(file.source === "development-fixture"
+              ? { source: file.source, fixtureToken: file.fixtureToken }
+              : {}),
           }
         : null;
     }
@@ -2162,6 +2180,26 @@
           request,
           file,
         );
+      if (file.source === "development-fixture")
+        return sendMessage({
+          type: "DELIVER_DEVELOPMENT_FILE",
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+          platform: request.platform,
+          role: request.role,
+          token: request.token,
+          fixtureToken: file.fixtureToken,
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+        }).catch((error) => {
+          session.port.postMessage({
+            type: "file-response",
+            requestId: request.requestId,
+            ok: false,
+            error: error.message,
+          });
+        });
       const channel = channelFor(session);
       let sent = false;
       const probe = () =>
@@ -2731,6 +2769,8 @@
         activeSession.port?.disconnect();
       }
       activeSession = null;
+      templateRevision++;
+      leaveNeutralTest();
       selectedCatalogueRow = null;
       clearTimeout(socialPollTimer);
       clearTimeout(matchTimer);
@@ -2760,7 +2800,7 @@
       invalidateMatch();
       scheduleMatch();
       get("#neutralTestStatus").textContent =
-        "New local draft. Remote uploads and recovery evidence were preserved; the neutral preset button can reuse your chosen test folder. Review previous remote drafts before reusing the same file.";
+        "New draft. Previous uploads and recovery data are unchanged.";
     }
     get("#newUploadDraft")?.addEventListener("click", () => {
       try {
@@ -2775,10 +2815,7 @@
         throw new Error(
           "Finish or stop the current preparation, then start a new draft before loading a test preset. Existing uploads were not changed.",
         );
-      if (!neutralTestFiles) {
-        get("#neutralTestFolder").click();
-        return;
-      }
+      if (!neutralTestFiles) throw new Error("Click Load Template again.");
       neutralTestMode = true;
       workflowMode.value = "main";
       workflowMode.disabled = true;
@@ -2798,27 +2835,26 @@
       title.value = "Neutral upload verification";
       description.value = "Neutral upload verification. Unpublished test.";
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
-      for (const [input, file] of [
-        [fullInput, neutralTestFiles.fullFile],
-        [teaserInput, neutralTestFiles.teaserFile],
-        [thumbnailInput, neutralTestFiles.thumbnailFile],
-      ]) {
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        input.files = transfer.files;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      pornhubInput.value = "";
+      fullFile = neutralTestFiles.fullFile;
+      teaserFile = neutralTestFiles.teaserFile;
+      thumbnailFile = neutralTestFiles.thumbnailFile;
       pornhubFile = null;
-      get("#pornhubFileSummary").textContent =
-        "Neutral test uses the full-video file. Final Submit remains manual.";
+      for (const input of [
+        fullInput,
+        teaserInput,
+        thumbnailInput,
+        pornhubInput,
+      ])
+        input.value = "";
+      selectedCatalogueRow = null;
+      manualTargets = null;
+      renderFilePickers();
       for (const control of [onlyfans, fansly, manyvids, pornhub])
         control.checked = true;
       socialX.checked = false;
       socialReddit.checked = false;
-      get("#leaveNeutralTest").hidden = false;
       get("#neutralTestStatus").textContent =
-        "Neutral test loaded. Manual preparation only; no catalogue writes or saved preset changes. Review destinations and click Yes to start. File handles stay in this tab.";
+        "Template loaded · unpublished preparation only.";
       updateWorkflowVisibility();
       refreshReleaseSummary();
       invalidateMatch();
@@ -2838,44 +2874,108 @@
       for (const option of [...contentPreset.options])
         if (option.value === NEUTRAL_TEST_PRESET) option.remove();
       contentPreset.value = "";
-      get("#leaveNeutralTest").hidden = true;
       get("#neutralTestStatus").textContent =
         "Saved presets restored for this draft. Previously chosen test files remain selected; nothing was uploaded.";
       scheduleMatch();
     }
-    for (const [selector, action] of [
-      ["#neutralTestPreset", applyNeutralTestPreset],
-      ["#leaveNeutralTest", leaveNeutralTest],
-      [
-        "#chooseNeutralTestFolder",
-        () => {
-          if (activeSession)
-            throw new Error("Start a new draft before changing test files.");
-          get("#neutralTestFolder").click();
-        },
-      ],
-    ])
-      get(selector)?.addEventListener("click", () => {
-        try {
-          action();
-        } catch (error) {
-          get("#neutralTestStatus").textContent = error.message;
-        }
-      });
-    get("#neutralTestFolder")?.addEventListener("change", () => {
+    get("#loadTemplate")?.addEventListener("click", async () => {
+      const button = get("#loadTemplate");
+      const revision = templateRevision;
+      button.disabled = true;
       try {
-        if (activeSession)
+        if (activeSession || runBusy)
           throw new Error(
-            "Current preparation is unchanged. Start a new draft before selecting test files.",
+            "Finish this preparation, then start a new draft before loading a template.",
           );
-        neutralTestFiles = neutralTestSelection(
-          get("#neutralTestFolder").files,
-        );
+        const files = globalThis.OFEnhancerDesktopUpload
+          ? await globalThis.OFEnhancerDesktopUpload.loadDevelopmentFixtures()
+          : (await sendMessage({ type: "LOAD_DEVELOPMENT_TEMPLATE" })).files;
+        if (activeSession || runBusy || revision !== templateRevision)
+          throw new Error(
+            "The draft changed while loading. Click Load Template again.",
+          );
+        neutralTestFiles = neutralTestSelection(files);
         applyNeutralTestPreset();
       } catch (error) {
         get("#neutralTestStatus").textContent = error.message;
+      } finally {
+        button.disabled = false;
       }
     });
+
+    function renderFilePickers() {
+      for (const [input, file, summary, empty] of [
+        [fullInput, fullFile, "fullFileSummary", "Choose the main video"],
+        [
+          teaserInput,
+          teaserFile,
+          "teaserFileSummary",
+          "Fansly and ManyVids preview",
+        ],
+        [
+          thumbnailInput,
+          thumbnailFile,
+          "manyvidsThumbnailSummary",
+          "Uses a site-generated thumbnail",
+        ],
+        [
+          pornhubInput,
+          pornhubFile,
+          "pornhubFileSummary",
+          "Uses the full video unless replaced",
+        ],
+        [
+          socialInput,
+          socialFile,
+          "socialFileSummary",
+          "Choose a video for social posts",
+        ],
+      ]) {
+        get("#" + summary).textContent = fileSummary(file, empty);
+        get("#" + summary + "Size").textContent = file
+          ? file.size >= 1000 ** 3
+            ? (file.size / 1000 ** 3).toFixed(2) + " GB"
+            : file.size >= 1000 ** 2
+              ? (file.size / 1000 ** 2).toFixed(1) + " MB"
+              : Math.max(1, Math.round(file.size / 1000)) + " KB"
+          : "";
+        const choose = document.querySelector(
+          '[data-choose-file="' + input.id + '"]',
+        );
+        const remove = document.querySelector(
+          '[data-remove-file="' + input.id + '"]',
+        );
+        choose.textContent = file ? "Replace" : "Choose file";
+        choose.disabled = input.disabled;
+        remove.hidden = !file;
+        remove.disabled = input.disabled;
+      }
+    }
+    for (const button of document.querySelectorAll("[data-choose-file]"))
+      button.addEventListener("click", () => {
+        const input = document.getElementById(button.dataset.chooseFile);
+        if (!input.disabled) input.click();
+      });
+    for (const button of document.querySelectorAll("[data-remove-file]"))
+      button.addEventListener("click", () => {
+        const input = document.getElementById(button.dataset.removeFile);
+        if (input.disabled) return;
+        templateRevision++;
+        input.value = "";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    const fileControlObserver = new MutationObserver(renderFilePickers);
+    for (const input of [
+      fullInput,
+      teaserInput,
+      thumbnailInput,
+      pornhubInput,
+      socialInput,
+    ])
+      fileControlObserver.observe(input, {
+        attributes: true,
+        attributeFilter: ["disabled"],
+      });
 
     fullInput.addEventListener("change", () => {
       fullFile = fullInput.files?.[0] || null;
@@ -2883,7 +2983,7 @@
       manualTargets = null;
       get("#fullFileSummary").textContent = fileSummary(
         fullFile,
-        "Required. It starts transferring after Yes and remains only in this open tab.",
+        "Choose the main video",
       );
       if (fullFile && !title.value.trim())
         title.value = titleFromFilename(fullFile.name);
@@ -2992,7 +3092,7 @@
       }
       get("#teaserFileSummary").textContent = fileSummary(
         teaserFile,
-        "Optional now. Fansly can upload the full video first and wait here for the teaser before posting.",
+        "Fansly and ManyVids preview",
       );
       flushPendingTeaser();
       if (!activeSession) scheduleMatch();
@@ -3001,7 +3101,7 @@
       thumbnailFile = thumbnailInput.files?.[0] || null;
       get("#manyvidsThumbnailSummary").textContent = fileSummary(
         thumbnailFile,
-        "Optional. If empty, ManyVids keeps its site-generated thumbnail.",
+        "Uses a site-generated thumbnail",
       );
       if (!activeSession) scheduleMatch();
     });
@@ -3009,7 +3109,7 @@
       pornhubFile = pornhubInput.files?.[0] || null;
       get("#pornhubFileSummary").textContent = fileSummary(
         pornhubFile,
-        "Optional limited edition. If empty, Pornhub uses the full-video selection in the plan.",
+        "Uses the full video unless replaced",
       );
       if (!activeSession) scheduleMatch();
     });
@@ -3017,10 +3117,19 @@
       socialFile = socialInput.files?.[0] || null;
       get("#socialFileSummary").textContent = fileSummary(
         socialFile,
-        "Optional until X or Reddit is selected. Kept only in this tab.",
+        "Choose a video for social posts",
       );
       refreshSocialReview();
     });
+    for (const input of [
+      fullInput,
+      teaserInput,
+      thumbnailInput,
+      pornhubInput,
+      socialInput,
+    ])
+      input.addEventListener("change", renderFilePickers);
+    renderFilePickers();
     socialCaption.addEventListener("input", refreshSocialReview);
     for (const control of [socialX, socialReddit]) {
       control.addEventListener("change", () => {

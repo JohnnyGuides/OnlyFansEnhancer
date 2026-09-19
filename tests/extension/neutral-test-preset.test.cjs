@@ -20,29 +20,44 @@ const files = () => [
     name: "neutral-full.mp4",
     size: 3429630660,
     type: "video/mp4",
-    webkitRelativePath: "tests/neutral-full.mp4",
+    source: "development-fixture",
+    fixtureToken: "11111111-1111-4111-8111-111111111111",
+    lastModified: 1789812000000,
   },
   {
     name: "neutral-teaser.mp4",
     size: 32543668,
     type: "video/mp4",
-    webkitRelativePath: "tests/neutral-teaser.mp4",
+    source: "development-fixture",
+    fixtureToken: "22222222-2222-4222-8222-222222222222",
+    lastModified: 1789812000000,
   },
   {
     name: "neutral-thumbnail-valid.png",
     size: 31324,
     type: "image/png",
-    webkitRelativePath: "tests/neutral-thumbnail-valid.png",
+    source: "development-fixture",
+    fixtureToken: "33333333-3333-4333-8333-333333333333",
+    lastModified: 1789812000000,
   },
 ];
-test("neutral test maps exact owned files without reading multi-gigabyte media", () => {
+test("template maps immutable path-backed descriptors without reading multi-gigabyte media", () => {
   const input = files();
   const result = api().neutralTestSelection(input);
-  assert.equal(result.fullFile, input[0]);
-  assert.equal(result.teaserFile, input[1]);
-  assert.equal(result.thumbnailFile, input[2]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.fullFile)), input[0]);
+  assert.equal(Object.isFrozen(result.fullFile), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.teaserFile)), input[1]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.thumbnailFile)), input[2]);
 });
-for (const kind of ["missing", "duplicate", "empty", "wrong-type", "nested"]) {
+for (const kind of [
+  "missing",
+  "duplicate",
+  "empty",
+  "wrong-type",
+  "nested",
+  "untrusted",
+  "fake-path",
+]) {
   test(`neutral test selection refuses ${kind} role`, () => {
     const input = files();
     if (kind === "missing") input.pop();
@@ -51,9 +66,11 @@ for (const kind of ["missing", "duplicate", "empty", "wrong-type", "nested"]) {
     if (kind === "wrong-type") input[0].type = "text/plain";
     if (kind === "nested")
       input[0].webkitRelativePath = "tests/other/neutral-full.mp4";
+    if (kind === "untrusted") delete input[0].fixtureToken;
+    if (kind === "fake-path") input[0].filePath = "C:\u005ctest.mp4";
     assert.throws(
       () => api().neutralTestSelection(input),
-      /neutral|missing|ambiguous|folder|video/i,
+      /template|missing|invalid/i,
     );
   });
 }

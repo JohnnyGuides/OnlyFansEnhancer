@@ -499,8 +499,12 @@ async function mountConsole(page, options = {}) {
     await page.addScriptTag({ path: path.join(repositoryRoot, relative) });
   }
   await page
-    .locator("#workflowMode")
-    .selectOption(options.workflowMode || "both");
+    .locator(
+      'input[name="workflowMode"][value="' +
+        (options.workflowMode || "both") +
+        '"]',
+    )
+    .check();
   await page
     .locator("#catalogueAssociation")
     .selectOption(options.deferCatalogue ? "later" : "now");

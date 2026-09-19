@@ -123,6 +123,7 @@
     setup: "Set up Chrome",
     offline: "Chrome not connected",
     repair: "Chrome setup needs repair",
+    "reset-pending": "Fresh reset: action needed",
     connected: "Chrome connected",
     choose: "Choose Chrome browser",
     unsupported: "Desktop agent available",
@@ -140,13 +141,18 @@
     for (const node of document.querySelectorAll(".chrome-readiness-message"))
       node.textContent = `${label}. ${value.message}`;
     document.querySelector("#chromeSetupMessage").textContent =
-      `${label}. ${value.message}`;
+      value.state === "repair"
+        ? "Chrome setup needs attention. Open troubleshooting below."
+        : `${label}. ${value.message}`;
+    document.querySelector("#chromeSetupError").textContent =
+      value.setupError || "";
+    document.querySelector("#chromeResetNotice").hidden = !value.resetPending;
+    document.querySelector("#chromeResetExtensionId").textContent =
+      value.resetExtensionId || value.extensionId || "";
     document.querySelector("#chromeExtensionFolder").textContent =
       value.extensionFolder ||
-      "Prepare integration to resolve the installed folder.";
-    document.querySelector("#chromeSetupSteps").hidden =
-      !value.chromeFound ||
-      Boolean(value.extensionId && !value.extensionFolder);
+      "Select Set up Chrome to find the installed extension-keyed folder.";
+    document.querySelector("#chromeSetupSteps").hidden = !value.chromeFound;
     for (const button of document.querySelectorAll("[data-chrome-action]")) {
       button.hidden =
         value.state === "unsupported" ||
@@ -155,6 +161,17 @@
           ? value.chromeFound
           : !value.chromeFound);
     }
+    document.querySelector(
+      '[data-chrome-action="openChromeExtensions"]',
+    ).hidden = value.canOpenExtensions !== true;
+    document.querySelector('[data-chrome-action="prepareChrome"]').hidden =
+      !value.chromeFound ||
+      (value.prepared && !(value.resetPending && !value.extensionFolder));
+    document.querySelector("#chromeAddressHint").hidden =
+      value.canOpenExtensions === true;
+    document.querySelector("#chromeFolderStep").hidden = Boolean(
+      value.extensionId && !value.extensionFolder,
+    );
     document.querySelector("#copyChromeFolder").disabled =
       !value.extensionFolder;
     document.querySelector(
@@ -217,14 +234,26 @@
     }
   }
 
-  document.querySelector("#chromeConnection").addEventListener("click", () => {
+  async function showChromeSetup() {
     chromeSetupDialog.showModal();
-    void refreshChrome();
+    await refreshChrome();
+    const prepare = document.querySelector(
+      '[data-chrome-action="prepareChrome"]',
+    );
+    if (
+      chromeReadiness?.chromeFound &&
+      !prepare.disabled &&
+      ((!chromeReadiness.prepared && chromeReadiness.state === "setup") ||
+        (chromeReadiness.resetPending && !chromeReadiness.extensionFolder))
+    )
+      prepare.click();
+  }
+  document.querySelector("#chromeConnection").addEventListener("click", () => {
+    void showChromeSetup();
   });
   for (const button of document.querySelectorAll(".chrome-setup-trigger"))
     button.addEventListener("click", () => {
-      chromeSetupDialog.showModal();
-      void refreshChrome();
+      void showChromeSetup();
     });
   document
     .querySelector("#closeChromeSetup")
@@ -234,6 +263,13 @@
     .addEventListener("click", refreshChrome);
   for (const button of document.querySelectorAll("[data-chrome-action]"))
     button.addEventListener("click", async () => {
+      if (
+        button.dataset.chromeAction === "freshChromeReset" &&
+        !global.confirm(
+          "Reset the OFEnhancer Chrome extension? Its Chrome settings and upload checkpoints will be cleared. Your catalogue, Google connection and desktop history stay intact. Stop active upload preparation first.",
+        )
+      )
+        return;
       button.disabled = true;
       const message = document.querySelector("#chromeSetupActionStatus");
       try {
@@ -244,8 +280,8 @@
         message.textContent =
           result?.message ||
           (button.dataset.chromeAction === "prepareChrome"
-            ? "Preparation finished. Complete the required Chrome steps; connection is checked automatically."
-            : "Opened. Waiting for fresh Chrome evidence.");
+            ? "Ready. Finish the steps in Chrome."
+            : "Opened. Check connection after finishing in Chrome.");
       } catch (error) {
         message.textContent = `Could not finish: ${error.message}`;
       } finally {
@@ -1799,8 +1835,7 @@
   openUploader.addEventListener("click", async () => {
     if (global.chrome?.webview) {
       if (!["connected", "choose"].includes(chromeReadiness?.state)) {
-        chromeSetupDialog.showModal();
-        void refreshChrome();
+        void showChromeSetup();
         return;
       }
       global.location.href = "upload-console.html";
@@ -1823,6 +1858,6 @@
 
   void refreshChrome();
   if (new URLSearchParams(global.location.search).get("chrome-setup") === "1")
-    chromeSetupDialog.showModal();
+    void showChromeSetup();
   chromePoll = setInterval(refreshChrome, 5000);
 })(globalThis);

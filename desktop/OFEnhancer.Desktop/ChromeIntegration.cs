@@ -8,7 +8,7 @@ namespace OFEnhancer.Desktop;
 
 internal sealed record ChromeIntegrationView(string State, string Message, bool HostAvailable,
     bool ChromeFound, bool Prepared, string? ExtensionId, string? ExtensionFolder,
-    object BrowserStatus, string? SetupError = null);
+    object BrowserStatus, string? SetupError = null, bool CanOpenExtensions = false, bool ResetPending = false, string? ResetExtensionId = null);
 
 // Only fixed OFEnhancer package paths and current-user registration are writable here.
 // Registry inspection is diagnostic evidence, not proof that an extension is loaded.
@@ -81,6 +81,7 @@ internal sealed class ChromeIntegration
             try
             {
                 ValidateSettings();
+                if (id is null) folder = ResolveFolder(CanonicalId());
                 if (id is not null)
                 {
                     folder = ResolveFolder(id);
@@ -106,20 +107,23 @@ internal sealed class ChromeIntegration
             int live = browserStatus.GetProperty("browsers").GetArrayLength();
             bool selected = browserStatus.GetProperty("connected").GetBoolean();
             bool selectionRequired = browserStatus.GetProperty("selectionRequired").GetBoolean();
-            if (prepared && browserStatus.TryGetProperty("updateRequired", out var update) && update.GetBoolean())
+            bool resetting = channel.Reset?.Pending == true;
+            if (!resetting && prepared && browserStatus.TryGetProperty("updateRequired", out var update) && update.GetBoolean())
                 error = BrowserUploadChannel.ExtensionReloadMessage;
-            string state = !chrome ? "not-found" : error is not null ? "repair" : !prepared ? "setup" : live == 0 ? "offline" : (live > 1 || selectionRequired) && !selected ? "choose" : "connected";
+            string state = !chrome ? "not-found" : resetting ? "reset-pending" : error is not null ? "repair" : !prepared ? "setup" : live == 0 ? "offline" : (live > 1 || selectionRequired) && !selected ? "choose" : "connected";
             string message = state switch
             {
-                "not-found" => "Google Chrome was not found in the standard installation locations. It is required for this uploader; catalogue import remains available.",
+                "not-found" => "Install Google Chrome to use Upload. Your catalogue is still available.",
+                "reset-pending" => channel.Reset!.Message,
                 "repair" => error!,
-                "setup" => "Prepare the personal extension, then enable Developer mode and choose Load unpacked in Chrome.",
-                "offline" => "Setup is prepared, but no fresh matching extension exchange was received. Open Chrome and check again; this does not establish whether the extension is disabled or Chrome is closed.",
-                "choose" => "Choose the upload browser in the uploader. A previous selection is never silently replaced after a disconnect or restart.",
-                _ => "A matching personal extension and desktop native bridge exchanged messages recently. Website sign-ins remain in Chrome. The separate X teaser host has not been checked."
+                "setup" => "Select Set up Chrome, then follow the steps below.",
+                "offline" => "Finish the steps below, then check connection.",
+                "choose" => "Choose the Chrome window to use in Upload.",
+                _ => "Ready to prepare uploads."
             };
             if (state == "not-found" && error is not null) message += " Setup also needs attention: " + error;
-            return new(state, message, true, chrome, prepared, id, id == CanonicalExtensionId ? folder : null, status, error);
+            return new(state, message, true, chrome, prepared, id, id is null || id == CanonicalExtensionId ? folder : null, status, error,
+                !resetting && live > 0 && (selected || live == 1 && !selectionRequired), resetting, channel.Reset?.PreviousExtensionId);
         }
     }
 
@@ -177,6 +181,7 @@ internal sealed class ChromeIntegration
     {
         lock (gate)
         {
+            if (channel.Reset?.Pending == true) return ConfigureFreshReset(false);
             VerifyPackage();
             if (!permanentInstall()) throw new InvalidOperationException("Run OFEnhancer from its permanent installed location before preparing Chrome. Staging and builds do not register hosts.");
             ValidateSettings();
@@ -190,15 +195,43 @@ internal sealed class ChromeIntegration
                 throw new InvalidOperationException("A different installation owns the native bridge. No registration was changed.");
             if (previous is not null && previous != CanonicalId() && targets.Length == 0)
                 throw new InvalidOperationException("Legacy installation location is unverified. Preserve its Chrome load folder and use advanced identity repair; do not load the new keyed extension.");
-            // Atomic file/settings commits make retries recoverable. No settings or Chrome storage migration.
-            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { name = HostName, description = "OFEnhancer desktop bridge", path = NativeExecutable, type = "stdio", allowed_origins = new[] { $"chrome-extension://{id}/" } });
-            string temporary = NativeManifest + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try { File.WriteAllBytes(temporary, bytes); File.Move(temporary, NativeManifest, true); }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
-            settings.Save(settings.Load() with { ExtensionId = id });
-            register(NativeManifest);
+            WriteRegistration(id);
             return Get();
         }
+    }
+
+    internal ChromeIntegrationView FreshReset() => ConfigureFreshReset(true);
+
+    private ChromeIntegrationView ConfigureFreshReset(bool begin)
+    {
+        lock (gate)
+        {
+            VerifyPackage();
+            if (!permanentInstall()) throw new InvalidOperationException("Install this build before starting Fresh reset.");
+            ValidateSettings();
+            var targets = registrationTargets();
+            if (targets.Any(target => !SamePath(target, NativeManifest)))
+                throw new InvalidOperationException("Another OFEnhancer installation owns Chrome setup. No extension state was changed.");
+            string canonical = CanonicalId();
+            ResolveFolder(canonical);
+            // Persist the rejection barrier before changing registration or sending
+            // a self-uninstall. An interrupted reset remains pending on restart.
+            if (begin) channel.BeginReset(effectiveIdentity() ?? canonical);
+            else if (channel.Reset?.Pending != true) throw new InvalidOperationException("Start Fresh reset before replacing the previous extension identity.");
+            WriteRegistration(canonical);
+            return Get();
+        }
+    }
+
+    private void WriteRegistration(string id)
+    {
+        // Atomic file/settings commits make retries recoverable. No settings or Chrome storage migration.
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { name = HostName, description = "OFEnhancer desktop bridge", path = NativeExecutable, type = "stdio", allowed_origins = new[] { $"chrome-extension://{id}/" } });
+        string temporary = NativeManifest + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.WriteAllBytes(temporary, bytes); File.Move(temporary, NativeManifest, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        settings.Save(settings.Load() with { ExtensionId = id });
+        register(NativeManifest);
     }
 
     private static void RegisterCurrentUser(string manifest)

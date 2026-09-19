@@ -123,7 +123,11 @@ modify a Chrome profile or enable the extension through enterprise policy.
 
 Updates close the old desktop app using Restart Manager handling, replace owned
 binaries, preserve settings/catalogue/history, and prompt extension reload.
-Repair/reinstall preserves data. Interactive uninstall defaults to keeping data
+Normal repair/reinstall preserves extension state and desktop data. The explicit
+Fresh reinstall option records a pending Chrome-extension reset before opening
+setup; it preserves desktop data and cannot report a fresh connection from a
+pre-reset installation. See [the reset contract](product.md#normal-update-versus-fresh-reset).
+Interactive uninstall defaults to keeping data
 and offers explicit removal of the dedicated data directory. Silent uninstall
 keeps data. External media and Chrome profiles are outside installer ownership.
 

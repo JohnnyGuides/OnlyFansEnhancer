@@ -1,6 +1,5 @@
 {
   "personal": {
-    "PRIVACY.md": "docs/privacy-personal.md",
     "app/app.css": "shared/workspace/app.css",
     "app/app.js": "shared/workspace/app.js",
     "app/finalLogo.png": "shared/workspace/finalLogo.png",
@@ -22,6 +21,7 @@
     "popup.css": "extensions/personal/popup.css",
     "popup.html": "extensions/personal/popup.html",
     "popup.js": "extensions/personal/popup.js",
+    "PRIVACY.md": "docs/privacy-personal.md",
     "realbooru-parser.html": "extensions/personal/realbooru-parser.html",
     "realbooru-parser.js": "extensions/personal/realbooru-parser.js",
     "upload-console.css": "extensions/personal/upload-console.css",
@@ -33,6 +33,7 @@
     "workflows/catalogue-proposal.js": "extensions/personal/workflows/catalogue-proposal.js",
     "workflows/common.js": "extensions/personal/workflows/common.js",
     "workflows/desktop-upload-runtime.js": "extensions/personal/workflows/desktop-upload-runtime.js",
+    "workflows/extension-lifecycle.js": "extensions/personal/workflows/extension-lifecycle.js",
     "workflows/fansly-prefill.js": "extensions/personal/workflows/fansly-prefill.js",
     "workflows/local-file-attacher.js": "extensions/personal/workflows/local-file-attacher.js",
     "workflows/manyvids-autofill.js": "extensions/personal/workflows/manyvids-autofill.js",

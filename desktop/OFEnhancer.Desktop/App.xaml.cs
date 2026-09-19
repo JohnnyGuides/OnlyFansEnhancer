@@ -18,6 +18,17 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs eventArgs)
     {
         base.OnStartup(eventArgs);
+        if (eventArgs.Args.Contains("--mark-chrome-reset", StringComparer.Ordinal))
+        {
+            try
+            {
+                var reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath);
+                reset.Begin(new DesktopSettingsStore(AppConfiguration.SettingsPath).Load().ExtensionId ?? ChromeIntegration.CanonicalExtensionId);
+                Shutdown(0);
+            }
+            catch { Shutdown(2); }
+            return;
+        }
         if (eventArgs.Args.Contains("--status-json", StringComparer.Ordinal))
         {
             using StreamWriter output = new(Console.OpenStandardOutput()) { AutoFlush = true };

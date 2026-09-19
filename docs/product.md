@@ -156,34 +156,46 @@ These statements preserve product direction, not permission to fill evidence gap
 or remove current safeguards. No unresolved public-platform trace is silently
 promoted to a tested implementation.
 
-## Neutral test preset and fresh drafts
+## Development template and fresh drafts
 
-Upload Hub provides **Neutral test preset** and **Choose test folder**. Select a
-folder containing exactly one direct child with each required name:
-`neutral-full.mp4`, `neutral-teaser.mp4` and `neutral-thumbnail-valid.png`.
-File references remain in the open Hub; the shortcut does not read a
-multi-gigabyte video into JavaScript memory or persist its path in settings.
-Reopening the Hub requires selecting the folder again.
+The personal Upload Console has one **Dev · Load Template** action. It loads
+`neutral-full.mp4`, `neutral-teaser.mp4` and `neutral-thumbnail-valid.png`
+from the fixed development fixture root
+`F:\WORK\Creations\OFEnhancer\.local\upload-test-media`.
+No folder selection is required. The desktop validates the exact names, content
+headers, non-empty bounded sizes and unmodified metadata, and issues in-memory
+opaque capabilities. The video remains on disk: JavaScript receives descriptors,
+not multi-gigabyte blobs or absolute paths. The existing bound native file
+attacher delivers it. Ordinary selected File objects still use the normal path.
+Neither the control nor its fixture contract is included in the store edition.
 
-The shortcut fills neutral title/description, the files, all four main-video
-destinations and the next Friday at 15:00 UTC. It locks manual mode and skips
-catalogue association. Fansly's saved caption and promotional FYP toggle, plus
-saved media tags/categories, do not leak into this draft. Existing pricing/access
-permissions are not silently replaced. Saved presets are unchanged. Review the
-plan and use the ordinary confirmation to start; the shortcut never starts an
-upload by itself.
+The template fills neutral title/description, all four main-video destinations
+and the next Friday at 15:00 UTC. It locks manual preparation and skips catalogue
+association. Saved captions, tags and categories cannot leak into the neutral
+draft; existing pricing/access settings and saved presets are unchanged.
+Loading does not start uploading. Review and confirm the plan separately.
 
-**New draft** is available after the run has settled. It clears this view and
-selected files, but preserves remote uploads and recovery/publication evidence.
-The test folder's file references can be reused through Neutral test preset in
-the same Hub. This does not authorize repeating an uncertain upload; the normal
-same-work safeguards still apply. An active run or pending file request prevents
-New draft. **Use saved presets** exits neutral mode on a fresh draft.
+**Draft actions → Start a new draft** clears the form after a settled run and
+leaves neutral mode. Remote uploads and recovery/publication evidence remain.
+An active run or unresolved file request prevents replacing the draft.
 
-Updates replace the application in its existing installation and retain the
-extension identity and settings. They do not run a destructive uninstall or
-remove/reinstall the Chrome extension. Review active uploads before updating,
-then reload the existing extension and reopen the Hub when instructed. A
-mismatched running extension is shown as reload-required rather than connected.
-Old execution bindings are retired on the version transition, while uncertainty
-and final-action evidence remain available for review and duplicate prevention.
+## Normal update versus Fresh reset
+
+A normal update keeps the Chrome extension, its identity and settings. Reload
+Creator Workflow Toolkit after installing an update. A version mismatch never
+counts as a working upload connection. Existing uncertainty and final-action
+evidence remain available for duplicate prevention.
+
+**Fresh reset** in Chrome setup, or **Fresh reinstall** in the installer, instead
+creates a durable reset barrier. The connected personal extension clears only
+its own Chrome storage and requests supported self-uninstall. If the old build
+cannot receive or perform the request, Chrome setup requires manual removal of
+Creator Workflow Toolkit and identifies the exact old ID. Load the displayed
+`extension-keyed` folder afterward. Reloading or a saved extension ID cannot
+complete a reset: a current-version genuine-install receipt and a new matching
+exchange are required after the old instance becomes silent. Pre-reset receipts
+remain rejected after desktop restarts. Interrupted resets remain pending.
+
+The catalogue, Google configuration, desktop settings, upload history and other
+application data are kept. No Chrome Preferences, Secure Preferences, extension
+databases, enterprise policies or other browser profile internals are edited.

@@ -28,7 +28,14 @@
   const storageKey = (key) => SETTINGS.has(key);
   const UUID =
     /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-  function create({ chrome, handleMessage, bindPort, unbindPort, attachFile }) {
+  function create({
+    chrome,
+    handleMessage,
+    bindPort,
+    unbindPort,
+    attachFile,
+    lifecycle,
+  }) {
     const ports = new Map();
     const events = [];
     const replies = [];
@@ -93,6 +100,22 @@
         JSON.stringify(command).length > 200_000
       )
         throw new Error("invalid-upload-command");
+      if (command.kind === "resetExtension") {
+        if (!UUID.test(command.generation || "") || !lifecycle)
+          throw new Error(
+            "Remove Creator Workflow Toolkit in chrome://extensions, then load the extension-keyed folder again.",
+          );
+        stopped = true;
+        clearTimeout(timer);
+        for (const port of [...ports.values()]) port.disconnect();
+        try {
+          await lifecycle.uninstall();
+        } catch (error) {
+          stopped = false;
+          throw error;
+        }
+        return { removed: true };
+      }
       if (command.kind === "message") {
         if (!MESSAGE_TYPES.has(command.message?.type))
           throw new Error("unsupported-upload-message");
@@ -212,10 +235,12 @@
           for (const current of [...ports.values()]) current.disconnect();
           if (!stopped) timer = setTimeout(connect, 5000);
         }
-        function exchange() {
+        async function exchange() {
           if (nativePort !== port || stopped) return;
           inFlight = crypto.randomUUID();
           try {
+            const installation = (await lifecycle?.getInstallation()) || null;
+            if (nativePort !== port || stopped) return;
             port.postMessage({
               protocolVersion: 1,
               requestId: inFlight,
@@ -224,6 +249,7 @@
                 browserId,
                 connectionId,
                 extensionId: chrome.runtime.id,
+                installation,
                 extensionVersion: chrome.runtime.getManifest?.().version || "",
                 setupGeneration,
                 replies: replies.splice(0, 64),
@@ -294,7 +320,7 @@
           timer = setTimeout(exchange, 500);
         });
         port.onDisconnect.addListener(lost);
-        exchange();
+        void exchange();
       } catch {
         if (!stopped) timer = setTimeout(connect, 5000);
       } finally {

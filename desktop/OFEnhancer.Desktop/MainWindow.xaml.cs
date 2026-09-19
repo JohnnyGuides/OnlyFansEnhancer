@@ -22,6 +22,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly HttpClient googleHttp;
     private readonly GoogleCatalogueController googleCatalogue;
     private readonly BrowserUploadChannel uploads = new();
+    private readonly DevelopmentFixtureSource developmentFixtures = new();
     private readonly UploadCatalogueController uploadCatalogue;
     private readonly ChromeIntegration chromeIntegration;
     private readonly bool hasExtensionOverride;
@@ -36,6 +37,7 @@ public partial class MainWindow : Window, IDisposable
         this.catalogue = catalogue;
         hasExtensionOverride = extensionOverride;
         settings = new DesktopSettingsStore(AppConfiguration.SettingsPath);
+        uploads.Reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath);
         Func<string?> effectiveIdentity = () => extensionOverride ? extensionId : settings.Load().ExtensionId;
         chromeIntegration = new ChromeIntegration(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")), settings, effectiveIdentity, uploads);
         browserSettings = new BrowserSettingsController(settings);
@@ -84,6 +86,23 @@ public partial class MainWindow : Window, IDisposable
                 return AgentResponse.SuccessResult(request, new { opened = true });
             }
             JsonElement payload = request.Payload ?? JsonSerializer.SerializeToElement(new { });
+            if (request.Operation is "loadDevelopmentFixtures" or "resolveDevelopmentFixture")
+            {
+                var integration = chromeIntegration.Get();
+                if (!integration.Prepared || uploads.Reset?.Pending == true
+                    || !payload.TryGetProperty("bridgeExtensionId", out var origin) || origin.GetString() != integration.ExtensionId
+                    || !payload.TryGetProperty("extensionVersion", out var version) || version.GetString() != AgentProtocol.ProductVersion)
+                    throw new InvalidOperationException("Connect the current personal extension before loading the development template.");
+                if (request.Operation == "loadDevelopmentFixtures")
+                {
+                    if (payload.EnumerateObject().Any(p => p.Name is not ("bridgeExtensionId" or "extensionVersion"))) throw new InvalidOperationException("invalid-payload");
+                    return AgentResponse.SuccessResult(request, developmentFixtures.Load());
+                }
+                if (payload.EnumerateObject().Any(p => p.Name is not ("bridgeExtensionId" or "extensionVersion" or "fixtureToken"))) throw new InvalidOperationException("invalid-payload");
+                var info = developmentFixtures.Resolve(payload.GetProperty("fixtureToken").GetString() ?? "");
+                return AgentResponse.SuccessResult(request, new { filePath = info.FullName, name = info.Name, size = info.Length,
+                    lastModified = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() });
+            }
             if (request.Operation == "browserExchange")
             {
                 chromeIntegration.Get();
@@ -103,7 +122,7 @@ public partial class MainWindow : Window, IDisposable
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
-        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension" }.Contains(operation)) return null;
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try
         {
@@ -137,6 +156,31 @@ public partial class MainWindow : Window, IDisposable
             }
             else if (operation == "getUploadBrowsers") { await Task.Run(chromeIntegration.Get); result = uploads.Status(); }
             else if (operation == "selectUploadBrowser") result = uploads.Select(payload.GetProperty("browserId").GetString() ?? "");
+            else if (operation == "loadDevelopmentFixtures")
+            {
+                if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any()) throw new InvalidOperationException("invalid-payload");
+                if (uploads.Reset?.Pending == true) throw new InvalidOperationException(uploads.Reset.Message);
+                result = await Task.Run(developmentFixtures.Load);
+            }
+            else if (operation == "freshChromeReset")
+            {
+                if (hasExtensionOverride || payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any()) throw new InvalidOperationException("invalid-payload");
+                result = await Task.Run(chromeIntegration.FreshReset);
+            }
+            else if (operation == "deliverDevelopmentFixture")
+            {
+                if (additionalObjects.Count != 0) throw new InvalidOperationException("invalid-payload");
+                var info = developmentFixtures.Resolve(payload.GetProperty("fixtureToken").GetString() ?? "");
+                if (info.Name != payload.GetProperty("name").GetString() || info.Length != payload.GetProperty("size").GetInt64()
+                    || new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() != payload.GetProperty("lastModified").GetInt64())
+                    throw new InvalidOperationException("Template changed. Click Load Template again.");
+                result = await uploads.RequestNativeFileAsync(JsonSerializer.SerializeToElement(new {
+                    kind = "file", filePath = info.FullName, name = info.Name, size = info.Length,
+                    lastModified = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+                    requestId = payload.GetProperty("requestId").GetString(), sessionId = payload.GetProperty("sessionId").GetString(),
+                    platform = payload.GetProperty("platform").GetString(), role = payload.GetProperty("role").GetString(), token = payload.GetProperty("token").GetString()
+                }));
+            }
             else if (operation == "deliverUploadFile")
             {
                 if (additionalObjects.Count != 1 || additionalObjects[0] is not CoreWebView2File file)
@@ -361,8 +405,13 @@ public partial class MainWindow : Window, IDisposable
         {
             string guide = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "extension-setup.html"));
             if (!File.Exists(guide)) throw new InvalidOperationException("Open chrome://extensions in Chrome's address bar. The extension is not connected yet.");
-            OpenChrome(new Uri(guide));
-            return "Chrome setup guide opened. Paste chrome://extensions into Chrome's address bar; direct opening becomes available once the extension is connected.";
+            var readiness = chromeIntegration.Get();
+            if (readiness.ExtensionFolder is null)
+                throw new InvalidOperationException("Copy chrome://extensions into Chrome and reload the existing extension. Choose Fresh reset for a clean installation.");
+            var address = new UriBuilder(new Uri(guide)) { Fragment = "folder=" + Uri.EscapeDataString(readiness.ExtensionFolder)
+                + (readiness.ResetPending ? "&reset=1&previous=" + Uri.EscapeDataString(readiness.ResetExtensionId ?? ChromeIntegration.CanonicalExtensionId) : "") };
+            OpenChrome(address.Uri);
+            return "Copy this address and paste it into Chrome: chrome://extensions";
         }
         OpenChrome(new Uri("about:blank"));
         return "Chrome opened.";

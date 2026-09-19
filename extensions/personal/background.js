@@ -2,6 +2,7 @@ importScripts(
   "workflows/registry.js",
   "workflows/local-file-attacher.js",
   "workflows/desktop-upload-runtime.js",
+  "workflows/extension-lifecycle.js",
   "workflows/catalogue-contract.js",
   "workflows/catalogue-client.js",
   "workflows/subreddit-presets.js",
@@ -45,6 +46,9 @@ const X_TEASER_SESSION_STORE = globalThis.CreatorXTeaserSessionStore;
 const X_TEASER_BINDING_KEY = "creatorXTeaserChromeBindingV1";
 const X_TEASER_NATIVE_HOST = "com.johnnyguides.creator_x_teaser";
 const DESKTOP_NATIVE_HOST = "com.johnnyguides.ofenhancer";
+const extensionLifecycle = globalThis.CreatorExtensionLifecycle?.create({
+  chrome,
+});
 const DESKTOP_CAPABILITIES = [
   "desktop-shell",
   "local-file-attach",
@@ -2726,7 +2730,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.25"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.26"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4201,7 +4205,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.25"
+      "upload-hub-0.20.26"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -5039,6 +5043,7 @@ async function openUploadConsole() {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await extensionLifecycle?.getInstallation();
   await ensureCreatorUploadRuntimeVersion();
   const current = await chrome.storage.local.get([
     SETTINGS_KEY,
@@ -5119,6 +5124,16 @@ function handleExtensionMessage(message, sender, sendResponse) {
         "Upload administration is restricted to the uploader console.",
       );
     switch (message?.type) {
+      case "LOAD_DEVELOPMENT_TEMPLATE":
+        assertDevelopmentConsole(sender);
+        return {
+          files: await sendDesktopRequest("loadDevelopmentFixtures", {
+            extensionVersion: chrome.runtime.getManifest().version,
+          }),
+        };
+      case "DELIVER_DEVELOPMENT_FILE":
+        assertDevelopmentConsole(sender);
+        return attachDevelopmentFile(message, sender);
       case "GET_SETTINGS":
         return { settings: await getSettings() };
       case "SET_SETTINGS":
@@ -5672,12 +5687,53 @@ async function associateCreatorUploadCatalogue(sessionId, candidate) {
   return results;
 }
 
+function assertDevelopmentConsole(sender) {
+  if (
+    sender?.id !== chrome.runtime.id ||
+    sender.url !== chrome.runtime.getURL("upload-console.html") ||
+    !sender.documentId
+  )
+    throw new Error(
+      "Development fixtures are restricted to the personal Upload Console.",
+    );
+}
+
+async function attachDevelopmentFile(message, sender) {
+  const pending = creatorUploadFileRequests.get(message.requestId);
+  if (
+    !pending ||
+    pending.port.desktop ||
+    !creatorUploadConsolePorts.has(pending.port) ||
+    pending.port.sender?.documentId !== sender.documentId ||
+    pending.port.sender?.tab?.id !== sender.tab?.id
+  )
+    throw new Error("The template no longer belongs to this upload window.");
+  const file = await sendDesktopRequest("resolveDevelopmentFixture", {
+    fixtureToken: message.fixtureToken,
+    extensionVersion: chrome.runtime.getManifest().version,
+  });
+  if (
+    file.name !== message.name ||
+    file.size !== message.size ||
+    file.lastModified !== message.lastModified
+  )
+    throw new Error("Template changed. Click Load Template again.");
+  return attachBoundUploadFile({ ...message, filePath: file.filePath });
+}
+
 async function attachDesktopUploadFile(command, ports) {
+  const pending = creatorUploadFileRequests.get(command.requestId);
+  if (!pending?.port.desktop || ![...ports.values()].includes(pending.port))
+    throw new Error(
+      "The selected file no longer belongs to this upload request.",
+    );
+  return attachBoundUploadFile(command);
+}
+
+async function attachBoundUploadFile(command) {
   const pending = creatorUploadFileRequests.get(command.requestId);
   if (
     !pending ||
-    !pending.port.desktop ||
-    ![...ports.values()].includes(pending.port) ||
     pending.sessionId !== command.sessionId ||
     pending.platform !== command.platform ||
     pending.role !== command.role ||
@@ -5816,6 +5872,7 @@ async function attachDesktopUploadFile(command, ports) {
 if (chrome.runtime.connectNative && globalThis.CreatorDesktopUploadRuntime) {
   globalThis.CreatorDesktopUploadRuntime.create({
     chrome,
+    lifecycle: extensionLifecycle,
     handleMessage: handleExtensionMessage,
     bindPort(port, message) {
       creatorUploadConsolePorts.add(port);

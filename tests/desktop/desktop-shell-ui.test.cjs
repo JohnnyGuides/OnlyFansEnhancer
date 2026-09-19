@@ -46,7 +46,7 @@ async function main() {
     await testOfflineBridgeRecovery(browser, address.port);
     await testChromeReadinessStates(browser, address.port);
     await testStaleChromeObservation(browser, address.port);
-    await testChromeExtensionsHasItsOwnActionRow(browser, address.port);
+    await testChromeExtensionsCopyAndConnectedAction(browser, address.port);
     for (const viewport of viewports) {
       const page = await browser.newPage({ viewport });
       const errors = [];
@@ -58,7 +58,7 @@ async function main() {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus") {
             return {
-              productVersion: "0.20.25",
+              productVersion: "0.20.26",
               protocolVersion: 1,
               capabilities: [
                 "desktop-shell",
@@ -153,7 +153,7 @@ async function main() {
   );
 }
 
-async function testChromeExtensionsHasItsOwnActionRow(browser, port) {
+async function testChromeExtensionsCopyAndConnectedAction(browser, port) {
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
   });
@@ -161,7 +161,7 @@ async function testChromeExtensionsHasItsOwnActionRow(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.25",
+          productVersion: "0.20.26",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };
@@ -171,6 +171,7 @@ async function testChromeExtensionsHasItsOwnActionRow(browser, port) {
           chromeFound: true,
           prepared: true,
           extensionFolder: "C:\\OFEnhancer\\extension-keyed",
+          canOpenExtensions: true,
           message: "Synthetic Chrome setup evidence.",
         };
       throw new Error("unsupported-operation");
@@ -216,7 +217,7 @@ async function testChromeReadinessStates(browser, port) {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus")
             return {
-              productVersion: "0.20.25",
+              productVersion: "0.20.26",
               protocolVersion: 1,
               capabilities: ["chrome-readiness"],
             };
@@ -275,7 +276,7 @@ async function testStaleChromeObservation(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.25",
+          productVersion: "0.20.26",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };

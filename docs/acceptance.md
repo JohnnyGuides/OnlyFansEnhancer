@@ -252,3 +252,40 @@ it; inspect the existing draft and stop before final Save/Post.
 All new preparation and test shortcuts remain manual. No production-site final
 Save, Post or Submit is authorized by a fixture pass. Full authenticated retests,
 installed-upgrade acceptance and current-site completion remain separate gates.
+
+## Chrome setup and Upload refresh — 0.20.26
+
+Implemented on the editable Windows checkout on 2026-09-19. The canonical
+personal extension ID remains `aocoaajmhccmefmfebgiiogfdojciild`.
+
+- `npm run check:web`: lint, type checking, formatting, reproducible extension
+  builds and 423 portable/extension/desktop-UI tests passed.
+- `npm run check:windows`: 54 catalogue and 301 desktop .NET tests, 13 native
+  tests and 14 Windows packaging tests passed; X teaser host built.
+- `npm run build:desktop`: the self-contained Windows package and Inno Setup
+  installer compiled. The remote shell's missing ProgramFiles(x86) environment
+  value was restored for that build process from the Windows known-folder API.
+- Production fixture validation resolved all three real development files,
+  including the 3,429,630,660-byte full video, with 22,744 bytes of managed
+  allocation for the descriptors and bounded header checks.
+- An isolated Chromium profile exercised the actual production lifecycle and
+  file-attacher modules: supported self-uninstall, absence of the old extension,
+  a genuine new-install receipt with no old checkpoint, preservation of a separate
+  test extension and site storage, and native attachment of all three actual
+  fixtures to an unpublished local form. No publication endpoint was present.
+- Rendered setup guides, the desktop setup dialog and Upload Console were checked
+  at desktop and narrow widths; picker keyboard operation, three-way workflow
+  navigation and 125% layout coverage are included in browser tests.
+
+The signed-in personal Chrome profile has no connected browser automation
+interface. Its old-install removal, new packaged-extension loading, fresh desktop
+connection and authenticated platform preparation were therefore **not live
+verified**. The existing desktop authority also prevented the package test's
+second GUI launch; that sub-check was explicitly skipped. No real account content
+was published, and the running personal Chrome profile was not modified.
+
+Normal updates preserve extension state. Fresh reset remains blocked until a
+current, genuinely installed extension crosses the durable reset barrier; neither
+an old saved ID, reload nor silence alone is accepted. Reset retains desktop
+catalogue, Google configuration and history and never edits Chrome profile
+internals. See [the product reset contract](product.md#normal-update-versus-fresh-reset).

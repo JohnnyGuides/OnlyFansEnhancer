@@ -26,6 +26,7 @@ public static partial class AppConfiguration
     private const int MaximumDataRootLength = 1_024;
 
     public static string SettingsPath => Path.Combine(DataRoot, "settings.json");
+    internal static string ChromeResetPath => Path.Combine(DataRoot, "data", "chrome-reset.json");
 
     public static string CatalogueDatabasePath => Path.Combine(DataRoot, "data", "catalogue.db");
 

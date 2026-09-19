@@ -1415,3 +1415,151 @@ dialog::backdrop {
       transform 160ms ease-out;
   }
 }
+
+/* Chrome setup is a short task sequence, separate from app settings. */
+#chromeSetupDialog {
+  width: min(660px, calc(100% - 24px));
+  padding: 24px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+.chrome-dialog-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+#chromeSetupDialog .chrome-dialog-heading h2 {
+  font-size: 1.4rem;
+  margin: 0;
+}
+#chromeSetupDialog p {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: #b5bfce;
+}
+#chromeSetupDialog h3 {
+  font-size: 0.95rem;
+  margin: 0 0 6px;
+}
+#chromeSetupDialog button {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  border-radius: 6px;
+}
+#chromeSetupDialog [hidden] {
+  display: none !important;
+}
+.chrome-steps {
+  counter-reset: chromeStep;
+  list-style: none;
+  margin: 22px 0 8px;
+  padding: 0;
+}
+.chrome-steps li {
+  position: relative;
+  counter-increment: chromeStep;
+  padding: 0 0 20px 40px;
+}
+.chrome-steps li::before {
+  content: counter(chromeStep);
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 1px solid #425268;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  color: #95dcfc;
+}
+.chrome-steps li p {
+  margin: 5px 0 10px;
+}
+.chrome-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid #3b495d;
+  border-radius: 6px;
+  background: #121a25;
+}
+.chrome-copy-row code {
+  flex: 1;
+  min-width: 0;
+  color: #e3f2fb;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+#chromeExtensionFolder {
+  margin: 0;
+  padding: 0;
+}
+.chrome-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+#chromeSetupDialog .chrome-primary-action {
+  margin: 10px 0 0;
+}
+#chromeSetupDialog .chrome-primary-action:has([hidden]) {
+  display: none;
+}
+#chromeSetupDialog details {
+  border-top: 1px solid #2d3746;
+  padding: 8px 0;
+}
+#chromeSetupDialog summary {
+  min-height: 36px;
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+#chromeSetupDialog :focus-visible {
+  outline: 3px solid #95dcfc;
+  outline-offset: 3px;
+}
+#chromeSetupActionStatus:empty,
+#chromeSetupError:empty {
+  display: none;
+}
+#chromeSetupDialog #checkChrome {
+  background: #62cbf6;
+  color: #081019;
+  border-color: #62cbf6;
+}
+#chromeResetNotice {
+  border-left: 3px solid #e7bd76;
+  padding: 12px;
+  background: #282117;
+  margin: 16px 0;
+}
+#chromeResetNotice p {
+  margin: 6px 0 0;
+}
+.chrome-reset-actions {
+  border-top: 1px solid #343b48;
+  margin-top: 14px;
+  padding-top: 10px;
+}
+#chromeSetupDialog [data-chrome-action="freshChromeReset"] {
+  border-color: #b39364;
+  background: transparent;
+}
+@media (max-width: 480px) {
+  #chromeSetupDialog {
+    padding: 16px;
+  }
+  .chrome-copy-row {
+    flex-wrap: wrap;
+  }
+  .chrome-copy-row code {
+    flex-basis: 100%;
+  }
+}

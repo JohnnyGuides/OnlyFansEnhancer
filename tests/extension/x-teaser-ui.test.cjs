@@ -51,6 +51,19 @@ const reviewRoot = path.join(
       context.serviceWorkers()[0] ||
       (await context.waitForEvent("serviceworker"));
     const extensionId = new URL(worker.url()).host;
+    await worker.evaluate(async () => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (
+          (await chrome.storage.local.get("ofenhancerInstallationV1"))
+            .ofenhancerInstallationV1
+        )
+          return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(
+        "The test extension did not finish its first installation.",
+      );
+    });
     const endpoint =
       "https://script.google.com/macros/s/abcdefghijklmnopqrstuvwxyz0123456789/exec";
     await worker.evaluate(

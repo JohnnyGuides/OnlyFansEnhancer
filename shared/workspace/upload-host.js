@@ -23,7 +23,11 @@
             ),
           );
         },
-        operation === "browserRequest" || operation === "deliverUploadFile"
+        [
+          "browserRequest",
+          "deliverUploadFile",
+          "deliverDevelopmentFixture",
+        ].includes(operation)
           ? 2 * 60 * 60_000
           : 30_000,
       );
@@ -59,7 +63,13 @@
   function connectionLost(reason) {
     browserStatus = null;
     for (const [id, item] of pending) {
-      if (!new Set(["browserRequest", "deliverUploadFile"]).has(item.operation))
+      if (
+        !new Set([
+          "browserRequest",
+          "deliverUploadFile",
+          "deliverDevelopmentFixture",
+        ]).has(item.operation)
+      )
         continue;
       clearTimeout(item.timeout);
       pending.delete(id);
@@ -238,22 +248,28 @@
   };
   globalThis.OFEnhancerDesktopUpload = Object.freeze({
     refreshBrowsers,
+    loadDevelopmentFixtures: () => call("loadDevelopmentFixtures"),
     async deliverFile(session, request, file) {
       try {
         await ensureBrowser();
         return await call(
-          "deliverUploadFile",
+          file.source === "development-fixture"
+            ? "deliverDevelopmentFixture"
+            : "deliverUploadFile",
           {
             requestId: request.requestId,
             sessionId: request.sessionId,
             platform: request.platform,
             role: request.role,
             token: request.token,
+            ...(file.source === "development-fixture"
+              ? { fixtureToken: file.fixtureToken }
+              : {}),
             name: file.name,
             size: file.size,
             lastModified: file.lastModified,
           },
-          [file],
+          file.source === "development-fixture" ? undefined : [file],
         );
       } catch (error) {
         try {
@@ -315,6 +331,7 @@
       element.hidden = false;
     const panel = document.createElement("section");
     panel.setAttribute("aria-label", "Browser connection");
+    panel.className = "desktop-upload-connection";
     const back = document.createElement("a");
     back.href = "index.html";
     back.textContent = "Back to catalogue";
@@ -334,7 +351,9 @@
     refresh.type = "button";
     refresh.textContent = "Refresh connection";
     panel.append(back, setup, message, label, select, refresh);
-    (document.querySelector("main") || document.body).prepend(panel);
+    const header = document.querySelector(".app-header");
+    if (header) header.after(panel);
+    else (document.querySelector("main") || document.body).prepend(panel);
     statusView = { message, label, select };
     const update = () => {
       const generation = ++observationGeneration;
@@ -357,10 +376,12 @@
       try {
         if (
           ports.size ||
-          [...pending.values()].some(
-            (item) =>
-              item.operation === "browserRequest" ||
-              item.operation === "deliverUploadFile",
+          [...pending.values()].some((item) =>
+            [
+              "browserRequest",
+              "deliverUploadFile",
+              "deliverDevelopmentFixture",
+            ].includes(item.operation),
           )
         )
           throw new Error(

@@ -412,53 +412,104 @@
     </div>
 
     <dialog id="chromeSetupDialog" aria-labelledby="chromeSetupTitle">
-      <button type="button" id="closeChromeSetup">Close</button>
-      <h2 id="chromeSetupTitle">Chrome setup</h2>
+      <div class="chrome-dialog-heading">
+        <h2 id="chromeSetupTitle">Connect Chrome</h2>
+        <button type="button" id="closeChromeSetup" autofocus>Close</button>
+      </div>
       <p id="chromeSetupMessage" role="status"></p>
+      <aside id="chromeResetNotice" hidden>
+        <strong>Remove the previous extension first</strong>
+        <p>
+          In Chrome, remove <strong>Creator Workflow Toolkit</strong>.<br />ID:
+          <code id="chromeResetExtensionId"></code>
+        </p>
+        <p>Reloading does not finish Fresh reset.</p>
+      </aside>
+      <button type="button" data-chrome-action="prepareChrome">
+        Set up Chrome
+      </button>
+      <button type="button" data-chrome-action="installChromeInfo">
+        Install Google Chrome
+      </button>
       <div id="chromeSetupSteps" hidden>
-        <ol>
-          <li>Prepare the OFEnhancer integration below.</li>
+        <ol class="chrome-steps">
           <li>
-            Open Chrome extensions. If the page does not open, paste
-            <code>chrome://extensions</code> into Chrome's address bar.
+            <h3>Open Chrome extensions</h3>
+            <p id="chromeAddressHint">
+              Copy this address and paste it into Chrome.
+            </p>
+            <div class="chrome-copy-row">
+              <code id="chromeExtensionsAddress" translate="no"
+                >chrome://extensions</code
+              ><button id="copyChromeAddress" type="button">Copy</button>
+            </div>
+            <div class="chrome-primary-action">
+              <button
+                type="button"
+                data-chrome-action="openChromeExtensions"
+                hidden
+              >
+                Open Chrome extensions
+              </button>
+            </div>
           </li>
           <li>
-            Enable Developer mode, choose Load unpacked, then select the exact
-            folder below. Keep that folder in place.
+            <h3>Turn on Developer mode</h3>
+            <p>
+              In the top-right of the Extensions page, turn on
+              <strong>Developer mode</strong>.
+            </p>
+          </li>
+          <li>
+            <h3>Click Load unpacked</h3>
+            <p>The button is at the top-left of the Extensions page.</p>
+          </li>
+          <li id="chromeFolderStep">
+            <h3>Select the OFEnhancer extension folder</h3>
+            <div class="chrome-copy-row">
+              <code id="chromeExtensionFolder" translate="no"></code>
+            </div>
+            <div class="chrome-folder-actions">
+              <button type="button" data-chrome-action="revealChromeExtension">
+                Show folder</button
+              ><button type="button" id="copyChromeFolder">Copy folder</button>
+            </div>
+          </li>
+          <li>
+            <h3>Check connection</h3>
+            <button type="button" id="checkChrome">Check connection</button>
           </li>
         </ol>
+      </div>
+      <p id="chromeSetupActionStatus" role="status" aria-live="polite"></p>
+      <details>
+        <summary>Why does Chrome mention debugger access?</summary>
         <p>
-          Already loaded? Open Chrome and check again first. Reload your
-          existing extension after an update; do not remove it or move its load
-          folder.
+          OFEnhancer uses it to attach your selected file to the upload form,
+          then detaches. Setup does not publish anything.
         </p>
-        <p id="chromeExtensionFolder"></p>
-      </div>
-      <p id="chromeSetupActionStatus" role="status"></p>
-      <div class="chrome-primary-action">
-        <button type="button" data-chrome-action="openChromeExtensions">
-          Open Chrome extensions
-        </button>
-      </div>
-      <div class="dialog-actions chrome-support-actions">
-        <button type="button" data-chrome-action="installChromeInfo">
-          Chrome installation information
-        </button>
-        <button type="button" data-chrome-action="prepareChrome">
-          Prepare integration
-        </button>
+      </details>
+      <details id="chromeTroubleshooting">
+        <summary>Existing installation / troubleshooting</summary>
+        <p>
+          Normal updates keep your extension and settings. Reload
+          <strong>Creator Workflow Toolkit</strong> in Chrome after updating.
+        </p>
+        <p id="chromeSetupError"></p>
         <button type="button" data-chrome-action="openChrome">
           Open Chrome
         </button>
-        <button type="button" data-chrome-action="revealChromeExtension">
-          Show extension folder
-        </button>
-        <button type="button" id="copyChromeFolder">Copy folder</button>
-        <button type="button" id="copyChromeAddress">
-          Copy extensions address
-        </button>
-        <button type="button" id="checkChrome">Check again</button>
-      </div>
+        <div class="chrome-reset-actions">
+          <p>
+            <strong>Fresh reset</strong> clears the extension's Chrome settings
+            and upload checkpoints. Your desktop catalogue, Google connection
+            and history stay intact.
+          </p>
+          <button type="button" data-chrome-action="freshChromeReset">
+            Fresh reset…
+          </button>
+        </div>
+      </details>
     </dialog>
 
     <dialog

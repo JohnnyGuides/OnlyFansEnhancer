@@ -38,7 +38,7 @@ static async Task<int> RunAsync(string[] args)
                 string? frame = await AgentPipeFrame.ReadOrEndAsync(inputStream, CancellationToken.None);
                 if (frame is null) return 0;
                 AgentRequest framedRequest = AgentRequest.Parse(frame);
-                if (framedRequest.Operation == "browserExchange")
+                if (framedRequest.Operation is "browserExchange" or "loadDevelopmentFixtures" or "resolveDevelopmentFixture")
                 {
                     var payload = framedRequest.Payload?.EnumerateObject().ToDictionary(item => item.Name, item => (object)item.Value.Clone()) ?? [];
                     // Replace caller-supplied evidence with the invocation origin supplied by Chrome.

@@ -8,6 +8,18 @@ namespace OFEnhancer.Desktop;
 public sealed class BrowserUploadChannel : IDisposable
 {
     private readonly object gate = new();
+    internal ChromeExtensionReset? Reset { get; set; }
+    internal void BeginReset(string extensionId)
+    {
+        lock (gate)
+        {
+            if (Reset is null) throw new InvalidOperationException("Chrome reset is unavailable.");
+            Reset.Begin(extensionId);
+            foreach (var waiting in pending.Values) waiting.TrySetException(new InvalidOperationException("Fresh reset started. Existing upload preparation was stopped."));
+            pending.Clear(); commands.Clear(); browsers.Clear(); connections.Clear(); versionMismatches.Clear(); selected = null;
+            selectionRequired = false;
+        }
+    }
     private readonly Dictionary<string, DateTimeOffset> browsers = [];
     private readonly Dictionary<string, string> connections = [];
     private readonly Dictionary<string, DateTimeOffset> versionMismatches = [];
@@ -91,6 +103,23 @@ public sealed class BrowserUploadChannel : IDisposable
                 || !payload.TryGetProperty("bridgeExtensionId", out var bridge) || bridge.GetString() != integrationIdentity
                 || !payload.TryGetProperty("setupGeneration", out var generation) || generation.GetString() != setupGeneration))
                 return new { commands = Array.Empty<object>(), connectionId, setupGeneration };
+            if (requireIdentity && Reset is not null)
+            {
+                bool matching = payload.TryGetProperty("extensionVersion", out var version) && version.ValueKind == JsonValueKind.String
+                    && version.GetString() == AgentProtocol.ProductVersion;
+                var observed = Reset.Observe(id, connectionId, payload.TryGetProperty("installation", out var receipt) ? receipt : null, matching);
+                if (!observed.Allowed)
+                {
+                    browsers.Remove(id);
+                    if (selected == id || Reset.Pending)
+                    {
+                        foreach (var waiting in pending.Values) waiting.TrySetException(new InvalidOperationException(Reset.Message));
+                        pending.Clear(); commands.Clear(); selected = null;
+                    }
+                    return new { commands = observed.Commands, connectionId, setupGeneration, requiredExtensionVersion = AgentProtocol.ProductVersion,
+                        resetPending = Reset.Pending, resetMessage = Reset.Message };
+                }
+            }
             if (requireIdentity && (!payload.TryGetProperty("extensionVersion", out var runtimeVersion)
                 || runtimeVersion.ValueKind != JsonValueKind.String || runtimeVersion.GetString() != AgentProtocol.ProductVersion))
             {
@@ -147,12 +176,12 @@ public sealed class BrowserUploadChannel : IDisposable
         lock (gate)
         {
             Expire();
-            var live = browsers.Where(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10))
+            var live = browsers.Where(pair => Reset?.Pending != true && clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10))
                 .Select(pair => pair.Key).ToArray();
             var relevant = selected is not null && live.Contains(selected) ? browsers[selected] : live.Select(id => browsers[id]).DefaultIfEmpty(DateTimeOffset.MinValue).Max();
             double expiresInMilliseconds = live.Length == 0 ? 0 : Math.Max(0, 10000 - (clock.GetUtcNow() - relevant).TotalMilliseconds);
             bool updateRequired = live.Length == 0 && versionMismatches.Any(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10));
-            return new { browsers = live, selected, connected = selected is not null && live.Contains(selected), expiresInMilliseconds, selectionRequired, updateRequired };
+            return new { browsers = live, selected, connected = selected is not null && live.Contains(selected), expiresInMilliseconds, selectionRequired, updateRequired, resetPending = Reset?.Pending == true };
         }
     }
 
@@ -161,6 +190,7 @@ public sealed class BrowserUploadChannel : IDisposable
         lock (gate)
         {
             Expire();
+            if (Reset?.Pending == true) throw new InvalidOperationException(Reset.Message);
             if (!browsers.TryGetValue(id, out var seen) || clock.GetUtcNow() - seen >= TimeSpan.FromSeconds(10))
                 throw new InvalidOperationException("browser-unavailable");
             if (selected != id && pending.Count > 0) throw new InvalidOperationException("upload-in-progress");
@@ -190,7 +220,7 @@ public sealed class BrowserUploadChannel : IDisposable
             || ContainsAttachment(property.Value));
     }
 
-    // Only MainWindow's AdditionalObject selection path may create this command.
+    // Only validated WebView selections or the fixed development fixture registry may create this command.
     internal Task<JsonElement> RequestNativeFileAsync(JsonElement command) => QueueAsync(command);
 
     internal Task<JsonElement> OpenChromePageAsync(string page, CancellationToken cancellationToken)
@@ -208,6 +238,7 @@ public sealed class BrowserUploadChannel : IDisposable
         lock (gate)
         {
             Expire();
+            if (Reset?.Pending == true) throw new InvalidOperationException(Reset.Message);
             var live = browsers.Where(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)).ToArray();
             if (selected is null && live.Length == 1 && !selectionRequired) selected = live[0].Key;
             if (selected is null && live.Length == 0 && versionMismatches.Any(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)))

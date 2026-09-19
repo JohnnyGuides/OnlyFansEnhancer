@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.25
+AppVersion=0.20.26
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.25
+OutputBaseFilename=OFEnhancer-Setup-0.20.26
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -34,9 +34,15 @@ Name: "{group}\Connect Chrome"; Filename: "{app}\desktop\OFEnhancer.Desktop.exe"
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OFEnhancer"; ValueData: """{app}\desktop\OFEnhancer.Desktop.exe"""; Flags: uninsdeletevalue
 
+Root: HKCU; Subkey: "Software\Classes\ofenhancer"; ValueType: string; ValueData: "URL:OFEnhancer Chrome setup"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\ofenhancer"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\ofenhancer\shell\open\command"; ValueType: string; ValueData: """{app}\desktop\OFEnhancer.Desktop.exe"" --chrome-setup"
+
 [Run]
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Parameters: "--chrome-setup"; Description: "Check Chrome setup or reload guidance"; Flags: postinstall nowait skipifsilent unchecked
+
+Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Parameters: "--chrome-setup"; Flags: nowait; Check: IsFreshReset
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\unregister-native-host.ps1"" -InstallRoot ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterNativeHost"
@@ -51,6 +57,20 @@ var
   ExistingUninstaller: String;
   ExistingUninstallCompleted: Boolean;
   RemoveUserData: Boolean;
+
+function IsFreshReset(): Boolean;
+begin
+  Result := (ExistingPage <> nil) and (ExistingPage.SelectedValueIndex = 1);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ExitCode: Integer;
+begin
+  if (CurStep = ssPostInstall) and IsFreshReset() then
+    if not Exec(ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'), '--mark-chrome-reset', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+      RaiseException('Fresh reset could not be started. Open OFEnhancer and choose Fresh reset; Chrome has not been reset.');
+end;
 
 function ExistingInstall(): Boolean;
 begin
@@ -70,11 +90,12 @@ begin
       wpWelcome,
       'OFEnhancer is already installed',
       'Choose what this installer should do.',
-      'If this older version cannot close automatically, right-click the OFEnhancer tray icon, choose Exit, then continue.',
+      'Both install options keep your catalogue, Google connection, settings and history. Fresh reinstall requires removing the old extension and reconnecting in Chrome.',
       True,
       False
     );
-    ExistingPage.Add('Update or reinstall');
+    ExistingPage.Add('Update or reinstall - keep Chrome extension and its state');
+    ExistingPage.Add('Fresh reinstall - reset Chrome extension only');
     ExistingPage.Add('Uninstall');
     ExistingPage.SelectedValueIndex := 0;
 
@@ -96,7 +117,7 @@ begin
   Result :=
     (KeepDataPage <> nil) and
     (PageID = KeepDataPage.ID) and
-    (ExistingPage.SelectedValueIndex <> 1);
+    (ExistingPage.SelectedValueIndex <> 2);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

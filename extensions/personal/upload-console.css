@@ -48,7 +48,7 @@ body {
 main {
   width: min(880px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 48px 0 72px;
+  padding: 22px 0 48px;
 }
 
 header {
@@ -78,22 +78,17 @@ h3 {
 }
 
 h1 {
-  margin-bottom: 10px;
-  font-size: clamp(2.25rem, 7vw, 4.5rem);
-  letter-spacing: -0.04em;
-  line-height: 0.95;
-  text-wrap: balance;
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
 }
 
 .workspace-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
   gap: 4px;
-  margin-bottom: 28px;
-  padding: 4px;
-  border: 1px solid #272d38;
-  border-radius: 14px;
-  background: #0d1118;
+  margin: 0;
+  padding: 0;
 }
 
 .workspace-tabs button {
@@ -106,7 +101,6 @@ h1 {
   border-color: #35657a;
   background: #172733;
   color: #f4f5f7;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
 }
 
 .tab-panel[hidden] {
@@ -259,11 +253,10 @@ h2 {
 .result-card,
 .safety-note {
   margin-top: 16px;
-  padding: 24px;
+  padding: 20px;
   border: 1px solid #272d38;
-  border-radius: 18px;
+  border-radius: 10px;
   background: rgba(18, 22, 30, 0.94);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
 }
 
 .section-heading,
@@ -272,7 +265,7 @@ h2 {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: 16px;
 }
 
 .local-badge,
@@ -300,7 +293,7 @@ select,
 textarea {
   width: 100%;
   border: 1px solid #343b48;
-  border-radius: 11px;
+  border-radius: 7px;
   background: #0d1118;
   color: #f4f5f7;
   font: inherit;
@@ -324,7 +317,7 @@ select:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
 summary:focus-visible {
-  outline: 3px solid rgba(101, 207, 255, 0.4);
+  outline: 3px solid #65cfff;
   outline-offset: 2px;
 }
 
@@ -527,7 +520,7 @@ button {
   min-height: 44px;
   padding: 11px 18px;
   border: 0;
-  border-radius: 11px;
+  border-radius: 7px;
   font: inherit;
   font-weight: 800;
   cursor: pointer;
@@ -689,7 +682,7 @@ button:disabled {
 @media (max-width: 650px) {
   main {
     width: min(100% - 20px, 880px);
-    padding-top: 28px;
+    padding-top: 16px;
   }
 
   .field-grid,
@@ -708,7 +701,7 @@ button:disabled {
   }
 
   .workspace-tabs {
-    margin-bottom: 22px;
+    margin-bottom: 0;
   }
 
   .settings-intro {
@@ -746,4 +739,277 @@ button:disabled {
 #preparationDiagnosticsText {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Compact upload workspace. Native controls retain their input semantics. */
+[hidden] {
+  display: none !important;
+}
+.app-header,
+.workflow-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.app-header {
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #272d38;
+}
+.app-name {
+  display: block;
+  color: #9da8b8;
+  font-size: 0.72rem;
+  margin-bottom: 2px;
+  letter-spacing: 0.035em;
+}
+.workspace-tabs button {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+.workflow-heading h2 {
+  font-size: 0.85rem;
+  color: #b8c1ce;
+  font-weight: 650;
+}
+.workflow-heading {
+  margin-bottom: 10px;
+}
+.dev-template {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dev-badge {
+  color: #a4adba;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.dev-template button {
+  border: 1px solid #343b48;
+  background: transparent;
+  color: #c6cfdb;
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 0.76rem;
+  font-weight: 550;
+}
+.workflow-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0;
+  margin: 0;
+  border: 0;
+  gap: 6px;
+  min-width: 0;
+}
+.workflow-segments label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  min-height: 50px;
+  padding: 9px 14px;
+  background: #10151d;
+  border: 1px solid #343b48;
+  border-radius: 7px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.workflow-segments label:has(:checked) {
+  border-color: #65cfff;
+  background: #132630;
+  color: #edfaff;
+}
+.workflow-segments label:has(:focus-visible) {
+  outline: 3px solid #65cfff;
+  outline-offset: 3px;
+}
+.workflow-segments input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #65cfff;
+}
+.workflow-segments small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  color: #b8c1ce;
+  font-weight: 450;
+}
+.workflow-segments:disabled {
+  opacity: 0.75;
+}
+.template-status {
+  margin: 8px 0 0;
+  color: #b8c1ce;
+  font-size: 0.8rem;
+}
+.template-status:empty {
+  display: none;
+}
+.file-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid #272d38;
+  min-width: 0;
+}
+.file-information {
+  min-width: 0;
+  flex: 1;
+}
+.file-information label {
+  margin: 0 0 5px;
+  font-size: 0.82rem;
+  color: #b8c1ce;
+  font-weight: 600;
+  cursor: pointer;
+}
+.optional-label {
+  display: inline;
+  margin-left: 6px;
+  font-size: 0.68rem;
+  font-weight: 450;
+  color: #96a1b2;
+}
+.file-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #ecf0f6;
+  overflow-wrap: anywhere;
+}
+.file-size {
+  font-size: 0.72rem;
+  color: #a4adba;
+}
+.file-size:empty {
+  display: none;
+}
+.file-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.file-actions button {
+  min-height: 38px;
+  padding: 7px 12px;
+  font-size: 0.8rem;
+  border: 1px solid #3d4859;
+  background: #1b2430;
+  color: #f1f5fa;
+  font-weight: 550;
+}
+.file-actions [data-remove-file] {
+  background: transparent;
+  color: #b8c1ce;
+  border-color: transparent;
+}
+input.file-input-native,
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.selection-note {
+  font-size: 0.72rem;
+  color: #96a1b2;
+  margin: 10px 0 0;
+}
+.draft-actions {
+  font-size: 0.8rem;
+  color: #a4adba;
+  margin: 6px 0 0;
+}
+.draft-actions summary {
+  cursor: pointer;
+  min-height: 32px;
+  padding: 8px 0;
+}
+.draft-actions button {
+  font-size: 0.8rem;
+  min-height: 36px;
+  margin: 6px 0;
+}
+.draft-actions p {
+  margin: 0;
+}
+.desktop-upload-connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0 0 14px;
+  font-size: 0.78rem;
+}
+.desktop-upload-connection p {
+  flex: 1 1 180px;
+  margin: 0;
+  color: #b8c1ce;
+}
+.desktop-upload-connection a {
+  color: #bdcadb;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+.desktop-upload-connection button {
+  background: transparent;
+  border: 1px solid #343b48;
+  color: #bdcadb;
+  padding: 5px 10px;
+  min-height: 32px;
+  font-size: 0.75rem;
+}
+.desktop-upload-connection label {
+  margin: 0;
+}
+.desktop-upload-connection select {
+  width: auto;
+  max-width: 100%;
+}
+@media (max-width: 480px) {
+  .workflow-segments label {
+    padding: 10px 8px;
+    gap: 6px;
+    font-size: 0.76rem;
+  }
+  .workflow-segments small {
+    font-size: 0.62rem;
+  }
+  .file-picker {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .file-information {
+    flex-basis: 100%;
+  }
+  .file-actions {
+    margin-left: auto;
+  }
+  .app-header {
+    gap: 10px;
+  }
+  .workspace-tabs button {
+    padding: 7px 9px;
+  }
+  .card {
+    padding: 16px;
+  }
 }
