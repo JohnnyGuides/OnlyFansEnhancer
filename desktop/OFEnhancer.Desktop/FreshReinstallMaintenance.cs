@@ -90,9 +90,9 @@ internal static class FreshReinstallMaintenance
         if (File.Exists(transactionPath))
         {
             transaction = FreshReinstallTransaction.Load(transactionPath);
-            if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal)
-                || !SamePath(transaction.InstallRoot, installRoot))
+            if (!SamePath(transaction.InstallRoot, installRoot))
                 throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
+            transaction.AdoptPendingPackage(version, installRoot, dataRoot, webViewRoot);
         }
         else
         {

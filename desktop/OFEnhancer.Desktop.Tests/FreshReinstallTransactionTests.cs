@@ -44,6 +44,32 @@ public sealed class FreshReinstallTransactionTests
     }
 
     [TestMethod]
+    public void New_installer_can_adopt_an_untouched_pending_transaction_only()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-adopt-" + Guid.NewGuid().ToString("N"));
+        string install = Path.Combine(root, "installed");
+        string data = Path.Combine(root, "data");
+        string webView = Path.Combine(root, "webview");
+        string transaction = Path.Combine(root, "maintenance", "fresh-reinstall.json");
+        try
+        {
+            var fresh = FreshReinstallTransaction.Create(transaction, "0.20.28", install, data, webView,
+                [ChromeIntegration.CanonicalExtensionId]);
+            fresh.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
+            fresh.AdoptPendingPackage("0.20.29", install, data, webView);
+            Assert.AreEqual("0.20.29", FreshReinstallTransaction.Load(transaction).PackageVersion);
+
+            fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal");
+            Assert.ThrowsException<InvalidOperationException>(() =>
+                fresh.AdoptPendingPackage("0.20.30", install, data, webView));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
     public void Corrupt_transaction_and_dangerous_or_overlapping_roots_fail_closed()
     {
         string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-invalid-" + Guid.NewGuid().ToString("N"));

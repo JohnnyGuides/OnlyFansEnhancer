@@ -157,6 +157,23 @@ internal sealed class FreshReinstallTransaction
         Save(next);
     }
 
+    internal void AdoptPendingPackage(string packageVersion, string installRoot, string dataRoot, string webViewRoot)
+    {
+        if (Phase >= FreshReinstallPhase.ExtensionRemovalVerified)
+            throw new InvalidOperationException("A destructive Fresh reinstall phase cannot change package version.");
+        if (!VersionPattern.IsMatch(packageVersion)
+            || !SameRoot(journal.InstallRoot, ValidateRoot(installRoot, "installation"))
+            || !SameRoot(journal.DataRoot, ValidateRoot(dataRoot, "data"))
+            || !SameRoot(journal.WebViewRoot, ValidateRoot(webViewRoot, "WebView2")))
+            throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
+        if (string.Equals(journal.PackageVersion, packageVersion, StringComparison.Ordinal)) return;
+        Save(journal with
+        {
+            PackageVersion = packageVersion,
+            Observations = journal.Observations.Append("pending-package-updated").TakeLast(128).ToArray(),
+        });
+    }
+
     internal void CleanOwnedState()
     {
         if (Phase >= FreshReinstallPhase.OwnedStatePurged) return;
@@ -250,6 +267,9 @@ internal sealed class FreshReinstallTransaction
         return candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || string.Equals(Path.TrimEndingDirectorySeparator(parent), Path.TrimEndingDirectorySeparator(child), StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool SameRoot(string left, string right) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(left), Path.TrimEndingDirectorySeparator(right), StringComparison.OrdinalIgnoreCase);
 
     private static void DeleteOwnedRoot(string root, bool exclusive)
     {
