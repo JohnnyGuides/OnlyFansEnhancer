@@ -8,7 +8,6 @@ const { chromium } = require("../support/browser.cjs");
 const root = require("../support/paths.cjs").repositoryRoot;
 
 const targetId = "aocoaajmhccmefmfebgiiogfdojciild";
-const verifierId = "nhllpejgihfneloninfpblbfdoigongm";
 
 async function worker(context, id) {
   const prefix = `chrome-extension://${id}/`;
@@ -23,23 +22,12 @@ async function worker(context, id) {
   return current;
 }
 
-async function launch(profile, target, verifier) {
+async function launch(profile, target) {
   return chromium.launchPersistentContext(profile, {
     headless: false,
     args: [
-      `--disable-extensions-except=${target},${verifier}`,
-      `--load-extension=${target},${verifier}`,
-      "--no-first-run",
-    ],
-  });
-}
-
-async function launchVerifierOnly(profile, verifier) {
-  return chromium.launchPersistentContext(profile, {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${verifier}`,
-      `--load-extension=${verifier}`,
+      `--disable-extensions-except=${target}`,
+      `--load-extension=${target}`,
       "--no-first-run",
     ],
   });
@@ -57,18 +45,14 @@ async function waitForInstallation(serviceWorker) {
 }
 
 test(
-  "real persistent Chromium removes without Reload and a genuine reinstall creates a clean new receipt",
+  "real persistent Chromium self-removes without a verifier and a genuine reinstall creates a clean new receipt",
   { timeout: 90_000 },
   async (t) => {
     if (process.platform !== "win32")
       return t.skip("Windows Chrome lifecycle regression");
-    const stage = path.join(root, "dist", "ofenhancer-desktop-v0.20.28");
+    const stage = path.join(root, "dist", "ofenhancer-desktop-v0.20.29");
     const target = path.join(stage, "extension-keyed");
-    const verifier = path.join(stage, "fresh-verifier");
-    if (
-      !fs.existsSync(path.join(target, "manifest.json")) ||
-      !fs.existsSync(path.join(verifier, "manifest.json"))
-    )
+    if (!fs.existsSync(path.join(target, "manifest.json")))
       return t.skip(
         "Run npm run stage:desktop before the real-browser lifecycle gate.",
       );
@@ -77,9 +61,8 @@ test(
     );
     let context;
     try {
-      context = await launch(profile, target, verifier);
+      context = await launch(profile, target);
       const targetWorker = await worker(context, targetId);
-      const verifierWorker = await worker(context, verifierId);
       const original = await targetWorker.evaluate(async () => {
         await chrome.storage.local.set({ oldLocal: true });
         await chrome.storage.session.set({ oldSession: true });
@@ -87,52 +70,23 @@ test(
         return extensionLifecycle.getInstallation();
       });
       assert.match(original.id, /^[a-f0-9-]{36}$/i);
-      assert.equal(
-        await verifierWorker.evaluate(
-          async (id) =>
-            (await chrome.management.getAll()).some((item) => item.id === id),
-          targetId,
-        ),
-        true,
-      );
       const extensionsPage = await context.newPage();
       await extensionsPage.goto("chrome://extensions/");
       const card = extensionsPage.getByText("Creator Workflow Toolkit", {
         exact: true,
       });
       await card.waitFor({ state: "visible", timeout: 10_000 });
-      const uninstallEvent = verifierWorker.evaluate(
-        (id) =>
-          new Promise((resolve) =>
-            chrome.management.onUninstalled.addListener((removed) => {
-              if (removed === id) resolve(removed);
-            }),
-          ),
-        targetId,
-      );
       await targetWorker
         .evaluate(() => extensionLifecycle.uninstall())
         .catch(() => {});
-      assert.equal(await uninstallEvent, targetId);
       await card.waitFor({ state: "detached", timeout: 10_000 });
-      assert.equal(
-        await verifierWorker.evaluate(
-          async (id) =>
-            (await chrome.management.getAll()).some((item) => item.id === id),
-          targetId,
-        ),
-        false,
-      );
       const deadPage = await context.newPage();
       await assert.rejects(
         deadPage.goto(`chrome-extension://${targetId}/popup.html`),
       );
 
       await context.close();
-      context = await launchVerifierOnly(profile, verifier);
-      await worker(context, verifierId);
-      await context.close();
-      context = await launch(profile, target, verifier);
+      context = await launch(profile, target);
       const reinstalled = await worker(context, targetId);
       const newInstallation = await waitForInstallation(reinstalled);
       const fresh = await reinstalled.evaluate(async () => ({

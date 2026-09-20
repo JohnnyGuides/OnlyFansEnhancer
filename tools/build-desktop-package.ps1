@@ -72,8 +72,8 @@ function Get-Sha256([string]$Path) {
 }
 $manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot "extensions\personal\manifest.json") -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-if ($version -ne "0.20.28") {
-  throw "The desktop package requires personal extension version 0.20.28."
+if ($version -ne "0.20.29") {
+  throw "The desktop package requires personal extension version 0.20.29."
 }
 
 . (Join-Path $PSScriptRoot 'release-output-safety.ps1')
@@ -152,7 +152,6 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot "shared\workspace\finalLogo.pn
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "desktop\OFEnhancer.Desktop\Assets\ofenhancer.ico") -Destination $assetsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\extension-setup.html") -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\extension-reload.html") -Destination $stage
-Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\fresh-reinstall.html") -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\fresh-verifier\manifest.json") -Destination $verifierDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\fresh-verifier\background.js") -Destination $verifierDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "tools\register-native-host.ps1") -Destination $toolsDirectory

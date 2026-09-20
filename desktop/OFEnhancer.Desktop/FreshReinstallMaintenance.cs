@@ -62,8 +62,6 @@ internal static class FreshReinstallMaintenance
     {
         string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
         string version = Argument(args, "--package-version");
-        string verifierRoot = Path.GetFullPath(Argument(args, "--verifier-root"));
-        string guide = Path.GetFullPath(Argument(args, "--guide"));
         if (File.Exists(AppConfiguration.MaintenanceTransactionPath))
         {
             FreshReinstallTransaction resumed = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
@@ -77,9 +75,6 @@ internal static class FreshReinstallMaintenance
         }
         if (!Directory.Exists(installRoot) || !File.Exists(Path.Combine(installRoot, "package-manifest.json")))
             throw new InvalidOperationException("The previous OFEnhancer installation root could not be verified.");
-        if (!File.Exists(Path.Combine(verifierRoot, "manifest.json")) || !File.Exists(guide))
-            throw new InvalidOperationException("The Fresh reinstall verifier package is incomplete.");
-
         string dataRoot = AppConfiguration.ResolveDataRoot(create: false);
         string webViewRoot = AppConfiguration.ResolveWebViewRoot(create: false);
         bool webViewExclusive = AppConfiguration.IsExclusiveWebViewRoot(webViewRoot) || !Directory.Exists(webViewRoot);
@@ -120,20 +115,6 @@ internal static class FreshReinstallMaintenance
             transaction.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
         }
 
-        Uri guideUri = new UriBuilder(new Uri(guide))
-        {
-            Fragment = "verifier=" + Uri.EscapeDataString(verifierRoot)
-                + "&target=" + Uri.EscapeDataString(oldIdentity)
-        }.Uri;
-        ChromeIntegration.OpenChrome(guideUri);
-        MessageBoxResult ready = System.Windows.MessageBox.Show(
-            "Chrome opened the Fresh reinstall removal gate. Load the temporary verifier folder shown there first. Then click OK; Setup will remove the exact previous OFEnhancer extension and wait for independent confirmation. Do not click Reload.",
-            "OFEnhancer Fresh reinstall",
-            MessageBoxButton.OKCancel,
-            MessageBoxImage.Warning
-        );
-        if (ready != MessageBoxResult.OK) return 4;
-
         string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         using Mutex candidate = new(true, $"Local\\OFEnhancer.Desktop.{userKey}", out bool first);
         if (!first)
@@ -148,13 +129,48 @@ internal static class FreshReinstallMaintenance
         agent.Start();
         try
         {
-            DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMinutes(10);
-            while (!reset.RemovalVerified && DateTimeOffset.UtcNow < deadline) Thread.Sleep(250);
+            // The exact old extension clears its Chrome-owned storage and calls
+            // uninstallSelf. Successful self-removal destroys the caller before
+            // it can reply, so allow a bounded error/reconnect window first.
+            DateTimeOffset automaticDeadline = DateTimeOffset.UtcNow.AddSeconds(18);
+            while (!reset.RemovalVerified && DateTimeOffset.UtcNow < automaticDeadline)
+            {
+                reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7));
+                Thread.Sleep(250);
+            }
             if (!reset.RemovalVerified)
-                throw new InvalidOperationException(reset.Message + " The transaction was preserved; run Setup again after resolving this exact gate.");
+            {
+                // Chrome can refuse self-removal (for example, managed policy or
+                // an old runtime). Ask the connected extension to open the exact
+                // profile's Extensions page and require one explicit user click.
+                reset.RequestManualRemoval();
+                Thread.Sleep(1500);
+                MessageBoxResult removed = System.Windows.MessageBox.Show(
+                    "Chrome could not confirm automatic removal.\n\n"
+                    + "In the Chrome profile where OFEnhancer is installed, open chrome://extensions. Find Creator Workflow Toolkit / OFEnhancer (ID "
+                    + oldIdentity + "), click Remove — not Reload — and wait until its card disappears.\n\n"
+                    + "Then return here and click OK. Keep Chrome open. Cancel safely preserves the Fresh reinstall for another attempt.",
+                    "One Chrome removal click needed",
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Information
+                );
+                if (removed != MessageBoxResult.OK) return 4;
+                // Let an in-flight poll settle, then make sure the old worker does
+                // not report itself again after the user's confirmation.
+                Thread.Sleep(1000);
+                reset.BeginManualConfirmation();
+                DateTimeOffset manualDeadline = DateTimeOffset.UtcNow.AddSeconds(4);
+                while (!reset.RemovalVerified && DateTimeOffset.UtcNow < manualDeadline)
+                {
+                    reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2));
+                    Thread.Sleep(250);
+                }
+                if (!reset.RemovalVerified)
+                    throw new InvalidOperationException("Chrome still reports the previous OFEnhancer extension as installed. Click its Remove button, wait for the card to disappear, and run Setup again. The transaction was preserved.");
+            }
         }
         finally { agent.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
-        transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "same-profile-verifier-absent");
+        transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal-or-user-confirmed");
         return 0;
     }
 

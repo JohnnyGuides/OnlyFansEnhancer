@@ -126,8 +126,9 @@ binaries, preserve settings/catalogue/history, and prompt extension reload.
 Normal repair/reinstall preserves extension state and desktop data. The explicit
 Fresh reinstall option stages a coordinator outside the installed/data/cache
 roots, records a durable transaction, preserves the old native removal route,
-and requires independent same-profile absence before running the verified old
-uninstaller. It then purges only proven OFEnhancer-owned desktop roots and installs
+automatically requests self-removal, and falls back to one explicit Remove click
+before running the verified old uninstaller. It then purges only proven
+OFEnhancer-owned desktop roots and installs
 clean files. Browser readiness remains closed until Chrome creates a genuine new
 install receipt. See [the reset contract](product.md#normal-update-versus-fresh-reset).
 Interactive uninstall defaults to keeping data

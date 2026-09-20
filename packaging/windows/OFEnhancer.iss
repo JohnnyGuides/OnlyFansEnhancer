@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.28
+AppVersion=0.20.29
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.28
+OutputBaseFilename=OFEnhancer-Setup-0.20.29
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -25,11 +25,9 @@ CloseApplications=force
 RestartApplications=no
 
 [Files]
-; The new maintenance binary and independent Chrome verifier are embedded for
-; pre-copy Fresh orchestration. They run from {tmp}, never from the old install.
+; The new maintenance binary is embedded for pre-copy Fresh orchestration. It
+; runs from {tmp}, never from the old install that Setup will remove.
 Source: "{#StageSource}\desktop\*"; DestDir: "{tmp}\ofenhancer-maintenance\desktop"; Flags: dontcopy noencryption recursesubdirs createallsubdirs
-Source: "{#StageSource}\fresh-verifier\*"; DestDir: "{tmp}\ofenhancer-maintenance\fresh-verifier"; Flags: dontcopy noencryption recursesubdirs createallsubdirs
-Source: "{#StageSource}\fresh-reinstall.html"; DestDir: "{tmp}\ofenhancer-maintenance"; Flags: dontcopy noencryption
 Source: "{#StageSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -77,7 +75,7 @@ begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(
       ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.28',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.29',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode
     ) or (ExitCode <> 0) then
       RaiseException('The clean package was copied, but its Fresh reinstall admission barrier could not be established. Run this installer again to resume.');
@@ -153,9 +151,7 @@ begin
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
   Parameters := Operation +
     ' --install-root "' + ExpandConstant('{app}') + '"' +
-    ' --package-version 0.20.28' +
-    ' --verifier-root "' + ExpandConstant('{tmp}\ofenhancer-maintenance\fresh-verifier') + '"' +
-    ' --guide "' + ExpandConstant('{tmp}\ofenhancer-maintenance\fresh-reinstall.html') + '"';
+    ' --package-version 0.20.29';
   Result := Exec(Helper, Parameters, '', SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
 end;
 
@@ -167,8 +163,6 @@ begin
   if not IsFreshReset() then Exit;
   try
     ExtractTemporaryFiles('{tmp}\ofenhancer-maintenance\desktop\*');
-    ExtractTemporaryFiles('{tmp}\ofenhancer-maintenance\fresh-verifier\*');
-    ExtractTemporaryFiles('{tmp}\ofenhancer-maintenance\fresh-reinstall.html');
   except
     Result := 'Fresh reinstall could not stage its maintenance coordinator. No old state was changed.';
     Exit;

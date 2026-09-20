@@ -9,7 +9,7 @@ namespace OFEnhancer.Desktop;
 internal sealed record ChromeIntegrationView(string State, string Message, bool HostAvailable,
     bool ChromeFound, bool Prepared, string? ExtensionId, string? ExtensionFolder,
     object BrowserStatus, string? SetupError = null, bool CanOpenExtensions = false, bool ResetPending = false,
-    string? ResetExtensionId = null, string? VerifierFolder = null);
+    string? ResetExtensionId = null);
 
 // Only fixed OFEnhancer package paths and current-user registration are writable here.
 // Registry inspection is diagnostic evidence, not proof that an extension is loaded.
@@ -74,6 +74,8 @@ internal sealed class ChromeIntegration
     {
         lock (gate)
         {
+            channel.Reset?.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7));
+            channel.Reset?.TryConfirmManualRemoval(TimeSpan.FromSeconds(7));
             if (channel.Reset is { Pending: true, RemovalVerified: true })
             {
                 VerifyPackage();
@@ -141,10 +143,8 @@ internal sealed class ChromeIntegration
             };
             if (state == "not-found" && error is not null) message += " Setup also needs attention: " + error;
             return new(state, message, true, chrome, prepared, id, id is null || id == CanonicalExtensionId ? folder : null, status, error,
-                !resetting && live > 0 && (selected || live == 1 && !selectionRequired), resetting,
-                channel.Reset?.PreviousExtensionId,
-                resetting && !channel.Reset!.RemovalVerified && Directory.Exists(Path.Combine(root, "fresh-verifier"))
-                    ? Path.Combine(root, "fresh-verifier") : null);
+                live > 0 && (selected || live == 1 && !selectionRequired), resetting,
+                channel.Reset?.PreviousExtensionId);
         }
     }
 

@@ -192,9 +192,10 @@ its own Chrome storage and requests supported self-uninstall. If the old build
 cannot receive or perform the request, Chrome setup requires manual removal of
 Creator Workflow Toolkit and identifies the exact old ID. Load the displayed
 `extension-keyed` folder afterward. Reloading or a saved extension ID cannot
-complete a reset: a temporary same-profile verifier must independently observe
-absence (including disabled installations), followed by a current-version genuine-install receipt and a new matching
-exchange. Pre-reset receipts
+complete a reset. OFEnhancer allows Chrome's removal call a bounded failure and
+reconnect window; only then does a successful self-removal or explicit manual
+Remove confirmation open the barrier. Completion still requires a
+current-version genuine-install receipt and a new matching exchange. Pre-reset receipts
 remain rejected after desktop restarts. Interrupted resets remain pending.
 
 Fresh reset keeps the catalogue, Google configuration, desktop settings, upload

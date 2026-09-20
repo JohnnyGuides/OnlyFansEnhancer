@@ -109,6 +109,10 @@ public sealed class AppConfigurationTests
                         Path.Combine(configuredRoot, "data", "google-oauth-token.dat"),
                         AppConfiguration.GoogleTokenPath
                     );
+                    Assert.AreEqual(
+                        Path.Combine(parent, "OFEnhancer-Maintenance", "fresh-reinstall.json"),
+                        AppConfiguration.MaintenanceTransactionPath
+                    );
                     Assert.IsTrue(Directory.Exists(configuredRoot));
                 }
             );

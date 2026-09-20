@@ -6,13 +6,16 @@ namespace OFEnhancer.Desktop;
 internal sealed record ExtensionResetObservation(bool Allowed, object[] Commands);
 internal sealed record ExtensionPresence(string Id, bool Enabled);
 
-// The target extension's disconnect or final reply is never removal proof. A
-// separate same-profile verifier must observe absence before a new install is admitted.
+// Fresh reset first asks the exact connected extension to clear its own storage
+// and uninstall itself. The final call cannot reply on success because Chrome
+// destroys its caller, so a bounded silence window completes that trusted
+// request. Manual removal is an explicit fallback, not the default workflow.
 internal sealed class ChromeExtensionReset
 {
     private sealed record Journal(int Schema, string Generation, long StartedAt, bool Pending,
         string ExtensionId, string[] RetiredReceipts, bool RemovalVerified, string? LastRemovalError,
-        bool VerifierSawTarget);
+        bool VerifierSawTarget, long RemovalRequestedAt, long ManualPromptAt,
+        long ManualConfirmedAt, long LastObservedAt);
     private sealed record Attempt(string CommandId, DateTimeOffset SentAt, int Count);
     private readonly string path;
     private readonly TimeProvider clock;
@@ -20,6 +23,7 @@ internal sealed class ChromeExtensionReset
     private readonly HashSet<string> receipts = [];
     private readonly Dictionary<string, Attempt> attempts = [];
     private readonly Dictionary<string, string> commandConnections = [];
+    private readonly HashSet<string> manualOpenConnections = [];
     private Journal? state;
     private DateTime lastWrite;
     private bool invalid;
@@ -47,25 +51,37 @@ internal sealed class ChromeExtensionReset
             int schema = root.GetProperty("Schema").GetInt32();
             Journal? loaded = schema switch
             {
-                1 => new Journal(3, root.GetProperty("Generation").GetString() ?? "",
+                1 => new Journal(4, root.GetProperty("Generation").GetString() ?? "",
                     root.GetProperty("StartedAt").GetInt64(), root.GetProperty("Pending").GetBoolean(),
                     root.GetProperty("ExtensionId").GetString() ?? "",
-                    root.GetProperty("RetiredReceipts").EnumerateArray().Select(item => item.GetString() ?? "").ToArray(), false, null, false),
-                2 => new Journal(3, root.GetProperty("Generation").GetString() ?? "",
+                    root.GetProperty("RetiredReceipts").EnumerateArray().Select(item => item.GetString() ?? "").ToArray(),
+                    false, null, false, 0, 0, 0, 0),
+                2 => new Journal(4, root.GetProperty("Generation").GetString() ?? "",
                     root.GetProperty("StartedAt").GetInt64(), root.GetProperty("Pending").GetBoolean(),
                     root.GetProperty("ExtensionId").GetString() ?? "",
                     root.GetProperty("RetiredReceipts").EnumerateArray().Select(item => item.GetString() ?? "").ToArray(),
                     root.GetProperty("RemovalVerified").GetBoolean(),
                     root.TryGetProperty("LastRemovalError", out JsonElement oldError) && oldError.ValueKind == JsonValueKind.String ? oldError.GetString() : null,
-                    false),
-                3 => JsonSerializer.Deserialize<Journal>(root.GetRawText()),
+                    false, 0, 0, 0, 0),
+                3 => new Journal(4, root.GetProperty("Generation").GetString() ?? "",
+                    root.GetProperty("StartedAt").GetInt64(), root.GetProperty("Pending").GetBoolean(),
+                    root.GetProperty("ExtensionId").GetString() ?? "",
+                    root.GetProperty("RetiredReceipts").EnumerateArray().Select(item => item.GetString() ?? "").ToArray(),
+                    root.GetProperty("RemovalVerified").GetBoolean(),
+                    root.TryGetProperty("LastRemovalError", out JsonElement priorError) && priorError.ValueKind == JsonValueKind.String ? priorError.GetString() : null,
+                    root.TryGetProperty("VerifierSawTarget", out JsonElement sawTarget) && sawTarget.ValueKind == JsonValueKind.True,
+                    0, 0, 0, 0),
+                4 => JsonSerializer.Deserialize<Journal>(root.GetRawText()),
                 _ => null,
             };
             if (loaded is null || !Guid.TryParse(loaded.Generation, out _) || loaded.StartedAt <= 0
                 || AppConfiguration.NormalizeExtensionId(loaded.ExtensionId) is null
                 || loaded.RetiredReceipts is null || loaded.RetiredReceipts.Length > 256
-                || loaded.LastRemovalError?.Length > 500) throw new InvalidOperationException();
-            if (state?.Generation != loaded.Generation) { attempts.Clear(); commandConnections.Clear(); }
+                || loaded.LastRemovalError?.Length > 500 || loaded.RemovalRequestedAt < 0
+                || loaded.ManualPromptAt < 0 || loaded.ManualConfirmedAt < 0 || loaded.LastObservedAt < 0)
+                throw new InvalidOperationException();
+            if (state?.Generation != loaded.Generation)
+            { attempts.Clear(); commandConnections.Clear(); manualOpenConnections.Clear(); }
             state = loaded;
             lastWrite = stamp;
             invalid = false;
@@ -103,9 +119,11 @@ internal sealed class ChromeExtensionReset
                 Refresh();
                 if (invalid) return "The Chrome reset record could not be verified. Start the operation again; uploads remain blocked.";
                 if (!string.IsNullOrWhiteSpace(state?.LastRemovalError))
-                    return "Chrome did not remove the previous OFEnhancer extension: " + state.LastRemovalError + ". Remove that exact extension in chrome://extensions; do not click Reload.";
+                    return "Chrome could not remove the previous OFEnhancer extension automatically: " + state.LastRemovalError + ". Use its Remove button in chrome://extensions; do not click Reload.";
+                if (state?.ManualPromptAt > 0)
+                    return "Chrome needs one manual Remove click for the previous OFEnhancer extension. Do not use Reload.";
                 if (state?.RemovalVerified != true)
-                    return "Removal of the previous OFEnhancer extension is awaiting independent same-profile verification. Remove it in chrome://extensions if requested; do not click Reload.";
+                    return "OFEnhancer is asking Chrome to remove the previous extension automatically. Keep Chrome open.";
                 return "The previous extension was removed. Load the new extension-keyed folder; a Reload is not a new installation.";
             }
         }
@@ -117,10 +135,12 @@ internal sealed class ChromeExtensionReset
         lock (gate)
         {
             Refresh();
-            Save(new(3, Guid.NewGuid().ToString(), clock.GetUtcNow().ToUnixTimeMilliseconds(), true, extensionId,
-                receipts.Concat(state?.RetiredReceipts ?? []).Distinct().TakeLast(256).ToArray(), false, null, false));
+            Save(new(4, Guid.NewGuid().ToString(), clock.GetUtcNow().ToUnixTimeMilliseconds(), true, extensionId,
+                receipts.Concat(state?.RetiredReceipts ?? []).Distinct().TakeLast(256).ToArray(),
+                false, null, false, 0, 0, 0, 0));
             attempts.Clear();
             commandConnections.Clear();
+            manualOpenConnections.Clear();
         }
     }
 
@@ -155,13 +175,81 @@ internal sealed class ChromeExtensionReset
                 return new(true, []);
             }
             if (!state.Pending || state.RemovalVerified) return new(false, []);
+            long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
+            if (state.ManualPromptAt > 0)
+            {
+                if (now - state.LastObservedAt >= 500)
+                    Save(state with { LastObservedAt = now });
+                if (manualOpenConnections.Add(connectionId))
+                    return new(false, [new { id = Guid.NewGuid().ToString(), command = new { kind = "openChromePage", page = "extensions" } }]);
+                return new(false, []);
+            }
             attempts.TryGetValue(connectionId, out Attempt? previous);
             if (previous is not null && (previous.Count >= 3 || clock.GetUtcNow() - previous.SentAt < TimeSpan.FromSeconds(2)))
                 return new(false, []);
             string commandId = Guid.NewGuid().ToString();
             attempts[connectionId] = new(commandId, clock.GetUtcNow(), (previous?.Count ?? 0) + 1);
             commandConnections[commandId] = connectionId;
+            Save(state with { RemovalRequestedAt = now, LastObservedAt = now, LastRemovalError = null });
             return new(false, [new { id = commandId, command = new { kind = "resetExtension", generation = state.Generation } }]);
+        }
+    }
+
+    internal bool TryConfirmAutomaticRemoval(TimeSpan silence)
+    {
+        lock (gate)
+        {
+            Refresh();
+            if (invalid || state is null || !state.Pending || state.RemovalVerified) return state?.RemovalVerified == true;
+            long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
+            if (state.ManualPromptAt == 0 && state.RemovalRequestedAt > 0
+                && string.IsNullOrWhiteSpace(state.LastRemovalError)
+                && now - state.RemovalRequestedAt >= silence.TotalMilliseconds)
+            {
+                Save(state with { RemovalVerified = true });
+                return true;
+            }
+            return false;
+        }
+    }
+
+    internal void RequestManualRemoval()
+    {
+        lock (gate)
+        {
+            Refresh();
+            if (invalid || state is null || !state.Pending || state.RemovalVerified) return;
+            long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
+            Save(state with { ManualPromptAt = now, ManualConfirmedAt = 0, LastObservedAt = now });
+            manualOpenConnections.Clear();
+        }
+    }
+
+    internal void BeginManualConfirmation()
+    {
+        lock (gate)
+        {
+            Refresh();
+            if (invalid || state is null || !state.Pending || state.ManualPromptAt == 0)
+                throw new InvalidOperationException("Manual Chrome removal is not active.");
+            Save(state with { ManualConfirmedAt = clock.GetUtcNow().ToUnixTimeMilliseconds() });
+        }
+    }
+
+    internal bool TryConfirmManualRemoval(TimeSpan silence)
+    {
+        lock (gate)
+        {
+            Refresh();
+            if (invalid || state is null || !state.Pending || state.RemovalVerified) return state?.RemovalVerified == true;
+            long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
+            if (state.ManualConfirmedAt > 0
+                && now - Math.Max(state.ManualConfirmedAt, state.LastObservedAt) >= silence.TotalMilliseconds)
+            {
+                Save(state with { RemovalVerified = true, LastRemovalError = null });
+                return true;
+            }
+            return false;
         }
     }
 

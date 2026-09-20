@@ -293,12 +293,14 @@ internals. See [the product reset contract](product.md#normal-update-versus-fres
 ## Fresh reinstall lifecycle — 0.20.27
 
 Fresh reinstall is distinct from Fresh reset. Setup stages its maintenance
-coordinator and temporary verifier outside the old install, data and WebView2
-roots before copying package files. A durable transaction blocks normal startup,
-keeps the verified legacy native origin reachable only for removal, records
-bounded removal failures and retries them without Reload, and accepts absence
-only from the same-profile verifier using `management.getAll` plus uninstall
-events. Only then may Setup run the verified old uninstaller and purge owned
+coordinator outside the old install, data and WebView2 roots before copying
+package files. A durable transaction blocks normal startup, keeps the verified
+legacy native origin reachable only for removal, and automatically asks the old
+extension to clear its own storage and uninstall itself. Chrome gets a bounded
+failure/reconnect window. If it refuses, Setup opens the connected profile's
+Extensions page and asks for one explicit Remove click; loading another
+developer-mode extension is not part of the normal workflow. Only then may
+Setup run the verified old uninstaller and purge owned
 desktop state. Clean desktop installation may finish with Chrome setup pending;
 the transaction completes only when the current build presents a receipt created
 by Chrome's genuine install lifecycle.
@@ -306,6 +308,17 @@ by Chrome's genuine install lifecycle.
 ## Fresh maintenance staging — 0.20.28
 
 Setup passes the unexpanded logical `{tmp}` destinations to Inno Setup's
-`ExtractTemporaryFiles` matcher. The temporary coordinator, verifier and guide
-are therefore extracted before any old state is changed; packaging regression
+`ExtractTemporaryFiles` matcher. The temporary coordinator is therefore
+extracted before any old state is changed; packaging regression
 coverage rejects expanding those match patterns to physical paths.
+
+## Automatic Chrome removal — 0.20.29
+
+- Fresh reinstall asks the connected old extension to clear its storage and
+  remove itself; a successful removal does not require loading a verifier.
+- If Chrome refuses automatic removal, Setup opens the connected profile's
+  Extensions page and asks for one ordinary **Remove** click. **Reload** is
+  never accepted as removal.
+- Setup does not stage or display the former verifier extension or separate
+  removal guide. A genuinely new installation receipt is still required
+  before the desktop upload connection becomes ready.

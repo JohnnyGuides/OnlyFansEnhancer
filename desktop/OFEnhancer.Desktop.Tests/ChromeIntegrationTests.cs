@@ -162,8 +162,10 @@ public sealed class ChromeIntegrationTests
         fixture.Integration.Prepare();
         Assert.AreEqual(cutoff, File.ReadAllText(journal), "Resume must not move the original reset cutoff.");
         Assert.AreEqual("reset-pending", fixture.Integration.Get().State);
-        Assert.IsFalse(fixture.Integration.Get().CanOpenExtensions);
-        fixture.Channel.Reset.ObserveVerifier(ChromeIntegration.MaintenanceVerifierId, [], [legacy]);
+        Assert.IsFalse(fixture.Integration.Get().CanOpenExtensions, "there is no connected Chrome profile in this fixture");
+        fixture.Channel.Reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(),
+            JsonSerializer.SerializeToElement(new { id = Guid.NewGuid().ToString(), installedAt = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds() }), true);
+        Assert.IsTrue(fixture.Channel.Reset.TryConfirmAutomaticRemoval(TimeSpan.Zero));
         var rebound = fixture.Integration.Get();
         Assert.AreEqual(ChromeIntegration.CanonicalExtensionId, rebound.ExtensionId);
         Assert.AreEqual(Path.Combine(fixture.Root, "extension-keyed"), rebound.ExtensionFolder);

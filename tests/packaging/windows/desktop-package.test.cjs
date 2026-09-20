@@ -57,6 +57,20 @@ function powershellQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+function stopProcessesBelow(directory) {
+  const prefix = path.resolve(directory) + path.sep;
+  const result = spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      `$prefix = ${powershellQuote(prefix)}; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+    ],
+    { encoding: "utf8", timeout: 10000, windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
 function expandArchive(archivePath, destination) {
   fs.mkdirSync(destination, { recursive: true });
   const result = spawnSync(
@@ -204,11 +218,7 @@ async function main() {
     /ExtractTemporaryFiles\(ExpandConstant/,
     "temporary-file patterns must remain logical Inno destinations until matching",
   );
-  for (const temporaryPath of [
-    "desktop\\*",
-    "fresh-verifier\\*",
-    "fresh-reinstall.html",
-  ]) {
+  for (const temporaryPath of ["desktop\\*"]) {
     assert.ok(
       installer.includes(
         `ExtractTemporaryFiles('{tmp}\\ofenhancer-maintenance\\${temporaryPath}')`,
@@ -216,6 +226,12 @@ async function main() {
       `maintenance extraction must retain the logical Inno path for ${temporaryPath}`,
     );
   }
+  assert.doesNotMatch(installer, /--verifier-root|--guide/);
+  assert.doesNotMatch(
+    installer,
+    /\{tmp\}\\ofenhancer-maintenance\\(?:fresh-verifier|fresh-reinstall\.html)/i,
+    "Fresh reinstall must not stage a helper extension or a separate instruction page",
+  );
   assert.doesNotMatch(installer, /--mark-chrome-reset/);
   assert.match(installer, /SelectedValueIndex <> 2/);
   assert.doesNotMatch(
@@ -535,7 +551,6 @@ async function main() {
       path.join(stage, "native", "ofenhancer-native-host.json.template"),
       path.join(stage, "extension-setup.html"),
       path.join(stage, "extension-reload.html"),
-      path.join(stage, "fresh-reinstall.html"),
       path.join(stage, "fresh-verifier", "manifest.json"),
       path.join(stage, "fresh-verifier", "background.js"),
       path.join(stage, "package-manifest.json"),
@@ -685,7 +700,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.28",
+      productVersion: "0.20.29",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -785,7 +800,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.28");
+    assert.equal(manifest.productVersion, "0.20.29");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));
@@ -855,6 +870,7 @@ async function main() {
         delay(3000),
       ]);
     }
+    stopProcessesBelow(temporary);
     fs.rmSync(temporary, {
       recursive: true,
       force: true,

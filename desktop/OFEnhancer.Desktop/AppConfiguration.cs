@@ -67,11 +67,20 @@ public static partial class AppConfiguration
         return IsValidGoogleOAuthClientId(candidate) ? candidate : null;
     }
 
-    internal static string MaintenanceTransactionPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "OFEnhancer-Maintenance",
-        "fresh-reinstall.json"
-    );
+    internal static string MaintenanceTransactionPath
+    {
+        get
+        {
+            // Keep the coordinator beside, never inside, the owned data root so
+            // Fresh cleanup cannot delete its own transaction. This also keeps
+            // an explicitly configured data root isolated from the normal user
+            // profile during package and portable-style runs.
+            string dataRoot = ResolveDataRoot(create: false);
+            string parent = Directory.GetParent(dataRoot)?.FullName
+                ?? throw new InvalidOperationException("The OFEnhancer data root has no safe maintenance parent.");
+            return Path.Combine(parent, "OFEnhancer-Maintenance", "fresh-reinstall.json");
+        }
+    }
 
     internal static string ResolveDataRoot(bool create)
     {

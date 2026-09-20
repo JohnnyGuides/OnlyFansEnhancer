@@ -384,7 +384,13 @@ public partial class MainWindow : Window, IDisposable
 
     private async Task<string> OpenChromePageAsync(string page)
     {
-        await Task.Run(chromeIntegration.Get);
+        var readiness = await Task.Run(chromeIntegration.Get);
+        if (page == "extensions" && readiness.ResetPending && uploads.Reset is { } reset)
+        {
+            reset.RequestManualRemoval();
+            reset.BeginManualConfirmation();
+            return "Chrome extensions is opening in the connected profile. Click Remove on the previous OFEnhancer extension, not Reload.";
+        }
         var status = JsonSerializer.SerializeToElement(uploads.Status());
         if (status.GetProperty("browsers").GetArrayLength() > 0)
         {
@@ -399,12 +405,11 @@ public partial class MainWindow : Window, IDisposable
         {
             string guide = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "extension-setup.html"));
             if (!File.Exists(guide)) throw new InvalidOperationException("Open chrome://extensions in Chrome's address bar. The extension is not connected yet.");
-            var readiness = chromeIntegration.Get();
+            readiness = chromeIntegration.Get();
             if (readiness.ExtensionFolder is null)
                 throw new InvalidOperationException("Copy chrome://extensions into Chrome and reload the existing extension. Choose Fresh reset for a clean installation.");
             var address = new UriBuilder(new Uri(guide)) { Fragment = "folder=" + Uri.EscapeDataString(readiness.ExtensionFolder)
-                + (readiness.ResetPending ? "&reset=1&previous=" + Uri.EscapeDataString(readiness.ResetExtensionId ?? ChromeIntegration.CanonicalExtensionId)
-                    + "&verifier=" + Uri.EscapeDataString(readiness.VerifierFolder ?? "") : "") };
+                + (readiness.ResetPending ? "&reset=1&previous=" + Uri.EscapeDataString(readiness.ResetExtensionId ?? ChromeIntegration.CanonicalExtensionId) : "") };
             OpenChrome(address.Uri);
             return "Copy this address and paste it into Chrome: chrome://extensions";
         }

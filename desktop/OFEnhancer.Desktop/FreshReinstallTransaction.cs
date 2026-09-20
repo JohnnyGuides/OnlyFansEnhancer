@@ -161,7 +161,7 @@ internal sealed class FreshReinstallTransaction
     {
         if (Phase >= FreshReinstallPhase.OwnedStatePurged) return;
         if (Phase is not (FreshReinstallPhase.ExtensionRemovalVerified or FreshReinstallPhase.PreviousPackageRemoved))
-            throw new InvalidOperationException("Chrome removal must be independently verified before desktop state is removed.");
+            throw new InvalidOperationException("Chrome removal must be confirmed before desktop state is removed.");
         if (Phase == FreshReinstallPhase.ExtensionRemovalVerified)
         {
             DeleteOwnedRoot(journal.InstallRoot, exclusive: true);
