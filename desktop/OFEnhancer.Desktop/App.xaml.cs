@@ -18,6 +18,11 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs eventArgs)
     {
         base.OnStartup(eventArgs);
+        if (FreshReinstallMaintenance.TryRun(eventArgs.Args, out int maintenanceExit))
+        {
+            Shutdown(maintenanceExit);
+            return;
+        }
         if (eventArgs.Args.Contains("--mark-chrome-reset", StringComparer.Ordinal))
         {
             try
@@ -41,6 +46,12 @@ public partial class App : System.Windows.Application
         {
             RunAgentOnce(eventArgs.Args);
             Shutdown();
+            return;
+        }
+        if (!FreshReinstallMaintenance.StartupAllowed(out string freshMessage))
+        {
+            System.Windows.MessageBox.Show(freshMessage, "Fresh reinstall incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown(3);
             return;
         }
 
@@ -71,6 +82,7 @@ public partial class App : System.Windows.Application
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        AppConfiguration.EnsureOwnedRootsForStartup();
         AppConfiguration.ApplyFreshInstallerDefaults(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")), AppConfiguration.SettingsPath);
         string? extensionId = AppConfiguration.ResolveExtensionId(
             eventArgs.Args,

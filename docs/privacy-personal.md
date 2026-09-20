@@ -96,6 +96,11 @@ Desktop update/repair preserves user data. Interactive uninstall defaults to
 keeping it and offers explicit removal of `%LocalAppData%\OFEnhancer`; silent
 uninstall keeps it. External selected media/audit roots, downloaded credential
 JSON, Google spreadsheets, and Chrome profiles are not erased by that choice.
+Fresh reinstall is a separate clean-slate operation: it removes the prior
+OFEnhancer extension and safely identified application-owned settings, catalogue,
+local Google token/client files, checkpoints, WebView2 state, caches and obsolete
+program files. It does not remove source media, external credential JSON, cloud
+resources, other extensions, site storage or unrelated files in a shared parent.
 Test data/captures may also contain private material: keep them outside source
 and delete only deliberately selected owned files.
 

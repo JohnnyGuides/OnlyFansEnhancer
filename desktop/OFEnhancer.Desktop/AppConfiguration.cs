@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 namespace OFEnhancer.Desktop;
 
@@ -66,59 +67,111 @@ public static partial class AppConfiguration
         return IsValidGoogleOAuthClientId(candidate) ? candidate : null;
     }
 
+    internal static string MaintenanceTransactionPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "OFEnhancer-Maintenance",
+        "fresh-reinstall.json"
+    );
+
+    internal static string ResolveDataRoot(bool create)
+    {
+        string? configuredRoot = Environment.GetEnvironmentVariable(DataRootEnvironmentVariable);
+        if (configuredRoot is null)
+        {
+            string standard = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OFEnhancer");
+            if (create) Directory.CreateDirectory(standard);
+            return standard;
+        }
+        if (string.IsNullOrWhiteSpace(configuredRoot) || configuredRoot.Length > MaximumDataRootLength
+            || !string.Equals(configuredRoot, configuredRoot.Trim(), StringComparison.Ordinal)
+            || !Path.IsPathFullyQualified(configuredRoot)) throw InvalidDataRoot();
+
+        try
+        {
+            string fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(configuredRoot));
+            string? volumeRoot = Path.GetPathRoot(fullRoot);
+            if (string.IsNullOrEmpty(volumeRoot)
+                || string.Equals(fullRoot, Path.TrimEndingDirectorySeparator(volumeRoot), StringComparison.OrdinalIgnoreCase)
+                || File.Exists(fullRoot)) throw InvalidDataRoot();
+            if (create) Directory.CreateDirectory(fullRoot);
+            return fullRoot;
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        { throw InvalidDataRoot(exception); }
+    }
+
+    internal static string ResolveWebViewRoot(bool create)
+    {
+        string? configured = Environment.GetEnvironmentVariable("OFENHANCER_WEBVIEW2_USER_DATA_FOLDER");
+        string value = configured ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OFEnhancer", "WebView2");
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumDataRootLength
+            || !string.Equals(value, value.Trim(), StringComparison.Ordinal) || !Path.IsPathFullyQualified(value))
+            throw new InvalidOperationException("OFENHANCER_WEBVIEW2_USER_DATA_FOLDER must name an absolute dedicated directory below a volume root.");
+        try
+        {
+            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value));
+            string volume = Path.TrimEndingDirectorySeparator(Path.GetPathRoot(full)!);
+            if (string.Equals(full, volume, StringComparison.OrdinalIgnoreCase) || File.Exists(full))
+                throw new InvalidOperationException();
+            if (create) Directory.CreateDirectory(full);
+            return full;
+        }
+        catch (Exception error) when (error is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException("OFENHANCER_WEBVIEW2_USER_DATA_FOLDER must name an absolute dedicated directory below a volume root.", error);
+        }
+    }
+
+    internal static void EnsureOwnedRootsForStartup()
+    {
+        EnsureOwnershipMarker(ResolveDataRoot(create: false), ".ofenhancer-owned-root.json");
+        EnsureOwnershipMarker(ResolveWebViewRoot(create: false), ".ofenhancer-webview-owned.json");
+    }
+
+    internal static bool IsExclusiveDataRoot(string root) =>
+        SamePath(root, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OFEnhancer"))
+        || HasOwnershipMarker(root, ".ofenhancer-owned-root.json");
+
+    internal static bool IsExclusiveWebViewRoot(string root) =>
+        SamePath(root, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OFEnhancer", "WebView2"))
+        || HasOwnershipMarker(root, ".ofenhancer-webview-owned.json");
+
+    private static void EnsureOwnershipMarker(string root, string markerName)
+    {
+        if (Directory.Exists(root))
+        {
+            if (HasOwnershipMarker(root, markerName) || Directory.EnumerateFileSystemEntries(root).Any()) return;
+        }
+        else Directory.CreateDirectory(root);
+        string marker = Path.Combine(root, markerName);
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { schema = 1, owner = "OFEnhancer" });
+        using FileStream output = new(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
+        output.Write(bytes);
+        output.Flush(true);
+    }
+
+    private static bool HasOwnershipMarker(string root, string markerName)
+    {
+        try
+        {
+            string marker = Path.Combine(root, markerName);
+            if (!File.Exists(marker) || new FileInfo(marker).Length is <= 0 or > 1024) return false;
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(marker));
+            return document.RootElement.GetProperty("schema").GetInt32() == 1
+                && document.RootElement.GetProperty("owner").GetString() == "OFEnhancer";
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException)
+        { return false; }
+    }
+
+    private static bool SamePath(string left, string right) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)).Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);
+
     private static string DataRoot
     {
-        get
-        {
-            string? configuredRoot = Environment.GetEnvironmentVariable(DataRootEnvironmentVariable);
-            if (configuredRoot is null)
-            {
-                return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "OFEnhancer"
-                );
-            }
-            if (
-                string.IsNullOrWhiteSpace(configuredRoot)
-                || configuredRoot.Length > MaximumDataRootLength
-                || !string.Equals(configuredRoot, configuredRoot.Trim(), StringComparison.Ordinal)
-                || !Path.IsPathFullyQualified(configuredRoot)
-            )
-            {
-                throw InvalidDataRoot();
-            }
-
-            try
-            {
-                string fullRoot = Path.TrimEndingDirectorySeparator(
-                    Path.GetFullPath(configuredRoot)
-                );
-                string? volumeRoot = Path.GetPathRoot(fullRoot);
-                if (
-                    string.IsNullOrEmpty(volumeRoot)
-                    || string.Equals(
-                        fullRoot,
-                        Path.TrimEndingDirectorySeparator(volumeRoot),
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                    || File.Exists(fullRoot)
-                )
-                {
-                    throw InvalidDataRoot();
-                }
-                Directory.CreateDirectory(fullRoot);
-                return fullRoot;
-            }
-            catch (Exception exception) when (
-                exception is ArgumentException
-                    or IOException
-                    or NotSupportedException
-                    or UnauthorizedAccessException
-            )
-            {
-                throw InvalidDataRoot(exception);
-            }
-        }
+        get => ResolveDataRoot(create: true);
     }
 
     private static InvalidOperationException InvalidDataRoot(Exception? innerException = null) =>

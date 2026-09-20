@@ -36,12 +36,10 @@ public sealed class ChromeExtensionResetTests
             Assert.AreEqual(0, reset.Observe(oldBrowser, oldConnection, oldReceipt, true).Commands.Length);
             clock.Now = clock.Now.AddSeconds(20);
             Assert.IsFalse(reset.Observe(oldBrowser, Guid.NewGuid().ToString(), oldReceipt, true).Allowed, "A reload is still the old installation.");
+            reset.ObserveVerifier(ChromeIntegration.MaintenanceVerifierId, [], [ChromeIntegration.CanonicalExtensionId]);
             string freshId = Guid.NewGuid().ToString(), freshBrowser = Guid.NewGuid().ToString(), freshConnection = Guid.NewGuid().ToString();
             var fresh = Receipt(freshId, clock.Now.ToUnixTimeMilliseconds());
-            Assert.IsFalse(reset.Observe(freshBrowser, freshConnection, fresh, true).Allowed, "Old connection is still live.");
-            clock.Now = clock.Now.AddSeconds(11);
             Assert.IsFalse(reset.Observe(freshBrowser, freshConnection, fresh, false).Allowed, "Wrong product version never finishes reset.");
-            clock.Now = clock.Now.AddSeconds(11);
             Assert.IsTrue(reset.Observe(freshBrowser, freshConnection, fresh, true).Allowed);
             Assert.IsFalse(reset.Pending);
             var restarted = new ChromeExtensionReset(Path.Combine(root, "chrome-reset.json"), clock);
@@ -97,8 +95,12 @@ public sealed class ChromeExtensionResetTests
             Exchange(generation, null, id);
             Assert.IsFalse(JsonSerializer.SerializeToElement(channel.Status()).GetProperty("connected").GetBoolean());
             await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(JsonSerializer.SerializeToElement(new { kind = "storageGet" })));
+            channel.Exchange(JsonSerializer.SerializeToElement(new {
+                browserId = Guid.NewGuid().ToString(), connectionId = Guid.NewGuid().ToString(),
+                extensionId = ChromeIntegration.MaintenanceVerifierId, bridgeExtensionId = ChromeIntegration.MaintenanceVerifierId,
+                maintenanceVerifier = new { installed = Array.Empty<object>(), uninstalled = new[] { id } }
+            }));
             var fresh = new { id = Guid.NewGuid().ToString(), installedAt = clock.Now.ToUnixTimeMilliseconds() };
-            clock.Now = clock.Now.AddSeconds(11);
             Exchange(generation, fresh, id);
             channel.Select(browser);
             Assert.IsTrue(JsonSerializer.SerializeToElement(channel.Status()).GetProperty("connected").GetBoolean());
@@ -127,6 +129,79 @@ public sealed class ChromeExtensionResetTests
             Assert.IsTrue(reset.Pending);
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
+    public void Removal_errors_are_recorded_and_retried_on_the_same_connection_without_reload()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-retry-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        try
+        {
+            var clock = new Clock();
+            var reset = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
+            string connection = Guid.NewGuid().ToString();
+            JsonElement old = JsonSerializer.SerializeToElement(new
+            {
+                id = Guid.NewGuid().ToString(),
+                installedAt = clock.Now.AddDays(-1).ToUnixTimeMilliseconds(),
+            });
+            reset.Begin(ChromeIntegration.CanonicalExtensionId);
+            var first = reset.Observe(Guid.NewGuid().ToString(), connection, old, true);
+            JsonElement command = JsonSerializer.SerializeToElement(first.Commands.Single());
+            string commandId = command.GetProperty("id").GetString()!;
+            reset.ObserveReplies(
+                connection,
+                JsonSerializer.SerializeToElement(new[] { new { id = commandId, error = "managed-extension" } })
+            );
+            Assert.IsTrue(reset.Message.Contains("managed-extension", StringComparison.Ordinal));
+
+            clock.Now = clock.Now.AddSeconds(3);
+            var retry = reset.Observe(Guid.NewGuid().ToString(), connection, old, true);
+            Assert.AreEqual(1, retry.Commands.Length, "the same running worker must be retried without Reload");
+            Assert.AreNotEqual(commandId, JsonSerializer.SerializeToElement(retry.Commands[0]).GetProperty("id").GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
+    public void Independently_observed_absence_is_required_before_a_new_install_can_complete()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-observer-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        try
+        {
+            var clock = new Clock();
+            var reset = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
+            reset.Begin(ChromeIntegration.CanonicalExtensionId);
+            reset.ObserveVerifier(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                [new ExtensionPresence(ChromeIntegration.CanonicalExtensionId, false)],
+                []
+            );
+            Assert.IsTrue(reset.Pending, "a target that was merely disabled is still installed");
+            var restartedVerifier = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
+            restartedVerifier.ObserveVerifier("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", [], []);
+            Assert.IsFalse(restartedVerifier.RemovalVerified, "restart cannot erase evidence that the target was previously present");
+            restartedVerifier.ObserveVerifier("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", [], [ChromeIntegration.CanonicalExtensionId]);
+            Assert.IsTrue(restartedVerifier.RemovalVerified);
+
+            var fresh = JsonSerializer.SerializeToElement(new
+            {
+                id = Guid.NewGuid().ToString(),
+                installedAt = clock.Now.AddSeconds(1).ToUnixTimeMilliseconds(),
+            });
+            clock.Now = clock.Now.AddSeconds(12);
+            Assert.IsTrue(restartedVerifier.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), fresh, true).Allowed);
+            Assert.IsFalse(restartedVerifier.Pending);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 
 }

@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDisposable
         this.catalogue = catalogue;
         hasExtensionOverride = extensionOverride;
         settings = new DesktopSettingsStore(AppConfiguration.SettingsPath);
-        uploads.Reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath);
+        uploads.Reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath, completed: FreshReinstallMaintenance.CompleteIfChromeReady);
         Func<string?> effectiveIdentity = () => extensionOverride ? extensionId : settings.Load().ExtensionId;
         chromeIntegration = new ChromeIntegration(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")), settings, effectiveIdentity, uploads);
         browserSettings = new BrowserSettingsController(settings);
@@ -253,13 +253,7 @@ public partial class MainWindow : Window, IDisposable
 
     private async void Window_Loaded(object sender, RoutedEventArgs eventArgs)
     {
-        string userDataFolder =
-            Environment.GetEnvironmentVariable("OFENHANCER_WEBVIEW2_USER_DATA_FOLDER")
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "OFEnhancer",
-                "WebView2"
-            );
+        string userDataFolder = AppConfiguration.ResolveWebViewRoot(create: true);
         CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(
             userDataFolder: userDataFolder
         );
@@ -409,7 +403,8 @@ public partial class MainWindow : Window, IDisposable
             if (readiness.ExtensionFolder is null)
                 throw new InvalidOperationException("Copy chrome://extensions into Chrome and reload the existing extension. Choose Fresh reset for a clean installation.");
             var address = new UriBuilder(new Uri(guide)) { Fragment = "folder=" + Uri.EscapeDataString(readiness.ExtensionFolder)
-                + (readiness.ResetPending ? "&reset=1&previous=" + Uri.EscapeDataString(readiness.ResetExtensionId ?? ChromeIntegration.CanonicalExtensionId) : "") };
+                + (readiness.ResetPending ? "&reset=1&previous=" + Uri.EscapeDataString(readiness.ResetExtensionId ?? ChromeIntegration.CanonicalExtensionId)
+                    + "&verifier=" + Uri.EscapeDataString(readiness.VerifierFolder ?? "") : "") };
             OpenChrome(address.Uri);
             return "Copy this address and paste it into Chrome: chrome://extensions";
         }

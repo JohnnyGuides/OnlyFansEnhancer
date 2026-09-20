@@ -8,7 +8,8 @@ namespace OFEnhancer.Desktop;
 
 internal sealed record ChromeIntegrationView(string State, string Message, bool HostAvailable,
     bool ChromeFound, bool Prepared, string? ExtensionId, string? ExtensionFolder,
-    object BrowserStatus, string? SetupError = null, bool CanOpenExtensions = false, bool ResetPending = false, string? ResetExtensionId = null);
+    object BrowserStatus, string? SetupError = null, bool CanOpenExtensions = false, bool ResetPending = false,
+    string? ResetExtensionId = null, string? VerifierFolder = null);
 
 // Only fixed OFEnhancer package paths and current-user registration are writable here.
 // Registry inspection is diagnostic evidence, not proof that an extension is loaded.
@@ -16,6 +17,7 @@ internal sealed class ChromeIntegration
 {
     internal const string HostName = "com.johnnyguides.ofenhancer";
     internal const string CanonicalExtensionId = "aocoaajmhccmefmfebgiiogfdojciild";
+    internal const string MaintenanceVerifierId = "nhllpejgihfneloninfpblbfdoigongm";
     internal const string RegistryPath = @"Software\Google\Chrome\NativeMessagingHosts\" + HostName;
     private readonly string root;
     private readonly DesktopSettingsStore settings;
@@ -72,6 +74,22 @@ internal sealed class ChromeIntegration
     {
         lock (gate)
         {
+            if (channel.Reset is { Pending: true, RemovalVerified: true })
+            {
+                VerifyPackage();
+                bool canonicalRegistration = false;
+                try
+                {
+                    using JsonDocument current = JsonDocument.Parse(ReadBounded(NativeManifest));
+                    JsonElement origins = current.RootElement.GetProperty("allowed_origins");
+                    canonicalRegistration = origins.GetArrayLength() == 1
+                        && origins[0].GetString() == $"chrome-extension://{CanonicalExtensionId}/"
+                        && effectiveIdentity() == CanonicalExtensionId;
+                }
+                catch (Exception ignored) when (ignored is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException)
+                { }
+                if (!canonicalRegistration) WriteRegistration(CanonicalExtensionId);
+            }
             bool chrome = findChrome() is not null;
             string? id = effectiveIdentity();
             string? error = null;
@@ -123,7 +141,10 @@ internal sealed class ChromeIntegration
             };
             if (state == "not-found" && error is not null) message += " Setup also needs attention: " + error;
             return new(state, message, true, chrome, prepared, id, id is null || id == CanonicalExtensionId ? folder : null, status, error,
-                !resetting && live > 0 && (selected || live == 1 && !selectionRequired), resetting, channel.Reset?.PreviousExtensionId);
+                !resetting && live > 0 && (selected || live == 1 && !selectionRequired), resetting,
+                channel.Reset?.PreviousExtensionId,
+                resetting && !channel.Reset!.RemovalVerified && Directory.Exists(Path.Combine(root, "fresh-verifier"))
+                    ? Path.Combine(root, "fresh-verifier") : null);
         }
     }
 
@@ -170,10 +191,15 @@ internal sealed class ChromeIntegration
         if (bytes.Length > 65536) throw new InvalidOperationException("The native bridge manifest is too large.");
         using var document = JsonDocument.Parse(bytes);
         var manifest = document.RootElement;
+        string[] origins = manifest.GetProperty("allowed_origins").EnumerateArray()
+            .Select(item => item.GetString() ?? "").Order(StringComparer.Ordinal).ToArray();
+        string[] expected = channel.Reset is { Pending: true, RemovalVerified: false }
+            ? new[] { $"chrome-extension://{id}/", $"chrome-extension://{MaintenanceVerifierId}/" }
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+            : [$"chrome-extension://{id}/"];
         if (manifest.GetProperty("name").GetString() != HostName || manifest.GetProperty("type").GetString() != "stdio"
             || !SamePath(manifest.GetProperty("path").GetString()!, NativeExecutable)
-            || manifest.GetProperty("allowed_origins").GetArrayLength() != 1
-            || manifest.GetProperty("allowed_origins")[0].GetString() != $"chrome-extension://{id}/")
+            || !origins.SequenceEqual(expected, StringComparer.Ordinal))
             throw new InvalidOperationException("The owned native bridge manifest does not match the effective extension identity. Check setup to repair it.");
     }
 
@@ -216,22 +242,52 @@ internal sealed class ChromeIntegration
             ResolveFolder(canonical);
             // Persist the rejection barrier before changing registration or sending
             // a self-uninstall. An interrupted reset remains pending on restart.
-            if (begin) channel.BeginReset(effectiveIdentity() ?? canonical);
+            string previous = effectiveIdentity() ?? canonical;
+            if (begin) channel.BeginReset(previous);
             else if (channel.Reset?.Pending != true) throw new InvalidOperationException("Start Fresh reset before replacing the previous extension identity.");
-            WriteRegistration(canonical);
+            if (channel.Reset?.RemovalVerified == true) WriteRegistration(canonical);
+            else WriteMaintenanceRegistration(previous);
             return Get();
         }
+    }
+
+    private void WriteMaintenanceRegistration(string previousId)
+    {
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            name = HostName,
+            description = "OFEnhancer Fresh removal bridge",
+            path = NativeExecutable,
+            type = "stdio",
+            allowed_origins = new[]
+            {
+                $"chrome-extension://{previousId}/",
+                $"chrome-extension://{MaintenanceVerifierId}/",
+            }.Distinct(StringComparer.Ordinal).ToArray(),
+        });
+        CommitManifest(bytes);
+        register(NativeManifest);
     }
 
     private void WriteRegistration(string id)
     {
         // Atomic file/settings commits make retries recoverable. No settings or Chrome storage migration.
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { name = HostName, description = "OFEnhancer desktop bridge", path = NativeExecutable, type = "stdio", allowed_origins = new[] { $"chrome-extension://{id}/" } });
-        string temporary = NativeManifest + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try { File.WriteAllBytes(temporary, bytes); File.Move(temporary, NativeManifest, true); }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        CommitManifest(bytes);
         settings.Save(settings.Load() with { ExtensionId = id });
         register(NativeManifest);
+    }
+
+    private void CommitManifest(byte[] bytes)
+    {
+        string temporary = NativeManifest + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (FileStream output = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            { output.Write(bytes); output.Flush(true); }
+            File.Move(temporary, NativeManifest, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     private static void RegisterCurrentUser(string manifest)

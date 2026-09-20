@@ -149,6 +149,10 @@
     document.querySelector("#chromeResetNotice").hidden = !value.resetPending;
     document.querySelector("#chromeResetExtensionId").textContent =
       value.resetExtensionId || value.extensionId || "";
+    document.querySelector("#chromeVerifierFolder").textContent =
+      value.verifierFolder || "Temporary verifier folder unavailable.";
+    document.querySelector("#copyChromeVerifierFolder").disabled =
+      !value.verifierFolder;
     document.querySelector("#chromeExtensionFolder").textContent =
       value.extensionFolder ||
       "Select Set up Chrome to find the installed extension-keyed folder.";
@@ -291,6 +295,7 @@
     });
   for (const [id, value] of [
     ["copyChromeFolder", () => chromeReadiness?.extensionFolder],
+    ["copyChromeVerifierFolder", () => chromeReadiness?.verifierFolder],
     ["copyChromeAddress", () => "chrome://extensions"],
   ]) {
     document.getElementById(id).addEventListener("click", async () => {

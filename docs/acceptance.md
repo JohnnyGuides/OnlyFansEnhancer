@@ -289,3 +289,16 @@ current, genuinely installed extension crosses the durable reset barrier; neithe
 an old saved ID, reload nor silence alone is accepted. Reset retains desktop
 catalogue, Google configuration and history and never edits Chrome profile
 internals. See [the product reset contract](product.md#normal-update-versus-fresh-reset).
+
+## Fresh reinstall lifecycle — 0.20.27
+
+Fresh reinstall is distinct from Fresh reset. Setup stages its maintenance
+coordinator and temporary verifier outside the old install, data and WebView2
+roots before copying package files. A durable transaction blocks normal startup,
+keeps the verified legacy native origin reachable only for removal, records
+bounded removal failures and retries them without Reload, and accepts absence
+only from the same-profile verifier using `management.getAll` plus uninstall
+events. Only then may Setup run the verified old uninstaller and purge owned
+desktop state. Clean desktop installation may finish with Chrome setup pending;
+the transaction completes only when the current build presents a receipt created
+by Chrome's genuine install lifecycle.

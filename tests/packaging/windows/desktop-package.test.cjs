@@ -182,9 +182,24 @@ async function main() {
   );
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
-  assert.match(installer, /Fresh reinstall - reset Chrome extension only/);
+  assert.match(
+    installer,
+    /Fresh reinstall - remove extension and all OFEnhancer desktop state/,
+  );
   assert.match(installer, /CurStep = ssPostInstall\) and IsFreshReset\(\)/);
-  assert.match(installer, /--mark-chrome-reset.*ewWaitUntilTerminated/);
+  assert.match(
+    installer,
+    /--fresh-reinstall-installed.*ewWaitUntilTerminated/s,
+  );
+  assert.match(
+    installer,
+    /function PrepareToInstall[\s\S]*--fresh-reinstall-remove[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-clean/,
+  );
+  assert.match(
+    installer,
+    /ofenhancer-maintenance.*dontcopy noencryption recursesubdirs/i,
+  );
+  assert.doesNotMatch(installer, /--mark-chrome-reset/);
   assert.match(installer, /SelectedValueIndex <> 2/);
   assert.doesNotMatch(
     installer.slice(
@@ -503,6 +518,9 @@ async function main() {
       path.join(stage, "native", "ofenhancer-native-host.json.template"),
       path.join(stage, "extension-setup.html"),
       path.join(stage, "extension-reload.html"),
+      path.join(stage, "fresh-reinstall.html"),
+      path.join(stage, "fresh-verifier", "manifest.json"),
+      path.join(stage, "fresh-verifier", "background.js"),
       path.join(stage, "package-manifest.json"),
       path.join(stage, "desktop", "Microsoft.Data.Sqlite.dll"),
     ]) {
@@ -650,7 +668,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.26",
+      productVersion: "0.20.27",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -750,7 +768,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.26");
+    assert.equal(manifest.productVersion, "0.20.27");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

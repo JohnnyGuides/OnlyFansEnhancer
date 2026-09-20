@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OFEnhancer Fresh reinstall removal gate</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        background: #101218;
+        color: #f4f6fb;
+      }
+      body {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      h1 {
+        line-height: 1.1;
+      }
+      li {
+        margin: 18px 0;
+      }
+      code {
+        display: block;
+        overflow-wrap: anywhere;
+        padding: 12px;
+        border-radius: 8px;
+        background: #202531;
+      }
+      .warning {
+        border-left: 4px solid #ffb84d;
+        padding: 12px 16px;
+        background: #2c2417;
+      }
+      button {
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 8px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Remove the previous Chrome installation</h1>
+    <p class="warning">
+      <strong>Do not click Reload.</strong> Reload is an update, not removal,
+      and cannot complete a Fresh reinstall.
+    </p>
+    <ol>
+      <li>
+        Open <strong>chrome://extensions</strong> in this same Chrome profile
+        and enable Developer mode.
+      </li>
+      <li>
+        Choose <strong>Load unpacked</strong> and select this temporary verifier
+        folder:<code id="verifier"></code
+        ><button id="copy-verifier">Copy folder</button>
+      </li>
+      <li>
+        Return to Setup and click OK. OFEnhancer will request supported
+        self-removal. If Chrome refuses or the old runtime does not support it,
+        remove extension ID <code id="target"></code> with its
+        <strong>Remove</strong> button.
+      </li>
+      <li>
+        Leave this Chrome profile open. The temporary verifier includes disabled
+        extensions, observes the uninstall event, reports only the target
+        identity, and removes itself after confirmation.
+      </li>
+    </ol>
+    <p>
+      Setup will not delete desktop data or install new files until this gate
+      succeeds.
+    </p>
+    <script>
+      const values = new URLSearchParams(location.hash.slice(1));
+      const verifier = values.get("verifier") || "Verifier folder unavailable";
+      const target = values.get("target") || "Target unavailable";
+      document.querySelector("#verifier").textContent = verifier;
+      document.querySelector("#target").textContent = target;
+      document
+        .querySelector("#copy-verifier")
+        .addEventListener("click", async () => {
+          await navigator.clipboard.writeText(verifier);
+        });
+    </script>
+  </body>
+</html>

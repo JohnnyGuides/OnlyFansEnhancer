@@ -424,6 +424,17 @@
           <code id="chromeResetExtensionId"></code>
         </p>
         <p>Reloading does not finish Fresh reset.</p>
+        <p>
+          First load the temporary verifier as an unpacked extension. It
+          observes the exact removal, including disabled installations, and
+          removes itself after confirmation.
+        </p>
+        <div class="chrome-copy-row">
+          <code id="chromeVerifierFolder" translate="no"></code>
+          <button type="button" id="copyChromeVerifierFolder">
+            Copy verifier folder
+          </button>
+        </div>
       </aside>
       <button type="button" data-chrome-action="prepareChrome">
         Set up Chrome

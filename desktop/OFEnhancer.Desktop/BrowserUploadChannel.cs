@@ -98,6 +98,58 @@ public sealed class BrowserUploadChannel : IDisposable
         {
             Expire();
             if (retiredConnections.Contains(connectionId)) throw new InvalidOperationException("stale-browser-connection");
+            string? suppliedExtension = payload.TryGetProperty("extensionId", out var suppliedExtensionValue)
+                && suppliedExtensionValue.ValueKind == JsonValueKind.String ? suppliedExtensionValue.GetString() : null;
+            string? suppliedBridge = payload.TryGetProperty("bridgeExtensionId", out var suppliedBridgeValue)
+                && suppliedBridgeValue.ValueKind == JsonValueKind.String ? suppliedBridgeValue.GetString() : null;
+            bool maintenanceTarget = Reset?.Pending == true
+                && suppliedExtension == Reset.PreviousExtensionId
+                && suppliedBridge == Reset.PreviousExtensionId;
+            if (maintenanceTarget)
+            {
+                if (payload.TryGetProperty("replies", out JsonElement maintenanceReplies))
+                    Reset!.ObserveReplies(connectionId, maintenanceReplies);
+                bool matching = payload.TryGetProperty("extensionVersion", out var maintenanceVersion)
+                    && maintenanceVersion.ValueKind == JsonValueKind.String
+                    && maintenanceVersion.GetString() == AgentProtocol.ProductVersion;
+                var observed = Reset!.Observe(id, connectionId,
+                    payload.TryGetProperty("installation", out var maintenanceReceipt) ? maintenanceReceipt : null, matching);
+                if (!observed.Allowed)
+                    return new { commands = observed.Commands, connectionId, setupGeneration,
+                        requiredExtensionVersion = AgentProtocol.ProductVersion, resetPending = Reset.Pending,
+                        resetMessage = Reset.Message };
+            }
+            JsonElement verifier = default;
+            bool maintenanceVerifier = Reset?.Pending == true
+                && suppliedExtension == ChromeIntegration.MaintenanceVerifierId
+                && suppliedBridge == ChromeIntegration.MaintenanceVerifierId
+                && payload.TryGetProperty("maintenanceVerifier", out verifier)
+                && verifier.ValueKind == JsonValueKind.Object;
+            if (maintenanceVerifier)
+            {
+                var installed = verifier.TryGetProperty("installed", out JsonElement installedValue)
+                    && installedValue.ValueKind == JsonValueKind.Array
+                    ? installedValue.EnumerateArray().Take(128)
+                        .Where(item => item.ValueKind == JsonValueKind.Object
+                            && item.TryGetProperty("id", out JsonElement candidate)
+                            && candidate.ValueKind == JsonValueKind.String
+                            && AppConfiguration.NormalizeExtensionId(candidate.GetString()) is not null)
+                        .Select(item => new ExtensionPresence(item.GetProperty("id").GetString()!,
+                            item.TryGetProperty("enabled", out JsonElement enabled) && enabled.ValueKind == JsonValueKind.True))
+                        .ToArray()
+                    : [];
+                var uninstallEvents = verifier.TryGetProperty("uninstalled", out JsonElement uninstalledValue)
+                    && uninstalledValue.ValueKind == JsonValueKind.Array
+                    ? uninstalledValue.EnumerateArray().Take(128)
+                        .Where(item => item.ValueKind == JsonValueKind.String
+                            && AppConfiguration.NormalizeExtensionId(item.GetString()) is not null)
+                        .Select(item => item.GetString()!).ToArray()
+                    : [];
+                Reset!.ObserveVerifier(ChromeIntegration.MaintenanceVerifierId, installed, uninstallEvents);
+                return new { commands = Array.Empty<object>(), connectionId, setupGeneration,
+                    resetPending = Reset.Pending, removalVerified = Reset.RemovalVerified,
+                    resetMessage = Reset.Message };
+            }
             if (requireIdentity && (integrationIdentity is null
                 || !payload.TryGetProperty("extensionId", out var extension) || extension.GetString() != integrationIdentity
                 || !payload.TryGetProperty("bridgeExtensionId", out var bridge) || bridge.GetString() != integrationIdentity

@@ -148,14 +148,25 @@ public sealed class ChromeIntegrationTests
         foreach (string name in preservedFiles) Assert.AreEqual("unchanged fixture data", File.ReadAllText(Path.Combine(fixture.Root, "data", name)));
         Assert.IsTrue(result.ResetPending);
         Assert.AreEqual(legacy, result.ResetExtensionId);
-        Assert.AreEqual(ChromeIntegration.CanonicalExtensionId, result.ExtensionId);
+        Assert.AreEqual(legacy, result.ExtensionId, "The old native origin must remain reachable until removal is verified.");
         Assert.AreEqual("edge", fixture.Settings.Load().BrowserId);
-        Assert.AreEqual(Path.Combine(fixture.Root, "extension-keyed"), result.ExtensionFolder);
+        Assert.IsNull(result.ExtensionFolder);
+        using (JsonDocument maintenanceManifest = JsonDocument.Parse(File.ReadAllText(fixture.Manifest)))
+        {
+            string[] origins = maintenanceManifest.RootElement.GetProperty("allowed_origins").EnumerateArray()
+                .Select(item => item.GetString()!).ToArray();
+            CollectionAssert.Contains(origins, $"chrome-extension://{legacy}/");
+            CollectionAssert.Contains(origins, $"chrome-extension://{ChromeIntegration.MaintenanceVerifierId}/");
+        }
         string cutoff = File.ReadAllText(journal);
         fixture.Integration.Prepare();
         Assert.AreEqual(cutoff, File.ReadAllText(journal), "Resume must not move the original reset cutoff.");
         Assert.AreEqual("reset-pending", fixture.Integration.Get().State);
         Assert.IsFalse(fixture.Integration.Get().CanOpenExtensions);
+        fixture.Channel.Reset.ObserveVerifier(ChromeIntegration.MaintenanceVerifierId, [], [legacy]);
+        var rebound = fixture.Integration.Get();
+        Assert.AreEqual(ChromeIntegration.CanonicalExtensionId, rebound.ExtensionId);
+        Assert.AreEqual(Path.Combine(fixture.Root, "extension-keyed"), rebound.ExtensionFolder);
     }
 
 }

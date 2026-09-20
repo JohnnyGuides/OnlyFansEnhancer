@@ -40,13 +40,20 @@
     async function uninstall() {
       if (typeof chrome.management?.uninstallSelf !== "function")
         throw new Error(REMOVE);
+      for (const area of ["local", "session", "sync"]) {
+        if (!chrome.storage[area]?.clear) continue;
+        try {
+          await chrome.storage[area].clear();
+        } catch {
+          throw new Error(
+            `Extension storage was partially cleared (${area} failed). ${REMOVE}`,
+          );
+        }
+      }
       try {
-        await clearOwnedStorage();
-        // Explicit confirmation happened in desktop/installer. Chrome may
-        // still refuse removal (for example, a managed installation).
         await chrome.management.uninstallSelf({ showConfirmDialog: false });
       } catch {
-        throw new Error(REMOVE);
+        throw new Error(`Chrome refused self-removal. ${REMOVE}`);
       }
     }
     return Object.freeze({ getInstallation, uninstall });

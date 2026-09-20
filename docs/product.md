@@ -123,7 +123,8 @@ cannot be re-enabled as retired; release a retired blocker only when no other
 current/retired assignment still references it. Missing images have a fallback.
 Do not replace real connection/catalogue states with sample success or fake rows.
 
-Install/update/repair preserve catalogue, settings, history, and local credentials.
+Update/repair and ordinary reinstall preserve catalogue, settings, history, and local credentials.
+Fresh reinstall deliberately removes all safely identified OFEnhancer-owned desktop state and caches.
 Interactive uninstall offers explicit removal of the dedicated user-data folder;
 silent uninstall preserves it. No Chrome profiles or enterprise policy are edited,
 and no unpacked extension is silently enabled. Notification text must remain
@@ -186,16 +187,20 @@ Creator Workflow Toolkit after installing an update. A version mismatch never
 counts as a working upload connection. Existing uncertainty and final-action
 evidence remain available for duplicate prevention.
 
-**Fresh reset** in Chrome setup, or **Fresh reinstall** in the installer, instead
-creates a durable reset barrier. The connected personal extension clears only
+**Fresh reset** in Chrome setup creates a durable extension-only reset barrier. The connected personal extension clears only
 its own Chrome storage and requests supported self-uninstall. If the old build
 cannot receive or perform the request, Chrome setup requires manual removal of
 Creator Workflow Toolkit and identifies the exact old ID. Load the displayed
 `extension-keyed` folder afterward. Reloading or a saved extension ID cannot
-complete a reset: a current-version genuine-install receipt and a new matching
-exchange are required after the old instance becomes silent. Pre-reset receipts
+complete a reset: a temporary same-profile verifier must independently observe
+absence (including disabled installations), followed by a current-version genuine-install receipt and a new matching
+exchange. Pre-reset receipts
 remain rejected after desktop restarts. Interrupted resets remain pending.
 
-The catalogue, Google configuration, desktop settings, upload history and other
-application data are kept. No Chrome Preferences, Secure Preferences, extension
+Fresh reset keeps the catalogue, Google configuration, desktop settings, upload
+history and other application data. **Fresh reinstall** uses the same verified
+Chrome-removal gate, then uninstalls the old package, purges owned settings,
+catalogue, credentials, checkpoints, WebView2 data and obsolete installed files,
+and installs clean files. An interruption resumes from its durable transaction;
+ordinary startup cannot reopen old state. No Chrome Preferences, Secure Preferences, extension
 databases, enterprise policies or other browser profile internals are edited.

@@ -183,6 +183,16 @@
           <code id="previous-extension"></code>
         </p>
         <p>Reloading does not finish Fresh reset.</p>
+        <p>
+          Before removing it, load this temporary verifier with
+          <strong>Load unpacked</strong>:
+        </p>
+        <div class="copy-row">
+          <code id="verifier-folder" translate="no"></code
+          ><button id="copy-verifier" type="button">
+            Copy verifier folder
+          </button>
+        </div>
       </aside>
       <ol>
         <li>
@@ -281,6 +291,9 @@
       document
         .querySelector("#copy-folder")
         .addEventListener("click", () => copy("extension-folder"));
+      document
+        .querySelector("#copy-verifier")
+        .addEventListener("click", () => copy("verifier-folder"));
       if (options.get("reset") === "1") {
         document.querySelector("#fresh-reset").hidden = false;
         const previous = options.get("previous") || "";
@@ -288,6 +301,11 @@
           /^[a-p]{32}$/.test(previous)
             ? previous
             : "aocoaajmhccmefmfebgiiogfdojciild";
+        const verifier = options.get("verifier") || "";
+        document.querySelector("#verifier-folder").textContent =
+          verifier ||
+          "Use the Fresh verifier folder installed with OFEnhancer.";
+        document.querySelector("#copy-verifier").disabled = !verifier;
       }
     </script>
   </body>

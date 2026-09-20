@@ -15,7 +15,7 @@ const signal = () => {
   };
 };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
-function extension() {
+function extension(options = {}) {
   const storage = {};
   const timers = [];
   const sent = [];
@@ -102,6 +102,7 @@ function extension() {
         throw new Error("wrong-file-session");
       return { delivered: true };
     },
+    lifecycle: options.lifecycle,
   });
   return {
     runtime,
@@ -130,6 +131,48 @@ function extension() {
     },
   };
 }
+
+test("a delayed self-uninstall refusal restarts exchange so the error is delivered without Reload", async () => {
+  let rejectUninstall;
+  const fixture = extension({
+    lifecycle: {
+      getInstallation: async () => null,
+      uninstall: () =>
+        new Promise((_, reject) => {
+          rejectUninstall = reject;
+        }),
+    },
+  });
+  await fixture.runtime.start();
+  await flush();
+  const before = fixture.sent.length;
+  fixture.respond([
+    {
+      id: webcrypto.randomUUID(),
+      command: {
+        kind: "resetExtension",
+        generation: webcrypto.randomUUID(),
+      },
+    },
+  ]);
+  fixture.tick(500);
+  await flush();
+  assert.equal(
+    fixture.sent.length,
+    before,
+    "the stopped reset path must not exchange early",
+  );
+  rejectUninstall(new Error("managed-extension"));
+  await flush();
+  fixture.tick(500);
+  await flush();
+  assert.equal(fixture.sent.length, before + 1);
+  assert.match(
+    fixture.sent.at(-1).payload.replies[0].error,
+    /managed-extension/,
+  );
+  fixture.runtime.stop();
+});
 
 function host(
   transport,

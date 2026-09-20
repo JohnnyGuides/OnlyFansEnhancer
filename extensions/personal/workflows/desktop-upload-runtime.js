@@ -112,6 +112,8 @@
           await lifecycle.uninstall();
         } catch (error) {
           stopped = false;
+          clearTimeout(timer);
+          timer = setTimeout(exchangeCurrentConnection, 500);
           throw error;
         }
         return { removed: true };
@@ -218,6 +220,7 @@
         const commands = new Map();
         let inFlight;
         let setupGeneration = null;
+        exchangeCurrentConnection = exchange;
         function lost() {
           void chrome.runtime.lastError;
           if (nativePort !== port) return;
@@ -327,6 +330,7 @@
         connecting = false;
       }
     }
+    let exchangeCurrentConnection = () => {};
     const storageListener = (changes, area) => {
       if (area !== "local" || stopped) return;
       const filtered = Object.fromEntries(

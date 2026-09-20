@@ -99,6 +99,21 @@ test("unavailable or refused self-removal stops with an actionable manual remova
   };
   await assert.rejects(
     f.lifecycle.uninstall(),
-    /Remove.*Creator Workflow Toolkit/i,
+    /refused.*Remove.*Creator Workflow Toolkit/i,
+  );
+});
+
+test("partial storage cleanup is reported distinctly and never attempts uninstall", async () => {
+  const f = fixture();
+  f.chrome.storage.session.clear = async () => {
+    throw new Error("session-busy");
+  };
+  await assert.rejects(
+    f.lifecycle.uninstall(),
+    /partially cleared.*session.*Remove.*Creator Workflow Toolkit/i,
+  );
+  assert.equal(
+    f.calls.some(([name]) => name === "uninstallSelf"),
+    false,
   );
 });
