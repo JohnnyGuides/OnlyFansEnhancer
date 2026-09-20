@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.27
+AppVersion=0.20.28
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.27
+OutputBaseFilename=OFEnhancer-Setup-0.20.28
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -77,7 +77,7 @@ begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(
       ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.27',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.28',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode
     ) or (ExitCode <> 0) then
       RaiseException('The clean package was copied, but its Fresh reinstall admission barrier could not be established. Run this installer again to resume.');
@@ -153,7 +153,7 @@ begin
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
   Parameters := Operation +
     ' --install-root "' + ExpandConstant('{app}') + '"' +
-    ' --package-version 0.20.27' +
+    ' --package-version 0.20.28' +
     ' --verifier-root "' + ExpandConstant('{tmp}\ofenhancer-maintenance\fresh-verifier') + '"' +
     ' --guide "' + ExpandConstant('{tmp}\ofenhancer-maintenance\fresh-reinstall.html') + '"';
   Result := Exec(Helper, Parameters, '', SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
@@ -166,9 +166,9 @@ begin
   Result := '';
   if not IsFreshReset() then Exit;
   try
-    ExtractTemporaryFiles(ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\*'));
-    ExtractTemporaryFiles(ExpandConstant('{tmp}\ofenhancer-maintenance\fresh-verifier\*'));
-    ExtractTemporaryFiles(ExpandConstant('{tmp}\ofenhancer-maintenance\fresh-reinstall.html'));
+    ExtractTemporaryFiles('{tmp}\ofenhancer-maintenance\desktop\*');
+    ExtractTemporaryFiles('{tmp}\ofenhancer-maintenance\fresh-verifier\*');
+    ExtractTemporaryFiles('{tmp}\ofenhancer-maintenance\fresh-reinstall.html');
   except
     Result := 'Fresh reinstall could not stage its maintenance coordinator. No old state was changed.';
     Exit;

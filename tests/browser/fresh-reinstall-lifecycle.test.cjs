@@ -62,7 +62,7 @@ test(
   async (t) => {
     if (process.platform !== "win32")
       return t.skip("Windows Chrome lifecycle regression");
-    const stage = path.join(root, "dist", "ofenhancer-desktop-v0.20.27");
+    const stage = path.join(root, "dist", "ofenhancer-desktop-v0.20.28");
     const target = path.join(stage, "extension-keyed");
     const verifier = path.join(stage, "fresh-verifier");
     if (

@@ -302,3 +302,10 @@ events. Only then may Setup run the verified old uninstaller and purge owned
 desktop state. Clean desktop installation may finish with Chrome setup pending;
 the transaction completes only when the current build presents a receipt created
 by Chrome's genuine install lifecycle.
+
+## Fresh maintenance staging — 0.20.28
+
+Setup passes the unexpanded logical `{tmp}` destinations to Inno Setup's
+`ExtractTemporaryFiles` matcher. The temporary coordinator, verifier and guide
+are therefore extracted before any old state is changed; packaging regression
+coverage rejects expanding those match patterns to physical paths.

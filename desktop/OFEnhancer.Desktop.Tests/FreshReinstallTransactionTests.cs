@@ -21,7 +21,7 @@ public sealed class FreshReinstallTransactionTests
         {
             var created = FreshReinstallTransaction.Create(
                 transaction,
-                "0.20.27",
+                "0.20.28",
                 install,
                 data,
                 webView,
@@ -56,7 +56,7 @@ public sealed class FreshReinstallTransactionTests
             Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Load(transaction));
             Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Create(
                 transaction,
-                "0.20.27",
+                "0.20.28",
                 Path.GetPathRoot(root)!,
                 Path.Combine(root, "data"),
                 Path.Combine(root, "webview"),
@@ -64,7 +64,7 @@ public sealed class FreshReinstallTransactionTests
             ));
             Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Create(
                 transaction,
-                "0.20.27",
+                "0.20.28",
                 Path.Combine(root, "install"),
                 root,
                 Path.Combine(root, "webview"),
@@ -97,7 +97,7 @@ public sealed class FreshReinstallTransactionTests
         {
             var fresh = FreshReinstallTransaction.Create(
                 transaction,
-                "0.20.27",
+                "0.20.28",
                 install,
                 sharedData,
                 webView,
@@ -138,7 +138,7 @@ public sealed class FreshReinstallTransactionTests
         File.WriteAllText(locked, "old");
         try
         {
-            var fresh = FreshReinstallTransaction.Create(transaction, "0.20.27", install, data, webView,
+            var fresh = FreshReinstallTransaction.Create(transaction, "0.20.28", install, data, webView,
                 [ChromeIntegration.CanonicalExtensionId], webViewRootExclusive: false);
             fresh.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
             fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "observer-absent");
