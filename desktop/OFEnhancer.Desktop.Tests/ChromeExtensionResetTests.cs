@@ -190,6 +190,7 @@ public sealed class ChromeExtensionResetTests
             });
             reset.Observe(browser, connection, old, true);
             reset.RequestManualRemoval();
+            Assert.IsTrue(reset.ManualRemovalPending);
             var open = reset.Observe(browser, connection, old, true);
             Assert.AreEqual("openChromePage", JsonSerializer.SerializeToElement(open.Commands.Single())
                 .GetProperty("command").GetProperty("kind").GetString());
@@ -200,6 +201,7 @@ public sealed class ChromeExtensionResetTests
             Assert.IsFalse(reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2)), "the still-reporting old worker blocks confirmation");
             clock.Now = clock.Now.AddSeconds(2);
             Assert.IsTrue(reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2)));
+            Assert.IsFalse(reset.ManualRemovalPending);
 
             var restarted = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
             Assert.IsTrue(restarted.RemovalVerified, "manual confirmation must survive installer restart");

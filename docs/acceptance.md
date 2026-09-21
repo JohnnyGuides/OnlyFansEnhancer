@@ -322,3 +322,14 @@ coverage rejects expanding those match patterns to physical paths.
 - Setup does not stage or display the former verifier extension or separate
   removal guide. A genuinely new installation receipt is still required
   before the desktop upload connection becomes ready.
+
+## Bounded Fresh installer flow — 0.20.30
+
+- The temporary coordinator has a bounded shutdown; confirmed Chrome removal
+  cannot leave Setup waiting indefinitely on an empty Preparing page.
+- Chrome removal instructions, progress, retry, and the one-click manual
+  fallback appear on a native Setup page. The coordinator displays no separate
+  instruction dialog.
+- Automatic removal names its maximum wait. Manual fallback uses short bullets,
+  opens the connected Chrome profile, and requires **Verify removal** before
+  destructive desktop cleanup can begin.

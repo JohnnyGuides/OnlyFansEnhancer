@@ -207,7 +207,26 @@ async function main() {
   );
   assert.match(
     installer,
-    /function PrepareToInstall[\s\S]*--fresh-reinstall-remove[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-clean/,
+    /function RunChromeRemovalStep[\s\S]*--fresh-reinstall-remove/,
+  );
+  assert.match(
+    installer,
+    /function PrepareToInstall[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-clean/,
+  );
+  assert.match(
+    installer,
+    /CreateCustomPage\([\s\S]*Remove the previous Chrome extension/,
+  );
+  assert.match(installer, /open chrome:\/\/extensions/);
+  assert.match(installer, /• Click Remove — not Reload\./);
+  assert.match(
+    installer,
+    /WizardForm\.NextButton\.Caption := 'Verify removal'/,
+  );
+  assert.match(installer, /SW_HIDE, ewWaitUntilTerminated/);
+  assert.doesNotMatch(
+    installer,
+    /One Chrome removal click needed|MessageBox\.Show/,
   );
   assert.match(
     installer,
@@ -700,7 +719,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.29",
+      productVersion: "0.20.30",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -800,7 +819,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.29");
+    assert.equal(manifest.productVersion, "0.20.30");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

@@ -56,8 +56,8 @@ public sealed class FreshReinstallTransactionTests
             var fresh = FreshReinstallTransaction.Create(transaction, "0.20.28", install, data, webView,
                 [ChromeIntegration.CanonicalExtensionId]);
             fresh.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
-            fresh.AdoptPendingPackage("0.20.29", install, data, webView);
-            Assert.AreEqual("0.20.29", FreshReinstallTransaction.Load(transaction).PackageVersion);
+            fresh.AdoptPendingPackage("0.20.30", install, data, webView);
+            Assert.AreEqual("0.20.30", FreshReinstallTransaction.Load(transaction).PackageVersion);
 
             fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal");
             Assert.ThrowsException<InvalidOperationException>(() =>

@@ -129,44 +129,40 @@ internal static class FreshReinstallMaintenance
         agent.Start();
         try
         {
-            // The exact old extension clears its Chrome-owned storage and calls
-            // uninstallSelf. Successful self-removal destroys the caller before
-            // it can reply, so allow a bounded error/reconnect window first.
-            DateTimeOffset automaticDeadline = DateTimeOffset.UtcNow.AddSeconds(18);
-            while (!reset.RemovalVerified && DateTimeOffset.UtcNow < automaticDeadline)
+            if (reset.ManualRemovalPending)
             {
-                reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7));
-                Thread.Sleep(250);
-            }
-            if (!reset.RemovalVerified)
-            {
-                // Chrome can refuse self-removal (for example, managed policy or
-                // an old runtime). Ask the connected extension to open the exact
-                // profile's Extensions page and require one explicit user click.
-                reset.RequestManualRemoval();
-                Thread.Sleep(1500);
-                MessageBoxResult removed = System.Windows.MessageBox.Show(
-                    "Chrome could not confirm automatic removal.\n\n"
-                    + "In the Chrome profile where OFEnhancer is installed, open chrome://extensions. Find Creator Workflow Toolkit / OFEnhancer (ID "
-                    + oldIdentity + "), click Remove — not Reload — and wait until its card disappears.\n\n"
-                    + "Then return here and click OK. Keep Chrome open. Cancel safely preserves the Fresh reinstall for another attempt.",
-                    "One Chrome removal click needed",
-                    MessageBoxButton.OKCancel,
-                    MessageBoxImage.Information
-                );
-                if (removed != MessageBoxResult.OK) return 4;
-                // Let an in-flight poll settle, then make sure the old worker does
-                // not report itself again after the user's confirmation.
-                Thread.Sleep(1000);
+                // Setup already displayed the manual instructions. A second
+                // click runs this short confirmation window; an old worker that
+                // still reports itself keeps the barrier closed.
                 reset.BeginManualConfirmation();
-                DateTimeOffset manualDeadline = DateTimeOffset.UtcNow.AddSeconds(4);
+                DateTimeOffset manualDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
                 while (!reset.RemovalVerified && DateTimeOffset.UtcNow < manualDeadline)
                 {
                     reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2));
                     Thread.Sleep(250);
                 }
+                if (!reset.RemovalVerified) return 4;
+            }
+            else
+            {
+                // The exact old extension clears its Chrome-owned storage and
+                // calls uninstallSelf. Successful self-removal destroys the
+                // caller before it can reply, so allow a bounded reconnect window.
+                DateTimeOffset automaticDeadline = DateTimeOffset.UtcNow.AddSeconds(18);
+                while (!reset.RemovalVerified && DateTimeOffset.UtcNow < automaticDeadline)
+                {
+                    reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7));
+                    Thread.Sleep(250);
+                }
                 if (!reset.RemovalVerified)
-                    throw new InvalidOperationException("Chrome still reports the previous OFEnhancer extension as installed. Click its Remove button, wait for the card to disappear, and run Setup again. The transaction was preserved.");
+                {
+                    // The installer owns the visible fallback copy. Keep this
+                    // process windowless, open the exact connected profile, and
+                    // return a distinct code so Setup can reveal its inline steps.
+                    reset.RequestManualRemoval();
+                    Thread.Sleep(1500);
+                    return 4;
+                }
             }
         }
         finally { agent.DisposeAsync().AsTask().GetAwaiter().GetResult(); }

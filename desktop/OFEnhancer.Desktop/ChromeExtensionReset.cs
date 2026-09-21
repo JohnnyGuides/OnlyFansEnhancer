@@ -109,6 +109,7 @@ internal sealed class ChromeExtensionReset
 
     internal bool Pending { get { lock (gate) { Refresh(); return invalid || state?.Pending == true; } } }
     internal bool RemovalVerified { get { lock (gate) { Refresh(); return !invalid && state?.RemovalVerified == true; } } }
+    internal bool ManualRemovalPending { get { lock (gate) { Refresh(); return !invalid && state is { Pending: true, RemovalVerified: false, ManualPromptAt: > 0 }; } } }
     internal string? PreviousExtensionId { get { lock (gate) { Refresh(); return state?.ExtensionId; } } }
     internal string Message
     {

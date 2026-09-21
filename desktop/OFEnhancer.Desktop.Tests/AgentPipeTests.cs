@@ -5,6 +5,11 @@ namespace OFEnhancer.Desktop.Tests;
 [TestClass]
 public sealed class AgentPipeTests
 {
+    private sealed class NeverPostContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) { }
+    }
+
     [TestMethod]
     public async Task Stalled_partial_frames_expire_and_release_all_workers()
     {
@@ -116,7 +121,7 @@ public sealed class AgentPipeTests
 
         Assert.IsTrue(response.Ok);
         Assert.AreEqual(request.RequestId.ToString(), response.RequestId);
-        Assert.AreEqual("0.20.29", response.Status?.ProductVersion);
+        Assert.AreEqual("0.20.30", response.Status?.ProductVersion);
         CollectionAssert.AreEqual(
             new[] { "desktop-shell", "local-file-attach", "native-bridge" },
             response.Status?.Capabilities.ToArray()
@@ -152,6 +157,24 @@ public sealed class AgentPipeTests
                     stop.Token
                 )
         );
+    }
+
+    [TestMethod]
+    public void Desktop_agent_can_be_disposed_from_a_blocked_synchronization_context()
+    {
+        string pipeName = $"ofenhancer-test-{Guid.NewGuid():N}";
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(new NeverPostContext());
+            var agent = new DesktopAgent(pipeName);
+            agent.Start();
+            agent.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
     }
 
     [TestMethod]

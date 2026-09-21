@@ -30,17 +30,23 @@ public sealed class DesktopAgent(string pipeName, Func<AgentRequest, Task<AgentR
 
     public async ValueTask DisposeAsync()
     {
-        stop.Cancel();
-        if (runTask is not null)
+        // Cancellation callbacks for pending Windows named-pipe accepts can
+        // occasionally block the calling thread. Initiate them asynchronously
+        // so the shutdown deadline also covers cancellation itself.
+        Task cancellation = stop.CancelAsync();
+        Task shutdown = runTask is null ? cancellation : Task.WhenAll(cancellation, runTask);
+        bool stopped = false;
+        try
         {
-            try
-            {
-                await runTask;
-            }
-            catch (OperationCanceledException)
-            {
-            }
+            await shutdown.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+            stopped = true;
         }
-        stop.Dispose();
+        catch (OperationCanceledException) { stopped = true; }
+        catch (TimeoutException) { }
+        // A named-pipe implementation or connected client must never keep the
+        // installer or tray process alive forever during shutdown. Leave the
+        // cancellation source undisposed only in that exceptional bounded case;
+        // the process is already exiting and active operations still own its token.
+        if (stopped) stop.Dispose();
     }
 }

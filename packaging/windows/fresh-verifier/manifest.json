@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OFEnhancer Fresh Reinstall Verifier",
-  "version": "0.20.29",
+  "version": "0.20.30",
   "description": "Temporary same-profile observer used only while OFEnhancer performs a Fresh reinstall.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzzWVZWy7WRAVAq8LiZh055UCHySPBkRtk3f4yhwqfNckSxnWpOOQ1OFPfAR84jJZD4cjyZVX7IJqU0idhdkLKjVWH1HlyETTOf4UeIeIMM1GvkPo2IrqinpGj3bS7jPBCj7k+aDdCGT+NsULGJD2lJjY8cSLKSM/dXjWwdEPOOIUTQadBi5A5bN4kcVkei0hjpHNV57hor7cYn2KIuZ/0OvbHEc/2aLen6OOHPqr6zlW+BGn6NS9XhZnE1qJYbwhEkiV6AlRjp5UrYgXERliKPzumL+HdX8/3BrfsrkXO6c5ybB+5IJqL+nK1EkLlp1NAxdt1PBx+HhKaNj9sNkQNQIDAQAB",
   "permissions": ["management", "nativeMessaging", "storage"],
