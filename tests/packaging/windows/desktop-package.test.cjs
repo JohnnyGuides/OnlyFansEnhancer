@@ -200,6 +200,8 @@ async function main() {
     installer,
     /Fresh reinstall - remove extension and all OFEnhancer desktop state/,
   );
+  assert.match(installer, /Resume Fresh reinstall/);
+  assert.match(installer, /ExistingPage\.CheckListBox\.Enabled := False/);
   assert.match(installer, /CurStep = ssPostInstall\) and IsFreshReset\(\)/);
   assert.match(
     installer,

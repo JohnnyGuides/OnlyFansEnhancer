@@ -110,18 +110,35 @@ begin
   ResumeFresh := FileExists(ExpandConstant('{localappdata}\OFEnhancer-Maintenance\fresh-reinstall.json'));
   if ExistingInstall() then
   begin
-    ExistingPage := CreateInputOptionPage(
-      wpWelcome,
-      'OFEnhancer is already installed',
-      'Choose what this installer should do.',
-      'Update preserves your desktop and Chrome state. Fresh reinstall removes the previous extension, OFEnhancer desktop data and caches, and obsolete installed files before installing clean files.',
-      True,
-      False
-    );
-    ExistingPage.Add('Update or reinstall - keep Chrome extension and its state');
-    ExistingPage.Add('Fresh reinstall - remove extension and all OFEnhancer desktop state');
-    ExistingPage.Add('Uninstall');
-    ExistingPage.SelectedValueIndex := 0;
+    if ResumeFresh then
+    begin
+      ExistingPage := CreateInputOptionPage(
+        wpWelcome,
+        'Resume Fresh reinstall',
+        'Setup found the safely preserved Fresh reinstall checkpoint.',
+        'Continue from the confirmed Chrome-removal step. Select Cancel if you are not ready to remove the old OFEnhancer desktop files and data.',
+        True,
+        False
+      );
+      ExistingPage.Add('Resume Fresh reinstall');
+      ExistingPage.SelectedValueIndex := 0;
+      ExistingPage.CheckListBox.Enabled := False;
+    end
+    else
+    begin
+      ExistingPage := CreateInputOptionPage(
+        wpWelcome,
+        'OFEnhancer is already installed',
+        'Choose what this installer should do.',
+        'Update preserves your desktop and Chrome state. Fresh reinstall removes the previous extension, OFEnhancer desktop data and caches, and obsolete installed files before installing clean files.',
+        True,
+        False
+      );
+      ExistingPage.Add('Update or reinstall - keep Chrome extension and its state');
+      ExistingPage.Add('Fresh reinstall - remove extension and all OFEnhancer desktop state');
+      ExistingPage.Add('Uninstall');
+      ExistingPage.SelectedValueIndex := 0;
+    end;
 
     KeepDataPage := CreateInputOptionPage(
       ExistingPage.ID,
@@ -310,7 +327,7 @@ begin
   Result :=
     (KeepDataPage <> nil) and
     (PageID = KeepDataPage.ID) and
-    (ExistingPage.SelectedValueIndex <> 2);
+    (ResumeFresh or (ExistingPage.SelectedValueIndex <> 2));
   if (FreshPage <> nil) and (PageID = FreshPage.ID) then
     Result := not IsFreshReset();
 end;
