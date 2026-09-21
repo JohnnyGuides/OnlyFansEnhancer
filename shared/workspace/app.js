@@ -149,10 +149,15 @@
     document.querySelector("#chromeResetNotice").hidden = !value.resetPending;
     document.querySelector("#chromeResetExtensionId").textContent =
       value.resetExtensionId || value.extensionId || "";
+    const removing = value.resetPending && value.resetStage === "removal";
+    document.querySelector("#chromeRemovalTask").hidden = !removing;
+    document.querySelector("#chromeReplacementTask").hidden =
+      !value.resetPending || removing;
     document.querySelector("#chromeExtensionFolder").textContent =
       value.extensionFolder ||
       "Select Set up Chrome to find the installed extension-keyed folder.";
-    document.querySelector("#chromeSetupSteps").hidden = !value.chromeFound;
+    document.querySelector("#chromeSetupSteps").hidden =
+      !value.chromeFound || removing;
     for (const button of document.querySelectorAll("[data-chrome-action]")) {
       button.hidden =
         value.state === "unsupported" ||
@@ -161,9 +166,10 @@
           ? value.chromeFound
           : !value.chromeFound);
     }
-    document.querySelector(
+    for (const open of document.querySelectorAll(
       '[data-chrome-action="openChromeExtensions"]',
-    ).hidden = value.canOpenExtensions !== true;
+    ))
+      open.hidden = value.canOpenExtensions !== true;
     document.querySelector('[data-chrome-action="prepareChrome"]').hidden =
       !value.chromeFound ||
       (value.prepared && !(value.resetPending && !value.extensionFolder));
@@ -266,14 +272,17 @@
       if (
         button.dataset.chromeAction === "freshChromeReset" &&
         !global.confirm(
-          "Reset the OFEnhancer Chrome extension? Its Chrome settings and upload checkpoints will be cleared. Your catalogue, Google connection and desktop history stay intact. Stop active upload preparation first.",
+          "Reset the OFEnhancer Chrome extension? Removing it clears its Chrome settings and upload checkpoints, but does not undo anything already submitted to a platform. Your catalogue, Google connection and desktop history stay intact. Stop active upload preparation first.",
         )
       )
         return;
       button.disabled = true;
       const message = document.querySelector("#chromeSetupActionStatus");
       try {
-        message.textContent = "Working…";
+        message.textContent =
+          button.dataset.chromeAction === "freshChromeReset"
+            ? "Saving the reset task…"
+            : "Opening…";
         const result = await global.OFEnhancerHost.request(
           button.dataset.chromeAction,
         );
@@ -284,6 +293,36 @@
             : "Opened. Check connection after finishing in Chrome.");
       } catch (error) {
         message.textContent = `Could not finish: ${error.message}`;
+      } finally {
+        button.disabled = false;
+        void refreshChrome();
+      }
+    });
+  for (const button of document.querySelectorAll("[data-reset-evidence]"))
+    button.addEventListener("click", async () => {
+      const evidence = button.dataset.resetEvidence;
+      if (
+        evidence === "unknown" &&
+        !global.confirm(
+          "Continue without confirming removal? The previous installation will remain denied desktop access, and a genuine replacement installation is still required.",
+        )
+      )
+        return;
+      button.disabled = true;
+      const message = document.querySelector("#chromeSetupActionStatus");
+      try {
+        message.textContent = "Saving this Chrome status…";
+        await global.OFEnhancerHost.request("continueChromeReset", {
+          evidence,
+        });
+        message.textContent =
+          evidence === "removed"
+            ? "Recorded as your report. Load the replacement extension now."
+            : evidence === "absent"
+              ? "Recorded as your report. Load the replacement extension now."
+              : "Removal remains unconfirmed. Load the replacement extension now.";
+      } catch (error) {
+        message.textContent = `Could not continue: ${error.message}`;
       } finally {
         button.disabled = false;
         void refreshChrome();

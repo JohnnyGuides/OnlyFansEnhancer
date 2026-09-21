@@ -9,7 +9,7 @@ namespace OFEnhancer.Desktop;
 internal sealed record ChromeIntegrationView(string State, string Message, bool HostAvailable,
     bool ChromeFound, bool Prepared, string? ExtensionId, string? ExtensionFolder,
     object BrowserStatus, string? SetupError = null, bool CanOpenExtensions = false, bool ResetPending = false,
-    string? ResetExtensionId = null);
+    string? ResetExtensionId = null, string? ResetStage = null, string? RemovalEvidence = null);
 
 // Only fixed OFEnhancer package paths and current-user registration are writable here.
 // Registry inspection is diagnostic evidence, not proof that an extension is loaded.
@@ -17,7 +17,6 @@ internal sealed class ChromeIntegration
 {
     internal const string HostName = "com.johnnyguides.ofenhancer";
     internal const string CanonicalExtensionId = "aocoaajmhccmefmfebgiiogfdojciild";
-    internal const string MaintenanceVerifierId = "nhllpejgihfneloninfpblbfdoigongm";
     internal const string RegistryPath = @"Software\Google\Chrome\NativeMessagingHosts\" + HostName;
     private readonly string root;
     private readonly DesktopSettingsStore settings;
@@ -74,9 +73,7 @@ internal sealed class ChromeIntegration
     {
         lock (gate)
         {
-            channel.Reset?.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7));
-            channel.Reset?.TryConfirmManualRemoval(TimeSpan.FromSeconds(7));
-            if (channel.Reset is { Pending: true, RemovalVerified: true })
+            if (channel.Reset is { Pending: true, Stage: ChromeResetStage.Replacement })
             {
                 VerifyPackage();
                 bool canonicalRegistration = false;
@@ -144,7 +141,8 @@ internal sealed class ChromeIntegration
             if (state == "not-found" && error is not null) message += " Setup also needs attention: " + error;
             return new(state, message, true, chrome, prepared, id, id is null || id == CanonicalExtensionId ? folder : null, status, error,
                 live > 0 && (selected || live == 1 && !selectionRequired), resetting,
-                channel.Reset?.PreviousExtensionId);
+                channel.Reset?.PreviousExtensionId, resetting ? channel.Reset?.Stage.ToString().ToLowerInvariant() : null,
+                resetting ? channel.Reset?.RemovalEvidence.ToString() : null);
         }
     }
 
@@ -193,8 +191,8 @@ internal sealed class ChromeIntegration
         var manifest = document.RootElement;
         string[] origins = manifest.GetProperty("allowed_origins").EnumerateArray()
             .Select(item => item.GetString() ?? "").Order(StringComparer.Ordinal).ToArray();
-        string[] expected = channel.Reset is { Pending: true, RemovalVerified: false }
-            ? new[] { $"chrome-extension://{id}/", $"chrome-extension://{MaintenanceVerifierId}/" }
+        string[] expected = channel.Reset is { Pending: true, Stage: ChromeResetStage.Removal }
+            ? new[] { $"chrome-extension://{id}/" }
                 .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
             : [$"chrome-extension://{id}/"];
         if (manifest.GetProperty("name").GetString() != HostName || manifest.GetProperty("type").GetString() != "stdio"
@@ -228,6 +226,17 @@ internal sealed class ChromeIntegration
 
     internal ChromeIntegrationView FreshReset() => ConfigureFreshReset(true);
 
+    internal ChromeIntegrationView ContinueFreshReset(ChromeRemovalEvidence evidence)
+    {
+        lock (gate)
+        {
+            if (channel.Reset?.Pending != true) throw new InvalidOperationException("No Chrome reset is waiting for action.");
+            channel.Reset.ContinueToReplacement(evidence);
+            WriteRegistration(CanonicalId());
+            return Get();
+        }
+    }
+
     private ChromeIntegrationView ConfigureFreshReset(bool begin)
     {
         lock (gate)
@@ -245,7 +254,7 @@ internal sealed class ChromeIntegration
             string previous = effectiveIdentity() ?? canonical;
             if (begin) channel.BeginReset(previous);
             else if (channel.Reset?.Pending != true) throw new InvalidOperationException("Start Fresh reset before replacing the previous extension identity.");
-            if (channel.Reset?.RemovalVerified == true) WriteRegistration(canonical);
+            if (channel.Reset?.Stage == ChromeResetStage.Replacement) WriteRegistration(canonical);
             else WriteMaintenanceRegistration(previous);
             return Get();
         }
@@ -262,7 +271,6 @@ internal sealed class ChromeIntegration
             allowed_origins = new[]
             {
                 $"chrome-extension://{previousId}/",
-                $"chrome-extension://{MaintenanceVerifierId}/",
             }.Distinct(StringComparer.Ordinal).ToArray(),
         });
         CommitManifest(bytes);

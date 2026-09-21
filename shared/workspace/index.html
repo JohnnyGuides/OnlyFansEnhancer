@@ -418,17 +418,51 @@
       </div>
       <p id="chromeSetupMessage" role="status"></p>
       <aside id="chromeResetNotice" hidden>
-        <strong>Remove the previous extension first</strong>
-        <p>
-          In Chrome, remove <strong>Creator Workflow Toolkit</strong>.<br />ID:
-          <code id="chromeResetExtensionId"></code>
-        </p>
-        <p>Reloading does not finish Fresh reset.</p>
-        <p>
-          OFEnhancer asks Chrome to remove this extension automatically. If
-          Chrome refuses, open Chrome extensions and click its
-          <strong>Remove</strong> button once.
-        </p>
+        <div id="chromeRemovalTask">
+          <strong>Remove the previous extension</strong>
+          <p>
+            In the Chrome profile where it is installed, remove
+            <strong>Creator Workflow Toolkit</strong>.<br />ID:
+            <code id="chromeResetExtensionId"></code>
+          </p>
+          <p>
+            Use <strong>Remove</strong>, not Reload. Closing Chrome or losing
+            the connection does not confirm removal.
+          </p>
+          <div class="chrome-copy-row">
+            <code translate="no">chrome://extensions</code>
+          </div>
+          <div
+            class="chrome-reset-choice"
+            role="group"
+            aria-label="Previous extension status"
+          >
+            <button type="button" data-chrome-action="openChromeExtensions">
+              Open Chrome extensions
+            </button>
+            <button type="button" data-reset-evidence="removed">
+              I removed it
+            </button>
+            <button type="button" data-reset-evidence="absent">
+              It was already absent
+            </button>
+            <button
+              type="button"
+              class="secondary-button"
+              data-reset-evidence="unknown"
+            >
+              Continue without confirmation
+            </button>
+          </div>
+        </div>
+        <div id="chromeReplacementTask" hidden>
+          <strong>Waiting for you in Chrome</strong>
+          <p>
+            Load the replacement from the folder shown below. OFEnhancer will
+            accept it only after its genuine installation initialization
+            finishes.
+          </p>
+        </div>
       </aside>
       <button type="button" data-chrome-action="prepareChrome">
         Set up Chrome

@@ -311,6 +311,12 @@
             action,
           }
         : {};
+    const installation = /** @type {{status?: string}|undefined} */ (
+      (await chrome.storage.local.get("ofenhancerInstallationV1"))
+        .ofenhancerInstallationV1
+    );
+    value.extensionVersion = chrome.runtime.getManifest().version;
+    value.installation = installation?.status === "ready" ? installation : null;
     return new Promise((resolve, reject) => {
       const requestId = crypto.randomUUID();
       const done = (response) => {

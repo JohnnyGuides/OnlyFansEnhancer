@@ -7,12 +7,12 @@ namespace OFEnhancer.Desktop;
 internal enum FreshReinstallPhase
 {
     Preflight,
-    ExtensionRemovalPending,
-    ExtensionRemovalVerified,
     PreviousPackageRemoved,
+    InstallRootPurged,
+    DataRootPurged,
     OwnedStatePurged,
     CleanPackageInstalled,
-    ChromeSetupPending,
+    ChromeObligationAcknowledged,
     Complete,
 }
 
@@ -86,7 +86,7 @@ internal sealed class FreshReinstallTransaction
         if (identities.Length == 0)
             throw new InvalidOperationException("Fresh reinstall has no verified Chrome extension identity.");
         var value = new Journal(
-            1,
+            2,
             Guid.NewGuid().ToString(),
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             packageVersion,
@@ -113,7 +113,9 @@ internal sealed class FreshReinstallTransaction
             if (!info.Exists || info.Length is <= 0 or > MaximumBytes)
                 throw new InvalidOperationException();
             Journal? value = JsonSerializer.Deserialize<Journal>(ReadUtf8(fullPath));
-            if (value is null || value.Schema != 1 || !Guid.TryParse(value.Generation, out _)
+            bool migrated = value?.Schema == 1;
+            if (migrated) value = value! with { Schema = 2, Phase = MigrateLegacyPhase(value.Phase).ToString() };
+            if (value is null || value.Schema != 2 || !Guid.TryParse(value.Generation, out _)
                 || value.StartedAt <= 0 || !VersionPattern.IsMatch(value.PackageVersion)
                 || !Enum.TryParse<FreshReinstallPhase>(value.Phase, false, out _)
                 || value.ExtensionIds is null or { Length: 0 } || value.ExtensionIds.Length > 16
@@ -131,7 +133,9 @@ internal sealed class FreshReinstallTransaction
             ValidateSeparate(transactionRoot, value.InstallRoot, "installation");
             ValidateSeparate(transactionRoot, value.DataRoot, "data");
             ValidateSeparate(transactionRoot, value.WebViewRoot, "WebView2");
-            return new(fullPath, value);
+            FreshReinstallTransaction transaction = new(fullPath, value);
+            if (migrated) transaction.Save(value);
+            return transaction;
         }
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
@@ -177,35 +181,69 @@ internal sealed class FreshReinstallTransaction
     internal void CleanOwnedState()
     {
         if (Phase >= FreshReinstallPhase.OwnedStatePurged) return;
-        if (Phase is not (FreshReinstallPhase.ExtensionRemovalVerified or FreshReinstallPhase.PreviousPackageRemoved))
-            throw new InvalidOperationException("Chrome removal must be confirmed before desktop state is removed.");
-        if (Phase == FreshReinstallPhase.ExtensionRemovalVerified)
+        if (Phase < FreshReinstallPhase.PreviousPackageRemoved)
+            throw new InvalidOperationException("The previous Windows package must be removed before desktop state is purged.");
+        if (Phase == FreshReinstallPhase.PreviousPackageRemoved)
         {
             DeleteOwnedRoot(journal.InstallRoot, exclusive: true);
-            Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed");
+            Advance(FreshReinstallPhase.InstallRootPurged, "install-root-purged");
         }
-        if (journal.DataRootExclusive)
-            DeleteOwnedRoot(journal.DataRoot, exclusive: true);
-        else
-            DeleteSharedDataRoot(journal.DataRoot);
-        if (journal.WebViewRootExclusive)
-            DeleteOwnedRoot(journal.WebViewRoot, exclusive: true);
-        else if (Directory.Exists(journal.WebViewRoot))
-            throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer.");
-        Advance(FreshReinstallPhase.OwnedStatePurged, "owned-state-purged");
+        if (Phase == FreshReinstallPhase.InstallRootPurged)
+        {
+            if (journal.DataRootExclusive)
+                DeleteOwnedRoot(journal.DataRoot, exclusive: true);
+            else
+                DeleteSharedDataRoot(journal.DataRoot);
+            Advance(FreshReinstallPhase.DataRootPurged, "data-root-purged");
+        }
+        if (Phase == FreshReinstallPhase.DataRootPurged)
+        {
+            if (journal.WebViewRootExclusive)
+                DeleteOwnedRoot(journal.WebViewRoot, exclusive: true);
+            else if (Directory.Exists(journal.WebViewRoot))
+                throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer.");
+            Advance(FreshReinstallPhase.OwnedStatePurged, "owned-state-purged");
+        }
     }
 
     internal void CompleteAndDelete()
     {
-        if (Phase != FreshReinstallPhase.ChromeSetupPending)
-            throw new InvalidOperationException("Fresh reinstall cannot complete before Chrome setup is admitted.");
-        Advance(FreshReinstallPhase.Complete, "new-install-admitted");
+        if (Phase == FreshReinstallPhase.ChromeObligationAcknowledged)
+            Advance(FreshReinstallPhase.Complete, "windows-maintenance-complete");
+        else if (Phase != FreshReinstallPhase.Complete)
+            throw new InvalidOperationException("Fresh reinstall cannot complete before the Chrome obligation is durably acknowledged.");
         File.Delete(path);
-        string removalJournal = Path.Combine(TransactionDirectory, "chrome-reset.json");
-        if (File.Exists(removalJournal)) File.Delete(removalJournal);
         if (Directory.Exists(TransactionDirectory) && !Directory.EnumerateFileSystemEntries(TransactionDirectory).Any())
             Directory.Delete(TransactionDirectory);
     }
+
+    internal void MarkPreviousPackageRemoved()
+    {
+        if (Phase >= FreshReinstallPhase.PreviousPackageRemoved) return;
+        if (Phase != FreshReinstallPhase.Preflight)
+            throw new InvalidOperationException("The Windows maintenance phase is invalid.");
+        Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed-or-absent");
+    }
+
+    internal static void CleanUserData(string dataRoot, string webViewRoot, bool dataRootExclusive, bool webViewRootExclusive)
+    {
+        string data = ValidateRoot(dataRoot, "data");
+        string webView = ValidateRoot(webViewRoot, "WebView2");
+        if (dataRootExclusive) DeleteOwnedRoot(data, exclusive: true); else DeleteSharedDataRoot(data);
+        if (webViewRootExclusive) DeleteOwnedRoot(webView, exclusive: true);
+        else if (Directory.Exists(webView))
+            throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer.");
+    }
+
+    private static FreshReinstallPhase MigrateLegacyPhase(string phase) => phase switch
+    {
+        "Preflight" or "ExtensionRemovalPending" or "ExtensionRemovalVerified" => FreshReinstallPhase.Preflight,
+        "PreviousPackageRemoved" => FreshReinstallPhase.PreviousPackageRemoved,
+        "OwnedStatePurged" => FreshReinstallPhase.OwnedStatePurged,
+        "CleanPackageInstalled" or "ChromeSetupPending" => FreshReinstallPhase.CleanPackageInstalled,
+        "Complete" => FreshReinstallPhase.ChromeObligationAcknowledged,
+        _ => throw new InvalidOperationException("The legacy Fresh reinstall phase is invalid."),
+    };
 
     private void Save(Journal value)
     {

@@ -38,13 +38,13 @@ static async Task<int> RunAsync(string[] args)
                 string? frame = await AgentPipeFrame.ReadOrEndAsync(inputStream, CancellationToken.None);
                 if (frame is null) return 0;
                 AgentRequest framedRequest = AgentRequest.Parse(frame);
-                if (framedRequest.Operation is "browserExchange" or "loadDevelopmentFixtures" or "resolveDevelopmentFixture")
-                {
-                    var payload = framedRequest.Payload?.EnumerateObject().ToDictionary(item => item.Name, item => (object)item.Value.Clone()) ?? [];
-                    // Replace caller-supplied evidence with the invocation origin supplied by Chrome.
-                    payload["bridgeExtensionId"] = args.Length > 0 ? args[0]["chrome-extension://".Length..].TrimEnd('/') : "";
-                    framedRequest = framedRequest with { Payload = JsonSerializer.SerializeToElement(payload) };
-                }
+                var payload = framedRequest.Payload is JsonElement supplied && supplied.ValueKind == JsonValueKind.Object
+                    ? supplied.EnumerateObject().ToDictionary(item => item.Name, item => (object)item.Value.Clone())
+                    : [];
+                // Replace caller-supplied identity evidence on every browser
+                // operation, including direct catalogue reads/result writes.
+                payload["bridgeExtensionId"] = args.Length > 0 ? args[0]["chrome-extension://".Length..].TrimEnd('/') : "";
+                framedRequest = framedRequest with { Payload = JsonSerializer.SerializeToElement(payload) };
                 requestId = framedRequest.RequestId.ToString();
                 AgentResponse framedResponse = await ForwardAsync(pipeName, framedRequest);
                 await WriteAsync(framedResponse, framed: true);

@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text.Json;
 using OFEnhancer.Desktop;
 
 namespace OFEnhancer.Desktop.Tests;
@@ -8,229 +8,149 @@ namespace OFEnhancer.Desktop.Tests;
 public sealed class FreshReinstallTransactionTests
 {
     [TestMethod]
-    public void Installed_package_finalization_recovers_once_and_is_idempotent()
+    public void Windows_finalization_retires_only_windows_record_and_keeps_chrome_obligation()
     {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-finalize-" + Guid.NewGuid().ToString("N"));
-        string install = Path.Combine(root, "installed");
-        string data = Path.Combine(root, "data");
-        string webView = Path.Combine(root, "webview");
-        string maintenance = Path.Combine(root, "maintenance");
-        string transactionPath = Path.Combine(maintenance, "fresh-reinstall.json");
-        Directory.CreateDirectory(install);
-        Directory.CreateDirectory(data);
-        Directory.CreateDirectory(webView);
-        Directory.CreateDirectory(maintenance);
-        try
+        using var fixture = new Fixture();
+        FreshReinstallTransaction transaction = fixture.Create();
+        new ChromeExtensionReset(fixture.ResetPath).Begin(ChromeIntegration.CanonicalExtensionId);
+        transaction.MarkPreviousPackageRemoved();
+        transaction.CleanOwnedState();
+        fixture.WriteInstalledPackage();
+
+        FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, fixture.Install, Fixture.Version);
+
+        Assert.IsFalse(File.Exists(fixture.TransactionPath));
+        Assert.IsTrue(File.Exists(fixture.ResetPath), "the app-owned Chrome task must survive Windows retirement");
+        Assert.IsTrue(new ChromeExtensionReset(fixture.ResetPath).Pending);
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Data, "data", "chrome-reset.json")), "there is no copied authority");
+    }
+
+    [TestMethod]
+    public void Repeated_cleanup_uses_checkpoints_and_does_not_delete_newly_installed_files()
+    {
+        using var fixture = new Fixture();
+        FreshReinstallTransaction transaction = fixture.Create();
+        transaction.MarkPreviousPackageRemoved();
+        transaction.CleanOwnedState();
+        fixture.WriteInstalledPackage();
+
+        FreshReinstallTransaction.Load(fixture.TransactionPath).CleanOwnedState();
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.Install, "payload.bin")));
+        Assert.AreEqual(FreshReinstallPhase.OwnedStatePurged, FreshReinstallTransaction.Load(fixture.TransactionPath).Phase);
+    }
+
+    [TestMethod]
+    public void Newer_package_can_adopt_before_destructive_effect_but_not_after()
+    {
+        using var fixture = new Fixture();
+        FreshReinstallTransaction transaction = fixture.Create("0.20.30");
+        transaction.AdoptPendingPackage("0.20.31", fixture.Install, fixture.Data, fixture.WebView);
+        Assert.AreEqual("0.20.31", FreshReinstallTransaction.Load(fixture.TransactionPath).PackageVersion);
+        transaction.MarkPreviousPackageRemoved();
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            transaction.AdoptPendingPackage("0.20.32", fixture.Install, fixture.Data, fixture.WebView));
+    }
+
+    [TestMethod]
+    public void Shared_data_siblings_survive_and_ambiguous_webview_fails_closed()
+    {
+        using var fixture = new Fixture(sharedData: true, webViewExclusive: false);
+        File.WriteAllText(Path.Combine(fixture.Data, "unrelated.txt"), "keep");
+        FreshReinstallTransaction transaction = fixture.Create(dataExclusive: false, webViewExclusive: false);
+        transaction.MarkPreviousPackageRemoved();
+        Assert.ThrowsException<InvalidOperationException>(transaction.CleanOwnedState);
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(fixture.Data, "unrelated.txt")));
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.WebView, "foreign.txt")));
+        Assert.AreEqual(FreshReinstallPhase.DataRootPurged, FreshReinstallTransaction.Load(fixture.TransactionPath).Phase);
+
+        File.WriteAllText(Path.Combine(fixture.Data, "created-after-checkpoint.txt"), "preserve");
+        Assert.ThrowsException<InvalidOperationException>(() =>
+            FreshReinstallTransaction.Load(fixture.TransactionPath).CleanOwnedState());
+        Assert.AreEqual("preserve", File.ReadAllText(Path.Combine(fixture.Data, "created-after-checkpoint.txt")));
+    }
+
+    [TestMethod]
+    public void Legacy_chrome_phases_migrate_without_claiming_chrome_completion()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(Path.GetDirectoryName(fixture.TransactionPath)!);
+        File.WriteAllText(fixture.TransactionPath, JsonSerializer.Serialize(new
         {
-            string payload = Path.Combine(install, "payload.bin");
+            Schema = 1, Generation = Guid.NewGuid().ToString(), StartedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            PackageVersion = Fixture.Version, Phase = "ChromeSetupPending", InstallRoot = fixture.Install,
+            DataRoot = fixture.Data, WebViewRoot = fixture.WebView, DataRootExclusive = true,
+            WebViewRootExclusive = true, ExtensionIds = new[] { ChromeIntegration.CanonicalExtensionId },
+            Observations = Array.Empty<string>(),
+        }));
+        FreshReinstallTransaction migrated = FreshReinstallTransaction.Load(fixture.TransactionPath);
+        Assert.AreEqual(FreshReinstallPhase.CleanPackageInstalled, migrated.Phase);
+        Assert.AreEqual(2, JsonDocument.Parse(File.ReadAllText(fixture.TransactionPath)).RootElement.GetProperty("Schema").GetInt32());
+
+        string completedPath = Path.Combine(fixture.Root, "completed-maintenance", "fresh-reinstall.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(completedPath)!);
+        File.WriteAllText(completedPath, JsonSerializer.Serialize(new
+        {
+            Schema = 1, Generation = Guid.NewGuid().ToString(), StartedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            PackageVersion = Fixture.Version, Phase = "Complete", InstallRoot = fixture.Install,
+            DataRoot = fixture.Data, WebViewRoot = fixture.WebView, DataRootExclusive = true,
+            WebViewRootExclusive = true, ExtensionIds = new[] { ChromeIntegration.CanonicalExtensionId },
+            Observations = Array.Empty<string>(),
+        }));
+        Assert.AreEqual(FreshReinstallPhase.ChromeObligationAcknowledged,
+            FreshReinstallTransaction.Load(completedPath).Phase);
+    }
+
+    [TestMethod]
+    public void Corrupt_transaction_and_overlapping_roots_fail_closed()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(Path.GetDirectoryName(fixture.TransactionPath)!);
+        File.WriteAllText(fixture.TransactionPath, "not-json");
+        Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Load(fixture.TransactionPath));
+        File.Delete(fixture.TransactionPath);
+        Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Create(
+            fixture.TransactionPath, Fixture.Version, fixture.Install, fixture.Root, fixture.WebView,
+            [ChromeIntegration.CanonicalExtensionId]));
+    }
+
+    private sealed class Fixture : IDisposable
+    {
+        internal const string Version = "0.20.34";
+        internal string Root { get; } = Path.Combine(Path.GetTempPath(), "ofe-fresh-" + Guid.NewGuid().ToString("N"));
+        internal string Install => Path.Combine(Root, "installed");
+        internal string Data => Path.Combine(Root, "data");
+        internal string WebView => Path.Combine(Root, "webview");
+        internal string TransactionPath => Path.Combine(Root, "maintenance", "fresh-reinstall.json");
+        internal string ResetPath => Path.Combine(Root, "maintenance", "chrome-reset.json");
+
+        internal Fixture(bool sharedData = false, bool webViewExclusive = true)
+        {
+            Directory.CreateDirectory(Install);
+            Directory.CreateDirectory(Path.Combine(Data, "data"));
+            Directory.CreateDirectory(WebView);
+            File.WriteAllText(Path.Combine(Install, "old.bin"), "old");
+            File.WriteAllText(Path.Combine(Data, "data", "catalogue.db"), "old");
+            File.WriteAllText(Path.Combine(Data, "settings.json"), "old");
+            File.WriteAllText(Path.Combine(WebView, webViewExclusive ? "cache.bin" : "foreign.txt"), "old");
+        }
+
+        internal FreshReinstallTransaction Create(string version = Version, bool dataExclusive = true, bool webViewExclusive = true) =>
+            FreshReinstallTransaction.Create(TransactionPath, version, Install, Data, WebView,
+                [ChromeIntegration.CanonicalExtensionId], dataExclusive, webViewExclusive);
+
+        internal void WriteInstalledPackage()
+        {
+            Directory.CreateDirectory(Install);
+            string payload = Path.Combine(Install, "payload.bin");
             File.WriteAllText(payload, "clean-package");
             byte[] bytes = File.ReadAllBytes(payload);
-            File.WriteAllText(Path.Combine(install, "package-manifest.json"), JsonSerializer.Serialize(new
+            File.WriteAllText(Path.Combine(Install, "package-manifest.json"), JsonSerializer.Serialize(new
             {
-                product = "OFEnhancer",
-                productVersion = "0.20.33",
+                product = "OFEnhancer", productVersion = Version,
                 files = new[] { new { path = "payload.bin", size = bytes.LongLength, sha256 = Convert.ToHexString(SHA256.HashData(bytes)) } },
             }));
-            File.WriteAllText(Path.Combine(maintenance, "chrome-reset.json"), "reset-journal");
-            FreshReinstallTransaction transaction = FreshReinstallTransaction.Create(
-                transactionPath, "0.20.33", install, data, webView, [ChromeIntegration.CanonicalExtensionId]);
-            transaction.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-ready");
-            transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "removal-confirmed");
-            transaction.Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed");
-            transaction.Advance(FreshReinstallPhase.OwnedStatePurged, "owned-state-purged");
-
-            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, install, "0.20.33");
-            Assert.IsFalse(File.Exists(transactionPath), "desktop maintenance must end when the clean package is verified");
-            Assert.IsFalse(File.Exists(Path.Combine(maintenance, "chrome-reset.json")), "the copied maintenance reset journal must be retired");
-            Assert.AreEqual("reset-journal", File.ReadAllText(Path.Combine(data, "data", "chrome-reset.json")));
-
-            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, install, "0.20.33");
-            Assert.IsFalse(File.Exists(transactionPath));
         }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
-    }
 
-    [TestMethod]
-    public void Transaction_is_durable_resumable_and_contains_no_user_state()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-" + Guid.NewGuid().ToString("N"));
-        string install = Path.Combine(root, "installed");
-        string data = Path.Combine(root, "data");
-        string webView = Path.Combine(root, "webview");
-        string transaction = Path.Combine(root, "maintenance", "fresh-reinstall.json");
-        Directory.CreateDirectory(install);
-        Directory.CreateDirectory(data);
-        Directory.CreateDirectory(webView);
-        try
-        {
-            var created = FreshReinstallTransaction.Create(
-                transaction,
-                "0.20.28",
-                install,
-                data,
-                webView,
-                [ChromeIntegration.CanonicalExtensionId]
-            );
-            created.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
-
-            FreshReinstallTransaction loaded = FreshReinstallTransaction.Load(transaction);
-            Assert.AreEqual(FreshReinstallPhase.ExtensionRemovalPending, loaded.Phase);
-            Assert.AreEqual(Path.GetFullPath(data), loaded.DataRoot);
-            string json = File.ReadAllText(transaction);
-            Assert.IsFalse(json.Contains("token", StringComparison.OrdinalIgnoreCase));
-            Assert.IsFalse(json.Contains("catalogue", StringComparison.OrdinalIgnoreCase));
-            Assert.IsFalse(json.Contains("clientSecret", StringComparison.OrdinalIgnoreCase));
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
-    }
-
-    [TestMethod]
-    public void New_installer_can_adopt_a_transaction_until_desktop_cleanup_starts()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-adopt-" + Guid.NewGuid().ToString("N"));
-        string install = Path.Combine(root, "installed");
-        string data = Path.Combine(root, "data");
-        string webView = Path.Combine(root, "webview");
-        string transaction = Path.Combine(root, "maintenance", "fresh-reinstall.json");
-        try
-        {
-            var fresh = FreshReinstallTransaction.Create(transaction, "0.20.28", install, data, webView,
-                [ChromeIntegration.CanonicalExtensionId]);
-            fresh.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
-            fresh.AdoptPendingPackage("0.20.30", install, data, webView);
-            Assert.AreEqual("0.20.30", FreshReinstallTransaction.Load(transaction).PackageVersion);
-
-            fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal");
-            fresh.AdoptPendingPackage("0.20.31", install, data, webView);
-            Assert.AreEqual("0.20.31", FreshReinstallTransaction.Load(transaction).PackageVersion);
-
-            fresh.Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed");
-            Assert.ThrowsException<InvalidOperationException>(() =>
-                fresh.AdoptPendingPackage("0.20.32", install, data, webView));
-        }
-        finally
-        {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
-        }
-    }
-
-    [TestMethod]
-    public void Corrupt_transaction_and_dangerous_or_overlapping_roots_fail_closed()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-invalid-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        string transaction = Path.Combine(root, "maintenance", "fresh-reinstall.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(transaction)!);
-        File.WriteAllText(transaction, "not-json");
-        try
-        {
-            Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Load(transaction));
-            Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Create(
-                transaction,
-                "0.20.28",
-                Path.GetPathRoot(root)!,
-                Path.Combine(root, "data"),
-                Path.Combine(root, "webview"),
-                [ChromeIntegration.CanonicalExtensionId]
-            ));
-            Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Create(
-                transaction,
-                "0.20.28",
-                Path.Combine(root, "install"),
-                root,
-                Path.Combine(root, "webview"),
-                [ChromeIntegration.CanonicalExtensionId]
-            ));
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
-    }
-
-    [TestMethod]
-    public void Cleanup_removes_owned_state_and_preserves_shared_siblings()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-clean-" + Guid.NewGuid().ToString("N"));
-        string install = Path.Combine(root, "installed");
-        string sharedData = Path.Combine(root, "shared-data");
-        string webView = Path.Combine(root, "webview");
-        string transaction = Path.Combine(root, "maintenance", "fresh-reinstall.json");
-        Directory.CreateDirectory(install);
-        Directory.CreateDirectory(Path.Combine(sharedData, "data"));
-        Directory.CreateDirectory(webView);
-        File.WriteAllText(Path.Combine(install, "obsolete.dll"), "old");
-        File.WriteAllText(Path.Combine(sharedData, "settings.json"), "old");
-        File.WriteAllText(Path.Combine(sharedData, "data", "catalogue.db"), "old");
-        File.WriteAllText(Path.Combine(sharedData, "unrelated.txt"), "keep");
-        File.WriteAllText(Path.Combine(webView, "sentinel.txt"), "old");
-        try
-        {
-            var fresh = FreshReinstallTransaction.Create(
-                transaction,
-                "0.20.28",
-                install,
-                sharedData,
-                webView,
-                [ChromeIntegration.CanonicalExtensionId],
-                dataRootExclusive: false,
-                webViewRootExclusive: true
-            );
-            fresh.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
-            fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "observer-absent");
-            fresh.CleanOwnedState();
-
-            Assert.IsFalse(Directory.Exists(install));
-            Assert.IsFalse(File.Exists(Path.Combine(sharedData, "settings.json")));
-            Assert.IsFalse(Directory.Exists(Path.Combine(sharedData, "data")));
-            Assert.IsTrue(File.Exists(Path.Combine(sharedData, "unrelated.txt")));
-            Assert.IsFalse(Directory.Exists(webView));
-            Assert.AreEqual(FreshReinstallPhase.OwnedStatePurged, FreshReinstallTransaction.Load(transaction).Phase);
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
-    }
-
-    [TestMethod]
-    public void Ambiguous_webview_and_locked_install_residue_keep_the_transaction_incomplete()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-blocked-" + Guid.NewGuid().ToString("N"));
-        string install = Path.Combine(root, "installed");
-        string data = Path.Combine(root, "data");
-        string webView = Path.Combine(root, "shared-webview");
-        string transaction = Path.Combine(root, "maintenance", "fresh-reinstall.json");
-        Directory.CreateDirectory(install);
-        Directory.CreateDirectory(data);
-        Directory.CreateDirectory(webView);
-        File.WriteAllText(Path.Combine(webView, "foreign.txt"), "keep");
-        string locked = Path.Combine(install, "obsolete.locked");
-        File.WriteAllText(locked, "old");
-        try
-        {
-            var fresh = FreshReinstallTransaction.Create(transaction, "0.20.28", install, data, webView,
-                [ChromeIntegration.CanonicalExtensionId], webViewRootExclusive: false);
-            fresh.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
-            fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "observer-absent");
-            using (FileStream hold = new(locked, FileMode.Open, FileAccess.Read, FileShare.None))
-                Assert.ThrowsException<IOException>(fresh.CleanOwnedState);
-            Assert.AreEqual(FreshReinstallPhase.ExtensionRemovalVerified, FreshReinstallTransaction.Load(transaction).Phase);
-
-            File.Delete(locked);
-            Assert.ThrowsException<InvalidOperationException>(fresh.CleanOwnedState);
-            Assert.IsTrue(File.Exists(Path.Combine(webView, "foreign.txt")));
-            Assert.AreEqual(FreshReinstallPhase.PreviousPackageRemoved, FreshReinstallTransaction.Load(transaction).Phase);
-        }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+        public void Dispose() { if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }
 }

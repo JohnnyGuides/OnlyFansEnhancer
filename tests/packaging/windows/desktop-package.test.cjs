@@ -191,19 +191,18 @@ async function main() {
   assert.match(installer, /PrivilegesRequired=lowest/);
   assert.match(
     installer,
-    /^CloseApplications=force$/m,
-    "updates must close legacy desktop builds that predate cooperative Restart Manager handling",
+    /^CloseApplications=yes$/m,
+    "updates must use cooperative Restart Manager shutdown without forcing unrelated work closed",
   );
   assert.match(installer, /Update or reinstall/);
   assert.match(installer, /Uninstall/);
   assert.match(
     installer,
-    /Fresh reinstall - remove extension and all OFEnhancer desktop state/,
+    /Fresh reinstall — clean OFEnhancer Windows data, then reset Chrome in the app/,
   );
-  assert.match(installer, /Resume Fresh reinstall/);
-  assert.match(installer, /FreshTransactionPhaseIs\('ChromeSetupPending'\)/);
-  assert.match(installer, /if ResumeAfterInstall then[\s\S]*ResumeFresh := False/);
-  assert.match(installer, /ShouldStartDesktop[\s\S]*not ResumeAfterInstall/);
+  assert.match(installer, /--fresh-reinstall-status/);
+  assert.match(installer, /A committed Fresh reinstall is paused/);
+  assert.match(installer, /ShouldStartDesktop[\s\S]*not IsFreshReset/);
   assert.match(installer, /CurPageID = wpFinished[\s\S]*msgButtonFinish/);
   assert.match(installer, /ExistingPage\.CheckListBox\.Enabled := False/);
   assert.match(installer, /CurStep = ssPostInstall\) and IsFreshReset\(\)/);
@@ -211,35 +210,29 @@ async function main() {
     installer,
     /--fresh-reinstall-installed.*ewWaitUntilTerminated/s,
   );
-  assert.match(
+  assert.doesNotMatch(
     installer,
-    /function RunChromeRemovalStep[\s\S]*--fresh-reinstall-remove/,
+    /--fresh-reinstall-remove|--fresh-reinstall-continue/,
   );
-  assert.match(installer, /--fresh-reinstall-continue/);
   assert.match(installer, /WizardDirValue/);
   assert.doesNotMatch(
     installer.match(/function RunFreshHelper[\s\S]*?end;/)?.[0] ?? "",
     /ExpandConstant\('\{app\}'\)/,
   );
-  assert.match(installer, /NextButton\.Width := ScaleX\(120\)/);
-  assert.match(installer, /Chrome cleanup was unavailable[\s\S]*safe update/);
-  assert.match(
+  assert.match(installer, /NextButton\.Width := ScaleX\(148\)/);
+  assert.doesNotMatch(
     installer,
-    /procedure AbandonFreshTransactionForSafeUpdate[\s\S]*fresh-reinstall\.json[\s\S]*chrome-reset\.json/,
+    /AbandonFreshTransactionForSafeUpdate|FreshFallbackUpdate/,
   );
   assert.match(
     installer,
-    /function PrepareToInstall[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-clean/,
+    /function PrepareToInstall[\s\S]*--fresh-reinstall-plan[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-previous-package-removed[\s\S]*--fresh-reinstall-clean/,
   );
+  assert.match(installer, /CreateCustomPage\([\s\S]*Confirm Fresh reinstall/);
+  assert.match(installer, /It does not claim that Chrome was removed/);
   assert.match(
     installer,
-    /CreateCustomPage\([\s\S]*Remove the previous Chrome extension/,
-  );
-  assert.match(installer, /open chrome:\/\/extensions/);
-  assert.match(installer, /• Click Remove — not Reload\./);
-  assert.match(
-    installer,
-    /WizardForm\.NextButton\.Caption := 'Check and continue'/,
+    /WizardForm\.NextButton\.Caption := 'Start Fresh reinstall'/,
   );
   assert.match(installer, /SW_HIDE, ewWaitUntilTerminated/);
   assert.doesNotMatch(
@@ -291,30 +284,21 @@ async function main() {
   );
   assert.match(
     installer,
-    /\[UninstallDelete\][\s\S]*Name:\s*"\{localappdata\}\\OFEnhancer";\s*Check:\s*ShouldDeleteUserData/,
-    "direct uninstall must target only the dedicated user-data directory",
+    /--uninstall-clean-data.*ShouldDeleteUserData/,
+    "direct uninstall must use the shared owned-root protections",
   );
   assert.match(
     installer,
-    /UninstallSilent[\s\S]*Keep my data \(recommended\)[\s\S]*Remove my data[\s\S]*TaskDialogMsgBox/,
+    /UninstallSilent[\s\S]*Keep my data \(recommended\)[\s\S]*Remove my desktop data[\s\S]*TaskDialogMsgBox/,
     "interactive uninstall must offer a native keep-or-remove choice",
   );
   assert.match(
     installer,
     /Connect Chrome.*OFEnhancer\.Desktop\.exe.*--chrome-setup/,
   );
-  const guideLauncher = fs.readFileSync(
-    path.join(root, "tools/open-chrome-guide.ps1"),
-    "utf8",
-  );
-  assert.match(
-    guideLauncher,
-    /Start-Process -FilePath \$desktop.*--chrome-setup/,
-  );
-  assert.doesNotMatch(
-    guideLauncher,
-    /chrome\.exe/,
-    "Start-menu and guide entry points must use the desktop's common setup controller",
+  assert.equal(
+    fs.existsSync(path.join(root, "tools/open-chrome-guide.ps1")),
+    false,
   );
   assert.doesNotMatch(
     installer,
@@ -587,9 +571,6 @@ async function main() {
       path.join(stage, "assets", "finalLogo.png"),
       path.join(stage, "native", "ofenhancer-native-host.json.template"),
       path.join(stage, "extension-setup.html"),
-      path.join(stage, "extension-reload.html"),
-      path.join(stage, "fresh-verifier", "manifest.json"),
-      path.join(stage, "fresh-verifier", "background.js"),
       path.join(stage, "package-manifest.json"),
       path.join(stage, "desktop", "Microsoft.Data.Sqlite.dll"),
     ]) {
@@ -600,49 +581,19 @@ async function main() {
       );
     }
 
-    const reloadGuide = fs.readFileSync(
+    for (const obsolete of [
       path.join(stage, "extension-reload.html"),
-      "utf8",
-    );
+      path.join(stage, "fresh-verifier"),
+      path.join(stage, "tools", "open-chrome-guide.ps1"),
+    ])
+      assert.equal(
+        fs.existsSync(obsolete),
+        false,
+        `obsolete staged path: ${obsolete}`,
+      );
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage();
-      await page.setContent(reloadGuide);
-      await page.evaluate(() => {
-        Object.defineProperty(navigator, "clipboard", {
-          configurable: true,
-          value: {
-            async writeText(value) {
-              globalThis.__copiedChromeUrl = value;
-            },
-          },
-        });
-      });
-      for (const viewport of [
-        { width: 1280, height: 720 },
-        { width: 800, height: 700 },
-        { width: 390, height: 844 },
-      ]) {
-        await page.setViewportSize(viewport);
-        assert.equal(
-          await page
-            .getByRole("heading", {
-              name: "Update your Chrome extension",
-            })
-            .isVisible(),
-          true,
-        );
-        assert.equal(
-          await page.evaluate(() => document.documentElement.scrollWidth),
-          viewport.width,
-        );
-      }
-      await page.getByRole("button", { name: "Copy", exact: true }).click();
-      assert.equal(
-        await page.evaluate(() => globalThis.__copiedChromeUrl),
-        "chrome://extensions",
-      );
-      assert.match(await page.getByRole("status").innerText(), /Copied/i);
       await page.addInitScript(() =>
         Object.defineProperty(navigator, "clipboard", {
           configurable: true,
@@ -661,6 +612,23 @@ async function main() {
           "#folder=" +
           encodeURIComponent(folder),
       );
+      for (const viewport of [
+        { width: 1280, height: 720 },
+        { width: 800, height: 700 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        assert.equal(
+          await page
+            .getByRole("heading", { name: "Connect Chrome" })
+            .isVisible(),
+          true,
+        );
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+          viewport.width,
+        );
+      }
       assert.equal(
         await page.locator("#extension-folder").textContent(),
         folder,
@@ -737,7 +705,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.33",
+      productVersion: "0.20.34",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -837,7 +805,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.33");
+    assert.equal(manifest.productVersion, "0.20.34");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

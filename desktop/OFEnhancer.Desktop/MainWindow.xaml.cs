@@ -37,7 +37,8 @@ public partial class MainWindow : Window, IDisposable
         this.catalogue = catalogue;
         hasExtensionOverride = extensionOverride;
         settings = new DesktopSettingsStore(AppConfiguration.SettingsPath);
-        uploads.Reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath, completed: FreshReinstallMaintenance.CompleteIfChromeReady);
+        uploads.Reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath,
+            legacyPath: AppConfiguration.LegacyChromeResetPath);
         Func<string?> effectiveIdentity = () => extensionOverride ? extensionId : settings.Load().ExtensionId;
         chromeIntegration = new ChromeIntegration(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")), settings, effectiveIdentity, uploads);
         browserSettings = new BrowserSettingsController(settings);
@@ -93,12 +94,14 @@ public partial class MainWindow : Window, IDisposable
                     || !payload.TryGetProperty("bridgeExtensionId", out var origin) || origin.GetString() != integration.ExtensionId
                     || !payload.TryGetProperty("extensionVersion", out var version) || version.GetString() != AgentProtocol.ProductVersion)
                     throw new InvalidOperationException("Connect the current personal extension before loading the development template.");
+                uploads.AuthorizeNativeOperation(origin.GetString(), version.GetString(),
+                    payload.TryGetProperty("installation", out JsonElement fixtureInstallation) ? fixtureInstallation : null);
                 if (request.Operation == "loadDevelopmentFixtures")
                 {
-                    if (payload.EnumerateObject().Any(p => p.Name is not ("bridgeExtensionId" or "extensionVersion"))) throw new InvalidOperationException("invalid-payload");
+                    if (payload.EnumerateObject().Any(p => p.Name is not ("bridgeExtensionId" or "extensionVersion" or "installation"))) throw new InvalidOperationException("invalid-payload");
                     return AgentResponse.SuccessResult(request, developmentFixtures.Load());
                 }
-                if (payload.EnumerateObject().Any(p => p.Name is not ("bridgeExtensionId" or "extensionVersion" or "fixtureToken"))) throw new InvalidOperationException("invalid-payload");
+                if (payload.EnumerateObject().Any(p => p.Name is not ("bridgeExtensionId" or "extensionVersion" or "installation" or "fixtureToken"))) throw new InvalidOperationException("invalid-payload");
                 var info = developmentFixtures.Resolve(payload.GetProperty("fixtureToken").GetString() ?? "");
                 return AgentResponse.SuccessResult(request, new { filePath = info.FullName, name = info.Name, size = info.Length,
                     lastModified = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() });
@@ -108,7 +111,14 @@ public partial class MainWindow : Window, IDisposable
                 chromeIntegration.Get();
                 return AgentResponse.SuccessResult(request, uploads.Exchange(payload));
             }
-            object result = await dispatcher.EnqueueAsync(() => uploadCatalogue.Handle(request.Operation, payload));
+            chromeIntegration.Get();
+            string? bridgeExtensionId = payload.TryGetProperty("bridgeExtensionId", out JsonElement bridge)
+                && bridge.ValueKind == JsonValueKind.String ? bridge.GetString() : null;
+            string? extensionVersion = payload.TryGetProperty("extensionVersion", out JsonElement directVersion)
+                && directVersion.ValueKind == JsonValueKind.String ? directVersion.GetString() : null;
+            uploads.AuthorizeNativeOperation(bridgeExtensionId, extensionVersion,
+                payload.TryGetProperty("installation", out JsonElement installation) ? installation : null);
+            object result = await dispatcher.EnqueueAsync(() => uploadCatalogue.Handle(request.Operation, WithoutTransportMetadata(payload)));
             return AgentResponse.SuccessResult(request, result);
         }
         catch (Exception error)
@@ -122,7 +132,7 @@ public partial class MainWindow : Window, IDisposable
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
-        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset" }.Contains(operation)) return null;
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try
         {
@@ -166,6 +176,21 @@ public partial class MainWindow : Window, IDisposable
             {
                 if (hasExtensionOverride || payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any()) throw new InvalidOperationException("invalid-payload");
                 result = await Task.Run(chromeIntegration.FreshReset);
+            }
+            else if (operation == "continueChromeReset")
+            {
+                if (hasExtensionOverride || payload.ValueKind != JsonValueKind.Object
+                    || !payload.TryGetProperty("evidence", out JsonElement evidenceValue)
+                    || payload.EnumerateObject().Any(property => property.Name != "evidence"))
+                    throw new InvalidOperationException("invalid-payload");
+                ChromeRemovalEvidence evidence = evidenceValue.GetString() switch
+                {
+                    "removed" => ChromeRemovalEvidence.UserReportedRemoved,
+                    "absent" => ChromeRemovalEvidence.UserReportedAbsent,
+                    "unknown" => ChromeRemovalEvidence.Unknown,
+                    _ => throw new InvalidOperationException("invalid-payload"),
+                };
+                result = await Task.Run(() => chromeIntegration.ContinueFreshReset(evidence));
             }
             else if (operation == "deliverDevelopmentFixture")
             {
@@ -385,12 +410,6 @@ public partial class MainWindow : Window, IDisposable
     private async Task<string> OpenChromePageAsync(string page)
     {
         var readiness = await Task.Run(chromeIntegration.Get);
-        if (page == "extensions" && readiness.ResetPending && uploads.Reset is { } reset)
-        {
-            reset.RequestManualRemoval();
-            reset.BeginManualConfirmation();
-            return "Chrome extensions is opening in the connected profile. Click Remove on the previous OFEnhancer extension, not Reload.";
-        }
         var status = JsonSerializer.SerializeToElement(uploads.Status());
         if (status.GetProperty("browsers").GetArrayLength() > 0)
         {
@@ -415,6 +434,15 @@ public partial class MainWindow : Window, IDisposable
         }
         OpenChrome(new Uri("about:blank"));
         return "Chrome opened.";
+    }
+
+    private static JsonElement WithoutTransportMetadata(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) return payload;
+        Dictionary<string, JsonElement> values = payload.EnumerateObject()
+            .Where(property => property.Name is not ("bridgeExtensionId" or "extensionVersion" or "installation"))
+            .ToDictionary(property => property.Name, property => property.Value.Clone());
+        return JsonSerializer.SerializeToElement(values);
     }
 
     private string? ChooseThumbnailRoot()

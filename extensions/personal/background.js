@@ -110,12 +110,17 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
   throw new Error("unsupported-operation");
 }
 
-function sendDesktopRequest(operation, payload = {}) {
+async function sendDesktopRequest(operation, payload = {}) {
+  const installation = await extensionLifecycle?.getInstallation();
   const request = {
     protocolVersion: 1,
     requestId: crypto.randomUUID(),
     operation,
-    payload,
+    payload: {
+      ...payload,
+      extensionVersion: chrome.runtime.getManifest().version,
+      installation: installation || null,
+    },
   };
   return new Promise((resolve, reject) =>
     chrome.runtime.sendNativeMessage(
@@ -2730,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.33"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.34"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4205,7 +4210,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.33"
+      "upload-hub-0.20.34"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -5042,8 +5047,7 @@ async function openUploadConsole() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
-  await extensionLifecycle?.getInstallation();
+async function initializeInstalledExtension() {
   await ensureCreatorUploadRuntimeVersion();
   const current = await chrome.storage.local.get([
     SETTINGS_KEY,
@@ -5078,7 +5082,20 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   if (Object.keys(writes).length > 0) await chrome.storage.local.set(writes);
   await syncCreatorToolRegistrations();
-});
+  await extensionLifecycle?.completeInstallation();
+}
+
+chrome.runtime.onInstalled.addListener(() => initializeInstalledExtension());
+
+// A service worker may stop between the genuine install event and receipt
+// publication. Resume the same durable initialization without minting a new
+// installation identity on reload or worker restart.
+extensionLifecycle
+  ?.needsInitialization()
+  .then((needed) => (needed ? initializeInstalledExtension() : undefined))
+  .catch((error) =>
+    console.error("Extension installation initialization failed.", error),
+  );
 
 chrome.runtime.onStartup.addListener(() => {
   syncCreatorToolRegistrations().catch((error) => {

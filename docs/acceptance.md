@@ -290,6 +290,35 @@ an old saved ID, reload nor silence alone is accepted. Reset retains desktop
 catalogue, Google configuration and history and never edits Chrome profile
 internals. See [the product reset contract](product.md#normal-update-versus-fresh-reset).
 
+## Windows/Chrome lifecycle separation — 0.20.34
+
+- Inno Setup owns only Windows planning, verified previous-package removal,
+  protected owned-root cleanup, package verification, and acknowledgement that a
+  separate Chrome obligation exists. It does not open Chrome, wait for removal,
+  or turn uncertainty into a success claim.
+- Fresh reinstall retires the Windows transaction after verified installation
+  while the single Chrome record remains outside purge roots. App launch resumes
+  that task without repeating desktop cleanup. Legacy Windows and reset schemas
+  have one bounded migration path; legacy silence-based “verified” state becomes
+  unknown rather than proof.
+- The app records requested, rejected, user-reported removed/absent, unknown, and
+  admitted states separately. Continuing unconfirmed keeps the previous
+  installation denied and still requires a genuine replacement receipt.
+- Self-uninstall does not pre-clear local/session/sync storage. A genuine install
+  initializes durably and publishes its receipt only after normalization. Worker
+  restart resumes the same identity; update/reload cannot mint one.
+- The retired receipt barrier covers browser exchange plus direct catalogue and
+  upload-result calls. The native host stamps the actual Chrome origin on every
+  browser request; the obsolete verifier origin/package and duplicate reload
+  guide are absent.
+- Interactive uninstall defaults to keeping data. Explicit removal uses the same
+  configured-root, ownership, and reparse protections as Fresh cleanup and states
+  separately that Chrome is unchanged. Silent uninstall keeps data.
+
+The versioned sections below are historical acceptance records. They explain why
+the superseded implementation existed; they are not simultaneous current
+requirements where they conflict with 0.20.34 or the product contract.
+
 ## Fresh reinstall lifecycle — 0.20.27
 
 Fresh reinstall is distinct from Fresh reset. Setup stages its maintenance

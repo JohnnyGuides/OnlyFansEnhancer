@@ -144,6 +144,22 @@ not authentication against another process running as the same user. Setup
 changes invalidate old liveness and pending channel work. Reconnect never releases
 offline UI mutations, and retired connection generations cannot consume commands.
 
+Lifecycle persistence has two disjoint authorities. The Windows maintenance
+record owns consented roots, package identity, and completed uninstall/purge/copy/
+verification effects. It contains no Chrome-ready claim and is retired after a
+verified package acknowledges the durable Chrome obligation. The Chrome reset
+record lives beside that transaction, outside purge roots, and is the only owner
+of removal requests/rejections, user reports, retired receipts, replacement stage,
+and admitted receipt. It is never copied into the desktop data root.
+
+Inno Setup invokes only Windows plan/checkpoint/cleanup/finalization operations.
+The installed app owns all Chrome guidance and admission. The extension owns only
+its resumable genuine-install initialization record. The native bridge remains a
+transport: it stamps Chrome's actual invocation origin on every browser request,
+while the desktop applies the reset/admission barrier to upload exchange and to
+direct catalogue/result operations. Diagnostics may remain reachable while a
+reset is pending; general catalogue and upload authority does not.
+
 Fresh installs use `extension-keyed`; `extension` remains the keyless compatibility
 composition from the same runtime sources. `packaging/personal-identity.json`
 contains only the fixed public key and derived ID. Private key material is neither

@@ -27,7 +27,11 @@ public static partial class AppConfiguration
     private const int MaximumDataRootLength = 1_024;
 
     public static string SettingsPath => Path.Combine(DataRoot, "settings.json");
-    internal static string ChromeResetPath => Path.Combine(DataRoot, "data", "chrome-reset.json");
+    // Chrome setup is a separate, app-owned obligation. Keep its only
+    // authoritative record beside the Windows maintenance transaction so a
+    // Fresh desktop purge cannot erase or copy it.
+    internal static string ChromeResetPath => Path.Combine(MaintenanceRoot, "chrome-reset.json");
+    internal static string LegacyChromeResetPath => Path.Combine(DataRoot, "data", "chrome-reset.json");
 
     public static string CatalogueDatabasePath => Path.Combine(DataRoot, "data", "catalogue.db");
 
@@ -81,6 +85,8 @@ public static partial class AppConfiguration
             return Path.Combine(parent, "OFEnhancer-Maintenance", "fresh-reinstall.json");
         }
     }
+
+    internal static string MaintenanceRoot => Path.GetDirectoryName(MaintenanceTransactionPath)!;
 
     internal static string ResolveDataRoot(bool create)
     {

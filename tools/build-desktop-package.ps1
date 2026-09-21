@@ -72,8 +72,8 @@ function Get-Sha256([string]$Path) {
 }
 $manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot "extensions\personal\manifest.json") -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-if ($version -ne "0.20.33") {
-  throw "The desktop package requires personal extension version 0.20.33."
+if ($version -ne "0.20.34") {
+  throw "The desktop package requires personal extension version 0.20.34."
 }
 
 . (Join-Path $PSScriptRoot 'release-output-safety.ps1')
@@ -92,8 +92,7 @@ $nativeDirectory = Join-Path $stage "native"
 $extensionDirectory = Join-Path $stage "extension"
 $assetsDirectory = Join-Path $stage "assets"
 $toolsDirectory = Join-Path $stage "tools"
-$verifierDirectory = Join-Path $stage "fresh-verifier"
-foreach ($directory in @($desktopDirectory, $nativeDirectory, $extensionDirectory, $assetsDirectory, $toolsDirectory, $verifierDirectory)) {
+foreach ($directory in @($desktopDirectory, $nativeDirectory, $extensionDirectory, $assetsDirectory, $toolsDirectory)) {
   New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 
@@ -151,12 +150,8 @@ Copy-Item -LiteralPath $keyedStage -Destination (Join-Path $stage "extension-key
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "shared\workspace\finalLogo.png") -Destination $assetsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "desktop\OFEnhancer.Desktop\Assets\ofenhancer.ico") -Destination $assetsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\extension-setup.html") -Destination $stage
-Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\extension-reload.html") -Destination $stage
-Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\fresh-verifier\manifest.json") -Destination $verifierDirectory
-Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging\windows\fresh-verifier\background.js") -Destination $verifierDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "tools\register-native-host.ps1") -Destination $toolsDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "tools\unregister-native-host.ps1") -Destination $toolsDirectory
-Copy-Item -LiteralPath (Join-Path $repositoryRoot "tools\open-chrome-guide.ps1") -Destination $toolsDirectory
 
 $versionFile = [ordered]@{
   product = "OFEnhancer"

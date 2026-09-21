@@ -14,8 +14,9 @@ public sealed class BrowserUploadChannel : IDisposable
         lock (gate)
         {
             if (Reset is null) throw new InvalidOperationException("Chrome reset is unavailable.");
+            if (pending.Count > 0 || commands.Count > 0)
+                throw new InvalidOperationException("An upload request is still active. Review or stop it before starting Fresh reset.");
             Reset.Begin(extensionId);
-            foreach (var waiting in pending.Values) waiting.TrySetException(new InvalidOperationException("Fresh reset started. Existing upload preparation was stopped."));
             pending.Clear(); commands.Clear(); browsers.Clear(); connections.Clear(); versionMismatches.Clear(); selected = null;
             selectionRequired = false;
         }
@@ -119,37 +120,6 @@ public sealed class BrowserUploadChannel : IDisposable
                         requiredExtensionVersion = AgentProtocol.ProductVersion, resetPending = Reset.Pending,
                         resetMessage = Reset.Message };
             }
-            JsonElement verifier = default;
-            bool maintenanceVerifier = Reset?.Pending == true
-                && suppliedExtension == ChromeIntegration.MaintenanceVerifierId
-                && suppliedBridge == ChromeIntegration.MaintenanceVerifierId
-                && payload.TryGetProperty("maintenanceVerifier", out verifier)
-                && verifier.ValueKind == JsonValueKind.Object;
-            if (maintenanceVerifier)
-            {
-                var installed = verifier.TryGetProperty("installed", out JsonElement installedValue)
-                    && installedValue.ValueKind == JsonValueKind.Array
-                    ? installedValue.EnumerateArray().Take(128)
-                        .Where(item => item.ValueKind == JsonValueKind.Object
-                            && item.TryGetProperty("id", out JsonElement candidate)
-                            && candidate.ValueKind == JsonValueKind.String
-                            && AppConfiguration.NormalizeExtensionId(candidate.GetString()) is not null)
-                        .Select(item => new ExtensionPresence(item.GetProperty("id").GetString()!,
-                            item.TryGetProperty("enabled", out JsonElement enabled) && enabled.ValueKind == JsonValueKind.True))
-                        .ToArray()
-                    : [];
-                var uninstallEvents = verifier.TryGetProperty("uninstalled", out JsonElement uninstalledValue)
-                    && uninstalledValue.ValueKind == JsonValueKind.Array
-                    ? uninstalledValue.EnumerateArray().Take(128)
-                        .Where(item => item.ValueKind == JsonValueKind.String
-                            && AppConfiguration.NormalizeExtensionId(item.GetString()) is not null)
-                        .Select(item => item.GetString()!).ToArray()
-                    : [];
-                Reset!.ObserveVerifier(ChromeIntegration.MaintenanceVerifierId, installed, uninstallEvents);
-                return new { commands = Array.Empty<object>(), connectionId, setupGeneration,
-                    resetPending = Reset.Pending, removalVerified = Reset.RemovalVerified,
-                    resetMessage = Reset.Message };
-            }
             if (requireIdentity && (integrationIdentity is null
                 || !payload.TryGetProperty("extensionId", out var extension) || extension.GetString() != integrationIdentity
                 || !payload.TryGetProperty("bridgeExtensionId", out var bridge) || bridge.GetString() != integrationIdentity
@@ -234,6 +204,23 @@ public sealed class BrowserUploadChannel : IDisposable
             double expiresInMilliseconds = live.Length == 0 ? 0 : Math.Max(0, 10000 - (clock.GetUtcNow() - relevant).TotalMilliseconds);
             bool updateRequired = live.Length == 0 && versionMismatches.Any(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10));
             return new { browsers = live, selected, connected = selected is not null && live.Contains(selected), expiresInMilliseconds, selectionRequired, updateRequired, resetPending = Reset?.Pending == true };
+        }
+    }
+
+    internal void AuthorizeNativeOperation(string? bridgeExtensionId, string? extensionVersion, JsonElement? installation)
+    {
+        lock (gate)
+        {
+            Expire();
+            if (Reset?.Pending == true) throw new InvalidOperationException(Reset.Message);
+            string? receipt = installation is { ValueKind: JsonValueKind.Object } value
+                && value.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String
+                ? id.GetString() : null;
+            if (integrationIdentity is null || bridgeExtensionId != integrationIdentity
+                || extensionVersion != AgentProtocol.ProductVersion
+                || Reset?.AdmittedReceipt is string admitted && receipt != admitted
+                || browsers.All(pair => clock.GetUtcNow() - pair.Value >= TimeSpan.FromSeconds(10)))
+                throw new InvalidOperationException("extension-not-admitted");
         }
     }
 

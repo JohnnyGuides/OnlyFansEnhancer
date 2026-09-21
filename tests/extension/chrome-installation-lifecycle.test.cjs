@@ -60,6 +60,9 @@ test("only a real Chrome install creates a new receipt; update/reload cannot sat
   assert.equal(await f.lifecycle.getInstallation(), null);
   assert.equal(f.areas.local.oldCheckpoint, true);
   await f.installed({ reason: "install" });
+  assert.equal(await f.lifecycle.getInstallation(), null);
+  assert.equal(await f.lifecycle.needsInitialization(), true);
+  await f.lifecycle.completeInstallation();
   const receipt = await f.lifecycle.getInstallation();
   assert.match(receipt.id, /^[a-f0-9-]{36}$/);
   assert.ok(receipt.installedAt > 0);
@@ -69,15 +72,14 @@ test("only a real Chrome install creates a new receipt; update/reload cannot sat
   assert.deepEqual(await f.lifecycle.getInstallation(), receipt);
 });
 
-test("explicit reset clears only the extension's own storage then uses uninstallSelf", async () => {
+test("explicit reset preserves recovery storage until Chrome accepts uninstallSelf", async () => {
   const f = fixture();
   await f.lifecycle.uninstall();
   assert.deepEqual(JSON.parse(JSON.stringify(f.calls)), [
-    ["clear", "local"],
-    ["clear", "session"],
-    ["clear", "sync"],
     ["uninstallSelf", { showConfirmDialog: false }],
   ]);
+  for (const area of Object.values(f.areas))
+    assert.equal(area.oldCheckpoint, true);
 });
 
 test("unavailable or refused self-removal stops with an actionable manual removal error", async () => {
@@ -103,17 +105,14 @@ test("unavailable or refused self-removal stops with an actionable manual remova
   );
 });
 
-test("partial storage cleanup is reported distinctly and never attempts uninstall", async () => {
+test("interrupted initialization resumes the same install identity", async () => {
   const f = fixture();
-  f.chrome.storage.session.clear = async () => {
-    throw new Error("session-busy");
-  };
-  await assert.rejects(
-    f.lifecycle.uninstall(),
-    /partially cleared.*session.*Remove.*Creator Workflow Toolkit/i,
-  );
-  assert.equal(
-    f.calls.some(([name]) => name === "uninstallSelf"),
-    false,
-  );
+  await f.installed({ reason: "install" });
+  const pending = f.areas.local.ofenhancerInstallationV1;
+  assert.equal(pending.status, "initializing");
+  assert.equal(await f.lifecycle.needsInitialization(), true);
+  await f.lifecycle.completeInstallation();
+  const receipt = await f.lifecycle.getInstallation();
+  assert.equal(receipt.id, pending.id);
+  assert.equal(receipt.installedAt, pending.installedAt);
 });

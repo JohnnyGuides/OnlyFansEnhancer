@@ -123,10 +123,13 @@ cannot be re-enabled as retired; release a retired blocker only when no other
 current/retired assignment still references it. Missing images have a fallback.
 Do not replace real connection/catalogue states with sample success or fake rows.
 
-Update/repair and ordinary reinstall preserve catalogue, settings, history, and local credentials.
-Fresh reinstall deliberately removes all safely identified OFEnhancer-owned desktop state and caches.
-Interactive uninstall offers explicit removal of the dedicated user-data folder;
-silent uninstall preserves it. No Chrome profiles or enterprise policy are edited,
+Update/repair and ordinary reinstall preserve catalogue, settings, history, local
+credentials, the extension identity, and its load location. Fresh reinstall
+deliberately removes all safely identified OFEnhancer-owned desktop state and
+caches, then leaves a separate durable Chrome replacement task for the installed
+app. Interactive uninstall offers protected cleanup of configured owned data
+roots; silent uninstall preserves data. Windows uninstall does not claim or
+perform Chrome removal. No Chrome profiles or enterprise policy are edited,
 and no unpacked extension is silently enabled. Notification text must remain
 neutral: **OFEnhancer needs attention**, not a title, account, path, or caption.
 
@@ -187,21 +190,27 @@ Creator Workflow Toolkit after installing an update. A version mismatch never
 counts as a working upload connection. Existing uncertainty and final-action
 evidence remain available for duplicate prevention.
 
-**Fresh reset** in Chrome setup creates a durable extension-only reset barrier. The connected personal extension clears only
-its own Chrome storage and requests supported self-uninstall. If the old build
-cannot receive or perform the request, Chrome setup requires manual removal of
-Creator Workflow Toolkit and identifies the exact old ID. Load the displayed
-`extension-keyed` folder afterward. Reloading or a saved extension ID cannot
-complete a reset. OFEnhancer allows Chrome's removal call a bounded failure and
-reconnect window; only then does a successful self-removal or explicit manual
-Remove confirmation open the barrier. Completion still requires a
-current-version genuine-install receipt and a new matching exchange. Pre-reset receipts
-remain rejected after desktop restarts. Interrupted resets remain pending.
+**Fresh reset** in Chrome setup creates one durable extension-only admission
+barrier outside desktop purge roots. A compatible current extension may be asked
+to call Chrome's supported self-uninstall API; its storage is not cleared before
+that request. An API request, disconnect, elapsed time, closed browser, or user
+report is recorded with its real provenance and is never relabelled verified
+removal. Incompatible or refused removal uses exact manual **Remove—not Reload**
+guidance. The user may continue with removal unconfirmed, but the previous
+installation stays denied desktop access.
+
+The replacement is admitted only when the canonical current-version runtime
+presents its durable genuine-install receipt after initialization and completes a
+current bridge exchange. Reload, update, worker restart, saved ID, old receipt,
+or direct catalogue/result call cannot satisfy the barrier. The admitted receipt
+persists so retired clients remain denied after desktop restart. Initialization
+is resumable and publishes no receipt until required normalization succeeds.
 
 Fresh reset keeps the catalogue, Google configuration, desktop settings, upload
-history and other application data. **Fresh reinstall** uses the same verified
-Chrome-removal gate, then uninstalls the old package, purges owned settings,
-catalogue, credentials, checkpoints, WebView2 data and obsolete installed files,
-and installs clean files. An interruption resumes from its durable transaction;
-ordinary startup cannot reopen old state. No Chrome Preferences, Secure Preferences, extension
-databases, enterprise policies or other browser profile internals are edited.
+history and other application data. **Fresh reinstall** first commits and executes
+only the approved Windows cleanup: old package, owned settings, catalogue,
+credentials, checkpoints, WebView2 data, and obsolete files. Package verification
+then retires the Windows transaction while preserving the separately seeded
+Chrome task. The installed app resumes that task without repeating desktop
+cleanup. No Chrome Preferences, Secure Preferences, extension databases,
+enterprise policies, or other browser profile internals are edited.

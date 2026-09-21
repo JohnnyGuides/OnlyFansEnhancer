@@ -1535,13 +1535,23 @@ dialog::backdrop {
   border-color: #62cbf6;
 }
 #chromeResetNotice {
-  border-left: 3px solid #e7bd76;
+  border: 1px solid #8d744d;
+  border-radius: 12px;
   padding: 12px;
   background: #282117;
   margin: 16px 0;
 }
 #chromeResetNotice p {
   margin: 6px 0 0;
+}
+.chrome-reset-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+#chromeReplacementTask strong {
+  color: #f3d49d;
 }
 .chrome-reset-actions {
   border-top: 1px solid #343b48;

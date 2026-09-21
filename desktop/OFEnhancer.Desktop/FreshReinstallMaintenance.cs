@@ -3,11 +3,11 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
-using System.Windows;
-using OFEnhancer.Protocol;
 
 namespace OFEnhancer.Desktop;
 
+// Owns only the Windows side of Fresh maintenance. Chrome reset intent is
+// durably seeded here, then resumed exclusively by the installed application.
 internal static class FreshReinstallMaintenance
 {
     internal static bool TryRun(IReadOnlyList<string> args, out int exitCode)
@@ -15,31 +15,43 @@ internal static class FreshReinstallMaintenance
         exitCode = 0;
         try
         {
-            if (args.Contains("--fresh-reinstall-remove", StringComparer.Ordinal))
+            if (args.Contains("--fresh-reinstall-status", StringComparer.Ordinal))
             {
-                exitCode = RemoveExtension(args);
+                exitCode = File.Exists(AppConfiguration.MaintenanceTransactionPath) ? 0 : 1;
                 return true;
             }
-            if (args.Contains("--fresh-reinstall-continue", StringComparer.Ordinal))
+            if (args.Contains("--fresh-reinstall-plan", StringComparer.Ordinal))
             {
-                exitCode = ContinueWithoutChromeConfirmation(args);
+                Plan(args);
+                return true;
+            }
+            if (args.Contains("--fresh-reinstall-previous-package-removed", StringComparer.Ordinal))
+            {
+                LoadMatching(args).MarkPreviousPackageRemoved();
                 return true;
             }
             if (args.Contains("--fresh-reinstall-clean", StringComparer.Ordinal))
             {
-                FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath).CleanOwnedState();
+                LoadMatching(args).CleanOwnedState();
                 return true;
             }
             if (args.Contains("--fresh-reinstall-installed", StringComparer.Ordinal))
             {
-                MarkInstalled(args);
+                using FinalizationLock finalization = AcquireFinalizationLock();
+                FreshReinstallTransaction transaction = LoadMatching(args);
+                FinalizeInstalledPackage(transaction, Argument(args, "--install-root"), Argument(args, "--package-version"));
+                return true;
+            }
+            if (args.Contains("--uninstall-clean-data", StringComparer.Ordinal))
+            {
+                CleanUninstallData();
                 return true;
             }
             return false;
         }
         catch (Exception error)
         {
-            Debug.WriteLine("Fresh reinstall maintenance failed: " + error);
+            Debug.WriteLine("OFEnhancer maintenance failed: " + error);
             exitCode = 3;
             return true;
         }
@@ -53,215 +65,114 @@ internal static class FreshReinstallMaintenance
         {
             using FinalizationLock finalization = AcquireFinalizationLock();
             FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-            if (transaction.Phase is FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled)
+            if (transaction.Phase is FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled
+                or FreshReinstallPhase.ChromeObligationAcknowledged or FreshReinstallPhase.Complete)
                 FinalizeInstalledPackage(transaction, transaction.InstallRoot, transaction.PackageVersion);
-            if (!File.Exists(AppConfiguration.MaintenanceTransactionPath))
-                return true;
+            if (!File.Exists(AppConfiguration.MaintenanceTransactionPath)) return true;
             transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-            if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending)
+            message = transaction.Phase switch
             {
-                transaction.CompleteAndDelete();
-                return true;
-            }
-            message = "OFEnhancer setup has not finished yet. Complete or rerun the installer; your previous data remains protected.";
+                FreshReinstallPhase.Preflight => "Fresh reinstall is paused before Windows cleanup. Rerun the installer to continue; Chrome has not been marked complete.",
+                FreshReinstallPhase.PreviousPackageRemoved => "The previous Windows package was removed. Rerun the installer to finish the clean installation.",
+                FreshReinstallPhase.InstallRootPurged or FreshReinstallPhase.DataRootPurged => "Fresh reinstall cleanup is partially complete. Rerun the installer to continue from its durable checkpoint.",
+                _ => "The Windows part of Fresh reinstall has not finished. Rerun the installer to continue from the saved checkpoint.",
+            };
             return false;
         }
         catch
         {
-            message = "OFEnhancer setup has not finished yet. Complete or rerun the installer; your previous data remains protected.";
+            message = "The Windows Fresh maintenance record could not be verified. Rerun the matching installer; no Chrome completion is assumed.";
             return false;
         }
     }
 
-    internal static void CompleteIfChromeReady()
-    {
-        if (!File.Exists(AppConfiguration.MaintenanceTransactionPath)) return;
-        FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-        if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending) transaction.CompleteAndDelete();
-    }
-
-    private static int RemoveExtension(IReadOnlyList<string> args)
+    private static void Plan(IReadOnlyList<string> args)
     {
         string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
         string version = Argument(args, "--package-version");
-        if (File.Exists(AppConfiguration.MaintenanceTransactionPath))
-        {
-            FreshReinstallTransaction resumed = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-            if (resumed.Phase >= FreshReinstallPhase.ExtensionRemovalVerified)
-            {
-                if (!SamePath(resumed.InstallRoot, installRoot))
-                    throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
-                if (resumed.Phase < FreshReinstallPhase.PreviousPackageRemoved)
-                    resumed.AdoptPendingPackage(version, installRoot, resumed.DataRoot, resumed.WebViewRoot);
-                else if (!string.Equals(resumed.PackageVersion, version, StringComparison.Ordinal))
-                    throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
-                return 0;
-            }
-        }
-        if (!Directory.Exists(installRoot) || !File.Exists(Path.Combine(installRoot, "package-manifest.json")))
-            throw new InvalidOperationException("The previous OFEnhancer installation root could not be verified.");
         string dataRoot = AppConfiguration.ResolveDataRoot(create: false);
         string webViewRoot = AppConfiguration.ResolveWebViewRoot(create: false);
         bool webViewExclusive = AppConfiguration.IsExclusiveWebViewRoot(webViewRoot) || !Directory.Exists(webViewRoot);
         if (!webViewExclusive)
-            throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer. Choose a dedicated folder before Fresh reinstall.");
-        string? oldIdentity = null;
-        string settingsPath = Path.Combine(dataRoot, "settings.json");
-        if (File.Exists(settingsPath)) oldIdentity = new DesktopSettingsStore(settingsPath).Load().ExtensionId;
-        oldIdentity ??= ChromeIntegration.CanonicalExtensionId;
+            throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer.");
 
         FreshReinstallTransaction transaction;
-        string transactionPath = AppConfiguration.MaintenanceTransactionPath;
-        if (File.Exists(transactionPath))
+        bool created = false;
+        if (File.Exists(AppConfiguration.MaintenanceTransactionPath))
         {
-            transaction = FreshReinstallTransaction.Load(transactionPath);
-            if (!SamePath(transaction.InstallRoot, installRoot))
-                throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
+            transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
             transaction.AdoptPendingPackage(version, installRoot, dataRoot, webViewRoot);
         }
         else
         {
-            transaction = FreshReinstallTransaction.Create(transactionPath, version, installRoot, dataRoot, webViewRoot,
-                [oldIdentity], AppConfiguration.IsExclusiveDataRoot(dataRoot), webViewExclusive);
+            if (!Directory.Exists(installRoot) || !File.Exists(Path.Combine(installRoot, "package-manifest.json")))
+                throw new InvalidOperationException("The previous OFEnhancer installation root could not be verified.");
+            string settingsPath = Path.Combine(dataRoot, "settings.json");
+            string oldIdentity = File.Exists(settingsPath)
+                ? new DesktopSettingsStore(settingsPath).Load().ExtensionId ?? ChromeIntegration.CanonicalExtensionId
+                : ChromeIntegration.CanonicalExtensionId;
+            transaction = FreshReinstallTransaction.Create(AppConfiguration.MaintenanceTransactionPath, version,
+                installRoot, dataRoot, webViewRoot, [oldIdentity], AppConfiguration.IsExclusiveDataRoot(dataRoot), webViewExclusive);
+            created = true;
         }
-        if (transaction.Phase >= FreshReinstallPhase.ExtensionRemovalVerified) return 0;
-
-        string resetPath = Path.Combine(transaction.TransactionDirectory, "chrome-reset.json");
-        ChromeExtensionReset reset = new(resetPath);
-        if (transaction.Phase == FreshReinstallPhase.Preflight && File.Exists(resetPath))
-            throw new InvalidOperationException("The Fresh removal journal is inconsistent; setup remains blocked.");
-        using BrowserUploadChannel channel = new() { Reset = reset };
-        DesktopSettingsStore settings = new(settingsPath);
-        ChromeIntegration integration = new(installRoot, settings, () => settings.Load().ExtensionId, channel,
-            permanentInstall: () => true);
-        if (transaction.Phase == FreshReinstallPhase.Preflight)
-        {
-            integration.FreshReset();
-            transaction.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-route-ready");
-        }
-
-        string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
-        using Mutex candidate = new(true, $"Local\\OFEnhancer.Desktop.{userKey}", out bool first);
-        if (!first)
-            throw new InvalidOperationException("Exit the running OFEnhancer tray application, then run this installer again. The Fresh transaction was preserved.");
-        DesktopAgent agent = new(DesktopAgent.DefaultPipeName(userKey), request =>
-        {
-            if (request.Operation != "browserExchange" || request.Payload is not JsonElement payload)
-                return Task.FromResult(AgentResponse.Failure(request.RequestId.ToString(), "maintenance-only"));
-            try { return Task.FromResult(AgentResponse.SuccessResult(request, channel.Exchange(payload))); }
-            catch (Exception error) { return Task.FromResult(AgentResponse.Failure(request.RequestId.ToString(), error is InvalidOperationException ? error.Message : "maintenance-failed")); }
-        });
-        agent.Start();
-        try
-        {
-            if (reset.ManualRemovalPending)
-            {
-                // Setup already displayed the manual instructions. A second
-                // click runs this short confirmation window; an old worker that
-                // still reports itself keeps the barrier closed.
-                reset.BeginManualConfirmation();
-                DateTimeOffset manualDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
-                while (!reset.RemovalVerified && DateTimeOffset.UtcNow < manualDeadline)
-                {
-                    reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2));
-                    Thread.Sleep(250);
-                }
-                if (!reset.RemovalVerified) return 4;
-            }
-            else
-            {
-                // The exact old extension clears its Chrome-owned storage and
-                // calls uninstallSelf. Successful self-removal destroys the
-                // caller before it can reply, so allow a bounded reconnect window.
-                DateTimeOffset automaticDeadline = DateTimeOffset.UtcNow.AddSeconds(18);
-                while (!reset.RemovalVerified && DateTimeOffset.UtcNow < automaticDeadline)
-                {
-                    reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7));
-                    Thread.Sleep(250);
-                }
-                if (!reset.RemovalVerified)
-                {
-                    // The installer owns the visible fallback copy. Keep this
-                    // process windowless, open the exact connected profile, and
-                    // return a distinct code so Setup can reveal its inline steps.
-                    reset.RequestManualRemoval();
-                    Thread.Sleep(1500);
-                    return 4;
-                }
-            }
-        }
-        finally { agent.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
-        transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal-or-user-confirmed");
-        return 0;
+        ChromeExtensionReset reset = new(AppConfiguration.ChromeResetPath, legacyPath: AppConfiguration.LegacyChromeResetPath);
+        if (!reset.IsValid) throw new InvalidOperationException("The Chrome reset record could not be verified.");
+        if (created && !reset.Pending)
+            reset.Begin(transaction.ExtensionIds[0]);
+        if (!reset.Pending)
+            throw new InvalidOperationException("The durable Chrome reset obligation could not be established.");
     }
 
-    private static int ContinueWithoutChromeConfirmation(IReadOnlyList<string> args)
+    private static FreshReinstallTransaction LoadMatching(IReadOnlyList<string> args)
     {
+        FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
         string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
         string version = Argument(args, "--package-version");
-        FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-        if (!SamePath(transaction.InstallRoot, installRoot))
+        if (!SamePath(transaction.InstallRoot, installRoot) || !string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal))
             throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
-        if (transaction.Phase >= FreshReinstallPhase.PreviousPackageRemoved)
-        {
-            if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal))
-                throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
-            return 0;
-        }
-        transaction.AdoptPendingPackage(version, installRoot, transaction.DataRoot, transaction.WebViewRoot);
-        if (transaction.Phase >= FreshReinstallPhase.ExtensionRemovalVerified) return 0;
-        if (transaction.Phase != FreshReinstallPhase.ExtensionRemovalPending)
-            throw new InvalidOperationException("Chrome removal has not been staged safely.");
-        string resetPath = Path.Combine(transaction.TransactionDirectory, "chrome-reset.json");
-        ChromeExtensionReset reset = new(resetPath);
-        reset.AcceptUnverifiedContinuation();
-        transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-removal-unconfirmed-user-continued");
-        return 0;
-    }
-
-    private static void MarkInstalled(IReadOnlyList<string> args)
-    {
-        string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
-        string version = Argument(args, "--package-version");
-        using FinalizationLock finalization = AcquireFinalizationLock();
-        FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-        FinalizeInstalledPackage(transaction, installRoot, version);
+        return transaction;
     }
 
     internal static void FinalizeInstalledPackage(FreshReinstallTransaction transaction, string installRoot, string version)
     {
-        if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal)
-            || !SamePath(transaction.InstallRoot, installRoot))
+        installRoot = Path.GetFullPath(installRoot);
+        if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal) || !SamePath(transaction.InstallRoot, installRoot))
             throw new InvalidOperationException("The clean package does not match the committed Fresh reinstall transaction.");
-        if (transaction.Phase == FreshReinstallPhase.Complete) return;
-        if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending)
+        if (transaction.Phase == FreshReinstallPhase.Complete)
+        {
+            transaction.CompleteAndDelete();
+            return;
+        }
+        if (transaction.Phase == FreshReinstallPhase.ChromeObligationAcknowledged)
         {
             transaction.CompleteAndDelete();
             return;
         }
         if (transaction.Phase is not (FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled))
-            throw new InvalidOperationException("The clean package cannot be finalized from the current Fresh reinstall phase.");
+            throw new InvalidOperationException("The clean package cannot be finalized from the current Windows phase.");
         VerifyInstalledPackage(installRoot, version);
-        string sourceReset = Path.Combine(transaction.TransactionDirectory, "chrome-reset.json");
-        if (!File.Exists(sourceReset)) throw new InvalidOperationException("The Fresh Chrome admission journal is missing.");
-        string destinationReset = Path.Combine(transaction.DataRoot, "data", "chrome-reset.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(destinationReset)!);
-        File.Copy(sourceReset, destinationReset, true);
+        ChromeExtensionReset reset = new(AppConfiguration.ChromeResetPath, legacyPath: AppConfiguration.LegacyChromeResetPath);
+        if (!reset.IsValid || !reset.Pending)
+            throw new InvalidOperationException("The Windows package is valid, but its durable Chrome reset obligation is missing.");
         if (transaction.Phase == FreshReinstallPhase.OwnedStatePurged)
             transaction.Advance(FreshReinstallPhase.CleanPackageInstalled, "clean-package-verified");
-        transaction.Advance(FreshReinstallPhase.ChromeSetupPending, "chrome-new-install-pending");
+        transaction.Advance(FreshReinstallPhase.ChromeObligationAcknowledged, "chrome-obligation-acknowledged");
         transaction.CompleteAndDelete();
+    }
+
+    private static void CleanUninstallData()
+    {
+        string dataRoot = AppConfiguration.ResolveDataRoot(create: false);
+        string webViewRoot = AppConfiguration.ResolveWebViewRoot(create: false);
+        bool webViewExclusive = AppConfiguration.IsExclusiveWebViewRoot(webViewRoot) || !Directory.Exists(webViewRoot);
+        FreshReinstallTransaction.CleanUserData(dataRoot, webViewRoot, AppConfiguration.IsExclusiveDataRoot(dataRoot), webViewExclusive);
     }
 
     private static FinalizationLock AcquireFinalizationLock()
     {
         string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         Mutex mutex = new(false, $"Local\\OFEnhancer.FreshFinalization.{userKey}");
-        try
-        {
-            if (!mutex.WaitOne(TimeSpan.FromSeconds(10)))
-                throw new TimeoutException("Fresh reinstall finalization is already running.");
-        }
+        try { if (!mutex.WaitOne(TimeSpan.FromSeconds(10))) throw new TimeoutException("OFEnhancer maintenance is already running."); }
         catch (AbandonedMutexException) { }
         return new FinalizationLock(mutex);
     }
@@ -269,15 +180,10 @@ internal static class FreshReinstallMaintenance
     private sealed class FinalizationLock(Mutex mutex) : IDisposable
     {
         private bool released;
-
         public void Dispose()
         {
-            if (!released)
-            {
-                released = true;
-                mutex.ReleaseMutex();
-                mutex.Dispose();
-            }
+            if (released) return;
+            released = true; mutex.ReleaseMutex(); mutex.Dispose();
         }
     }
 
@@ -306,10 +212,8 @@ internal static class FreshReinstallMaintenance
     {
         for (int index = 0; index < args.Count - 1; index++)
             if (string.Equals(args[index], name, StringComparison.Ordinal)) return args[index + 1];
-        throw new InvalidOperationException("Fresh reinstall is missing " + name + ".");
+        throw new InvalidOperationException("OFEnhancer maintenance is missing " + name + ".");
     }
-
-    private static bool SamePath(string left, string right) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)).Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);
+    private static bool SamePath(string left, string right) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(left))
+        .Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);
 }

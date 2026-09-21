@@ -13,234 +13,151 @@ public sealed class ChromeExtensionResetTests
     }
 
     [TestMethod]
-    public void OldReceiptAndReloadNeverCompleteResetAndNewInstallMustWaitForOldSilence()
+    public void Request_disconnect_and_elapsed_time_never_prove_removal()
     {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-" + Guid.NewGuid());
-        Directory.CreateDirectory(root);
+        string path = TempPath();
         try
         {
-            File.WriteAllText(Path.Combine(root, "catalogue.db"), "keep catalogue");
-            File.WriteAllText(Path.Combine(root, "settings.json"), "keep desktop settings");
             var clock = new Clock();
-            var reset = new ChromeExtensionReset(Path.Combine(root, "chrome-reset.json"), clock);
-            string oldBrowser = Guid.NewGuid().ToString(), oldConnection = Guid.NewGuid().ToString();
-            JsonElement Receipt(string id, long at) => JsonSerializer.SerializeToElement(new { id, installedAt = at });
-            string oldId = Guid.NewGuid().ToString();
-            var oldReceipt = Receipt(oldId, clock.Now.AddDays(-1).ToUnixTimeMilliseconds());
-            Assert.IsTrue(reset.Observe(oldBrowser, oldConnection, oldReceipt, true).Allowed);
+            var reset = new ChromeExtensionReset(path, clock);
+            string oldReceiptId = Guid.NewGuid().ToString();
+            JsonElement oldReceipt = Receipt(oldReceiptId, clock.Now.AddDays(-1));
+            reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), oldReceipt, true);
             reset.Begin(ChromeIntegration.CanonicalExtensionId);
+
+            ExtensionResetObservation request = reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), oldReceipt, true);
+            Assert.AreEqual(1, request.Commands.Length);
+            Assert.AreEqual(ChromeRemovalEvidence.Requested, reset.RemovalEvidence);
+            clock.Now = clock.Now.AddDays(2);
+            Assert.AreEqual(ChromeResetStage.Removal, reset.Stage);
             Assert.IsTrue(reset.Pending);
-            var first = reset.Observe(oldBrowser, oldConnection, oldReceipt, true);
-            Assert.IsFalse(first.Allowed);
-            Assert.AreEqual(1, first.Commands.Length);
-            Assert.AreEqual(0, reset.Observe(oldBrowser, oldConnection, oldReceipt, true).Commands.Length);
-            clock.Now = clock.Now.AddSeconds(20);
-            Assert.IsFalse(reset.Observe(oldBrowser, Guid.NewGuid().ToString(), oldReceipt, true).Allowed, "A reload is still the old installation.");
-            clock.Now = clock.Now.AddSeconds(8);
-            Assert.IsTrue(reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7)), "a successful self-removal cannot reply after Chrome destroys its worker");
-            string freshId = Guid.NewGuid().ToString(), freshBrowser = Guid.NewGuid().ToString(), freshConnection = Guid.NewGuid().ToString();
-            var fresh = Receipt(freshId, clock.Now.ToUnixTimeMilliseconds());
-            Assert.IsFalse(reset.Observe(freshBrowser, freshConnection, fresh, false).Allowed, "Wrong product version never finishes reset.");
-            Assert.IsTrue(reset.Observe(freshBrowser, freshConnection, fresh, true).Allowed);
-            Assert.IsFalse(reset.Pending);
-            var restarted = new ChromeExtensionReset(Path.Combine(root, "chrome-reset.json"), clock);
-            Assert.IsFalse(restarted.Observe(oldBrowser, oldConnection, oldReceipt, true).Allowed, "Old profile cannot reconnect after desktop restart.");
-            Assert.IsTrue(restarted.Observe(freshBrowser, freshConnection, fresh, true).Allowed);
-            Assert.AreEqual("keep catalogue", File.ReadAllText(Path.Combine(root, "catalogue.db")));
-            Assert.AreEqual("keep desktop settings", File.ReadAllText(Path.Combine(root, "settings.json")));
+            Assert.IsTrue(reset.Message.Contains("not confirmed", StringComparison.OrdinalIgnoreCase));
         }
-        finally { Directory.Delete(root, true); }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
     }
 
     [TestMethod]
-    public void DisconnectionAndSavedIdentityAreNotProofOfFreshInstallation()
+    public void User_report_is_provenance_not_verification_and_fresh_receipt_is_required()
     {
-        string path = Path.Combine(Path.GetTempPath(), "ofe-reset-" + Guid.NewGuid(), "chrome-reset.json");
+        string path = TempPath();
+        try
+        {
+            var clock = new Clock();
+            var reset = new ChromeExtensionReset(path, clock);
+            JsonElement oldReceipt = Receipt(Guid.NewGuid().ToString(), clock.Now.AddHours(-1));
+            reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), oldReceipt, true);
+            reset.Begin(ChromeIntegration.CanonicalExtensionId);
+            reset.ContinueToReplacement(ChromeRemovalEvidence.UserReportedRemoved);
+
+            Assert.AreEqual(ChromeResetStage.Replacement, reset.Stage);
+            Assert.AreEqual(ChromeRemovalEvidence.UserReportedRemoved, reset.RemovalEvidence);
+            Assert.IsFalse(reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), oldReceipt, true).Allowed);
+            Assert.IsTrue(reset.Pending);
+
+            JsonElement fresh = Receipt(Guid.NewGuid().ToString(), clock.Now.AddSeconds(1));
+            Assert.IsFalse(reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), fresh, false).Allowed);
+            Assert.IsTrue(reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), fresh, true).Allowed);
+            Assert.IsFalse(reset.Pending);
+            Assert.AreEqual(fresh.GetProperty("id").GetString(), reset.AdmittedReceipt);
+
+            var restarted = new ChromeExtensionReset(path, clock);
+            Assert.IsFalse(restarted.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), oldReceipt, true).Allowed);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
+    }
+
+    [TestMethod]
+    public void Api_rejection_is_recorded_without_retry_or_storage_loss_claim()
+    {
+        string path = TempPath();
         try
         {
             var clock = new Clock();
             var reset = new ChromeExtensionReset(path, clock);
             reset.Begin(ChromeIntegration.CanonicalExtensionId);
-            var old = JsonSerializer.SerializeToElement(new
-            {
-                id = Guid.NewGuid().ToString(),
-                installedAt = clock.Now.AddDays(-1).ToUnixTimeMilliseconds(),
-            });
-            Assert.AreEqual(1, reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), old, true).Commands.Length);
-            clock.Now = clock.Now.AddSeconds(8);
-            Assert.IsTrue(reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7)));
-            Assert.IsTrue(reset.Pending);
-            Assert.IsTrue(reset.RemovalVerified);
-            Assert.IsTrue(reset.Message.Contains("new extension-keyed folder"));
-        }
-        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
-    }
-    [TestMethod]
-    public async Task ChannelKeepsResetClosedUntilNewInstallAndRejectsWrongBridge()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "ofe-reset-channel-" + Guid.NewGuid(), "reset.json");
-        try
-        {
-            var clock = new Clock();
-            using var channel = new BrowserUploadChannel(clock) { Reset = new ChromeExtensionReset(path, clock) };
-            string id = ChromeIntegration.CanonicalExtensionId, browser = Guid.NewGuid().ToString(), connection = Guid.NewGuid().ToString();
-            channel.ConfigureIntegration(id, "owned-manifest");
-            JsonElement Exchange(string? generation, object? receipt, string bridge) => JsonSerializer.SerializeToElement(channel.Exchange(JsonSerializer.SerializeToElement(new {
-                browserId = browser, connectionId = connection, extensionId = id, bridgeExtensionId = bridge,
-                extensionVersion = OFEnhancer.Protocol.AgentProtocol.ProductVersion, setupGeneration = generation, installation = receipt
-            })));
-            string generation = Exchange(null, null, id).GetProperty("setupGeneration").GetString()!;
-            var old = new { id = Guid.NewGuid().ToString(), installedAt = clock.Now.AddDays(-1).ToUnixTimeMilliseconds() };
-            Exchange(generation, old, id);
-            channel.Select(browser);
-            var pending = channel.RequestAsync(JsonSerializer.SerializeToElement(new { kind = "storageGet", keys = new[] { "creatorToolkitV2" } }));
-            channel.BeginReset(id);
-            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => pending);
-            Assert.AreEqual(0, Exchange(generation, old, new string('b', 32)).GetProperty("commands").GetArrayLength());
-            var rejected = Exchange(generation, old, id);
-            Assert.AreEqual("resetExtension", rejected.GetProperty("commands")[0].GetProperty("command").GetProperty("kind").GetString());
-            clock.Now = clock.Now.AddSeconds(8);
-            Assert.IsTrue(channel.Reset.TryConfirmAutomaticRemoval(TimeSpan.FromSeconds(7)));
-            clock.Now = clock.Now.AddMinutes(1);
-            Exchange(generation, null, id);
-            Assert.IsFalse(JsonSerializer.SerializeToElement(channel.Status()).GetProperty("connected").GetBoolean());
-            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(JsonSerializer.SerializeToElement(new { kind = "storageGet" })));
-            var fresh = new { id = Guid.NewGuid().ToString(), installedAt = clock.Now.ToUnixTimeMilliseconds() };
-            Exchange(generation, fresh, id);
-            channel.Select(browser);
-            Assert.IsTrue(JsonSerializer.SerializeToElement(channel.Status()).GetProperty("connected").GetBoolean());
-            Assert.IsFalse(channel.Reset.Pending);
-            Exchange(generation, old, id);
-            Assert.IsFalse(JsonSerializer.SerializeToElement(channel.Status()).GetProperty("connected").GetBoolean());
-        }
-        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
-    }
-
-    [TestMethod]
-    public void CorruptJournalAndMalformedReceiptFailClosed()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-invalid-" + Guid.NewGuid());
-        Directory.CreateDirectory(root);
-        try
-        {
-            string path = Path.Combine(root, "reset.json");
-            File.WriteAllText(path, "not a journal");
-            var reset = new ChromeExtensionReset(path);
-            Assert.IsTrue(reset.Pending);
-            Assert.IsFalse(reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), null, true).Allowed);
-            reset.Begin(ChromeIntegration.CanonicalExtensionId);
-            var bad = JsonSerializer.SerializeToElement(new { id = Guid.NewGuid().ToString(), installedAt = "yesterday" });
-            Assert.IsFalse(reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), bad, true).Allowed);
-            Assert.IsTrue(reset.Pending);
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [TestMethod]
-    public void Removal_errors_are_recorded_and_retried_on_the_same_connection_without_reload()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-retry-" + Guid.NewGuid());
-        Directory.CreateDirectory(root);
-        try
-        {
-            var clock = new Clock();
-            var reset = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
             string connection = Guid.NewGuid().ToString();
-            JsonElement old = JsonSerializer.SerializeToElement(new
-            {
-                id = Guid.NewGuid().ToString(),
-                installedAt = clock.Now.AddDays(-1).ToUnixTimeMilliseconds(),
-            });
-            reset.Begin(ChromeIntegration.CanonicalExtensionId);
-            var first = reset.Observe(Guid.NewGuid().ToString(), connection, old, true);
+            ExtensionResetObservation first = reset.Observe(Guid.NewGuid().ToString(), connection,
+                Receipt(Guid.NewGuid().ToString(), clock.Now.AddDays(-1)), true);
             JsonElement command = JsonSerializer.SerializeToElement(first.Commands.Single());
-            string commandId = command.GetProperty("id").GetString()!;
-            reset.ObserveReplies(
-                connection,
-                JsonSerializer.SerializeToElement(new[] { new { id = commandId, error = "managed-extension" } })
-            );
-            Assert.IsTrue(reset.Message.Contains("managed-extension", StringComparison.Ordinal));
-
-            clock.Now = clock.Now.AddSeconds(3);
-            var retry = reset.Observe(Guid.NewGuid().ToString(), connection, old, true);
-            Assert.AreEqual(1, retry.Commands.Length, "the same running worker must be retried without Reload");
-            Assert.AreNotEqual(commandId, JsonSerializer.SerializeToElement(retry.Commands[0]).GetProperty("id").GetString());
+            reset.ObserveReplies(connection, JsonSerializer.SerializeToElement(new[]
+            {
+                new { id = command.GetProperty("id").GetString(), error = "Chrome refused self-removal." },
+            }));
+            Assert.AreEqual(ChromeRemovalEvidence.ApiRejected, reset.RemovalEvidence);
+            clock.Now = clock.Now.AddMinutes(5);
+            Assert.AreEqual(0, reset.Observe(Guid.NewGuid().ToString(), connection,
+                Receipt(Guid.NewGuid().ToString(), clock.Now.AddDays(-1)), true).Commands.Length);
+            Assert.IsTrue(reset.Message.Contains("refused", StringComparison.OrdinalIgnoreCase));
         }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
     }
 
     [TestMethod]
-    public void Manual_fallback_opens_the_exact_profile_and_requires_old_worker_silence()
+    public void Legacy_silence_verification_migrates_to_unknown_and_stays_blocked()
     {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-observer-" + Guid.NewGuid());
-        Directory.CreateDirectory(root);
+        string path = TempPath();
         try
         {
-            var clock = new Clock();
-            var reset = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
-            reset.Begin(ChromeIntegration.CanonicalExtensionId);
-            string browser = Guid.NewGuid().ToString(), connection = Guid.NewGuid().ToString();
-            var old = JsonSerializer.SerializeToElement(new
+            long started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, JsonSerializer.Serialize(new
             {
-                id = Guid.NewGuid().ToString(),
-                installedAt = clock.Now.AddDays(-1).ToUnixTimeMilliseconds(),
-            });
-            reset.Observe(browser, connection, old, true);
-            reset.RequestManualRemoval();
-            Assert.IsTrue(reset.ManualRemovalPending);
-            var open = reset.Observe(browser, connection, old, true);
-            Assert.AreEqual("openChromePage", JsonSerializer.SerializeToElement(open.Commands.Single())
-                .GetProperty("command").GetProperty("kind").GetString());
-            reset.BeginManualConfirmation();
-            clock.Now = clock.Now.AddSeconds(1);
-            reset.Observe(browser, connection, old, true);
-            clock.Now = clock.Now.AddSeconds(1);
-            Assert.IsFalse(reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2)), "the still-reporting old worker blocks confirmation");
-            clock.Now = clock.Now.AddSeconds(2);
-            Assert.IsTrue(reset.TryConfirmManualRemoval(TimeSpan.FromSeconds(2)));
-            Assert.IsFalse(reset.ManualRemovalPending);
-
-            var restarted = new ChromeExtensionReset(Path.Combine(root, "reset.json"), clock);
-            Assert.IsTrue(restarted.RemovalVerified, "manual confirmation must survive installer restart");
-
-            var fresh = JsonSerializer.SerializeToElement(new
-            {
-                id = Guid.NewGuid().ToString(),
-                installedAt = clock.Now.AddSeconds(1).ToUnixTimeMilliseconds(),
-            });
-            clock.Now = clock.Now.AddSeconds(12);
-            Assert.IsTrue(restarted.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), fresh, true).Allowed);
-            Assert.IsFalse(restarted.Pending);
+                Schema = 4, Generation = Guid.NewGuid().ToString(), StartedAt = started, Pending = true,
+                ExtensionId = ChromeIntegration.CanonicalExtensionId, RetiredReceipts = Array.Empty<string>(),
+                RemovalVerified = true, LastRemovalError = (string?)null, VerifierSawTarget = false,
+                RemovalRequestedAt = started, ManualPromptAt = 0, ManualConfirmedAt = 0, LastObservedAt = started,
+            }));
+            var migrated = new ChromeExtensionReset(path);
+            Assert.AreEqual(ChromeResetStage.Replacement, migrated.Stage);
+            Assert.AreEqual(ChromeRemovalEvidence.Unknown, migrated.RemovalEvidence);
+            Assert.IsTrue(migrated.Pending);
+            Assert.IsTrue(migrated.Message.Contains("not confirmed", StringComparison.OrdinalIgnoreCase));
+            Assert.AreEqual(5, JsonDocument.Parse(File.ReadAllText(path)).RootElement.GetProperty("Schema").GetInt32());
         }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
     }
 
     [TestMethod]
-    public void Explicit_continuation_is_durable_when_Chrome_cannot_confirm_removal()
+    public void Corrupt_journal_and_malformed_receipt_fail_closed()
     {
-        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-continue-" + Guid.NewGuid());
-        Directory.CreateDirectory(root);
+        string path = TempPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         try
         {
-            string path = Path.Combine(root, "reset.json");
+            File.WriteAllText(path, "not-json");
             var reset = new ChromeExtensionReset(path);
-            reset.Begin(ChromeIntegration.CanonicalExtensionId);
-            reset.AcceptUnverifiedContinuation();
-
-            Assert.IsTrue(reset.RemovalVerified);
-            Assert.IsTrue(reset.Message.Contains("previous extension was removed", StringComparison.OrdinalIgnoreCase));
-            Assert.IsTrue(new ChromeExtensionReset(path).RemovalVerified);
+            Assert.IsTrue(reset.Pending);
+            Assert.IsFalse(reset.IsValid);
+            Assert.IsFalse(reset.Observe(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), null, true).Allowed);
         }
-        finally
-        {
-            Directory.Delete(root, true);
-        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
     }
 
+    [TestMethod]
+    public void Native_operations_are_denied_during_reset_and_for_wrong_origin()
+    {
+        string path = TempPath();
+        try
+        {
+            using var channel = new BrowserUploadChannel { Reset = new ChromeExtensionReset(path) };
+            channel.ConfigureIntegration(ChromeIntegration.CanonicalExtensionId, "manifest");
+            string browser = Guid.NewGuid().ToString(), connection = Guid.NewGuid().ToString();
+            JsonElement first = JsonSerializer.SerializeToElement(channel.Exchange(JsonSerializer.SerializeToElement(new { browserId = browser, connectionId = connection,
+                extensionId = ChromeIntegration.CanonicalExtensionId, bridgeExtensionId = ChromeIntegration.CanonicalExtensionId,
+                extensionVersion = OFEnhancer.Protocol.AgentProtocol.ProductVersion })));
+            channel.Exchange(JsonSerializer.SerializeToElement(new { browserId = browser, connectionId = connection,
+                extensionId = ChromeIntegration.CanonicalExtensionId, bridgeExtensionId = ChromeIntegration.CanonicalExtensionId,
+                extensionVersion = OFEnhancer.Protocol.AgentProtocol.ProductVersion,
+                setupGeneration = first.GetProperty("setupGeneration").GetString() }));
+            channel.AuthorizeNativeOperation(ChromeIntegration.CanonicalExtensionId, OFEnhancer.Protocol.AgentProtocol.ProductVersion, null);
+            Assert.ThrowsException<InvalidOperationException>(() => channel.AuthorizeNativeOperation(new string('b', 32), OFEnhancer.Protocol.AgentProtocol.ProductVersion, null));
+            channel.BeginReset(ChromeIntegration.CanonicalExtensionId);
+            Assert.ThrowsException<InvalidOperationException>(() => channel.AuthorizeNativeOperation(ChromeIntegration.CanonicalExtensionId, OFEnhancer.Protocol.AgentProtocol.ProductVersion, null));
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
+    }
+
+    private static string TempPath() => Path.Combine(Path.GetTempPath(), "ofe-reset-" + Guid.NewGuid().ToString("N"), "reset.json");
+    private static JsonElement Receipt(string id, DateTimeOffset installedAt) =>
+        JsonSerializer.SerializeToElement(new { id, installedAt = installedAt.ToUnixTimeMilliseconds() });
 }

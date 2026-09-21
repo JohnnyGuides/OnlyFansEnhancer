@@ -121,18 +121,21 @@ HKCU startup/native entries. The Connect Chrome shortcut opens desktop setup;
 users enable/load/reload the personal extension in Chrome themselves. Setup must never
 modify a Chrome profile or enable the extension through enterprise policy.
 
-Updates close the old desktop app using Restart Manager handling, replace owned
-binaries, preserve settings/catalogue/history, and prompt extension reload.
-Normal repair/reinstall preserves extension state and desktop data. The explicit
-Fresh reinstall option stages a coordinator outside the installed/data/cache
-roots, records a durable transaction, preserves the old native removal route,
-automatically requests self-removal, and falls back to one explicit Remove click
-before running the verified old uninstaller. It then purges only proven
-OFEnhancer-owned desktop roots and installs
-clean files. Browser readiness remains closed until Chrome creates a genuine new
-install receipt. See [the reset contract](product.md#normal-update-versus-fresh-reset).
-Interactive uninstall defaults to keeping data
-and offers explicit removal of the dedicated data directory. Silent uninstall
+Updates use Restart Manager, replace owned binaries, preserve desktop and Chrome
+state, and guide Reload only when the live runtime is outdated. Normal
+repair/reinstall preserves the extension identity and load location. The explicit
+Fresh reinstall option stages one Windows coordinator outside every purge root,
+durably seeds the separate app-owned Chrome obligation, runs the verified old
+uninstaller, purges only proven OFEnhancer-owned Windows roots, verifies the clean
+package, and retires the Windows transaction. It does not open, wait for, or make
+claims about Chrome.
+
+The installed app then resumes the same Chrome task. Removal evidence remains
+truthful and browser access stays closed until a canonical current-version genuine
+install receipt completes initialization and a current bridge exchange. See
+[the reset contract](product.md#normal-update-versus-fresh-reset). Interactive
+uninstall defaults to keeping data and routes explicit cleanup through the same
+owned-root/reparse protections, including configured roots. Silent uninstall
 keeps data. External media and Chrome profiles are outside installer ownership.
 
 For a manual desktop relay registration, use `tools/register-native-host.ps1`
