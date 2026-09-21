@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.32
+AppVersion=0.20.33
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.32
+OutputBaseFilename=OFEnhancer-Setup-0.20.33
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -108,7 +108,7 @@ begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(
       ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.32',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.33',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode
     ) or (ExitCode <> 0) then
       RaiseException('The clean package was copied, but its Fresh reinstall admission barrier could not be established. Run this installer again to resume.');
@@ -137,38 +137,22 @@ begin
   OriginalNextWidth := WizardForm.NextButton.Width;
   OriginalBackLeft := WizardForm.BackButton.Left;
   ResumeFresh := FileExists(ExpandConstant('{localappdata}\OFEnhancer-Maintenance\fresh-reinstall.json'));
-  ResumeAfterInstall := ResumeFresh and (
-    FreshTransactionPhaseIs('CleanPackageInstalled') or
-    FreshTransactionPhaseIs('ChromeSetupPending')
-  );
+  ResumeAfterInstall := ResumeFresh and FreshTransactionPhaseIs('ChromeSetupPending');
+  if ResumeAfterInstall then
+    ResumeFresh := False;
   if ExistingInstall() then
   begin
     if ResumeFresh then
     begin
-      if ResumeAfterInstall then
-      begin
-        ExistingPage := CreateInputOptionPage(
-          wpWelcome,
-          'Finish Fresh reinstall',
-          'The clean OFEnhancer package is installed.',
-          'Continue to finish Chrome setup. No old desktop files or data will be removed again.',
-          True,
-          False
-        );
-        ExistingPage.Add('Finish Fresh reinstall');
-      end
-      else
-      begin
-        ExistingPage := CreateInputOptionPage(
-          wpWelcome,
-          'Resume Fresh reinstall',
-          'Setup found the safely preserved Fresh reinstall checkpoint.',
-          'Continue the protected cleanup from its last completed step.',
-          True,
-          False
-        );
-        ExistingPage.Add('Resume Fresh reinstall');
-      end;
+      ExistingPage := CreateInputOptionPage(
+        wpWelcome,
+        'Resume Fresh reinstall',
+        'Setup found the safely preserved Fresh reinstall checkpoint.',
+        'Continue the protected cleanup from its last completed step.',
+        True,
+        False
+      );
+      ExistingPage.Add('Resume Fresh reinstall');
       ExistingPage.SelectedValueIndex := 0;
       ExistingPage.CheckListBox.Enabled := False;
     end
@@ -259,7 +243,7 @@ begin
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
   Parameters := Operation +
     ' --install-root "' + WizardDirValue + '"' +
-    ' --package-version 0.20.32';
+    ' --package-version 0.20.33';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
 end;
 

@@ -118,7 +118,7 @@ test("upgrade archives old preparation, drops live bindings, preserves unrelated
   f.local.creatorToolkitV2 = { saved: true };
   f.session.unrelated = { keep: true };
   const before = structuredClone(f.local.creatorUploadRecoveryV1[0].steps);
-  await f.store.ensureRuntimeVersion("0.20.32");
+  await f.store.ensureRuntimeVersion("0.20.33");
   assert.equal(f.session[f.store.KEY_PREFIX + record.id], undefined);
   assert.deepEqual(f.local.creatorToolkitV2, { saved: true });
   assert.deepEqual(f.session.unrelated, { keep: true });
@@ -151,7 +151,7 @@ test("upgrade persists final-action evidence before removing legacy session stat
       },
     },
   };
-  await f.store.ensureRuntimeVersion("0.20.32");
+  await f.store.ensureRuntimeVersion("0.20.33");
   assert.equal(f.session[f.store.KEY_PREFIX + record.id], undefined);
   assert.equal((await f.store.listPublication()).length, 1);
   await assert.rejects(
@@ -167,14 +167,14 @@ test("failed archive durability leaves old bindings and all recovery records unt
   const before = JSON.stringify({ session: f.session, local: f.local });
   f.refuseArchive();
   await assert.rejects(
-    f.store.ensureRuntimeVersion("0.20.32"),
+    f.store.ensureRuntimeVersion("0.20.33"),
     /archive-not-durable/,
   );
   assert.equal(JSON.stringify({ session: f.session, local: f.local }), before);
 });
 test("downgrade or malformed version does not delete current state", async () => {
   const f = harness();
-  await f.store.ensureRuntimeVersion("0.20.32");
+  await f.store.ensureRuntimeVersion("0.20.33");
   await f.store.save(record);
   const before = JSON.stringify({ session: f.session, local: f.local });
   for (const version of ["0.20.24", "invalid", ""])

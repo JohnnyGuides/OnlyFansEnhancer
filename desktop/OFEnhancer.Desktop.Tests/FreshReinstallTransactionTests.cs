@@ -28,24 +28,24 @@ public sealed class FreshReinstallTransactionTests
             File.WriteAllText(Path.Combine(install, "package-manifest.json"), JsonSerializer.Serialize(new
             {
                 product = "OFEnhancer",
-                productVersion = "0.20.32",
+                productVersion = "0.20.33",
                 files = new[] { new { path = "payload.bin", size = bytes.LongLength, sha256 = Convert.ToHexString(SHA256.HashData(bytes)) } },
             }));
             File.WriteAllText(Path.Combine(maintenance, "chrome-reset.json"), "reset-journal");
             FreshReinstallTransaction transaction = FreshReinstallTransaction.Create(
-                transactionPath, "0.20.32", install, data, webView, [ChromeIntegration.CanonicalExtensionId]);
+                transactionPath, "0.20.33", install, data, webView, [ChromeIntegration.CanonicalExtensionId]);
             transaction.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-ready");
             transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "removal-confirmed");
             transaction.Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed");
             transaction.Advance(FreshReinstallPhase.OwnedStatePurged, "owned-state-purged");
 
-            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, install, "0.20.32");
-            Assert.AreEqual(FreshReinstallPhase.ChromeSetupPending, FreshReinstallTransaction.Load(transactionPath).Phase);
+            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, install, "0.20.33");
+            Assert.IsFalse(File.Exists(transactionPath), "desktop maintenance must end when the clean package is verified");
+            Assert.IsFalse(File.Exists(Path.Combine(maintenance, "chrome-reset.json")), "the copied maintenance reset journal must be retired");
             Assert.AreEqual("reset-journal", File.ReadAllText(Path.Combine(data, "data", "chrome-reset.json")));
 
-            FreshReinstallMaintenance.FinalizeInstalledPackage(
-                FreshReinstallTransaction.Load(transactionPath), install, "0.20.32");
-            Assert.AreEqual(FreshReinstallPhase.ChromeSetupPending, FreshReinstallTransaction.Load(transactionPath).Phase);
+            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, install, "0.20.33");
+            Assert.IsFalse(File.Exists(transactionPath));
         }
         finally
         {

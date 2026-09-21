@@ -361,3 +361,16 @@ coverage rejects expanding those match patterns to physical paths.
   proceeds only to the remaining Chrome connection step.
 - The completion page restores the native **Finish** label; custom Fresh-page
   labels and button sizing do not leak into other wizard pages.
+
+## Retired Fresh maintenance checkpoint — 0.20.33
+
+- Verifying the clean desktop package copies the Chrome reset journal into the
+  installed data directory, then immediately completes and deletes the separate
+  Fresh maintenance transaction and its source reset journal.
+- Chrome admission remains enforced by the installed reset journal; it does not
+  depend on retaining installer state until Chrome is configured.
+- A legacy `ChromeSetupPending` transaction is silently excluded from Fresh
+  resume detection. Setup presents its normal installed-product choices and
+  launches only the remaining Chrome setup step after installation.
+- Desktop startup safely retires any legacy `ChromeSetupPending` transaction,
+  preventing old successful Fresh reinstalls from affecting future installers.

@@ -55,8 +55,14 @@ internal static class FreshReinstallMaintenance
             FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
             if (transaction.Phase is FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled)
                 FinalizeInstalledPackage(transaction, transaction.InstallRoot, transaction.PackageVersion);
-            if (FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath).Phase == FreshReinstallPhase.ChromeSetupPending)
+            if (!File.Exists(AppConfiguration.MaintenanceTransactionPath))
                 return true;
+            transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
+            if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending)
+            {
+                transaction.CompleteAndDelete();
+                return true;
+            }
             message = "OFEnhancer setup has not finished yet. Complete or rerun the installer; your previous data remains protected.";
             return false;
         }
@@ -227,7 +233,12 @@ internal static class FreshReinstallMaintenance
         if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal)
             || !SamePath(transaction.InstallRoot, installRoot))
             throw new InvalidOperationException("The clean package does not match the committed Fresh reinstall transaction.");
-        if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending) return;
+        if (transaction.Phase == FreshReinstallPhase.Complete) return;
+        if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending)
+        {
+            transaction.CompleteAndDelete();
+            return;
+        }
         if (transaction.Phase is not (FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled))
             throw new InvalidOperationException("The clean package cannot be finalized from the current Fresh reinstall phase.");
         VerifyInstalledPackage(installRoot, version);
@@ -239,6 +250,7 @@ internal static class FreshReinstallMaintenance
         if (transaction.Phase == FreshReinstallPhase.OwnedStatePurged)
             transaction.Advance(FreshReinstallPhase.CleanPackageInstalled, "clean-package-verified");
         transaction.Advance(FreshReinstallPhase.ChromeSetupPending, "chrome-new-install-pending");
+        transaction.CompleteAndDelete();
     }
 
     private static FinalizationLock AcquireFinalizationLock()
