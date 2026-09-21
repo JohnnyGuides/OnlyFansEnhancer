@@ -163,18 +163,20 @@ internal sealed class FreshReinstallTransaction
 
     internal void AdoptPendingPackage(string packageVersion, string installRoot, string dataRoot, string webViewRoot)
     {
-        if (Phase >= FreshReinstallPhase.PreviousPackageRemoved)
-            throw new InvalidOperationException("A destructive Fresh reinstall phase cannot change package version.");
         if (!VersionPattern.IsMatch(packageVersion)
             || !SameRoot(journal.InstallRoot, ValidateRoot(installRoot, "installation"))
             || !SameRoot(journal.DataRoot, ValidateRoot(dataRoot, "data"))
             || !SameRoot(journal.WebViewRoot, ValidateRoot(webViewRoot, "WebView2")))
             throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
         if (string.Equals(journal.PackageVersion, packageVersion, StringComparison.Ordinal)) return;
+        if (Version.Parse(packageVersion) < Version.Parse(journal.PackageVersion))
+            throw new InvalidOperationException("Resume Fresh reinstall with this package version or a newer installer.");
+        // A newer repair installer may finish an interrupted transaction, but it
+        // must retain every cleanup checkpoint and the original approved roots.
         Save(journal with
         {
             PackageVersion = packageVersion,
-            Observations = journal.Observations.Append("pending-package-updated").TakeLast(128).ToArray(),
+            Observations = journal.Observations.Append("resume-package-updated").TakeLast(128).ToArray(),
         });
     }
 
@@ -289,6 +291,9 @@ internal sealed class FreshReinstallTransaction
         string volume = Path.TrimEndingDirectorySeparator(Path.GetPathRoot(full)!);
         if (string.Equals(full, volume, StringComparison.OrdinalIgnoreCase) || File.Exists(full))
             throw new InvalidOperationException($"The Fresh reinstall {name} root is unsafe.");
+        for (DirectoryInfo? ancestor = new(full); ancestor is not null; ancestor = ancestor.Parent)
+            if (ancestor.Exists && (ancestor.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("Fresh reinstall refused a redirected owned path.");
         return full;
     }
 
@@ -348,8 +353,7 @@ internal sealed class FreshReinstallTransaction
         if ((attributes & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("Fresh reinstall refused a redirected owned path.");
         if (!descend || (attributes & FileAttributes.Directory) == 0) return;
-        foreach (string child in Directory.EnumerateFileSystemEntries(path, "*", SearchOption.AllDirectories))
-            if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("Fresh reinstall refused a redirected owned path.");
+        foreach (string child in Directory.EnumerateFileSystemEntries(path))
+            RejectReparsePoints(child);
     }
 }

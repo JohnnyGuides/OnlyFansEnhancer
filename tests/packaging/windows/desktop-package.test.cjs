@@ -226,7 +226,7 @@ async function main() {
   );
   assert.match(
     installer,
-    /function PrepareToInstall[\s\S]*--fresh-reinstall-plan[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-previous-package-removed[\s\S]*--fresh-reinstall-clean/,
+    /function PrepareToInstall[\s\S]*ValidExistingUninstaller[\s\S]*--fresh-reinstall-plan[\s\S]*--fresh-reinstall-needs-uninstall[\s\S]*ExistingUninstallerPath[\s\S]*--fresh-reinstall-previous-package-removed[\s\S]*--fresh-reinstall-clean/,
   );
   assert.match(installer, /CreateCustomPage\([\s\S]*Confirm Fresh reinstall/);
   assert.match(installer, /It does not claim that Chrome was removed/);
@@ -279,8 +279,8 @@ async function main() {
   );
   assert.match(
     installer,
-    /Exec\(\s*'>'\s*,\s*ExistingUninstaller \+ ' \/SILENT \/NORESTART'/s,
-    "Setup must execute the registered uninstall command without reparsing it",
+    /Exec\(ExistingUninstallerPath, '\/SILENT \/NORESTART'/s,
+    "Setup must execute only the validated uninstaller executable",
   );
   assert.match(
     installer,
@@ -705,7 +705,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.35",
+      productVersion: "0.20.36",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -805,7 +805,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.35");
+    assert.equal(manifest.productVersion, "0.20.36");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

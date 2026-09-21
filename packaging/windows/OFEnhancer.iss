@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.35
+AppVersion=0.20.36
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.35
+OutputBaseFilename=OFEnhancer-Setup-0.20.36
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -58,6 +58,9 @@ var
   FreshScope: TNewStaticText;
   ExistingUninstaller: String;
   ExistingInstallRoot: String;
+  ExistingUninstallerPath: String;
+  MaintenanceError: String;
+  MaintenanceStatus: Integer;
   ExistingUninstallCompleted: Boolean;
   RemoveUserData: Boolean;
   ResumeFresh: Boolean;
@@ -110,28 +113,45 @@ end;
 
 function RunFreshHelper(const Operation: String; var ExitCode: Integer): Boolean;
 var
-  Helper, Parameters: String;
+  Helper, Parameters, ErrorFile: String;
+  ErrorText: AnsiString;
 begin
+  MaintenanceError := '';
+  ErrorFile := ExpandConstant('{tmp}\ofenhancer-maintenance-error.txt');
+  DeleteFile(ErrorFile);
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
-  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.35';
+  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.36 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  if LoadStringFromFile(ErrorFile, ErrorText) then MaintenanceError := UTF8Decode(ErrorText);
+  if not Result then MaintenanceError := SysErrorMessage(ExitCode);
+  Log(Operation + ': exit ' + IntToStr(ExitCode) + ' ' + MaintenanceError);
 end;
 
 function HasResumableFreshTransaction(): Boolean;
 var
   ExitCode: Integer;
 begin
-  Result := ExtractFreshMaintenance() and RunFreshHelper('--fresh-reinstall-status', ExitCode) and (ExitCode = 0);
+  MaintenanceStatus := 3;
+  if ExtractFreshMaintenance() and RunFreshHelper('--fresh-reinstall-status', ExitCode) then
+    MaintenanceStatus := ExitCode;
+  Result := MaintenanceStatus = 0;
 end;
 
 procedure InitializeWizard();
 var
   FreshAfterID: Integer;
+  SavedRoot: AnsiString;
 begin
   OriginalNextLeft := WizardForm.NextButton.Left;
   OriginalNextWidth := WizardForm.NextButton.Width;
   OriginalBackLeft := WizardForm.BackButton.Left;
   ResumeFresh := HasResumableFreshTransaction();
+  if ResumeFresh then
+    if LoadStringFromFile(ExpandConstant('{tmp}\ofenhancer-resume-root.txt'), SavedRoot) then
+    begin
+      WizardForm.DirEdit.Text := UTF8Decode(SavedRoot);
+      Log('Resuming approved installation root: ' + WizardDirValue);
+    end;
 
   if ExistingInstall() or ResumeFresh then
   begin
@@ -182,16 +202,25 @@ end;
 
 function ValidExistingUninstaller(): Boolean;
 var
-  Candidate, RootPrefix: String;
+  Candidate, Name: String;
 begin
-  Candidate := ExistingUninstaller;
-  StringChangeEx(Candidate, '"', '', True);
+  Result := False;
+  if Trim(ExistingInstallRoot) = '' then Exit;
+  Candidate := Trim(ExistingUninstaller);
+  if (Length(Candidate) > 1) and (Candidate[1] = '"') and (Candidate[Length(Candidate)] = '"') then
+    Candidate := Copy(Candidate, 2, Length(Candidate) - 2);
+  if (Pos('"', Candidate) > 0) or (ExtractFileDrive(Candidate) = '') then Exit;
   ExistingInstallRoot := RemoveBackslashUnlessRoot(ExpandFileName(ExistingInstallRoot));
-  RootPrefix := AddBackslash(ExistingInstallRoot);
-  Result := (ExistingInstallRoot <> '') and
+  Candidate := ExpandFileName(Candidate);
+  Name := Lowercase(ExtractFileName(Candidate));
+  ExistingUninstallerPath := Candidate;
+  Result :=
     (CompareText(ExistingInstallRoot, RemoveBackslashUnlessRoot(ExpandFileName(WizardDirValue))) = 0) and
-    (Pos(Lowercase(RootPrefix), Lowercase(ExpandFileName(Candidate))) = 1) and
-    (Pos('unins', Lowercase(ExtractFileName(Candidate))) = 1) and FileExists(Candidate);
+    (CompareText(ExistingInstallRoot, RemoveBackslashUnlessRoot(ExtractFileDir(Candidate))) = 0) and
+    (Length(Name) = 12) and (Copy(Name, 1, 5) = 'unins') and
+    (Name[6] >= '0') and (Name[6] <= '9') and
+    (Name[7] >= '0') and (Name[7] <= '9') and
+    (Name[8] >= '0') and (Name[8] <= '9') and (Copy(Name, 9, 4) = '.exe');
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -199,20 +228,34 @@ var
   ExitCode: Integer;
 begin
   Result := '';
-  if not IsFreshReset() then Exit;
-  if not ExtractFreshMaintenance() or not RunFreshHelper('--fresh-reinstall-plan', ExitCode) or (ExitCode <> 0) then
+  if MaintenanceStatus = 3 then
   begin
-    Result := 'Fresh reinstall could not save its Windows plan and durable Chrome obligation. No cleanup was started.';
+    Result := 'The saved installation checkpoint could not be read. ' + MaintenanceError;
     Exit;
   end;
-  if ExistingInstall() then
+  if not IsFreshReset() then Exit;
+  { Validate registry paths before creating any reset obligation. Missing files
+    are handled separately after the helper verifies the product manifest. }
+  if ExistingInstall() and not ValidExistingUninstaller() then
   begin
-    if not ValidExistingUninstaller() then
-    begin
-      Result := 'The registered previous uninstaller does not belong to the verified OFEnhancer install root. Cleanup was blocked.';
-      Exit;
-    end;
-    if not Exec('>', ExistingUninstaller + ' /SILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+    Result := 'The registered uninstall path differs from the selected OFEnhancer folder. Select ' + ExistingInstallRoot + ' to repair this installation. No cleanup was started.';
+    Exit;
+  end;
+  if not ExtractFreshMaintenance() or not RunFreshHelper('--fresh-reinstall-plan', ExitCode) or (ExitCode <> 0) then
+  begin
+    Result := 'Fresh reinstall could not prepare or resume Windows cleanup. ' + MaintenanceError;
+    Exit;
+  end;
+  if not RunFreshHelper('--fresh-reinstall-needs-uninstall', ExitCode) or ((ExitCode <> 0) and (ExitCode <> 1)) then
+  begin
+    Result := 'Setup could not read the uninstall checkpoint. ' + MaintenanceError;
+    Exit;
+  end;
+  if (ExitCode = 0) and ExistingInstall() then
+  begin
+    if not FileExists(ExistingUninstallerPath) then
+      Log('Previous uninstaller is missing. Repairing the verified product root directly.')
+    else if not Exec(ExistingUninstallerPath, '/SILENT /NORESTART', ExistingInstallRoot, SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
     begin
       Result := 'The verified previous OFEnhancer uninstaller failed. The resumable Windows transaction was preserved.';
       Exit;
@@ -224,7 +267,7 @@ begin
     Exit;
   end;
   if not RunFreshHelper('--fresh-reinstall-clean', ExitCode) or (ExitCode <> 0) then
-    Result := 'OFEnhancer could not purge every verified owned Windows file or cache. Setup stopped and preserved the resumable transaction.';
+    Result := 'Windows cleanup paused; completed steps will not repeat. ' + MaintenanceError;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -233,7 +276,7 @@ var
 begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.35',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.36',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
       RaiseException('The Windows package was copied, but verification or durable Chrome handoff failed. Run this installer again to resume.');
 end;
@@ -243,6 +286,7 @@ begin
   Result := (KeepDataPage <> nil) and (PageID = KeepDataPage.ID) and
     (ResumeFresh or (ExistingPage.SelectedValueIndex <> 2));
   if (FreshPage <> nil) and (PageID = FreshPage.ID) then Result := not IsFreshReset();
+  if ResumeFresh and (PageID = wpSelectDir) then Result := True;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -271,13 +315,19 @@ begin
   Result := True;
   if (KeepDataPage <> nil) and (CurPageID = KeepDataPage.ID) then
   begin
+    if not ValidExistingUninstaller() or not FileExists(ExistingUninstallerPath) then
+    begin
+      MsgBox('The previous uninstaller is missing or invalid. Choose Update or reinstall to repair it while keeping your data, then uninstall.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
     if (not KeepDataPage.Values[0]) and (not ExtractFreshMaintenance()) then
     begin
       MsgBox('Windows could not prepare verified OFEnhancer data cleanup. Nothing was removed.', mbError, MB_OK);
       Result := False;
       Exit;
     end;
-    if not Exec('>', ExistingUninstaller + ' /SILENT /NORESTART', '', SW_SHOW, ewWaitUntilTerminated, ExitCode) then
+    if not Exec(ExistingUninstallerPath, '/SILENT /NORESTART', ExistingInstallRoot, SW_SHOW, ewWaitUntilTerminated, ExitCode) then
       MsgBox('Windows could not start the existing uninstaller: ' + SysErrorMessage(ExitCode), mbError, MB_OK)
     else if ExitCode <> 0 then MsgBox('OFEnhancer could not be uninstalled. Your data was not removed.', mbError, MB_OK)
     else

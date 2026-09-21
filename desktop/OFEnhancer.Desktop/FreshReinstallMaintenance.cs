@@ -17,7 +17,18 @@ internal static class FreshReinstallMaintenance
         {
             if (args.Contains("--fresh-reinstall-status", StringComparer.Ordinal))
             {
-                exitCode = File.Exists(AppConfiguration.MaintenanceTransactionPath) ? 0 : 1;
+                if (!File.Exists(AppConfiguration.MaintenanceTransactionPath)) exitCode = 1;
+                else
+                {
+                    FreshReinstallTransaction saved = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
+                    string? resumeRootPath = OptionalArgument(args, "--resume-root-file");
+                    if (resumeRootPath is not null) File.WriteAllText(resumeRootPath, saved.InstallRoot);
+                }
+                return true;
+            }
+            if (args.Contains("--fresh-reinstall-needs-uninstall", StringComparer.Ordinal))
+            {
+                exitCode = LoadMatching(args).Phase == FreshReinstallPhase.Preflight ? 0 : 1;
                 return true;
             }
             if (args.Contains("--fresh-reinstall-plan", StringComparer.Ordinal))
@@ -52,6 +63,11 @@ internal static class FreshReinstallMaintenance
         catch (Exception error)
         {
             Debug.WriteLine("OFEnhancer maintenance failed: " + error);
+            // The installer owns this temporary diagnostic; never dump settings,
+            // tokens, or the exception stack into it.
+            string? errorPath = OptionalArgument(args, "--error-file");
+            if (errorPath is not null)
+                try { File.WriteAllText(errorPath, error.Message); } catch { }
             exitCode = 3;
             return true;
         }
@@ -65,6 +81,9 @@ internal static class FreshReinstallMaintenance
         {
             using FinalizationLock finalization = AcquireFinalizationLock();
             FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
+            // No Windows mutation has been checkpointed. A failed preparation
+            // must not prevent access to the existing desktop and its data.
+            if (transaction.Phase == FreshReinstallPhase.Preflight) return true;
             if (transaction.Phase is FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled
                 or FreshReinstallPhase.ChromeObligationAcknowledged or FreshReinstallPhase.Complete)
                 FinalizeInstalledPackage(transaction, transaction.InstallRoot, transaction.PackageVersion);
@@ -97,7 +116,8 @@ internal static class FreshReinstallMaintenance
             throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer.");
 
         FreshReinstallTransaction transaction;
-        bool created = false;
+        ChromeExtensionReset reset = new(AppConfiguration.ChromeResetPath, legacyPath: AppConfiguration.LegacyChromeResetPath);
+        if (!reset.IsValid) throw new InvalidOperationException("The Chrome reset record could not be verified.");
         if (File.Exists(AppConfiguration.MaintenanceTransactionPath))
         {
             transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
@@ -105,22 +125,31 @@ internal static class FreshReinstallMaintenance
         }
         else
         {
-            if (!Directory.Exists(installRoot) || !File.Exists(Path.Combine(installRoot, "package-manifest.json")))
-                throw new InvalidOperationException("The previous OFEnhancer installation root could not be verified.");
+            VerifyPreviousPackage(installRoot);
             string settingsPath = Path.Combine(dataRoot, "settings.json");
             string oldIdentity = File.Exists(settingsPath)
                 ? new DesktopSettingsStore(settingsPath).Load().ExtensionId ?? ChromeIntegration.CanonicalExtensionId
                 : ChromeIntegration.CanonicalExtensionId;
             transaction = FreshReinstallTransaction.Create(AppConfiguration.MaintenanceTransactionPath, version,
                 installRoot, dataRoot, webViewRoot, [oldIdentity], AppConfiguration.IsExclusiveDataRoot(dataRoot), webViewExclusive);
-            created = true;
         }
-        ChromeExtensionReset reset = new(AppConfiguration.ChromeResetPath, legacyPath: AppConfiguration.LegacyChromeResetPath);
-        if (!reset.IsValid) throw new InvalidOperationException("The Chrome reset record could not be verified.");
-        if (created && !reset.Pending)
+        // Recover a crash between the two durable writes. Never recreate a
+        // Chrome obligation after cleanup or after replacement was admitted.
+        if (transaction.Phase == FreshReinstallPhase.Preflight && !reset.Pending)
             reset.Begin(transaction.ExtensionIds[0]);
-        if (!reset.Pending)
+        if (!reset.Pending && transaction.Phase < FreshReinstallPhase.ChromeObligationAcknowledged)
             throw new InvalidOperationException("The durable Chrome reset obligation could not be established.");
+    }
+
+    internal static void VerifyPreviousPackage(string root)
+    {
+        // A missing unins000.exe is recoverable only inside a real product
+        // package. A filename alone is not evidence of an owned install root.
+        using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "package-manifest.json")));
+        if (manifest.RootElement.GetProperty("product").GetString() != "OFEnhancer"
+            || !Version.TryParse(manifest.RootElement.GetProperty("productVersion").GetString(), out _)
+            || manifest.RootElement.GetProperty("files").ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("The previous OFEnhancer installation root could not be verified.");
     }
 
     private static FreshReinstallTransaction LoadMatching(IReadOnlyList<string> args)
@@ -213,6 +242,12 @@ internal static class FreshReinstallMaintenance
         for (int index = 0; index < args.Count - 1; index++)
             if (string.Equals(args[index], name, StringComparison.Ordinal)) return args[index + 1];
         throw new InvalidOperationException("OFEnhancer maintenance is missing " + name + ".");
+    }
+    private static string? OptionalArgument(IReadOnlyList<string> args, string name)
+    {
+        for (int index = 0; index < args.Count - 1; index++)
+            if (string.Equals(args[index], name, StringComparison.Ordinal)) return args[index + 1];
+        return null;
     }
     private static bool SamePath(string left, string right) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(left))
         .Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);

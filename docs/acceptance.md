@@ -54,6 +54,27 @@ Chrome setup/reload guides use Chrome, current data survives update/repair, and
 external media/profiles remain untouched. A StageOnly pass is not a compiled or
 installed Setup pass. Unsigned local output is not a signed public release.
 
+### Installer recovery — 0.20.36
+
+`tests/packaging/windows/installer-recovery.test.cjs` compiles the production
+installer logic under a random test AppId, with desktop integration declarations
+removed. Its files and logs stay under `.local/installer-recovery-*`; its registry
+changes are limited to that test AppId. Run it after `npm run build:desktop`.
+
+- Reproduce a registered but missing `unins000.exe` and a saved 0.20.35 preflight.
+  The repair uses the approved folder, removes obsolete fixture state, installs
+  and verifies the package, and retires only the Windows checkpoint.
+- Resume `OwnedStatePurged` with a newly copied package and uninstaller present.
+  Neither the new uninstaller nor completed purge operations may run again.
+- Run an ordinary update and silent uninstall, retaining fixture user data.
+- .NET coverage exercises every phase with the same/newer repair version,
+  rejects downgrades and changed roots, restores an interrupted Chrome-obligation
+  write, distinguishes corrupt checkpoints from absence, and checks product-root
+  evidence. Preflight alone must not block normal desktop startup.
+
+These isolated runs do not install into the owner's live product folder or
+remove/reset the owner's Chrome extension.
+
 ## Google acceptance on a disposable workbook copy
 
 Follow [Google catalogue](google-catalogue.md). First prove adaptive import leaves

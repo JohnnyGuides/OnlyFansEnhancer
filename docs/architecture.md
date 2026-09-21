@@ -153,6 +153,11 @@ of removal requests/rejections, user reports, retired receipts, replacement stag
 and admitted receipt. It is never copied into the desktop data root.
 
 Inno Setup invokes only Windows plan/checkpoint/cleanup/finalization operations.
+Recovery retains the original approved roots and completed cleanup phases, even
+when a newer repair installer adopts the transaction. A missing registered
+uninstaller can be recovered inside the verified product root. Once removal is
+checkpointed, Setup never runs an uninstaller again for that transaction. Saved
+preflight alone does not block desktop startup; destructive phases still do.
 The installed app owns all Chrome guidance and admission. The extension owns only
 its resumable genuine-install initialization record. The native bridge remains a
 transport: it stamps Chrome's actual invocation origin on every browser request,
