@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.36"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.37"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -2814,14 +2814,26 @@ async function assertCreatorUploadPageBinding(session, target, sender) {
       creatorUploadPort(session.id) !== port ||
       session.executionPort !== port ||
       target.documentId !== sender.documentId ||
-      target.boundUrl !== originalUrl ||
+      (target.boundUrl !== originalUrl &&
+        !(
+          alias &&
+          ["https://fansly.com/", "https://fansly.com/home"].includes(
+            target.boundUrl,
+          )
+        )) ||
       frame?.documentId !== sender.documentId ||
-      frame?.url !== sender.url
+      (frame?.url !== sender.url &&
+        !(
+          alias &&
+          ["https://fansly.com/", "https://fansly.com/home"].includes(
+            frame?.url,
+          )
+        ))
     )
       refuse("upload-page-binding-changed");
   };
   await inspectFrame();
-  if (!facts.routeMatch) {
+  if (alias) {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: target.tabId, documentIds: [sender.documentId] },
       func: (id) => {
@@ -2829,18 +2841,31 @@ async function assertCreatorUploadPageBinding(session, target, sender) {
         const candidates = [
           ...document.querySelectorAll("app-post-creation"),
         ].filter((node) => node.isConnected && node.getClientRects().length);
-        return Boolean(
-          composer &&
-          composer.isConnected &&
-          candidates.length === 1 &&
-          candidates[0] === composer,
-        );
+        return {
+          url: location.href,
+          owned: Boolean(
+            composer &&
+            composer.isConnected &&
+            candidates.length === 1 &&
+            candidates[0] === composer,
+          ),
+        };
       },
       args: [session.id],
     });
-    if (result?.result !== true) refuse("upload-page-binding-composer-changed");
+    // Chrome MessageSender.url retains the document's initial URL after pushState.
+    // Verify the live homepage alias and original composer in the exact document.
+    if (
+      result?.frameId !== 0 ||
+      result?.documentId !== sender.documentId ||
+      !["https://fansly.com/", "https://fansly.com/home"].includes(
+        result?.result?.url,
+      ) ||
+      result?.result?.owned !== true
+    )
+      refuse("upload-page-binding-composer-changed");
     await inspectFrame();
-    target.boundUrl = sender.url;
+    target.boundUrl = result.result.url;
   }
 }
 
@@ -4222,7 +4247,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.36"
+      "upload-hub-0.20.37"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4407,8 +4432,9 @@ async function runCreatorManyVidsPlatform(session, target) {
           target.documentId,
         );
       } catch (error) {
-        if (!target.editorHandoff?.documentId || target.editorHandoff.invalid)
-          throw error;
+        // The source execution can end just before Chrome reports onCommitted.
+        // An armed handoff may wait for that event, but never implies acceptance.
+        if (!target.editorHandoff || target.editorHandoff.invalid) throw error;
         uploadResult = { status: "edit-requested" };
       }
       if (uploadResult.status !== "edit-requested") {
@@ -5399,21 +5425,50 @@ function handleExtensionMessage(message, sender, sendResponse) {
             message.evidence?.destinationUrl,
             "edit",
           );
+          const buttonHandoff =
+            !message.evidence?.destinationUrl &&
+            message.evidence?.completedCard === true;
           if (
-            !expected ||
-            expected.manyvidsId !== message.evidence?.videoId ||
-            new URL(expected.url).search ||
-            new URL(expected.url).hash
+            !buttonHandoff &&
+            (!expected ||
+              expected.manyvidsId !== message.evidence?.videoId ||
+              new URL(expected.url).search ||
+              new URL(expected.url).hash)
           )
             throw new Error("ManyVids editor destination evidence is missing.");
+          if (buttonHandoff) {
+            const [proof] = await chrome.scripting.executeScript({
+              target: { tabId: target.tabId, documentIds: [sender.documentId] },
+              func: (commandId, filename) => {
+                const action =
+                  globalThis.CreatorManyVidsCompletedActions?.get(commandId);
+                return Boolean(
+                  location.href === "https://www.manyvids.com/upload-video" &&
+                  action?.filename === filename &&
+                  action.verify(),
+                );
+              },
+              args: [message.commandId, session.draft.fullFilename],
+            });
+            if (
+              proof?.result !== true ||
+              proof.frameId !== 0 ||
+              proof.documentId !== sender.documentId
+            )
+              throw new Error(
+                "ManyVids completed-card handoff proof is unavailable.",
+              );
+            await assertCreatorUploadPageBinding(session, target, sender);
+          }
           if (!target.editorHandoff) {
             if (!chrome.webNavigation.onCommitted)
               throw new Error("Editor navigation evidence is unavailable.");
             const handoff = {
               commandId: message.commandId,
               sourceDocumentId: sender.documentId,
-              expectedUrl: expected.url,
-              videoId: expected.manyvidsId,
+              expectedUrl: expected?.url || "",
+              videoId: expected?.manyvidsId || "",
+              expiresAt: Date.now() + 30_000,
               documentId: "",
               url: "",
               invalid: false,
@@ -5427,8 +5482,11 @@ function handleExtensionMessage(message, sender, sendResponse) {
               const route = manyVidsRoute(details.url, "edit");
               if (
                 !route ||
-                route.manyvidsId !== handoff.videoId ||
-                details.url !== handoff.expectedUrl ||
+                (handoff.videoId && route.manyvidsId !== handoff.videoId) ||
+                (handoff.expectedUrl && details.url !== handoff.expectedUrl) ||
+                new URL(details.url).search ||
+                new URL(details.url).hash ||
+                Date.now() > handoff.expiresAt ||
                 session.cancelled ||
                 creatorUploadPort(session.id) !== boundPort ||
                 session.executionPort !== boundPort ||
@@ -5440,6 +5498,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
               )
                 handoff.invalid = true;
               else {
+                handoff.videoId ||= route.manyvidsId;
+                handoff.expectedUrl ||= details.url;
                 handoff.documentId = details.documentId;
                 handoff.url = details.url;
               }

@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.36",
+          productVersion: "0.20.37",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -582,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.36",
+    productVersion: "0.20.37",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -602,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.36");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.37");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -951,6 +951,14 @@ function send(message) {
   chrome.scripting.executeScript = async (details) => {
     if (details.files) return [{ frameId: 0 }];
     const name = details.func.name;
+    if (details.func.toString().includes("CreatorManyVidsCompletedActions"))
+      return [
+        {
+          frameId: 0,
+          documentId: tabDocumentId(openTabs.get(details.target.tabId)),
+          result: true,
+        },
+      ];
     if (
       name === "func" &&
       typeof details.args?.[0] === "string" &&
@@ -1021,7 +1029,7 @@ function send(message) {
               actionId: "open-editor",
               commandId: "11111111-1111-4111-8111-111111111111",
               outcome: "intent",
-              evidence: { destinationUrl, videoId: "7783271" },
+              evidence: { completedCard: true },
             },
             {
               tab: { id: tab.id },
@@ -2214,7 +2222,14 @@ function send(message) {
   // before a durable file-selection step can be issued.
   chrome.scripting.executeScript = async (details) => {
     assert.ok(details.func.toString().includes("CreatorFanslyComposers"));
-    return [{ result: true }];
+    const tab = openTabs.get(details.target.tabId);
+    return [
+      {
+        frameId: 0,
+        documentId: tabDocumentId(tab),
+        result: { owned: true, url: tab.url },
+      },
+    ];
   };
   context.AbortController = AbortController;
   context.addEventListener = () => {};

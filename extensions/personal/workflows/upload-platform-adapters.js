@@ -350,6 +350,74 @@
       );
     let ownedCard = null;
     let uploadIdentity = "";
+    const completedSelector =
+      '[class*="Uploaded-videos-module-"][class*="__cardVideo"]';
+    const initialCompleted = new Set(
+      document.querySelectorAll(completedSelector),
+    );
+    if (
+      [...initialCompleted].some(
+        (card) =>
+          visible(card) &&
+          normalizedFilename(
+            card.querySelector('[class*="__fileName"]')?.textContent,
+          ) === normalizedFilename(draft.fullFilename),
+      )
+    )
+      throw new Error(
+        "ManyVids already has a completed file with this name. Inspect its Edit page before selecting another copy.",
+      );
+    let ownedCompleted = null;
+    const completedCard = () => {
+      if (
+        fileReceipt?.role !== "full" ||
+        fileReceipt.name !== draft.fullFilename ||
+        !Number.isSafeInteger(fileReceipt.size) ||
+        fileReceipt.size <= 0
+      )
+        return null;
+      const candidates = [
+        ...document.querySelectorAll(completedSelector),
+      ].filter((card) => {
+        const name = card.querySelector('[class*="__fileName"]')?.textContent;
+        return (
+          visible(card) &&
+          normalizedFilename(name) === normalizedFilename(draft.fullFilename)
+        );
+      });
+      if (!candidates.length) return null;
+      if (candidates.length !== 1 || initialCompleted.has(candidates[0]))
+        throw new Error(
+          "ManyVids completed upload association is ambiguous or pre-existing.",
+        );
+      const card = candidates[0];
+      const size = card
+        .querySelector('[class*="__videoSize"]')
+        ?.textContent.trim();
+      const match = /^Filesize\s+(\d+(?:\.\d+)?)\s+MB$/i.exec(size || "");
+      if (
+        !match ||
+        Number(match[1]) !==
+          Number((fileReceipt.size / (1024 * 1024)).toFixed(2))
+      )
+        throw new Error(
+          "ManyVids completed card size does not match the selected file.",
+        );
+      const edit = manyVidsEditControl(card);
+      if (
+        edit.getAttribute("aria-label") !==
+          `Button edit video : ${draft.fullFilename}` ||
+        !edit.querySelector('svg[data-name="edit-icon"]') ||
+        !visible(edit)
+      )
+        throw new Error(
+          "ManyVids completed Edit control identity is unverified.",
+        );
+      if (ownedCompleted && ownedCompleted !== card)
+        throw new Error("ManyVids completed card identity changed.");
+      ownedCompleted = card;
+      return card;
+    };
     const currentCard = () => {
       if (!dashboard.isConnected || !visible(dashboard))
         throw new Error("ManyVids owned dashboard changed.");
@@ -387,6 +455,7 @@
     };
     const currentEdit = () => {
       const card = currentCard();
+      if (!card) return completedCard();
       return card?.matches(
         "[data-state='upload-complete'], .is-complete, .uppy-Dashboard-Item--complete, [data-upload-complete='true']",
       )
@@ -501,7 +570,7 @@
         (document.visibilityState === "visible" && document.hasFocus())
       )
         return true;
-      if (!currentCard()) return false;
+      if (!currentCard() && !completedCard()) return false;
       if (Date.now() < nextForegroundCheck) return false;
       const proof = await context.focusPage();
       abortIfNeeded(signal);
@@ -542,32 +611,48 @@
     const videoId =
       destination?.origin === "https://www.manyvids.com" &&
       /^\/Edit-vid\/(\d+)\/?$/.exec(destination.pathname)?.[1];
+    const buttonHandoff = !href && card === ownedCompleted;
     if (
       context.checkpointStep &&
+      !buttonHandoff &&
       (!videoId || destination.search || destination.hash)
     )
       throw new Error(
         "ManyVids completed Edit destination identity is unavailable.",
       );
-    await context.checkpointStep?.("open-editor", editorCommand, "intent", {
-      destinationUrl: destination?.href,
-      videoId,
-    });
-    if (
-      !card.isConnected ||
-      !edit.isConnected ||
-      (context.focusPage &&
-        (document.visibilityState !== "visible" || !document.hasFocus())) ||
-      !enabled(edit) ||
-      currentEdit() !== card ||
-      (edit.getAttribute("href") ||
-        edit.getAttribute("data-href") ||
-        edit.getAttribute("data-url")) !== href
-    )
-      throw new Error(
-        "ManyVids completed card changed during the editor checkpoint.",
-      );
-    click(edit, "ManyVids continue/edit control");
+    if (buttonHandoff) {
+      globalThis.CreatorManyVidsCompletedActions ||= new Map();
+      globalThis.CreatorManyVidsCompletedActions.set(editorCommand, {
+        filename: draft.fullFilename,
+        verify: () =>
+          currentEdit() === card && manyVidsEditControl(card) === edit,
+      });
+    }
+    try {
+      await context.checkpointStep?.("open-editor", editorCommand, "intent", {
+        destinationUrl: destination?.href,
+        videoId,
+        ...(buttonHandoff ? { completedCard: true } : {}),
+      });
+      if (
+        !card.isConnected ||
+        !edit.isConnected ||
+        (context.focusPage &&
+          (document.visibilityState !== "visible" || !document.hasFocus())) ||
+        !enabled(edit) ||
+        currentEdit() !== card ||
+        (edit.getAttribute("href") ||
+          edit.getAttribute("data-href") ||
+          edit.getAttribute("data-url")) !== href
+      )
+        throw new Error(
+          "ManyVids completed card changed during the editor checkpoint.",
+        );
+      click(edit, "ManyVids continue/edit control");
+    } finally {
+      if (buttonHandoff)
+        globalThis.CreatorManyVidsCompletedActions.delete(editorCommand);
+    }
     return { platform: "manyvids", status: "edit-requested" };
   }
 
@@ -700,7 +785,9 @@
     await context.attachFile("pornhub", selector);
     await waitFor(
       () =>
-        document.querySelector('custom-dropdown[data-key="orientation"]') &&
+        document.querySelector(
+          'custom-dropdown[data-key="orientation"], .dropdownElement[data-error="orientation"]',
+        ) &&
         document.querySelector('input[name="tags"]') &&
         document.querySelector(
           'input[name="category"], input[name="categoryInput"]',
@@ -1394,6 +1481,55 @@
   }
 
   function onlyFansScheduleAction(owned) {
+    const controls = [
+      ...document.querySelectorAll("button, [role='button']"),
+    ].filter((node) => visible(node) && onlyFansOwnsControl(owned, node));
+    // Owner-supplied September 21 markup: the real datepicker has a generic
+    // aria-label ("Your target"), while another toolbar button says Schedule post.
+    // Prefer the combined action/class/icon identity over that misleading label.
+    const structural = controls.filter(
+      (node) =>
+        node.getAttribute("at-attr") === "scheduled_msg" ||
+        node.classList.contains("b-make-post__datepicker-btn") ||
+        node.querySelector('svg[data-icon-name="icon-schedule"]'),
+    );
+    if (structural.length) {
+      if (structural.length !== 1)
+        throw new Error(
+          "OnlyFans schedule action is ambiguous (multiple datepicker identities).",
+        );
+      const node = structural[0];
+      const icons = node.querySelectorAll(
+        'svg[data-icon-name="icon-schedule"]',
+      );
+      const uses = icons[0]?.querySelectorAll("use");
+      if (
+        node.getAttribute("at-attr") !== "scheduled_msg" ||
+        !node.classList.contains("b-make-post__datepicker-btn") ||
+        icons.length !== 1 ||
+        uses?.length !== 1 ||
+        uses[0].getAttribute("href") !== "#icon-schedule" ||
+        (uses[0].hasAttribute("xlink:href") &&
+          uses[0].getAttribute("xlink:href") !== "#icon-schedule")
+      )
+        throw new Error(
+          "OnlyFans schedule action identity is incomplete; no action was clicked.",
+        );
+      assertActionLabels(
+        node,
+        ["schedule post", "your target"],
+        "OnlyFans schedule action",
+      );
+      if (
+        /\b(expiration|expire|expires|expiry|delete|remove)\b/i.test(
+          referencedLabel(node, "aria-describedby"),
+        )
+      )
+        throw new Error(
+          "OnlyFans schedule action has conflicting expiration identity.",
+        );
+      return node;
+    }
     const candidates = [
       ...document.querySelectorAll("button, [role='button']"),
     ].filter((node) => {
@@ -1482,7 +1618,28 @@
     const surfaces = dialogs.filter(
       (node) => node === popup || node.contains(popup),
     );
+    // The September 21 owner trace shows an unlabelled vdatetime popup inside
+    // the post form, with a time tab and Save for Later / Next / OK controls.
+    // Accept that observed structure only when it has no conflicting identity.
+    const structuralIdentity =
+      composer.contains(popup) &&
+      surfaces.every(
+        (node) =>
+          !node.getAttribute("aria-label") &&
+          !node.getAttribute("title") &&
+          !node.getAttribute("aria-labelledby") &&
+          ![...node.querySelectorAll("h1,h2,h3,[role='heading']")].some(
+            visible,
+          ),
+      ) &&
+      [...popup.querySelectorAll("button")].filter(
+        (node) => visible(node) && actionName(node) === "save for later",
+      ).length === 1 &&
+      [...popup.querySelectorAll("button")].filter(
+        (node) => visible(node) && ["next", "ok"].includes(actionName(node)),
+      ).length === 1;
     if (
+      !structuralIdentity &&
       !surfaces.some((node) =>
         names(node).some(
           (name) => name === "schedule post" || name === "schedule",
@@ -2682,7 +2839,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.36",
+    revision: "upload-hub-0.20.37",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

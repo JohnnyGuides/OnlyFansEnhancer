@@ -54,6 +54,56 @@ Chrome setup/reload guides use Chrome, current data survives update/repair, and
 external media/profiles remain untouched. A StageOnly pass is not a compiled or
 installed Setup pass. Unsigned local output is not a signed public release.
 
+### Upload preparation corrections — 0.20.37
+
+September 21 owner traces and the supplied OnlyFans button markup establish
+the current scheduler action (`at-attr="scheduled_msg"`,
+`b-make-post__datepicker-btn`, `icon-schedule`) despite its generic accessible
+label. The adapter prefers that combined identity, rejects incomplete or
+conflicting controls, and supports the recorded unlabelled in-composer
+`vdatetime` popup with Save for Later and Next/OK controls. Expiration dialogs
+and final publication remain guarded.
+
+An isolated real Chrome regression reproduced Fansly's binding failure:
+`MessageSender.url` retains `/` after `pushState` while the frame and page report
+`/home`. Binding now verifies the live homepage URL and original composer inside
+the exact document. Concurrent checks can accept the same verified alias without
+invalidating one another; foreign routes, documents, composers and connections
+remain rejected. The Chrome regression uses intercepted inert HTML, not a live
+account or upload.
+
+Live inspection followed ManyVids' 3.43 GB test file through upload completion.
+Its completed card replaces the Uppy item outside the dashboard, and Edit has no
+URL attribute. The adapter now binds a newly appeared card by the approved file
+receipt, exact filename, rounded displayed size, unique Edit action and icon.
+The coordinator independently checks the in-document action proof, then accepts
+one top-frame editor navigation within 30 seconds on the same bound connection;
+the resulting canonical editor URL and document become the handoff identity.
+Pre-existing/duplicate/replaced cards, unrelated destinations and lost bindings
+are rejected. A live click on the completed neutral file opened its Edit page;
+no Save or publication action was taken. The new automated handoff is covered by
+fixtures and still needs a fresh installed-version run.
+
+The owner's later ManyVids form trace matches the current title, description,
+teaser Upload and custom-launch controls. Direct live interaction also verified
+neutral title/description readback and September 25 at 17:00 in the displayed
+Europe/Amsterdam timezone, without final Save. Fansly accepted neutral composer
+text and exposed Upload New. Browser chooser calls selected no files on either
+site, so those calls do not establish upload acceptance; file-URL access in the
+browser-control extension is required before continuing that verification.
+
+Pornhub's metadata form was visible while the adapter waited for a removed
+`custom-dropdown` element. The metadata adapter now also recognizes the observed
+`data-error="orientation"` dropdown and verifies exact selection readback.
+
+Regression fixtures cover the owner-supplied scheduler identity, unlabelled
+calendar, wrong/ambiguous actions, stale Fansly navigation metadata, concurrent
+binding checks, and current Pornhub dropdown selection and failure cases.
+These are supporting checks, not end-to-end live acceptance. Browser policy
+blocked the Upload console and OnlyFans page; the owner traces describe manual
+actions before this update. Installation and a fresh automated unpublished run
+of this version remain unverified.
+
 ### Installer recovery — 0.20.36
 
 `tests/packaging/windows/installer-recovery.test.cjs` compiles the production

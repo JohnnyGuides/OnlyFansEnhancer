@@ -46,6 +46,31 @@ async function onlyFansFixture(page, variant) {
     const scheduler = document.querySelector("#scheduler");
     const schedule = document.querySelector("#schedule");
     const expiration = document.querySelector("#expiration");
+    if (variant.startsWith("structural-")) {
+      schedule.removeAttribute("aria-labelledby");
+      schedule.setAttribute("aria-label", "Your target");
+      schedule.setAttribute("at-attr", "scheduled_msg");
+      schedule.classList.add("b-make-post__datepicker-btn");
+      schedule.innerHTML =
+        '<svg data-icon-name="icon-schedule" aria-hidden="true"><use href="#icon-schedule" xlink:href="#icon-schedule"></use></svg>';
+      expiration.setAttribute("aria-label", "Schedule post");
+      if (variant === "structural-incomplete")
+        schedule.removeAttribute("at-attr");
+      if (variant === "structural-conflict")
+        schedule.title = "Expiration period";
+      if (variant === "structural-duplicate")
+        composer.append(schedule.cloneNode(true));
+    }
+    if (["trace-unlabelled", "structural-current"].includes(variant)) {
+      composer.append(scheduler);
+      scheduler.removeAttribute("aria-label");
+      scheduler.removeAttribute("role");
+      scheduler.querySelector("h2").remove();
+      scheduler.insertAdjacentHTML(
+        "beforeend",
+        '<button type="button">Save for Later</button><button type="button" id="next">Next</button>',
+      );
+    }
     if (variant !== "label-conflict") expiration.title = "Expiration period";
     if (
       ["wrong-surface", "generic-dialog", "existing-dialog"].includes(variant)
@@ -91,8 +116,11 @@ async function onlyFansFixture(page, variant) {
       .forEach((node) => {
         node.onclick = () => actions.push("date-time:" + node.textContent);
       });
-    scheduler.querySelector(".time").onclick = () =>
-      (document.querySelector("#time").hidden = false);
+    scheduler.querySelector(".time").onclick = () => {
+      document.querySelector("#time").hidden = false;
+      if (["trace-unlabelled", "structural-current"].includes(variant))
+        document.querySelector("#next").hidden = true;
+    };
     document.querySelector("#time button").onclick = () => {
       scheduler.hidden = true;
       composer.insertAdjacentHTML(
@@ -112,6 +140,11 @@ for (const variant of [
   "generic-dialog",
   "duplicate",
   "existing-dialog",
+  "trace-unlabelled",
+  "structural-current",
+  "structural-incomplete",
+  "structural-conflict",
+  "structural-duplicate",
 ]) {
   test(`OnlyFans action and postcondition identity: ${variant}`, async () => {
     const browser = await chromium.launch({ headless: true });
@@ -156,7 +189,14 @@ for (const variant of [
       assert.equal(result.actions.includes("PUBLICATION"), false);
       assert.deepEqual(result.before, result.after);
       assert.equal(result.caption, "Neutral upload verification");
-      if (["label-conflict", "foreign-action"].includes(variant)) {
+      if (
+        [
+          "label-conflict",
+          "foreign-action",
+          "trace-unlabelled",
+          "structural-current",
+        ].includes(variant)
+      ) {
         assert.equal(
           result.result.status,
           "manual-submit-required",
@@ -172,13 +212,15 @@ for (const variant of [
         );
         assert.match(
           result.result.error,
-          variant === "wrong-surface"
-            ? /expiration.*scheduler/i
-            : variant === "duplicate"
-              ? /schedule.*ambiguous/i
-              : variant === "existing-dialog"
-                ? /existing.*dialog/i
-                : /scheduler.*unverified|unsupported.*scheduler/i,
+          variant.startsWith("structural-")
+            ? /schedule action.*(ambiguous|incomplete|conflicting)/i
+            : variant === "wrong-surface"
+              ? /expiration.*scheduler/i
+              : variant === "duplicate"
+                ? /schedule.*ambiguous/i
+                : variant === "existing-dialog"
+                  ? /existing.*dialog/i
+                  : /scheduler.*unverified|unsupported.*scheduler/i,
         );
       }
     } finally {

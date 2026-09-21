@@ -7,6 +7,9 @@
   const TAG_INPUT_SELECTOR = 'input[name="tags"]';
   const CATEGORY_INPUT_SELECTOR =
     'input[name="category"], input[name="categoryInput"]';
+  const ORIENTATION_HOST =
+    'custom-dropdown[data-key="orientation"], .dropdownElement[data-error="orientation"]';
+  const ORIENTATION_TRIGGER = ".customSelectTrigger, .selectedValue";
 
   function tokenFieldRoot(input) {
     return (
@@ -128,12 +131,10 @@
   }
 
   async function selectOrientation(expected, signal, budget) {
-    const host = toolkit.queryUnique(
-      'custom-dropdown[data-key="orientation"]',
-      document,
-      { description: "Pornhub orientation control" },
-    );
-    const trigger = toolkit.queryUnique(".customSelectTrigger", host, {
+    const host = toolkit.queryUnique(ORIENTATION_HOST, document, {
+      description: "Pornhub orientation control",
+    });
+    const trigger = toolkit.queryUnique(ORIENTATION_TRIGGER, host, {
       description: "Pornhub orientation trigger",
     });
     if (
@@ -151,7 +152,9 @@
     const option = await toolkit.waitFor(
       () => {
         const local = Array.from(
-          host.querySelectorAll(".customOptions .customOption"),
+          host.querySelectorAll(
+            ".customOptions .customOption, .c-drop-wrapper__list .c-drop-wrapper__option",
+          ),
         ).filter(toolkit.isVisible);
         const resolution = toolkit.resolveExact(local, expected, (element) =>
           toolkit.displayText(element.textContent),
@@ -191,7 +194,7 @@
 
   function formSignature() {
     const orientation = document.querySelector(
-      'custom-dropdown[data-key="orientation"] .customSelectTrigger',
+      'custom-dropdown[data-key="orientation"] .customSelectTrigger, .dropdownElement[data-error="orientation"] .selectedValue',
     );
     const tagInput = document.querySelector(TAG_INPUT_SELECTOR);
     const categoryInput = document.querySelector(CATEGORY_INPUT_SELECTOR);

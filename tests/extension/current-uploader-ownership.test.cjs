@@ -149,7 +149,9 @@ test("Fansly alias authorization retains exact composer, frame, document and con
           assert.deepEqual(Array.from(request.target.documentIds), [
             documentId,
           ]);
-          return [{ result: owned }];
+          return [
+            { frameId: 0, documentId, result: { owned, url: frame.url } },
+          ];
         },
       },
     },
