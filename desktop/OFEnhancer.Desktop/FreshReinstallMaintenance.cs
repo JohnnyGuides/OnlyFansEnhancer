@@ -31,6 +31,13 @@ internal static class FreshReinstallMaintenance
                 exitCode = LoadMatching(args).Phase == FreshReinstallPhase.Preflight ? 0 : 1;
                 return true;
             }
+            if (args.Contains("--fresh-reinstall-stop-applications", StringComparer.Ordinal))
+            {
+                FreshReinstallTransaction transaction = LoadMatching(args);
+                if (transaction.Phase < FreshReinstallPhase.OwnedStatePurged)
+                    InstalledApplicationShutdown.Stop(transaction.InstallRoot);
+                return true;
+            }
             if (args.Contains("--fresh-reinstall-plan", StringComparer.Ordinal))
             {
                 Plan(args);

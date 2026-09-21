@@ -54,6 +54,24 @@ Chrome setup/reload guides use Chrome, current data survives update/repair, and
 external media/profiles remain untouched. A StageOnly pass is not a compiled or
 installed Setup pass. Unsigned local output is not a signed public release.
 
+### Fresh reinstall runtime-lock repair — 0.20.38
+
+The owner's failed 0.20.37 installation stopped at `PreviousPackageRemoved`
+because the existing tray process still held `desktop/clrjit.dll`. Inno's normal
+application-closing pass occurs after `PrepareToInstall`, where Fresh cleanup
+already runs. The embedded maintenance helper now requests graceful shutdown
+before uninstall or cleanup, limited to exact desktop/native executable paths
+under the journal's approved installation root and the current Windows session.
+It uses the existing close-app window-message handler, waits for process exit,
+and pauses without force termination when an application refuses to close.
+Resuming preserves the transaction's completed phases and original roots.
+
+A Windows process fixture holds a runtime file while hidden. Verification checks
+graceful release, refusal without termination, and preservation of a same-named
+application outside the approved root. Compiled installer recovery checks also
+verify shutdown precedes uninstall and cleanup. User installation is separate
+from these isolated fixture checks; the paused owner transaction is not reset.
+
 ### Upload preparation corrections — 0.20.37
 
 September 21 owner traces and the supplied OnlyFans button markup establish

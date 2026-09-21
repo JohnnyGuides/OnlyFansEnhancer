@@ -151,6 +151,18 @@ test(
         fs.readFileSync(path.join(base, "missing-uninstaller.log"), "utf8"),
         /Previous uninstaller is missing/,
       );
+      const cleanupLog = fs.readFileSync(
+        path.join(base, "missing-uninstaller.log"),
+        "utf8",
+      );
+      const closeStep = cleanupLog.indexOf(
+        "--fresh-reinstall-stop-applications: exit 0",
+      );
+      assert.ok(closeStep >= 0);
+      assert.ok(
+        closeStep < cleanupLog.indexOf("--fresh-reinstall-needs-uninstall:"),
+      );
+      assert.ok(closeStep < cleanupLog.indexOf("--fresh-reinstall-clean:"));
 
       fs.mkdirSync(data, { recursive: true });
       fs.writeFileSync(
