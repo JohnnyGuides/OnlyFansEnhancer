@@ -348,3 +348,16 @@ coverage rejects expanding those match patterns to physical paths.
   the unconfirmed result and proceeds; if a safe Fresh transaction could not be
   staged, Setup abandons only its maintenance journals, degrades to an in-place
   update, and preserves existing data.
+
+## Atomic Fresh completion — 0.20.32
+
+- Fresh reinstall suppresses the ordinary desktop launch until the clean package
+  is finalized. Its single post-install launch opens Chrome setup directly.
+- Desktop startup can safely and idempotently finalize a fully copied package
+  from `OwnedStatePurged` or `CleanPackageInstalled`, serialized with the
+  installer's finalizer so concurrent launches cannot move the journal backward.
+- A `ChromeSetupPending` journal is rendered as **Finish Fresh reinstall**. It
+  skips Chrome removal and desktop cleanup, preserves the clean package, and
+  proceeds only to the remaining Chrome connection step.
+- The completion page restores the native **Finish** label; custom Fresh-page
+  labels and button sizing do not leak into other wizard pages.

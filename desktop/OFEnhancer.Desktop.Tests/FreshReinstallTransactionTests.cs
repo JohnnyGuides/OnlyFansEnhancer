@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using OFEnhancer.Desktop;
 
 namespace OFEnhancer.Desktop.Tests;
@@ -6,6 +7,52 @@ namespace OFEnhancer.Desktop.Tests;
 [TestClass]
 public sealed class FreshReinstallTransactionTests
 {
+    [TestMethod]
+    public void Installed_package_finalization_recovers_once_and_is_idempotent()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-finalize-" + Guid.NewGuid().ToString("N"));
+        string install = Path.Combine(root, "installed");
+        string data = Path.Combine(root, "data");
+        string webView = Path.Combine(root, "webview");
+        string maintenance = Path.Combine(root, "maintenance");
+        string transactionPath = Path.Combine(maintenance, "fresh-reinstall.json");
+        Directory.CreateDirectory(install);
+        Directory.CreateDirectory(data);
+        Directory.CreateDirectory(webView);
+        Directory.CreateDirectory(maintenance);
+        try
+        {
+            string payload = Path.Combine(install, "payload.bin");
+            File.WriteAllText(payload, "clean-package");
+            byte[] bytes = File.ReadAllBytes(payload);
+            File.WriteAllText(Path.Combine(install, "package-manifest.json"), JsonSerializer.Serialize(new
+            {
+                product = "OFEnhancer",
+                productVersion = "0.20.32",
+                files = new[] { new { path = "payload.bin", size = bytes.LongLength, sha256 = Convert.ToHexString(SHA256.HashData(bytes)) } },
+            }));
+            File.WriteAllText(Path.Combine(maintenance, "chrome-reset.json"), "reset-journal");
+            FreshReinstallTransaction transaction = FreshReinstallTransaction.Create(
+                transactionPath, "0.20.32", install, data, webView, [ChromeIntegration.CanonicalExtensionId]);
+            transaction.Advance(FreshReinstallPhase.ExtensionRemovalPending, "removal-ready");
+            transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "removal-confirmed");
+            transaction.Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed");
+            transaction.Advance(FreshReinstallPhase.OwnedStatePurged, "owned-state-purged");
+
+            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, install, "0.20.32");
+            Assert.AreEqual(FreshReinstallPhase.ChromeSetupPending, FreshReinstallTransaction.Load(transactionPath).Phase);
+            Assert.AreEqual("reset-journal", File.ReadAllText(Path.Combine(data, "data", "chrome-reset.json")));
+
+            FreshReinstallMaintenance.FinalizeInstalledPackage(
+                FreshReinstallTransaction.Load(transactionPath), install, "0.20.32");
+            Assert.AreEqual(FreshReinstallPhase.ChromeSetupPending, FreshReinstallTransaction.Load(transactionPath).Phase);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [TestMethod]
     public void Transaction_is_durable_resumable_and_contains_no_user_state()
     {

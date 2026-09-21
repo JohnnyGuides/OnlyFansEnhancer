@@ -49,11 +49,22 @@ internal static class FreshReinstallMaintenance
     {
         message = "";
         if (!File.Exists(AppConfiguration.MaintenanceTransactionPath)) return true;
-        FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-        if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending) return true;
-        message = "Fresh reinstall is incomplete at " + transaction.Phase
-            + ". Run the same OFEnhancer installer again to resume; old application state will not be reopened.";
-        return false;
+        try
+        {
+            using FinalizationLock finalization = AcquireFinalizationLock();
+            FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
+            if (transaction.Phase is FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled)
+                FinalizeInstalledPackage(transaction, transaction.InstallRoot, transaction.PackageVersion);
+            if (FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath).Phase == FreshReinstallPhase.ChromeSetupPending)
+                return true;
+            message = "OFEnhancer setup has not finished yet. Complete or rerun the installer; your previous data remains protected.";
+            return false;
+        }
+        catch
+        {
+            message = "OFEnhancer setup has not finished yet. Complete or rerun the installer; your previous data remains protected.";
+            return false;
+        }
     }
 
     internal static void CompleteIfChromeReady()
@@ -206,19 +217,56 @@ internal static class FreshReinstallMaintenance
     {
         string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
         string version = Argument(args, "--package-version");
+        using FinalizationLock finalization = AcquireFinalizationLock();
         FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
-        if (transaction.Phase != FreshReinstallPhase.OwnedStatePurged
-            || !string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal)
+        FinalizeInstalledPackage(transaction, installRoot, version);
+    }
+
+    internal static void FinalizeInstalledPackage(FreshReinstallTransaction transaction, string installRoot, string version)
+    {
+        if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal)
             || !SamePath(transaction.InstallRoot, installRoot))
             throw new InvalidOperationException("The clean package does not match the committed Fresh reinstall transaction.");
+        if (transaction.Phase == FreshReinstallPhase.ChromeSetupPending) return;
+        if (transaction.Phase is not (FreshReinstallPhase.OwnedStatePurged or FreshReinstallPhase.CleanPackageInstalled))
+            throw new InvalidOperationException("The clean package cannot be finalized from the current Fresh reinstall phase.");
         VerifyInstalledPackage(installRoot, version);
         string sourceReset = Path.Combine(transaction.TransactionDirectory, "chrome-reset.json");
         if (!File.Exists(sourceReset)) throw new InvalidOperationException("The Fresh Chrome admission journal is missing.");
-        string destinationReset = Path.Combine(AppConfiguration.ResolveDataRoot(create: true), "data", "chrome-reset.json");
+        string destinationReset = Path.Combine(transaction.DataRoot, "data", "chrome-reset.json");
         Directory.CreateDirectory(Path.GetDirectoryName(destinationReset)!);
         File.Copy(sourceReset, destinationReset, true);
-        transaction.Advance(FreshReinstallPhase.CleanPackageInstalled, "clean-package-verified");
+        if (transaction.Phase == FreshReinstallPhase.OwnedStatePurged)
+            transaction.Advance(FreshReinstallPhase.CleanPackageInstalled, "clean-package-verified");
         transaction.Advance(FreshReinstallPhase.ChromeSetupPending, "chrome-new-install-pending");
+    }
+
+    private static FinalizationLock AcquireFinalizationLock()
+    {
+        string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        Mutex mutex = new(false, $"Local\\OFEnhancer.FreshFinalization.{userKey}");
+        try
+        {
+            if (!mutex.WaitOne(TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("Fresh reinstall finalization is already running.");
+        }
+        catch (AbandonedMutexException) { }
+        return new FinalizationLock(mutex);
+    }
+
+    private sealed class FinalizationLock(Mutex mutex) : IDisposable
+    {
+        private bool released;
+
+        public void Dispose()
+        {
+            if (!released)
+            {
+                released = true;
+                mutex.ReleaseMutex();
+                mutex.Dispose();
+            }
+        }
     }
 
     private static void VerifyInstalledPackage(string root, string version)

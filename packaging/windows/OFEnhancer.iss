@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.31
+AppVersion=0.20.32
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.31
+OutputBaseFilename=OFEnhancer-Setup-0.20.32
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -42,10 +42,10 @@ Root: HKCU; Subkey: "Software\Classes\ofenhancer"; ValueType: string; ValueName:
 Root: HKCU; Subkey: "Software\Classes\ofenhancer\shell\open\command"; ValueType: string; ValueData: """{app}\desktop\OFEnhancer.Desktop.exe"" --chrome-setup"
 
 [Run]
-Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Description: "Start OFEnhancer"; Flags: postinstall nowait skipifsilent; Check: ShouldStartDesktop
 Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Parameters: "--chrome-setup"; Description: "Check Chrome setup or reload guidance"; Flags: postinstall nowait skipifsilent unchecked
 
-Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Parameters: "--chrome-setup"; Flags: nowait; Check: IsFreshReset
+Filename: "{app}\desktop\OFEnhancer.Desktop.exe"; Parameters: "--chrome-setup"; Flags: nowait; Check: ShouldLaunchFreshChromeSetup
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\unregister-native-host.ps1"" -InstallRoot ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterNativeHost"
@@ -66,6 +66,7 @@ var
   ExistingUninstallCompleted: Boolean;
   RemoveUserData: Boolean;
   ResumeFresh: Boolean;
+  ResumeAfterInstall: Boolean;
   FreshRemovalReady: Boolean;
   FreshManualRequired: Boolean;
   FreshFallbackUpdate: Boolean;
@@ -76,7 +77,28 @@ var
 
 function IsFreshReset(): Boolean;
 begin
-  Result := not FreshFallbackUpdate and (ResumeFresh or ((ExistingPage <> nil) and (ExistingPage.SelectedValueIndex = 1)));
+  Result := not FreshFallbackUpdate and not ResumeAfterInstall and
+    (ResumeFresh or ((ExistingPage <> nil) and (ExistingPage.SelectedValueIndex = 1)));
+end;
+
+function ShouldStartDesktop(): Boolean;
+begin
+  Result := not IsFreshReset() and not ResumeAfterInstall;
+end;
+
+function ShouldLaunchFreshChromeSetup(): Boolean;
+begin
+  Result := IsFreshReset() or ResumeAfterInstall;
+end;
+
+function FreshTransactionPhaseIs(const Phase: String): Boolean;
+var
+  Journal: AnsiString;
+begin
+  Result := LoadStringFromFile(
+    ExpandConstant('{localappdata}\OFEnhancer-Maintenance\fresh-reinstall.json'),
+    Journal
+  ) and (Pos('"Phase":"' + Phase + '"', Journal) > 0);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -86,7 +108,7 @@ begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(
       ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.31',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.32',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode
     ) or (ExitCode <> 0) then
       RaiseException('The clean package was copied, but its Fresh reinstall admission barrier could not be established. Run this installer again to resume.');
@@ -115,19 +137,38 @@ begin
   OriginalNextWidth := WizardForm.NextButton.Width;
   OriginalBackLeft := WizardForm.BackButton.Left;
   ResumeFresh := FileExists(ExpandConstant('{localappdata}\OFEnhancer-Maintenance\fresh-reinstall.json'));
+  ResumeAfterInstall := ResumeFresh and (
+    FreshTransactionPhaseIs('CleanPackageInstalled') or
+    FreshTransactionPhaseIs('ChromeSetupPending')
+  );
   if ExistingInstall() then
   begin
     if ResumeFresh then
     begin
-      ExistingPage := CreateInputOptionPage(
-        wpWelcome,
-        'Resume Fresh reinstall',
-        'Setup found the safely preserved Fresh reinstall checkpoint.',
-        'Continue from the confirmed Chrome-removal step. Select Cancel if you are not ready to remove the old OFEnhancer desktop files and data.',
-        True,
-        False
-      );
-      ExistingPage.Add('Resume Fresh reinstall');
+      if ResumeAfterInstall then
+      begin
+        ExistingPage := CreateInputOptionPage(
+          wpWelcome,
+          'Finish Fresh reinstall',
+          'The clean OFEnhancer package is installed.',
+          'Continue to finish Chrome setup. No old desktop files or data will be removed again.',
+          True,
+          False
+        );
+        ExistingPage.Add('Finish Fresh reinstall');
+      end
+      else
+      begin
+        ExistingPage := CreateInputOptionPage(
+          wpWelcome,
+          'Resume Fresh reinstall',
+          'Setup found the safely preserved Fresh reinstall checkpoint.',
+          'Continue the protected cleanup from its last completed step.',
+          True,
+          False
+        );
+        ExistingPage.Add('Resume Fresh reinstall');
+      end;
       ExistingPage.SelectedValueIndex := 0;
       ExistingPage.CheckListBox.Enabled := False;
     end
@@ -218,7 +259,7 @@ begin
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
   Parameters := Operation +
     ' --install-root "' + WizardDirValue + '"' +
-    ' --package-version 0.20.31';
+    ' --package-version 0.20.32';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
 end;
 
@@ -409,7 +450,10 @@ begin
     WizardForm.NextButton.Left := OriginalNextLeft;
     WizardForm.NextButton.Width := OriginalNextWidth;
     WizardForm.BackButton.Left := OriginalBackLeft;
-    WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
+    if CurPageID = wpFinished then
+      WizardForm.NextButton.Caption := SetupMessage(msgButtonFinish)
+    else
+      WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
   end;
 end;
 

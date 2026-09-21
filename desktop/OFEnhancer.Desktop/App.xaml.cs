@@ -50,7 +50,7 @@ public partial class App : System.Windows.Application
         }
         if (!FreshReinstallMaintenance.StartupAllowed(out string freshMessage))
         {
-            System.Windows.MessageBox.Show(freshMessage, "Fresh reinstall incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(freshMessage, "Finish OFEnhancer setup", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown(3);
             return;
         }
