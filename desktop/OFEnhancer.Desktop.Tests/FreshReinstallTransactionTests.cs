@@ -59,15 +59,15 @@ public sealed class FreshReinstallTransactionTests
             while (transaction.Phase < phase) transaction.Advance(transaction.Phase + 1, "fixture-checkpoint");
             string generation = transaction.Generation;
             transaction.AdoptPendingPackage("0.20.35", fixture.Install, fixture.Data, fixture.WebView);
-            transaction.AdoptPendingPackage("0.20.39", fixture.Install, fixture.Data, fixture.WebView);
+            transaction.AdoptPendingPackage("0.20.40", fixture.Install, fixture.Data, fixture.WebView);
             transaction = FreshReinstallTransaction.Load(fixture.TransactionPath);
             Assert.AreEqual(phase, transaction.Phase);
             Assert.AreEqual(generation, transaction.Generation);
-            Assert.AreEqual("0.20.39", transaction.PackageVersion);
+            Assert.AreEqual("0.20.40", transaction.PackageVersion);
             Assert.ThrowsException<InvalidOperationException>(() =>
                 transaction.AdoptPendingPackage("0.20.35", fixture.Install, fixture.Data, fixture.WebView));
             Assert.ThrowsException<InvalidOperationException>(() =>
-                transaction.AdoptPendingPackage("0.20.39", fixture.Install + "-other", fixture.Data, fixture.WebView));
+                transaction.AdoptPendingPackage("0.20.40", fixture.Install + "-other", fixture.Data, fixture.WebView));
         }
     }
 
@@ -187,7 +187,7 @@ public sealed class FreshReinstallTransactionTests
 
     private sealed class Fixture : IDisposable
     {
-        internal const string Version = "0.20.39";
+        internal const string Version = "0.20.40";
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "ofe-fresh-" + Guid.NewGuid().ToString("N"));
         internal string Install => Path.Combine(Root, "installed");
         internal string Data => Path.Combine(Root, "data");

@@ -54,6 +54,28 @@ Chrome setup/reload guides use Chrome, current data survives update/repair, and
 external media/profiles remain untouched. A StageOnly pass is not a compiled or
 installed Setup pass. Unsigned local output is not a signed public release.
 
+### MainHub schedule and certifications — 0.20.40
+
+The current upload form's publication dropdown now opens its owned schedule
+picker, selects the requested UTC date/time, and verifies the saved readonly
+date before continuing. Month navigation checks each resulting month and stops
+on unexpected movement. Picker ownership, timezone, and selected date/time must
+agree; ambiguous or changed controls stop preparation.
+
+At the owner's explicit request, preparation automatically selects the three
+identified legal certifications and verifies their checked state. It does not
+select Sponsored Content or reaction-content options. Final Submit remains manual.
+Fixtures cover correct scheduling, month transitions, unexpected month changes,
+wrong upload ownership/timezone, failed saved-date readback, duplicate certification
+controls, a click that does not check the boxes, and already accepted declarations.
+
+Live MainHub browser inspection with the benign teaser fixture verified selecting
+September 25, 2026 at 15:00 UTC and saving the draft date. Its readonly field
+reported `25 September, 2026, 03:00:00 PM "UTC"`. The legal certifications were
+inspected but not clicked through the browser tool, and final Submit was not
+clicked. Automatic certification acceptance and month navigation were verified
+with isolated browser fixtures; an installed release run remains unverified.
+
 ### Scheduler control repair — 0.20.39
 
 September 22 live Fansly inspection confirmed that Confirm Date belongs to the

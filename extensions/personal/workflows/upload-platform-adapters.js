@@ -848,11 +848,20 @@
       throw new Error(
         "Pornhub [title]: Approved title changed during metadata preparation.",
       );
+    const currentForm = title.closest("form.video-details-form");
+    if (currentForm) {
+      await configurePornhubSchedule(currentForm, draft.scheduledIso, signal);
+      await acceptPornhubCertifications(currentForm, signal);
+    }
     await context.progress?.("prepared");
     return {
       platform: "pornhub",
       status: "manual-submit-required",
-      manualFields: ["schedule", "custom thumbnail (optional)", "final Submit"],
+      manualFields: [
+        ...(!currentForm ? ["schedule"] : []),
+        "custom thumbnail (optional)",
+        "final Submit",
+      ],
       effectiveFilename: draft.pornhubFilename,
       preset: resolved.name,
     };
@@ -864,6 +873,254 @@
       .trim()
       .replace(/\s+/g, " ")
       .toLowerCase();
+  }
+
+  async function configurePornhubSchedule(form, iso, signal) {
+    const instant = new Date(iso);
+    if (
+      !Number.isFinite(instant.getTime()) ||
+      instant.getUTCSeconds() ||
+      instant.getUTCMilliseconds()
+    )
+      throw new Error("Pornhub schedule instant is invalid.");
+    const parts = zonedParts(iso, "UTC");
+    const monthName = new Intl.DateTimeFormat("en", {
+      month: "long",
+      timeZone: "UTC",
+    }).format(instant);
+    const dateText = `${parts.day} ${monthName}, ${instant.getUTCFullYear()}`;
+    const timeText = `${String(instant.getUTCHours() % 12 || 12).padStart(2, "0")}:${parts.minute}:00 ${instant.getUTCHours() < 12 ? "AM" : "PM"}`;
+    const expected = `${dateText}, ${timeText} "UTC"`;
+    const readback = () => form.querySelector('input[name="scheduleDatePaid"]');
+    if (readback()?.value === expected) return;
+    const owner = form.closest("v-upload-video-details[form-id]");
+    const ownerId = owner?.getAttribute("form-id");
+    if (
+      !ownerId ||
+      document.querySelectorAll(
+        `v-upload-video-details[form-id="${CSS.escape(ownerId)}"]`,
+      ).length !== 1
+    )
+      throw new Error("Pornhub schedule upload ownership is ambiguous.");
+    if ([...document.querySelectorAll("schedule-date")].some(visible))
+      throw new Error("Pornhub existing schedule picker requires review.");
+    if (readback()) click(readback(), "Pornhub existing schedule date");
+    else {
+      const dropdown = one(
+        '[data-error="videoPublishedDate"]',
+        "Pornhub publication mode",
+        form,
+      );
+      click(dropdown, "Pornhub publication mode");
+      click(
+        exactText(
+          '[data-key="date"]',
+          "Schedule date",
+          "Pornhub schedule option",
+          dropdown,
+        ),
+        "Pornhub schedule option",
+      );
+    }
+    const picker = await waitFor(
+      () => {
+        const candidates = [
+          ...document.querySelectorAll("schedule-date"),
+        ].filter(visible);
+        if (
+          candidates.length > 1 ||
+          (candidates[0] && candidates[0].getAttribute("form-id") !== ownerId)
+        )
+          throw new Error("Pornhub schedule picker belongs to another upload.");
+        return candidates[0];
+      },
+      "Pornhub owned schedule picker",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    const verifyOwner = () => {
+      if (
+        !form.isConnected ||
+        !owner.contains(form) ||
+        !picker.isConnected ||
+        picker.getAttribute("form-id") !== ownerId
+      )
+        throw new Error("Pornhub schedule ownership changed.");
+      if (
+        normalizedText(
+          one(".dp-info-note", "Pornhub schedule timezone", picker).textContent,
+        ) !== "all upload times are in utc."
+      )
+        throw new Error("Pornhub schedule timezone is unverified.");
+    };
+    verifyOwner();
+    const months = Array.from({ length: 12 }, (_, month) =>
+      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
+        new Date(Date.UTC(2020, month, 1)),
+      ),
+    );
+    const calendarMonth = () => {
+      verifyOwner();
+      const header = one(".dp-current", "Pornhub calendar month", picker)
+        .textContent.trim()
+        .match(/^([A-Za-z]+)\s+(\d{4})$/);
+      const month = header ? months.indexOf(header[1]) : -1;
+      if (!header || month < 0)
+        throw new Error("Pornhub calendar month is unverified.");
+      return Number(header[2]) * 12 + month;
+    };
+    const targetMonth = instant.getUTCFullYear() * 12 + instant.getUTCMonth();
+    for (let attempt = 0; calendarMonth() !== targetMonth; attempt++) {
+      if (attempt >= 24)
+        throw new Error("Pornhub schedule calendar navigation limit reached.");
+      const previous = calendarMonth();
+      const direction = Math.sign(targetMonth - previous);
+      click(
+        exactText(
+          "button.dp-nav-btn",
+          direction > 0 ? "›" : "‹",
+          "Pornhub calendar navigation",
+          picker,
+        ),
+        "Pornhub calendar navigation",
+      );
+      await waitFor(
+        () => {
+          const current = calendarMonth();
+          if (current !== previous && current !== previous + direction)
+            throw new Error(
+              "Pornhub calendar navigation changed an unexpected month.",
+            );
+          return current === previous + direction;
+        },
+        "Pornhub calendar month change",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
+    click(
+      exactText(
+        ".dp-day:not(.dp-other-month):not(.dp-disabled)",
+        parts.day,
+        "Pornhub schedule day",
+        picker,
+      ),
+      "Pornhub schedule day",
+    );
+    const time = one(
+      '[data-error="scheduleTime"]',
+      "Pornhub schedule time",
+      picker,
+    );
+    click(time, "Pornhub schedule time");
+    click(
+      exactText(
+        ".c-drop-wrapper__option",
+        timeText,
+        "Pornhub UTC time option",
+        time,
+      ),
+      "Pornhub UTC time option",
+    );
+    await waitFor(
+      () => {
+        verifyOwner();
+        const selected = [
+          ...picker.querySelectorAll(
+            ".dp-day.dp-selected:not(.dp-other-month)",
+          ),
+        ].filter(visible);
+        return (
+          selected.length === 1 &&
+          selected[0].textContent.trim() === parts.day &&
+          one(
+            ".dp-current",
+            "Pornhub calendar month",
+            picker,
+          ).textContent.trim() === `${monthName} ${instant.getUTCFullYear()}` &&
+          one(
+            ".dp-date-info .dp-info-value",
+            "Pornhub chosen date",
+            picker,
+          ).textContent.trim() === dateText &&
+          one(
+            ".selectedValue",
+            "Pornhub chosen time",
+            time,
+          ).textContent.trim() === timeText
+        );
+      },
+      "Pornhub selected UTC instant",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    click(
+      exactText(
+        "button.dp-schedule-btn",
+        "Schedule",
+        "Pornhub draft date confirmation",
+        picker,
+      ),
+      "Pornhub draft date confirmation",
+    );
+    await waitFor(
+      () =>
+        form.isConnected && !visible(picker) && readback()?.value === expected,
+      "Pornhub persisted UTC schedule",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+  }
+
+  async function acceptPornhubCertifications(form, signal) {
+    const group = one(
+      "#termsWrapper v-checkbox#selectAll",
+      "Pornhub certification group",
+      form,
+    );
+    const expected = [
+      "certifyDocumentationAndConsent",
+      "certifyNoViolations",
+      "acknowledgeReviewAndPublication",
+    ];
+    const labels = [...group.querySelectorAll(".nested-checkboxes label[for]")];
+    if (
+      labels.length !== expected.length ||
+      expected.some(
+        (id) => labels.filter((label) => label.htmlFor === id).length !== 1,
+      )
+    )
+      throw new Error(
+        "Pornhub certification controls changed or are ambiguous.",
+      );
+    const all = one(
+      'input[type="checkbox"]#selectAll',
+      "Pornhub certification checkbox",
+      group,
+      { allowHidden: true },
+    );
+    const action = exactText(
+      ".termsTitle",
+      "SELECT ALL AND CERTIFY.",
+      "Pornhub certify all action",
+      group,
+    );
+    const checked = () =>
+      all.checked &&
+      labels.every((label) =>
+        visible(label.querySelector('v-svg-icon[name="checkMark"]')),
+      );
+    if (!checked()) {
+      if (all.checked)
+        throw new Error("Pornhub certification states disagree.");
+      click(action.closest("label"), "Pornhub certify all");
+    }
+    await waitFor(
+      () => form.isConnected && group.isConnected && checked(),
+      "Pornhub all certifications accepted",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
   }
 
   async function configureManyVidsSchedule(form, draft, signal) {
@@ -2858,7 +3115,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.39",
+    revision: "upload-hub-0.20.40",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
