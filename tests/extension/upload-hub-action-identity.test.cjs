@@ -42,6 +42,18 @@ async function onlyFansFixture(page, variant) {
     </section>`);
   await page.evaluate((variant) => {
     window.actions = [];
+    if (variant === "lowercase-period") {
+      document.querySelector('[data-part="hour"]').innerHTML = Array.from(
+        { length: 12 },
+        (_, i) => `<div class="vdatetime-time-picker__item">${i + 1}</div>`,
+      ).join("");
+      document
+        .querySelector("#time")
+        .insertAdjacentHTML(
+          "afterbegin",
+          '<div class="vdatetime-time-picker__list" style="text-transform:uppercase"><div class="vdatetime-time-picker__item">am</div><div class="vdatetime-time-picker__item">pm</div></div>',
+        );
+    }
     const composer = document.querySelector("#composer");
     const scheduler = document.querySelector("#scheduler");
     const schedule = document.querySelector("#schedule");
@@ -134,6 +146,7 @@ async function onlyFansFixture(page, variant) {
 }
 
 for (const variant of [
+  "lowercase-period",
   "label-conflict",
   "foreign-action",
   "wrong-surface",
@@ -191,6 +204,7 @@ for (const variant of [
       assert.equal(result.caption, "Neutral upload verification");
       if (
         [
+          "lowercase-period",
           "label-conflict",
           "foreign-action",
           "trace-unlabelled",
@@ -204,6 +218,10 @@ for (const variant of [
         );
         assert.equal(result.actions.filter((a) => a === "schedule").length, 1);
         assert.ok(result.actions.includes("date-time:18"));
+        if (variant === "lowercase-period") {
+          assert.ok(result.actions.includes("date-time:pm"));
+          assert.ok(result.actions.includes("date-time:00"));
+        }
       } else {
         assert.equal(result.result.status, "failed");
         assert.equal(

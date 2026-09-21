@@ -3,8 +3,9 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { chromium } = require("../support/browser.cjs");
 
-for (const publicAlternative of [false, true]) {
-  test(`Fansly current modal access alternatives public=${publicAlternative}`, async () => {
+for (const variant of [false, true, "calendar-drift"]) {
+  const publicAlternative = variant === true;
+  test(`Fansly current modal access alternatives variant=${variant}`, async () => {
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage();
@@ -15,14 +16,14 @@ for (const publicAlternative of [false, true]) {
         <div class="icon-stack"><i class="fa-clock"></i><i class="fa-calendar"></i></div>
         <div class="new-post-btn">Post</div>
       </app-post-creation>
-      <app-post-schedule-modal hidden><div class="modal-content">
+      <app-post-schedule-modal hidden><div class="modal"><div class="modal-content">
         <div class="timezone">Time Zone</div><div>Europe/Zurich</div>
         <div class="header"><div class="month">September 2026</div></div>
         <table><tr><td class="current-month-day">18</td></tr></table>
         <select data-time="hour">${Array.from({ length: 24 }, (_, i) => `<option>${String(i).padStart(2, "0")}</option>`).join("")}</select>
         <select data-time="minute"><option>00</option><option>30</option></select>
         <select><option>AM</option><option>24H</option></select>
-        <div class="btn confirm-btn">Confirm Date</div>
+        </div><div class="modal-footer"><div class="btn confirm-btn">Confirm Date</div></div>
       </div></app-post-schedule-modal>
       <script>
         window.actions = [];
@@ -55,6 +56,7 @@ for (const publicAlternative of [false, true]) {
         composer.querySelector('input').onchange = event => { actions.push('full'); event.target.value=''; setTimeout(()=>openMedia(),50); };
         composer.querySelector('.icon-stack').onclick=()=>schedule.hidden=false;
         schedule.querySelector('td').onclick=event=>event.target.classList.add('is-selected');
+        if (${variant === "calendar-drift"}) schedule.querySelector('[data-time=minute]').onchange=()=>{schedule.querySelector('.month').textContent='October 2026';};
         schedule.querySelector('.confirm-btn').onclick=()=>{schedule.hidden=true; composer.querySelector('.new-post-btn').textContent='Schedule';};
         composer.querySelector('.new-post-btn').onclick=()=>actions.push('PUBLICATION');
         window.CreatorToolkit = { createBudget: () => ({}) };
@@ -97,6 +99,12 @@ for (const publicAlternative of [false, true]) {
         assert.equal(result.result.status, "failed");
         assert.match(result.result.error, /public access alternative/);
         assert.deepEqual(result.actions, ["full", "teaser", "preset:Default"]);
+        return;
+      }
+      if (variant === "calendar-drift") {
+        assert.equal(result.result.status, "failed");
+        assert.match(result.result.error, /calendar date changed/);
+        assert.equal(result.actions.includes("PUBLICATION"), false);
         return;
       }
       assert.equal(result.result.status, "manual-submit-required");

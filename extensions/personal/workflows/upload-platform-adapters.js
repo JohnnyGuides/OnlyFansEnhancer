@@ -1896,10 +1896,10 @@
         (list) =>
           visible(list) &&
           [...list.querySelectorAll(".vdatetime-time-picker__item")].some(
-            (item) => item.textContent.trim() === "AM",
+            (item) => normalizedText(item.textContent) === "am",
           ) &&
           [...list.querySelectorAll(".vdatetime-time-picker__item")].some(
-            (item) => item.textContent.trim() === "PM",
+            (item) => normalizedText(item.textContent) === "pm",
           ),
       );
       if (periods.length !== 1)
@@ -2713,7 +2713,7 @@
       () => {
         const roots = [
           ...document.querySelectorAll(
-            "app-post-schedule-modal .modal-content, #schedule-modal",
+            "app-post-schedule-modal .modal, #schedule-modal",
           ),
         ].filter(visible);
         if (roots.length > 1)
@@ -2759,6 +2759,25 @@
       format.selectedOptions[0]?.textContent.trim() !== "24H"
     )
       throw new Error("Fansly schedule time readback failed.");
+    if (dateRoot.closest("app-post-schedule-modal")) {
+      const month = one(".header .month", "Fansly calendar month", dateRoot);
+      const expectedMonth = new Intl.DateTimeFormat("en", {
+        month: "long",
+        year: "numeric",
+        timeZone: siteZone,
+      }).format(new Date(draft.scheduledIso));
+      const selected = [
+        ...dateRoot.querySelectorAll(".current-month-day.is-selected"),
+      ].filter(visible);
+      if (
+        month.textContent.trim() !== expectedMonth ||
+        selected.length !== 1 ||
+        selected[0].textContent.trim() !== parts.day
+      )
+        throw new Error(
+          "Fansly selected calendar date changed before confirmation.",
+        );
+    }
     click(
       exactText(
         ".confirm-btn, .btn",
@@ -2839,7 +2858,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.38",
+    revision: "upload-hub-0.20.39",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

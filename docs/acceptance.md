@@ -54,6 +54,25 @@ Chrome setup/reload guides use Chrome, current data survives update/repair, and
 external media/profiles remain untouched. A StageOnly pass is not a compiled or
 installed Setup pass. Unsigned local output is not a signed public release.
 
+### Scheduler control repair — 0.20.39
+
+September 22 live Fansly inspection confirmed that Confirm Date belongs to the
+modal footer, outside `.modal-content`. Scheduler ownership now covers the whole
+modal. Immediately before confirmation, the selected calendar month/day must
+still match the intended date as well as the selected time. A matching summary
+alone is insufficient. Live browser controls set September 25, 2026 at 17:00 in
+Europe/Zurich and confirmed only the draft date; the composer displayed Schedule
+while media continued uploading. The publication action was not clicked.
+
+OnlyFans AM/PM list detection now normalizes case, matching the existing exact
+action resolver and supporting lowercase source text rendered in uppercase.
+Fixtures cover lowercase PM selection, the actual Fansly footer layout, and a
+calendar changing after date selection. The owner confirmed the live PM option
+is `<div class="vdatetime-time-picker__item">pm</div>`, establishing the casing
+mismatch. Direct OnlyFans browser access was previously blocked, so a fresh
+installed-version run remains unverified. No active upload was retried or
+restarted for this repair.
+
 ### Fresh reinstall runtime-lock repair — 0.20.38
 
 The owner's failed 0.20.37 installation stopped at `PreviousPackageRemoved`
