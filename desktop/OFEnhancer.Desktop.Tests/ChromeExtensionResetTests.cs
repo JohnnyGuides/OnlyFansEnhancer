@@ -221,4 +221,26 @@ public sealed class ChromeExtensionResetTests
         }
     }
 
+    [TestMethod]
+    public void Explicit_continuation_is_durable_when_Chrome_cannot_confirm_removal()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ofe-reset-continue-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "reset.json");
+            var reset = new ChromeExtensionReset(path);
+            reset.Begin(ChromeIntegration.CanonicalExtensionId);
+            reset.AcceptUnverifiedContinuation();
+
+            Assert.IsTrue(reset.RemovalVerified);
+            Assert.IsTrue(reset.Message.Contains("previous extension was removed", StringComparison.OrdinalIgnoreCase));
+            Assert.IsTrue(new ChromeExtensionReset(path).RemovalVerified);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
 }

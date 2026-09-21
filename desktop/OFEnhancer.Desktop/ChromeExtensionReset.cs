@@ -237,6 +237,22 @@ internal sealed class ChromeExtensionReset
         }
     }
 
+    internal void AcceptUnverifiedContinuation()
+    {
+        lock (gate)
+        {
+            Refresh();
+            if (invalid || state is null || !state.Pending)
+                throw new InvalidOperationException("The Chrome removal record is not available.");
+            if (state.RemovalVerified) return;
+            Save(state with
+            {
+                RemovalVerified = true,
+                LastRemovalError = null,
+            });
+        }
+    }
+
     internal bool TryConfirmManualRemoval(TimeSpan silence)
     {
         lock (gate)

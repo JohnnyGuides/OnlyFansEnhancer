@@ -44,7 +44,7 @@ public sealed class FreshReinstallTransactionTests
     }
 
     [TestMethod]
-    public void New_installer_can_adopt_an_untouched_pending_transaction_only()
+    public void New_installer_can_adopt_a_transaction_until_desktop_cleanup_starts()
     {
         string root = Path.Combine(Path.GetTempPath(), "ofe-fresh-adopt-" + Guid.NewGuid().ToString("N"));
         string install = Path.Combine(root, "installed");
@@ -60,8 +60,12 @@ public sealed class FreshReinstallTransactionTests
             Assert.AreEqual("0.20.30", FreshReinstallTransaction.Load(transaction).PackageVersion);
 
             fresh.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal");
+            fresh.AdoptPendingPackage("0.20.31", install, data, webView);
+            Assert.AreEqual("0.20.31", FreshReinstallTransaction.Load(transaction).PackageVersion);
+
+            fresh.Advance(FreshReinstallPhase.PreviousPackageRemoved, "previous-package-removed");
             Assert.ThrowsException<InvalidOperationException>(() =>
-                fresh.AdoptPendingPackage("0.20.30", install, data, webView));
+                fresh.AdoptPendingPackage("0.20.32", install, data, webView));
         }
         finally
         {

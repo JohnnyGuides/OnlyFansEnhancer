@@ -20,6 +20,11 @@ internal static class FreshReinstallMaintenance
                 exitCode = RemoveExtension(args);
                 return true;
             }
+            if (args.Contains("--fresh-reinstall-continue", StringComparer.Ordinal))
+            {
+                exitCode = ContinueWithoutChromeConfirmation(args);
+                return true;
+            }
             if (args.Contains("--fresh-reinstall-clean", StringComparer.Ordinal))
             {
                 FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath).CleanOwnedState();
@@ -34,7 +39,7 @@ internal static class FreshReinstallMaintenance
         }
         catch (Exception error)
         {
-            System.Windows.MessageBox.Show(error.Message, "Fresh reinstall incomplete", MessageBoxButton.OK, MessageBoxImage.Error);
+            Debug.WriteLine("Fresh reinstall maintenance failed: " + error);
             exitCode = 3;
             return true;
         }
@@ -67,8 +72,11 @@ internal static class FreshReinstallMaintenance
             FreshReinstallTransaction resumed = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
             if (resumed.Phase >= FreshReinstallPhase.ExtensionRemovalVerified)
             {
-                if (!string.Equals(resumed.PackageVersion, version, StringComparison.Ordinal)
-                    || !SamePath(resumed.InstallRoot, installRoot))
+                if (!SamePath(resumed.InstallRoot, installRoot))
+                    throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
+                if (resumed.Phase < FreshReinstallPhase.PreviousPackageRemoved)
+                    resumed.AdoptPendingPackage(version, installRoot, resumed.DataRoot, resumed.WebViewRoot);
+                else if (!string.Equals(resumed.PackageVersion, version, StringComparison.Ordinal))
                     throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
                 return 0;
             }
@@ -167,6 +175,30 @@ internal static class FreshReinstallMaintenance
         }
         finally { agent.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
         transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-self-removal-or-user-confirmed");
+        return 0;
+    }
+
+    private static int ContinueWithoutChromeConfirmation(IReadOnlyList<string> args)
+    {
+        string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
+        string version = Argument(args, "--package-version");
+        FreshReinstallTransaction transaction = FreshReinstallTransaction.Load(AppConfiguration.MaintenanceTransactionPath);
+        if (!SamePath(transaction.InstallRoot, installRoot))
+            throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
+        if (transaction.Phase >= FreshReinstallPhase.PreviousPackageRemoved)
+        {
+            if (!string.Equals(transaction.PackageVersion, version, StringComparison.Ordinal))
+                throw new InvalidOperationException("A different Fresh reinstall transaction is already in progress.");
+            return 0;
+        }
+        transaction.AdoptPendingPackage(version, installRoot, transaction.DataRoot, transaction.WebViewRoot);
+        if (transaction.Phase >= FreshReinstallPhase.ExtensionRemovalVerified) return 0;
+        if (transaction.Phase != FreshReinstallPhase.ExtensionRemovalPending)
+            throw new InvalidOperationException("Chrome removal has not been staged safely.");
+        string resetPath = Path.Combine(transaction.TransactionDirectory, "chrome-reset.json");
+        ChromeExtensionReset reset = new(resetPath);
+        reset.AcceptUnverifiedContinuation();
+        transaction.Advance(FreshReinstallPhase.ExtensionRemovalVerified, "chrome-removal-unconfirmed-user-continued");
         return 0;
     }
 

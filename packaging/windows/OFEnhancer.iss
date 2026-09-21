@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.30
+AppVersion=0.20.31
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.30
+OutputBaseFilename=OFEnhancer-Setup-0.20.31
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -68,11 +68,15 @@ var
   ResumeFresh: Boolean;
   FreshRemovalReady: Boolean;
   FreshManualRequired: Boolean;
+  FreshFallbackUpdate: Boolean;
   MaintenanceExtracted: Boolean;
+  OriginalNextLeft: Integer;
+  OriginalNextWidth: Integer;
+  OriginalBackLeft: Integer;
 
 function IsFreshReset(): Boolean;
 begin
-  Result := ResumeFresh or ((ExistingPage <> nil) and (ExistingPage.SelectedValueIndex = 1));
+  Result := not FreshFallbackUpdate and (ResumeFresh or ((ExistingPage <> nil) and (ExistingPage.SelectedValueIndex = 1)));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -82,7 +86,7 @@ begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(
       ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.30',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.31',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode
     ) or (ExitCode <> 0) then
       RaiseException('The clean package was copied, but its Fresh reinstall admission barrier could not be established. Run this installer again to resume.');
@@ -107,6 +111,9 @@ procedure InitializeWizard();
 var
   FreshAfterID: Integer;
 begin
+  OriginalNextLeft := WizardForm.NextButton.Left;
+  OriginalNextWidth := WizardForm.NextButton.Width;
+  OriginalBackLeft := WizardForm.BackButton.Left;
   ResumeFresh := FileExists(ExpandConstant('{localappdata}\OFEnhancer-Maintenance\fresh-reinstall.json'));
   if ExistingInstall() then
   begin
@@ -167,7 +174,7 @@ begin
   FreshSummary.WordWrap := True;
   FreshSummary.Font.Style := [fsBold];
   FreshSummary.SetBounds(0, 8, FreshPage.SurfaceWidth, 36);
-  FreshSummary.Caption := 'Keep Chrome open. Setup will request removal automatically.';
+  FreshSummary.Caption := 'Setup will check Chrome, then continue either way.';
 
   FreshSteps := TNewStaticText.Create(FreshPage.Surface);
   FreshSteps.Parent := FreshPage.Surface;
@@ -175,10 +182,10 @@ begin
   FreshSteps.WordWrap := True;
   FreshSteps.SetBounds(0, 56, FreshPage.SurfaceWidth, 122);
   FreshSteps.Caption :=
-    '• Setup asks the existing extension to remove itself.' + #13#10 +
-    '• If Chrome needs help, this page will show one Remove step.' + #13#10 +
-    '• Reload is not removal.' + #13#10 +
-    '• Nothing is deleted until Chrome removal is confirmed.';
+    '• If the extension is already gone, Setup detects that and continues.' + #13#10 +
+    '• Otherwise, Setup asks Chrome to remove it.' + #13#10 +
+    '• If Chrome does not confirm, you can still continue.' + #13#10 +
+    '• Reload is not removal.';
 
   FreshStatus := TNewStaticText.Create(FreshPage.Surface);
   FreshStatus.Parent := FreshPage.Surface;
@@ -210,8 +217,8 @@ var
 begin
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
   Parameters := Operation +
-    ' --install-root "' + ExpandConstant('{app}') + '"' +
-    ' --package-version 0.20.30';
+    ' --install-root "' + WizardDirValue + '"' +
+    ' --package-version 0.20.31';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
 end;
 
@@ -227,14 +234,26 @@ begin
   end;
 end;
 
+procedure AbandonFreshTransactionForSafeUpdate();
+var
+  MaintenanceRoot: String;
+begin
+  MaintenanceRoot := ExpandConstant('{localappdata}\OFEnhancer-Maintenance');
+  DeleteFile(AddBackslash(MaintenanceRoot) + 'fresh-reinstall.json');
+  DeleteFile(AddBackslash(MaintenanceRoot) + 'chrome-reset.json');
+  RemoveDir(MaintenanceRoot);
+end;
+
 function RunChromeRemovalStep(): Boolean;
 var
   ExitCode: Integer;
+  HadManualPrompt: Boolean;
 begin
   Result := False;
+  HadManualPrompt := FreshManualRequired;
   WizardForm.NextButton.Enabled := False;
   FreshStatus.Font.Color := clWindowText;
-  if FreshManualRequired then
+  if HadManualPrompt then
     FreshStatus.Caption := 'Checking that the extension is gone…'
   else
     FreshStatus.Caption := 'Asking Chrome to remove the extension… This can take up to 20 seconds.';
@@ -242,16 +261,35 @@ begin
 
   if not ExtractFreshMaintenance() then
   begin
-    FreshStatus.Font.Color := clRed;
-    FreshStatus.Caption := 'Setup could not start Chrome cleanup. No files or data were changed.';
+    FreshManualRequired := True;
+    FreshStatus.Font.Color := clWindowText;
+    if HadManualPrompt then
+    begin
+      FreshFallbackUpdate := True;
+      AbandonFreshTransactionForSafeUpdate();
+      FreshStatus.Caption := 'Chrome cleanup was unavailable. Setup will continue as a safe update and keep existing data.';
+      Result := True;
+    end
+    else
+      FreshStatus.Caption := 'Chrome cleanup could not start. Select Continue setup; the existing extension may need removal later.';
+    WizardForm.NextButton.Caption := 'Continue setup';
     WizardForm.NextButton.Enabled := True;
     Exit;
   end;
   if not RunFreshHelper('--fresh-reinstall-remove', ExitCode) then
   begin
-    FreshStatus.Font.Color := clRed;
-    FreshStatus.Caption := 'Windows could not start Chrome cleanup. Select Try again.';
-    WizardForm.NextButton.Caption := 'Try again';
+    FreshManualRequired := True;
+    FreshStatus.Font.Color := clWindowText;
+    if HadManualPrompt then
+    begin
+      FreshFallbackUpdate := True;
+      AbandonFreshTransactionForSafeUpdate();
+      FreshStatus.Caption := 'Chrome cleanup was unavailable. Setup will continue as a safe update and keep existing data.';
+      Result := True;
+    end
+    else
+      FreshStatus.Caption := 'Windows could not check Chrome. Select Continue setup; the existing extension may need removal later.';
+    WizardForm.NextButton.Caption := 'Continue setup';
     WizardForm.NextButton.Enabled := True;
     Exit;
   end;
@@ -262,25 +300,43 @@ begin
     FreshStatus.Caption := 'Chrome extension removed. Setup can continue.';
     Result := True;
   end
-  else if ExitCode = 4 then
+  else if not HadManualPrompt then
   begin
     FreshManualRequired := True;
-    FreshSummary.Caption := 'Chrome needs one manual Remove click.';
-    FreshSteps.Caption :=
-      '• In the Chrome profile that has OFEnhancer, open chrome://extensions.' + #13#10 +
-      '• Find Creator Workflow Toolkit / OFEnhancer.' + #13#10 +
-      '• Click Remove — not Reload.' + #13#10 +
-      '• Wait until its card disappears.' + #13#10 +
-      '• Return here and select Verify removal.';
     FreshStatus.Font.Color := clWindowText;
-    FreshStatus.Caption := 'Waiting for you. Your desktop files and data are still untouched.';
-    WizardForm.NextButton.Caption := 'Verify removal';
+    if ExitCode = 4 then
+    begin
+      FreshSummary.Caption := 'Chrome did not confirm removal. Setup can still continue.';
+      FreshSteps.Caption :=
+        '• In the Chrome profile that has OFEnhancer, open chrome://extensions.' + #13#10 +
+        '• Find Creator Workflow Toolkit / OFEnhancer.' + #13#10 +
+        '• Click Remove — not Reload.' + #13#10 +
+        '• Wait until its card disappears.' + #13#10 +
+        '• Return here and select Check and continue.';
+      FreshStatus.Caption := 'If the extension is already absent, select Check and continue now.';
+      WizardForm.NextButton.Caption := 'Check and continue';
+    end
+    else
+    begin
+      FreshStatus.Caption := 'Chrome could not be checked. Select Continue setup; the existing extension may need removal later.';
+      WizardForm.NextButton.Caption := 'Continue setup';
+    end;
   end
   else
   begin
-    FreshStatus.Font.Color := clRed;
-    FreshStatus.Caption := 'Chrome cleanup stopped safely. Select Try again, or Cancel to leave everything unchanged.';
-    WizardForm.NextButton.Caption := 'Try again';
+    if RunFreshHelper('--fresh-reinstall-continue', ExitCode) and (ExitCode = 0) then
+    begin
+      FreshRemovalReady := True;
+      FreshStatus.Caption := 'Setup is continuing. If the old extension remains, remove it after installation.';
+      Result := True;
+    end
+    else
+    begin
+      FreshFallbackUpdate := True;
+      AbandonFreshTransactionForSafeUpdate();
+      FreshStatus.Caption := 'Chrome cleanup was unavailable. Setup will continue as a safe update and keep existing data.';
+      Result := True;
+    end;
   end;
   WizardForm.NextButton.Enabled := True;
 end;
@@ -295,16 +351,20 @@ begin
   begin
     if not ExtractFreshMaintenance() then
     begin
-      Result := 'Fresh reinstall could not start Chrome cleanup. No old state was changed.';
+      FreshFallbackUpdate := True;
+      AbandonFreshTransactionForSafeUpdate();
       Exit;
     end;
     if not RunFreshHelper('--fresh-reinstall-remove', ExitCode) or (ExitCode <> 0) then
-    begin
-      Result := 'Chrome removal still needs attention. Return to the Chrome removal page and follow its steps.';
-      Exit;
-    end;
+      if not RunFreshHelper('--fresh-reinstall-continue', ExitCode) or (ExitCode <> 0) then
+      begin
+        FreshFallbackUpdate := True;
+        AbandonFreshTransactionForSafeUpdate();
+        Exit;
+      end;
     FreshRemovalReady := True;
   end;
+  if FreshFallbackUpdate then Exit;
   if ExistingInstall() then
   begin
     if not ValidExistingUninstaller() then
@@ -336,13 +396,21 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if (FreshPage <> nil) and (CurPageID = FreshPage.ID) then
   begin
+    WizardForm.NextButton.Width := ScaleX(120);
+    WizardForm.NextButton.Left := WizardForm.CancelButton.Left - WizardForm.NextButton.Width - ScaleX(8);
+    WizardForm.BackButton.Left := WizardForm.NextButton.Left - WizardForm.BackButton.Width - ScaleX(8);
     if FreshManualRequired then
-      WizardForm.NextButton.Caption := 'Verify removal'
+      WizardForm.NextButton.Caption := 'Check and continue'
     else
-      WizardForm.NextButton.Caption := 'Remove and continue';
+      WizardForm.NextButton.Caption := 'Remove extension';
   end
   else
+  begin
+    WizardForm.NextButton.Left := OriginalNextLeft;
+    WizardForm.NextButton.Width := OriginalNextWidth;
+    WizardForm.BackButton.Left := OriginalBackLeft;
     WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

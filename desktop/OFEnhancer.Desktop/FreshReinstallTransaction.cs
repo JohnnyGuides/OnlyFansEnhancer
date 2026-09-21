@@ -159,7 +159,7 @@ internal sealed class FreshReinstallTransaction
 
     internal void AdoptPendingPackage(string packageVersion, string installRoot, string dataRoot, string webViewRoot)
     {
-        if (Phase >= FreshReinstallPhase.ExtensionRemovalVerified)
+        if (Phase >= FreshReinstallPhase.PreviousPackageRemoved)
             throw new InvalidOperationException("A destructive Fresh reinstall phase cannot change package version.");
         if (!VersionPattern.IsMatch(packageVersion)
             || !SameRoot(journal.InstallRoot, ValidateRoot(installRoot, "installation"))

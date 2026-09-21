@@ -211,6 +211,18 @@ async function main() {
     installer,
     /function RunChromeRemovalStep[\s\S]*--fresh-reinstall-remove/,
   );
+  assert.match(installer, /--fresh-reinstall-continue/);
+  assert.match(installer, /WizardDirValue/);
+  assert.doesNotMatch(
+    installer.match(/function RunFreshHelper[\s\S]*?end;/)?.[0] ?? "",
+    /ExpandConstant\('\{app\}'\)/,
+  );
+  assert.match(installer, /NextButton\.Width := ScaleX\(120\)/);
+  assert.match(installer, /Chrome cleanup was unavailable[\s\S]*safe update/);
+  assert.match(
+    installer,
+    /procedure AbandonFreshTransactionForSafeUpdate[\s\S]*fresh-reinstall\.json[\s\S]*chrome-reset\.json/,
+  );
   assert.match(
     installer,
     /function PrepareToInstall[\s\S]*ExistingUninstaller[\s\S]*--fresh-reinstall-clean/,
@@ -223,7 +235,7 @@ async function main() {
   assert.match(installer, /• Click Remove — not Reload\./);
   assert.match(
     installer,
-    /WizardForm\.NextButton\.Caption := 'Verify removal'/,
+    /WizardForm\.NextButton\.Caption := 'Check and continue'/,
   );
   assert.match(installer, /SW_HIDE, ewWaitUntilTerminated/);
   assert.doesNotMatch(
@@ -721,7 +733,7 @@ async function main() {
     });
     assert.equal(status.status, 0, status.stdout + status.stderr);
     assert.deepEqual(JSON.parse(status.stdout), {
-      productVersion: "0.20.30",
+      productVersion: "0.20.31",
       protocolVersion: 1,
       capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
     });
@@ -821,7 +833,7 @@ async function main() {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(stage, "package-manifest.json"), "utf8"),
     );
-    assert.equal(manifest.productVersion, "0.20.30");
+    assert.equal(manifest.productVersion, "0.20.31");
     assert.equal(manifest.files.length > 10, true);
     for (const entry of manifest.files) {
       const filePath = path.join(stage, ...entry.path.split("/"));

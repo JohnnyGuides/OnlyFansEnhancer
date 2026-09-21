@@ -333,3 +333,18 @@ coverage rejects expanding those match patterns to physical paths.
 - Automatic removal names its maximum wait. Manual fallback uses short bullets,
   opens the connected Chrome profile, and requires **Verify removal** before
   destructive desktop cleanup can begin.
+
+## Non-blocking Chrome cleanup — 0.20.31
+
+- The Chrome-removal page never expands `{app}` before Inno Setup initializes
+  it; pre-install maintenance uses the selected wizard directory directly.
+- The action button has dedicated width for **Remove extension**, **Check and
+  continue**, and **Continue setup**, with the Back button repositioned so
+  labels do not truncate or overlap.
+- Setup accepts an existing verified checkpoint immediately. Otherwise it asks
+  the connected extension or verifier for removal evidence, then uses a bounded
+  absence check when the user confirms the extension is already gone.
+- A missing Chrome confirmation cannot trap Setup. Explicit continuation records
+  the unconfirmed result and proceeds; if a safe Fresh transaction could not be
+  staged, Setup abandons only its maintenance journals, degrades to an in-place
+  update, and preserves existing data.
