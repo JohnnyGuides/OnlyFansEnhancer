@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.34
+AppVersion=0.20.35
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.34
+OutputBaseFilename=OFEnhancer-Setup-0.20.35
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -113,7 +113,7 @@ var
   Helper, Parameters: String;
 begin
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
-  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.34';
+  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.35';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
 end;
 
@@ -233,7 +233,7 @@ var
 begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.34',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.35',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
       RaiseException('The Windows package was copied, but verification or durable Chrome handoff failed. Run this installer again to resume.');
 end;

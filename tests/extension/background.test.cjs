@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.34",
+          productVersion: "0.20.35",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -582,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.34",
+    productVersion: "0.20.35",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -602,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.34");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.35");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -689,8 +689,8 @@ function send(message) {
   assert.equal(restoredUploadSession.manyvids.status, "edit-failed");
 
   const validatedUpload = JSON.parse(
-    vm.runInContext(
-      `JSON.stringify(validateCreatorUploadRequest({
+    await vm.runInContext(
+      `(async () => JSON.stringify(await validateCreatorUploadRequest({
         sessionId: "0123456789abcdef0123456789abcdef0123456789abcdef",
         targets: ["onlyfans", "fansly", "manyvids"],
         draft: {
@@ -718,7 +718,7 @@ function send(message) {
           fingerprint: "1234abcd",
           status: "matched"
         }
-      }))`,
+      })))()`,
       context,
     ),
   );
@@ -769,7 +769,7 @@ function send(message) {
       pornhubLink: `https://www.pornhub.com/view_video.php?viewkey=${"x".repeat(100)}`,
     },
   };
-  const boundedCatalogueContext = vm.runInContext(
+  const boundedCatalogueContext = await vm.runInContext(
     "validateCreatorUploadRequest(boundedCatalogueContext)",
     context,
   );
@@ -792,7 +792,7 @@ function send(message) {
       status: "matched",
     },
   };
-  const historicalUpload = vm.runInContext(
+  const historicalUpload = await vm.runInContext(
     "validateCreatorUploadRequest(historicalUploadRequest)",
     context,
   );
@@ -805,7 +805,7 @@ function send(message) {
       status: "matched",
     },
   };
-  const historicalWeekday = vm.runInContext(
+  const historicalWeekday = await vm.runInContext(
     "validateCreatorUploadRequest(historicalWeekdayRequest)",
     context,
   );
@@ -818,12 +818,11 @@ function send(message) {
       status: "new",
     },
   };
-  assert.throws(
-    () =>
-      vm.runInContext(
-        "validateCreatorUploadRequest(newRowDateMismatch)",
-        context,
-      ),
+  await assert.rejects(
+    vm.runInContext(
+      "validateCreatorUploadRequest(newRowDateMismatch)",
+      context,
+    ),
     /Invalid catalogue upload preview/,
   );
   context.invalidHistoricalDate = {
@@ -834,12 +833,11 @@ function send(message) {
       status: "matched",
     },
   };
-  assert.throws(
-    () =>
-      vm.runInContext(
-        "validateCreatorUploadRequest(invalidHistoricalDate)",
-        context,
-      ),
+  await assert.rejects(
+    vm.runInContext(
+      "validateCreatorUploadRequest(invalidHistoricalDate)",
+      context,
+    ),
     /Invalid catalogue upload preview/,
   );
   context.uploadOnlyRequest = {
@@ -847,6 +845,46 @@ function send(message) {
     draft: { ...validatedUpload.draft, publishMode: "autonomous" },
     catalogue: null,
   };
+  const oversizedProfiles = JSON.parse(
+    await vm.runInContext(
+      `(async () => {
+        const profiles = structuredClone(uploadOnlyRequest.draft.profiles);
+        for (let index = 0; index < 120; index++) {
+          profiles.phUploader.presets["Custom preset " + index] = {
+            orientation: "Straight",
+            tags: Array.from({ length: 50 }, (_, tag) => ("tag-" + index + "-" + tag).padEnd(100, "x")),
+            categories: ["amateur"]
+          };
+        }
+        const normalized = CreatorToolkitRegistry.normalizeSettings({ profiles }).value.profiles;
+        const snapshot = {
+          fanslyPrefill: normalized.fanslyPrefill,
+          manyvidsAutofill: normalized.manyvidsAutofill,
+          phUploader: normalized.phUploader
+        };
+        const legacy = JSON.stringify(snapshot);
+        const request = {
+          ...uploadOnlyRequest,
+          draft: { ...uploadOnlyRequest.draft, profiles: snapshot, profileSignature: legacy }
+        };
+        const acceptedLegacy = await validateCreatorUploadRequest(request);
+        request.draft.profileSignature = await CreatorToolkitRegistry.uploadProfileSignature(snapshot);
+        const acceptedCurrent = await validateCreatorUploadRequest(request);
+        return JSON.stringify({
+          legacyLength: legacy.length,
+          legacySignature: acceptedLegacy.draft.profileSignature,
+          currentSignature: acceptedCurrent.draft.profileSignature
+        });
+      })()`,
+      context,
+    ),
+  );
+  assert.ok(oversizedProfiles.legacyLength > 50_000);
+  assert.match(oversizedProfiles.legacySignature, /^[a-f0-9]{64}$/);
+  assert.equal(
+    oversizedProfiles.currentSignature,
+    oversizedProfiles.legacySignature,
+  );
   vm.runInContext(
     `async function startAndObserveCreatorUpload(id, targets) {
     const acknowledgement = await startCreatorUpload(id, targets);
@@ -855,7 +893,7 @@ function send(message) {
   }`,
     context,
   );
-  const uploadOnly = vm.runInContext(
+  const uploadOnly = await vm.runInContext(
     "validateCreatorUploadRequest(uploadOnlyRequest)",
     context,
   );
@@ -870,12 +908,11 @@ function send(message) {
     { ...validatedUpload.catalogue, fingerprint: "" },
   ]) {
     context.invalidUploadRequest = { ...validatedUpload, catalogue };
-    assert.throws(
-      () =>
-        vm.runInContext(
-          "validateCreatorUploadRequest(invalidUploadRequest)",
-          context,
-        ),
+    await assert.rejects(
+      vm.runInContext(
+        "validateCreatorUploadRequest(invalidUploadRequest)",
+        context,
+      ),
       /Invalid catalogue upload preview/,
     );
   }
@@ -883,12 +920,11 @@ function send(message) {
     ...context.uploadOnlyRequest,
     draft: { ...validatedUpload.draft, fanslyPreset: "default" },
   };
-  assert.throws(
-    () =>
-      vm.runInContext(
-        "validateCreatorUploadRequest(invalidUploadRequest)",
-        context,
-      ),
+  await assert.rejects(
+    vm.runInContext(
+      "validateCreatorUploadRequest(invalidUploadRequest)",
+      context,
+    ),
     /exact defaulT/,
   );
 

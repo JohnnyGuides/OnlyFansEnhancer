@@ -1375,7 +1375,6 @@
           profiles.fanslyPrefill.message,
         ) ?? value.description;
       value.profiles = profiles;
-      value.profileSignature = JSON.stringify(profiles);
       return value;
     }
 
@@ -2385,7 +2384,7 @@
     }
 
     async function recheckProposalBeforeUpload() {
-      const priorProfiles = draft().profileSignature;
+      const priorProfiles = JSON.stringify(draft().profiles);
       const currentProfiles = await refreshProfiles();
       if (priorProfiles !== currentProfiles) {
         scheduleMatch();
@@ -2463,6 +2462,9 @@
         }
         await recheckSubredditPresets(social);
         value = validate(true);
+        value.profileSignature = await creatorRegistry.uploadProfileSignature(
+          value.profiles,
+        );
         targets = pendingTargets(value);
         if (!targets.length && !social.enabled) {
           matchStatus.textContent =
@@ -2587,6 +2589,7 @@
                     status: currentMatch.status,
                   },
           });
+          activeSession.accepted = true;
           for (const platform of response.uploadSession.platforms || []) {
             setPlatformState(platform.platform, platform);
           }
@@ -2636,7 +2639,31 @@
           "Run accepted. Follow each platform card for its confirmed result.";
       } catch (error) {
         matchStatus.textContent = error.message;
-        if (activeSession) {
+        if (
+          activeSession &&
+          targets.length &&
+          activeSession.accepted !== true
+        ) {
+          activeSession.closed = true;
+          activeSession.channel?.close();
+          activeSession.port?.disconnect();
+          activeSession = null;
+          platformStates.clear();
+          renderPlatformStates();
+          confirmation.hidden = false;
+          get("#preparationControls").hidden = true;
+          if (workflowMode) workflowMode.disabled = neutralTestMode;
+          if (catalogueAssociation)
+            catalogueAssociation.disabled = neutralTestMode;
+          for (const input of [
+            fullInput,
+            teaserInput,
+            thumbnailInput,
+            pornhubInput,
+            socialInput,
+          ])
+            input.disabled = false;
+        } else if (activeSession) {
           for (const platform of targets) {
             if (
               !new Set([

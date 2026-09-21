@@ -5,6 +5,7 @@ using OFEnhancer.Desktop;
 namespace OFEnhancer.Desktop.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class FreshReinstallTransactionTests
 {
     [TestMethod]
@@ -17,7 +18,16 @@ public sealed class FreshReinstallTransactionTests
         transaction.CleanOwnedState();
         fixture.WriteInstalledPackage();
 
-        FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, fixture.Install, Fixture.Version);
+        string? previousDataRoot = Environment.GetEnvironmentVariable("OFENHANCER_DATA_ROOT");
+        try
+        {
+            Environment.SetEnvironmentVariable("OFENHANCER_DATA_ROOT", fixture.Data);
+            FreshReinstallMaintenance.FinalizeInstalledPackage(transaction, fixture.Install, Fixture.Version);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OFENHANCER_DATA_ROOT", previousDataRoot);
+        }
 
         Assert.IsFalse(File.Exists(fixture.TransactionPath));
         Assert.IsTrue(File.Exists(fixture.ResetPath), "the app-owned Chrome task must survive Windows retirement");
@@ -115,13 +125,13 @@ public sealed class FreshReinstallTransactionTests
 
     private sealed class Fixture : IDisposable
     {
-        internal const string Version = "0.20.34";
+        internal const string Version = "0.20.35";
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "ofe-fresh-" + Guid.NewGuid().ToString("N"));
         internal string Install => Path.Combine(Root, "installed");
         internal string Data => Path.Combine(Root, "data");
         internal string WebView => Path.Combine(Root, "webview");
-        internal string TransactionPath => Path.Combine(Root, "maintenance", "fresh-reinstall.json");
-        internal string ResetPath => Path.Combine(Root, "maintenance", "chrome-reset.json");
+        internal string TransactionPath => Path.Combine(Root, "OFEnhancer-Maintenance", "fresh-reinstall.json");
+        internal string ResetPath => Path.Combine(Root, "OFEnhancer-Maintenance", "chrome-reset.json");
 
         internal Fixture(bool sharedData = false, bool webViewExclusive = true)
         {

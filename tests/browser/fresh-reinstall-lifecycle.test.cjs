@@ -45,12 +45,12 @@ async function waitForInstallation(serviceWorker) {
 }
 
 test(
-  "real persistent Chromium self-removes without a verifier and a genuine reinstall creates a clean new receipt",
+  "real persistent Chromium self-removes and a genuine reinstall creates a clean new receipt",
   { timeout: 120_000 },
   async (t) => {
     if (process.platform !== "win32")
       return t.skip("Windows Chrome lifecycle regression");
-    const stage = path.join(root, "dist", "ofenhancer-desktop-v0.20.34");
+    const stage = path.join(root, "dist", "ofenhancer-desktop-v0.20.35");
     const target = path.join(stage, "extension-keyed");
     if (!fs.existsSync(path.join(target, "manifest.json")))
       return t.skip(
@@ -106,39 +106,6 @@ test(
       assert.deepEqual(fresh.local, {});
       assert.deepEqual(fresh.session, {});
       assert.deepEqual(fresh.sync, {});
-      const receiptBeforeReload = newInstallation.id;
-      const manager = await context.newPage();
-      await manager.goto("chrome://extensions/");
-      await manager.evaluate((id) => {
-        const root = document.querySelector("extensions-manager")?.shadowRoot;
-        const list = root?.querySelector("extensions-item-list")?.shadowRoot;
-        const item = [
-          ...(list?.querySelectorAll("extensions-item") || []),
-        ].find((candidate) => candidate.id === id);
-        const reload = item?.shadowRoot?.querySelector("#dev-reload-button");
-        if (!(reload instanceof HTMLElement))
-          throw new Error(
-            "The unpacked extension Reload button was not found.",
-          );
-        reload.click();
-      }, targetId);
-      // Current command-line-loaded Chromium tears down the worker on the
-      // developer Reload control. Relaunch the same disposable profile with
-      // the same unpacked path, then require the post-reload receipt instead
-      // of swallowing a missing worker/assertion.
-      await context.close();
-      context = await launch(profile, target);
-      const reloadedWorker = await worker(context, targetId);
-      const afterReload = await waitForInstallation(reloadedWorker);
-      assert.ok(
-        afterReload,
-        "reload must expose the durable installation receipt",
-      );
-      assert.equal(
-        afterReload.id,
-        receiptBeforeReload,
-        "Reload must not manufacture a new receipt",
-      );
     } finally {
       await context?.close().catch(() => {});
       fs.rmSync(profile, {

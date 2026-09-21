@@ -290,6 +290,18 @@ an old saved ID, reload nor silence alone is accepted. Reset retains desktop
 catalogue, Google configuration and history and never edits Chrome profile
 internals. See [the product reset contract](product.md#normal-update-versus-fresh-reset).
 
+## Creator upload profile admission — 0.20.35
+
+- Confirmed creator workflow profiles use a canonical SHA-256 signature instead
+  of storing a potentially truncated serialized profile bundle. Custom profile
+  sets larger than 50,000 characters remain admissible without weakening the
+  post-confirmation change check.
+- A preparation rejected before the background accepts its session is rolled
+  back locally. The Upload Hub restores the confirmation controls and does not
+  expose a Retry action for a target that never existed.
+- The bounded legacy serialized signature remains accepted during the update so
+  an already-open 0.20.34 Upload Console can finish its admission handshake.
+
 ## Windows/Chrome lifecycle separation — 0.20.34
 
 - Inno Setup owns only Windows planning, verified previous-package removal,
@@ -317,7 +329,7 @@ internals. See [the product reset contract](product.md#normal-update-versus-fres
 
 The versioned sections below are historical acceptance records. They explain why
 the superseded implementation existed; they are not simultaneous current
-requirements where they conflict with 0.20.34 or the product contract.
+requirements where they conflict with 0.20.35 or the product contract.
 
 ## Fresh reinstall lifecycle — 0.20.27
 

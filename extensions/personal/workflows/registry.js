@@ -777,6 +777,34 @@
     return normalizeSettings(raw).value;
   }
 
+  async function uploadProfileSignature(rawProfiles) {
+    const profiles = normalizeSettings({
+      schemaVersion: SCHEMA_VERSION,
+      profiles: rawProfiles,
+    }).value.profiles;
+    const snapshot = {
+      fanslyPrefill: profiles.fanslyPrefill,
+      manyvidsAutofill: profiles.manyvidsAutofill,
+      phUploader: profiles.phUploader,
+    };
+    const canonical = JSON.stringify(snapshot, (_key, item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+        ? Object.fromEntries(
+            Object.keys(item)
+              .sort()
+              .map((field) => [field, item[field]]),
+          )
+        : item,
+    );
+    const bytes = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(canonical),
+    );
+    return [...new Uint8Array(bytes)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   globalThis.CreatorToolkitRegistry = Object.freeze({
     STORAGE_KEY,
     LEGACY_STORAGE_KEY,
@@ -788,5 +816,6 @@
     isPlainObject,
     normalizeSettings,
     migrateLegacySettings,
+    uploadProfileSignature,
   });
 })();

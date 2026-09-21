@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.34"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.35"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -2965,8 +2965,10 @@ function creatorUploadSessionProofMatches(session, proof) {
       session.draft.pornhubFilename &&
     (proof.manyvidsThumbnail === true) ===
       (session.draft.manyvidsThumbnail === true) &&
-    creatorUploadClean(proof.profileSignature, 50_000) ===
-      session.draft.profileSignature
+    (creatorUploadClean(proof.profileSignature, 50_000) ===
+      session.draft.profileSignature ||
+      creatorUploadClean(proof.profileSignature, 50_000) ===
+        session.draft.legacyProfileSignature)
   );
 }
 
@@ -2976,7 +2978,7 @@ function creatorUploadClean(value, maximum) {
     .slice(0, maximum);
 }
 
-function validateCreatorUploadRequest(message) {
+async function validateCreatorUploadRequest(message) {
   if (
     !["manual", "autonomous"].includes(message.draft?.publishMode ?? "manual")
   )
@@ -3024,16 +3026,26 @@ function validateCreatorUploadRequest(message) {
     manyvidsAutofill: normalizedProfiles.manyvidsAutofill,
     phUploader: normalizedProfiles.phUploader,
   };
-  draft.profileSignature = JSON.stringify(draft.profiles);
+  draft.profileSignature = await CREATOR_REGISTRY.uploadProfileSignature(
+    draft.profiles,
+  );
   const providedProfileSignature = creatorUploadClean(
     message.draft?.profileSignature,
     50_000,
   );
+  const legacyProfileSignature = creatorUploadClean(
+    JSON.stringify(draft.profiles),
+    50_000,
+  );
   if (
     providedProfileSignature &&
-    providedProfileSignature !== draft.profileSignature
+    providedProfileSignature !== draft.profileSignature &&
+    providedProfileSignature !== legacyProfileSignature
   ) {
     throw new Error("Creator workflow profiles changed after confirmation.");
+  }
+  if (providedProfileSignature === legacyProfileSignature) {
+    draft.legacyProfileSignature = legacyProfileSignature;
   }
   const scheduled = new Date(draft.scheduledIso);
   if (
@@ -3949,7 +3961,7 @@ async function prepareCreatorManyVidsEdit(session, target) {
 
 async function prepareCreatorUpload(message, launcher = "extension") {
   await ensureCreatorUploadRuntimeVersion();
-  const request = validateCreatorUploadRequest(message);
+  const request = await validateCreatorUploadRequest(message);
   request.launcher = launcher === "desktop" ? "desktop" : "extension";
   await CREATOR_UPLOAD_SESSION_STORE.assertAvailable(
     {
@@ -4210,7 +4222,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.34"
+      "upload-hub-0.20.35"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",

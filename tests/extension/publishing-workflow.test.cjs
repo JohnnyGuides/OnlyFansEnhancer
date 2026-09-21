@@ -61,6 +61,21 @@ function installScriptProperties(context, values = {}) {
 
 async function addUploadConsoleScripts(page, options = {}) {
   await page.evaluate(async () => {
+    if (!globalThis.crypto.subtle) {
+      Object.defineProperty(globalThis.crypto, "subtle", {
+        value: {
+          async digest(_algorithm, input) {
+            const bytes = new Uint8Array(input);
+            const result = new Uint8Array(32);
+            for (let index = 0; index < bytes.length; index++) {
+              result[index % result.length] =
+                (result[index % result.length] * 33 + bytes[index]) & 0xff;
+            }
+            return result.buffer;
+          },
+        },
+      });
+    }
     const previous = globalThis.chrome.storage?.local;
     const seeded = previous?.get
       ? await previous.get([
@@ -2449,6 +2464,7 @@ test("upload console performs no platform mutation before the single Yes confirm
     await page.setContent(html);
     await page.evaluate(() => {
       globalThis.consoleMessages = [];
+      globalThis.rejectFirstPreparation = true;
       globalThis.CreatorCatalogueClient = {
         async loadConfig() {
           return {
@@ -2527,6 +2543,15 @@ test("upload console performs no platform mutation before the single Yes confirm
               return;
             }
             if (message.type === "PREPARE_CREATOR_UPLOAD") {
+              if (globalThis.rejectFirstPreparation) {
+                globalThis.rejectFirstPreparation = false;
+                callback({
+                  ok: false,
+                  error:
+                    "Creator workflow profiles changed after confirmation.",
+                });
+                return;
+              }
               callback({
                 ok: true,
                 uploadSession: {
@@ -2580,6 +2605,19 @@ test("upload console performs no platform mutation before the single Yes confirm
       await page.locator("#uploadSummary").textContent(),
       /Fansly saved toggles.*Post to FYP: off.*Post to Walls: on.*Lock Replies: off/s,
     );
+
+    await page.locator("#confirmUpload").click();
+    await page
+      .getByText("Creator workflow profiles changed after confirmation.", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(await page.locator("#confirmation").isVisible(), true);
+    assert.equal(await page.locator(".result-card").count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Retry" }).count(), 0);
+    await page.evaluate(() => {
+      globalThis.consoleMessages = [];
+    });
 
     await page.locator("#confirmUpload").click();
     await page

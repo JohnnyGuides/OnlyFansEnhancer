@@ -93,7 +93,7 @@ public sealed class AgentProtocolTests
         Assert.IsTrue(document.RootElement.GetProperty("ok").GetBoolean());
         Assert.AreEqual(RequestId, document.RootElement.GetProperty("requestId").GetString());
         JsonElement status = document.RootElement.GetProperty("status");
-        Assert.AreEqual("0.20.34", status.GetProperty("productVersion").GetString());
+        Assert.AreEqual("0.20.35", status.GetProperty("productVersion").GetString());
         CollectionAssert.AreEqual(
             new[] { "desktop-shell", "local-file-attach", "native-bridge" },
             status.GetProperty("capabilities").EnumerateArray().Select(value => value.GetString()).ToArray()
