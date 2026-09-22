@@ -7,9 +7,11 @@ explains the evidence required before expanding automation.
 
 ## Interaction and safety
 
-OFEnhancer prepares one exact plan and asks for one **Yes** before its authorized
-mutations. The plan identifies files, catalogue item, targets, captions, saved
-recipes, timing, and allowed catalogue effects. Changing those inputs invalidates
+OFEnhancer binds each run to one exact plan. In the Upload Console, one deliberate
+**Upload** authorizes the selected preparation and publishing mode; there is no
+additional generic confirmation screen. Other publishing surfaces retain their specific
+authorization controls. The plan identifies files, catalogue item, targets,
+captions, saved recipes, timing, and allowed catalogue effects. Changing those inputs invalidates
 the plan. A new public attempt, deletion, or repost needs new authorization; an
 unknown previous outcome is not permission to try again.
 
@@ -84,7 +86,7 @@ interface appear complete.
 Catalogue identity is stable, explicit, and independent of row position. An
 existing verified binding or hash can establish identity; title, filename, date,
 and episode similarities only rank bounded candidates. They cannot silently
-choose a row. A strong proposal still needs the creator's Yes; ambiguity opens
+choose a row. A strong uploader proposal still needs the creator's Upload action; ambiguity opens
 the searchable picker. Re-read row/identity/profile fingerprints before mutation.
 Never overwrite a different existing platform link; an identical canonical link
 is idempotent. Per-platform results and reconciliation remain independent.
@@ -177,7 +179,8 @@ The template fills neutral title/description, all four main-video destinations
 and the next Friday at 15:00 UTC. It locks manual preparation and skips catalogue
 association. Saved captions, tags and categories cannot leak into the neutral
 draft; existing pricing/access settings and saved presets are unchanged.
-Loading does not start uploading. Review and confirm the plan separately.
+Loading does not start uploading. Review the files and destinations, then click
+**Upload**. The template remains in manual preparation mode.
 
 **Draft actions → Start a new draft** clears the form after a settled run and
 leaves neutral mode. Remote uploads and recovery/publication evidence remain.

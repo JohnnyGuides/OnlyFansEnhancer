@@ -41,6 +41,8 @@ async function mount(page) {
         },
         sendMessage(message, callback) {
           calls.push(message);
+          if (message.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY")
+            return callback({ ok: true, availability: { ready: true } });
           if (message.type === "LOAD_DEVELOPMENT_TEMPLATE") {
             if (globalThis.missingFixture)
               return callback({

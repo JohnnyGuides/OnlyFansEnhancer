@@ -51,620 +51,638 @@
         role="tabpanel"
         aria-labelledby="uploaderTab"
       >
-        <section class="workflow-panel" aria-labelledby="workflowHeading">
-          <div class="workflow-heading">
-            <h2 id="workflowHeading">Workflow</h2>
-            <div class="dev-template">
-              <span class="dev-badge">Dev</span
-              ><button id="loadTemplate" type="button">Load Template</button>
-            </div>
-          </div>
-          <fieldset id="workflowMode" class="workflow-segments">
-            <legend class="visually-hidden">What are you uploading?</legend>
-            <label
-              ><input
-                type="radio"
-                name="workflowMode"
-                value="main"
-                checked
-              /><span>Main video</span></label
-            >
-            <label
-              ><input type="radio" name="workflowMode" value="teaser" /><span
-                >Social teaser</span
-              ></label
-            >
-            <label
-              ><input type="radio" name="workflowMode" value="both" /><span
-                >Both<small>Main + social</small></span
-              ></label
-            >
-          </fieldset>
-          <p id="neutralTestStatus" class="template-status" role="status"></p>
-        </section>
-
-        <section class="card draft-card" aria-labelledby="draftHeading">
-          <div class="section-heading">
-            <div>
-              <p class="step">Step 1</p>
-              <h2 id="draftHeading">Files &amp; details</h2>
-            </div>
-          </div>
-
-          <div class="file-picker">
-            <div class="file-information">
-              <label for="uploadFullVideo">Full video</label>
-              <p id="fullFileSummary" class="file-summary" aria-live="polite">
-                Choose the main video
-              </p>
-              <span id="fullFileSummarySize" class="file-size"></span>
-            </div>
-            <input
-              id="uploadFullVideo"
-              name="uploadFullVideo"
-              type="file"
-              class="file-input-native"
-              tabindex="-1"
-              accept="video/*,.mkv,.avi"
-              required
-              aria-describedby="fullFileSummary draftErrors"
-            />
-            <div class="file-actions">
-              <button
-                type="button"
-                data-choose-file="uploadFullVideo"
-                aria-label="Choose full video"
-              >
-                Choose file
-              </button>
-              <button
-                type="button"
-                data-remove-file="uploadFullVideo"
-                aria-label="Remove full video"
-                hidden
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-          <div class="file-picker">
-            <div class="file-information">
-              <label for="uploadTeaser"
-                >Shared teaser
-                <span class="optional-label">Optional</span></label
-              >
-              <p id="teaserFileSummary" class="file-summary" aria-live="polite">
-                Fansly and ManyVids preview
-              </p>
-              <span id="teaserFileSummarySize" class="file-size"></span>
-            </div>
-            <input
-              id="uploadTeaser"
-              name="uploadTeaser"
-              type="file"
-              class="file-input-native"
-              tabindex="-1"
-              accept="video/*,.mkv,.avi"
-              aria-describedby="teaserFileSummary draftErrors"
-            />
-            <div class="file-actions">
-              <button
-                type="button"
-                data-choose-file="uploadTeaser"
-                aria-label="Choose shared teaser"
-              >
-                Choose file
-              </button>
-              <button
-                type="button"
-                data-remove-file="uploadTeaser"
-                aria-label="Remove shared teaser"
-                hidden
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-          <div class="file-picker">
-            <div class="file-information">
-              <label for="uploadManyvidsThumbnail"
-                >ManyVids thumbnail
-                <span class="optional-label">Optional</span></label
-              >
-              <p
-                id="manyvidsThumbnailSummary"
-                class="file-summary"
-                aria-live="polite"
-              >
-                Uses a site-generated thumbnail
-              </p>
-              <span id="manyvidsThumbnailSummarySize" class="file-size"></span>
-            </div>
-            <input
-              id="uploadManyvidsThumbnail"
-              name="uploadManyvidsThumbnail"
-              type="file"
-              class="file-input-native"
-              tabindex="-1"
-              accept="image/jpeg,image/png,.jpg,.jpeg,.png"
-              aria-describedby="manyvidsThumbnailSummary draftErrors"
-            />
-            <div class="file-actions">
-              <button
-                type="button"
-                data-choose-file="uploadManyvidsThumbnail"
-                aria-label="Choose manyvids thumbnail"
-              >
-                Choose file
-              </button>
-              <button
-                type="button"
-                data-remove-file="uploadManyvidsThumbnail"
-                aria-label="Remove manyvids thumbnail"
-                hidden
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-          <div class="file-picker">
-            <div class="file-information">
-              <label for="uploadPornhubVideo"
-                >Pornhub video
-                <span class="optional-label">Optional</span></label
-              >
-              <p
-                id="pornhubFileSummary"
-                class="file-summary"
-                aria-live="polite"
-              >
-                Uses the full video unless replaced
-              </p>
-              <span id="pornhubFileSummarySize" class="file-size"></span>
-            </div>
-            <input
-              id="uploadPornhubVideo"
-              name="uploadPornhubVideo"
-              type="file"
-              class="file-input-native"
-              tabindex="-1"
-              accept="video/*,.mkv,.avi"
-              aria-describedby="pornhubFileSummary draftErrors"
-            />
-            <div class="file-actions">
-              <button
-                type="button"
-                data-choose-file="uploadPornhubVideo"
-                aria-label="Choose pornhub video"
-              >
-                Choose file
-              </button>
-              <button
-                type="button"
-                data-remove-file="uploadPornhubVideo"
-                aria-label="Remove pornhub video"
-                hidden
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-          <p class="selection-note">
-            Selections are cleared when this window closes.
-          </p>
-          <div class="field-grid">
-            <div>
-              <label for="uploadTitle">Title</label>
-              <input
-                id="uploadTitle"
-                name="title"
-                type="text"
-                autocomplete="off"
-                required
-                aria-describedby="draftErrors"
-              />
-            </div>
-            <div>
-              <label for="releaseDate">Release Friday</label>
-              <input
-                id="releaseDate"
-                name="releaseDate"
-                type="date"
-                autocomplete="off"
-                required
-                aria-describedby="draftErrors"
-              />
-              <p id="releaseTimeSummary" class="hint"></p>
-            </div>
-          </div>
-
-          <label for="uploadDescription">Description</label>
-          <textarea
-            id="uploadDescription"
-            name="description"
-            rows="3"
-            spellcheck="true"
-            autocomplete="off"
-            placeholder="Add a description…"
-          ></textarea>
-
-          <label for="contentPreset">Content preset</label>
-          <select
-            id="contentPreset"
-            name="contentPreset"
-            aria-describedby="draftErrors"
-          >
-            <option value="">Choose when Pornhub is selected</option>
-            <option value="Straight">Straight</option>
-            <option value="Gay">Gay</option>
-            <option value="Lesbian">Lesbian</option>
-            <option value="Bisexual Male">Bisexual Male</option>
-            <option value="Transgender">Transgender</option>
-          </select>
-        </section>
-
-        <details class="draft-actions">
-          <summary>Draft actions</summary>
-          <button id="newUploadDraft" type="button">Start a new draft</button>
-          <p>Clears this form, not previous uploads.</p>
-        </details>
-
-        <section class="card" aria-labelledby="targetsHeading">
-          <div class="section-heading">
-            <div>
-              <p class="step">Step 2</p>
-              <h2 id="targetsHeading">Choose platforms</h2>
-            </div>
-          </div>
-
-          <div id="mainDestinations" class="target-grid">
-            <label class="target-option">
-              <input
-                id="targetOnlyfans"
-                name="paidTargets"
-                type="checkbox"
-                value="onlyfans"
-                checked
-              />
-              <span
-                ><strong>OnlyFans</strong
-                ><small
-                  >Full video · description · no label changes</small
-                ></span
-              >
-            </label>
-            <label class="target-option">
-              <input
-                id="targetManyvids"
-                name="paidTargets"
-                type="checkbox"
-                value="manyvids"
-              />
-              <span
-                ><strong>ManyVids</strong
-                ><small>Full · optional preview · Friday 15:00 UTC</small></span
-              >
-            </label>
-            <label class="target-option">
-              <input
-                id="targetFansly"
-                name="paidTargets"
-                type="checkbox"
-                value="fansly"
-                checked
-              />
-              <span
-                ><strong>Fansly</strong
-                ><small
-                  >Teaser as Free Preview · full locked with defaulT</small
-                ></span
-              >
-            </label>
-            <label class="target-option">
-              <input
-                id="targetPornhub"
-                name="paidTargets"
-                type="checkbox"
-                value="pornhub"
-              />
-              <span
-                ><strong>Pornhub</strong
-                ><small
-                  >File and preset preparation · final Submit manual</small
-                ></span
-              >
-            </label>
-          </div>
-
-          <p id="pornhubRecommendation" class="hint" role="status"></p>
-
-          <p id="draftErrors" class="error" role="alert"></p>
-          <div id="mainPublishFields">
-            <label for="mainPublishMode">Main-video publishing</label>
-            <select id="mainPublishMode">
-              <option value="manual">Prepare, then let me publish</option>
-              <option value="autonomous" selected>
-                Publish or schedule after I confirm the plan
-              </option>
-            </select>
-          </div>
-          <label for="catalogueAssociation">Catalogue entry</label>
-          <select id="catalogueAssociation">
-            <option value="later">Choose later — keep results locally</option>
-            <option value="now">Choose an entry now</option>
-          </select>
-          <p id="catalogueConnectionStatus" class="hint" role="status"></p>
-          <p id="matchStatus" class="status" role="status">
-            Choose your files and destinations to review the plan.
-          </p>
-          <button id="continueWithoutSheet" type="button" hidden>
-            Continue without sheet
-          </button>
-          <div id="cataloguePicker" class="catalogue-picker" hidden>
-            <label for="catalogueSearch">Search catalogue</label>
-            <input
-              id="catalogueSearch"
-              name="catalogueSearch"
-              type="search"
-              autocomplete="off"
-              placeholder="Title, ID, series, or episode…"
-            />
-            <label for="catalogueRow">Catalogue episode</label>
-            <select id="catalogueRow" name="catalogueRow"></select>
-            <label class="catalogue-picker-toggle">
-              <input
-                id="showAllCatalogue"
-                name="showAllCatalogue"
-                type="checkbox"
-              />
-              Show all catalogue entries
-            </label>
-            <button id="refreshCatalogue" type="button">
-              Refresh catalogue
-            </button>
-            <p id="selectedCatalogueReason" class="hint" role="status"></p>
-          </div>
-          <details class="settings-details">
-            <summary>Advanced: legacy sheet bridge</summary>
-            <p class="hint">
-              <a
-                data-chrome-only
-                href="options.html#catalogueBridgeHeading"
-                target="_blank"
-                rel="noopener"
-                >Configure a legacy Apps Script bridge</a
-              >
-              <span data-desktop-only hidden
-                >Configure the optional Apps Script bridge in the Chrome
-                uploader</span
-              >
-              for matching and saving post links.
-            </p>
-          </details>
-        </section>
-
-        <section
-          class="card social-card"
-          aria-labelledby="socialHeading"
-          hidden
-        >
-          <div class="section-heading">
-            <div>
-              <p class="step">Step 3</p>
-              <h2 id="socialHeading">Distribute a social teaser</h2>
-            </div>
-            <span class="local-badge">Optional</span>
-          </div>
-          <p class="section-copy">
-            Choose the teaser and destinations. Reddit drafts need a confirmed
-            Redgifs link; final publishing stays manual until verified
-            automation is available.
-          </p>
-
-          <div class="file-picker">
-            <div class="file-information">
-              <label for="uploadSocialTeaser">Social teaser</label>
-              <p id="socialFileSummary" class="file-summary" aria-live="polite">
-                Choose a video for social posts
-              </p>
-              <span id="socialFileSummarySize" class="file-size"></span>
-            </div>
-            <input
-              id="uploadSocialTeaser"
-              name="uploadSocialTeaser"
-              type="file"
-              class="file-input-native"
-              tabindex="-1"
-              accept="video/*,.mkv,.avi"
-              aria-describedby="socialFileSummary socialErrors"
-            />
-            <div class="file-actions">
-              <button
-                type="button"
-                data-choose-file="uploadSocialTeaser"
-                aria-label="Choose social teaser"
-              >
-                Choose file
-              </button>
-              <button
-                type="button"
-                data-remove-file="uploadSocialTeaser"
-                aria-label="Remove social teaser"
-                hidden
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-
-          <label for="socialCaption">Social caption</label>
-          <textarea
-            id="socialCaption"
-            name="socialCaption"
-            rows="4"
-            maxlength="5000"
-            spellcheck="true"
-            autocomplete="off"
-            placeholder="Used for the X caption and as each Reddit post's default title…"
-            aria-describedby="socialErrors"
-          ></textarea>
-
-          <div
-            class="social-targets"
-            role="group"
-            aria-label="Social destinations"
-          >
-            <label class="target-option">
-              <input
-                id="targetSocialX"
-                name="socialTargets"
-                type="checkbox"
-                value="x"
-              />
-              <span
-                ><strong>X</strong
-                ><small
-                  >Teaser + caption · paid link in the first reply</small
-                ></span
-              >
-            </label>
-            <label class="target-option">
-              <input
-                id="targetSocialReddit"
-                name="socialTargets"
-                type="checkbox"
-                value="reddit"
-              />
-              <span
-                ><strong>Reddit</strong
-                ><small
-                  >Redgifs first · then each selected subreddit</small
-                ></span
-              >
-            </label>
-          </div>
-
-          <div id="socialPaidLinkFields" hidden>
-            <label for="socialPaidLink">Paid-video link for the X reply</label>
-            <select
-              id="socialPaidLink"
-              name="socialPaidLink"
-              aria-describedby="socialPaidLinkHint socialErrors"
-            >
-              <option value="">Choose the paid-video link</option>
-            </select>
-            <p id="socialPaidLinkHint" class="hint">
-              Existing catalogue links appear automatically. A missing link can
-              come from the paid upload authorized by the same Yes.
-            </p>
-            <div id="socialCustomPaidLinkField" hidden>
-              <label for="socialCustomPaidLink">Custom paid-video URL</label>
-              <input
-                id="socialCustomPaidLink"
-                name="socialCustomPaidLink"
-                type="url"
-                inputmode="url"
-                autocomplete="off"
-                placeholder="https://…"
-                aria-describedby="socialErrors"
-              />
-            </div>
-          </div>
-
-          <fieldset class="mode-choice">
-            <legend>Publishing mode</legend>
-            <label>
-              <input type="radio" name="socialMode" value="manual" checked />
-              <span
-                ><strong>Confirm manually</strong
-                ><small
-                  >Fill and upload, then stop before each final publish.</small
-                ></span
-              >
-            </label>
-            <label>
-              <input type="radio" name="socialMode" value="autonomous" />
-              <span
-                ><strong>Autonomous after Yes</strong
-                ><small
-                  >Use only approved presets and click final controls.</small
-                ></span
-              >
-            </label>
-          </fieldset>
-
-          <div id="subredditFields" hidden>
-            <div class="subreddit-heading">
-              <div>
-                <h3>Subreddits</h3>
-                <p class="hint">
-                  Your last selection becomes the next default.
-                </p>
+        <div id="uploadContent">
+          <section class="workflow-panel" aria-labelledby="workflowHeading">
+            <div class="workflow-heading">
+              <h2 id="workflowHeading">Workflow</h2>
+              <div class="dev-template">
+                <span class="dev-badge">Dev</span
+                ><button id="loadTemplate" type="button">Load Template</button>
               </div>
-              <button id="refreshSubreddits" type="button">Refresh list</button>
             </div>
-            <label class="subreddit-filter" for="subredditSearch"
-              >Filter subreddits</label
-            >
-            <input
-              id="subredditSearch"
-              name="subredditSearch"
-              type="search"
+            <fieldset id="workflowMode" class="workflow-segments">
+              <legend class="visually-hidden">What are you uploading?</legend>
+              <label
+                ><input
+                  type="radio"
+                  name="workflowMode"
+                  value="main"
+                  checked
+                /><span>Main video</span></label
+              >
+              <label
+                ><input type="radio" name="workflowMode" value="teaser" /><span
+                  >Social teaser</span
+                ></label
+              >
+              <label
+                ><input type="radio" name="workflowMode" value="both" /><span
+                  >Both<small>Main + social</small></span
+                ></label
+              >
+            </fieldset>
+            <p id="neutralTestStatus" class="template-status" role="status"></p>
+          </section>
+
+          <section class="card draft-card" aria-labelledby="draftHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="draftHeading">Files &amp; details</h2>
+              </div>
+            </div>
+
+            <div class="file-picker">
+              <div class="file-information">
+                <label for="uploadFullVideo">Full video</label>
+                <p id="fullFileSummary" class="file-summary" aria-live="polite">
+                  Choose the main video
+                </p>
+                <span id="fullFileSummarySize" class="file-size"></span>
+              </div>
+              <input
+                id="uploadFullVideo"
+                name="uploadFullVideo"
+                type="file"
+                class="file-input-native"
+                tabindex="-1"
+                accept="video/*,.mkv,.avi"
+                required
+                aria-describedby="fullFileSummary draftErrors"
+              />
+              <div class="file-actions">
+                <button
+                  type="button"
+                  data-choose-file="uploadFullVideo"
+                  aria-label="Choose full video"
+                >
+                  Choose file
+                </button>
+                <button
+                  type="button"
+                  data-remove-file="uploadFullVideo"
+                  aria-label="Remove full video"
+                  hidden
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+            <details id="optionalMedia" class="optional-media">
+              <summary>
+                Optional media <span id="optionalMediaCount"></span>
+              </summary>
+              <div class="file-picker" data-media-for="fansly manyvids">
+                <div class="file-information">
+                  <label for="uploadTeaser">Shared teaser</label>
+                  <p
+                    id="teaserFileSummary"
+                    class="file-summary"
+                    aria-live="polite"
+                  >
+                    Fansly and ManyVids preview
+                  </p>
+                  <span id="teaserFileSummarySize" class="file-size"></span>
+                </div>
+                <input
+                  id="uploadTeaser"
+                  name="uploadTeaser"
+                  type="file"
+                  class="file-input-native"
+                  tabindex="-1"
+                  accept="video/*,.mkv,.avi"
+                  aria-describedby="teaserFileSummary draftErrors"
+                />
+                <div class="file-actions">
+                  <button
+                    type="button"
+                    data-choose-file="uploadTeaser"
+                    aria-label="Choose shared teaser"
+                  >
+                    Choose file
+                  </button>
+                  <button
+                    type="button"
+                    data-remove-file="uploadTeaser"
+                    aria-label="Remove shared teaser"
+                    hidden
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div class="file-picker" data-media-for="manyvids">
+                <div class="file-information">
+                  <label for="uploadManyvidsThumbnail"
+                    >ManyVids thumbnail</label
+                  >
+                  <p
+                    id="manyvidsThumbnailSummary"
+                    class="file-summary"
+                    aria-live="polite"
+                  >
+                    Uses a site-generated thumbnail
+                  </p>
+                  <span
+                    id="manyvidsThumbnailSummarySize"
+                    class="file-size"
+                  ></span>
+                </div>
+                <input
+                  id="uploadManyvidsThumbnail"
+                  name="uploadManyvidsThumbnail"
+                  type="file"
+                  class="file-input-native"
+                  tabindex="-1"
+                  accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                  aria-describedby="manyvidsThumbnailSummary draftErrors"
+                />
+                <div class="file-actions">
+                  <button
+                    type="button"
+                    data-choose-file="uploadManyvidsThumbnail"
+                    aria-label="Choose manyvids thumbnail"
+                  >
+                    Choose file
+                  </button>
+                  <button
+                    type="button"
+                    data-remove-file="uploadManyvidsThumbnail"
+                    aria-label="Remove manyvids thumbnail"
+                    hidden
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div class="file-picker" data-media-for="pornhub">
+                <div class="file-information">
+                  <label for="uploadPornhubVideo">Pornhub video</label>
+                  <p
+                    id="pornhubFileSummary"
+                    class="file-summary"
+                    aria-live="polite"
+                  >
+                    Uses the full video unless replaced
+                  </p>
+                  <span id="pornhubFileSummarySize" class="file-size"></span>
+                </div>
+                <input
+                  id="uploadPornhubVideo"
+                  name="uploadPornhubVideo"
+                  type="file"
+                  class="file-input-native"
+                  tabindex="-1"
+                  accept="video/*,.mkv,.avi"
+                  aria-describedby="pornhubFileSummary draftErrors"
+                />
+                <div class="file-actions">
+                  <button
+                    type="button"
+                    data-choose-file="uploadPornhubVideo"
+                    aria-label="Choose pornhub video"
+                  >
+                    Choose file
+                  </button>
+                  <button
+                    type="button"
+                    data-remove-file="uploadPornhubVideo"
+                    aria-label="Remove pornhub video"
+                    hidden
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </details>
+            <p class="selection-note">
+              Selections are cleared when this window closes.
+            </p>
+            <div class="field-grid">
+              <div>
+                <label for="uploadTitle">Title</label>
+                <input
+                  id="uploadTitle"
+                  name="title"
+                  type="text"
+                  autocomplete="off"
+                  required
+                  aria-describedby="draftErrors"
+                />
+              </div>
+              <div>
+                <label for="releaseDate">Release Friday</label>
+                <input
+                  id="releaseDate"
+                  name="releaseDate"
+                  type="date"
+                  autocomplete="off"
+                  required
+                  aria-describedby="draftErrors"
+                />
+                <p id="releaseTimeSummary" class="hint"></p>
+              </div>
+            </div>
+
+            <label for="uploadDescription">Description</label>
+            <textarea
+              id="uploadDescription"
+              name="description"
+              rows="2"
+              spellcheck="true"
               autocomplete="off"
-              placeholder="Name, status, or note…"
-            />
-            <p id="subredditStatus" class="status" role="status"></p>
-            <div id="subredditList" class="subreddit-list"></div>
-          </div>
+              placeholder="Add a description…"
+            ></textarea>
 
-          <p id="socialErrors" class="error" role="alert"></p>
-          <p id="socialTraceStatus" class="trace-status" role="status">
-            Select X or Reddit to check recorded-flow evidence.
-          </p>
-        </section>
-
-        <section
-          id="confirmation"
-          class="card confirmation"
-          hidden
-          aria-labelledby="confirmationHeading"
-        >
-          <div class="section-heading">
-            <div>
-              <p class="step">Step 4</p>
-              <h2 id="confirmationHeading">Confirm the exact upload</h2>
+            <div id="pornhubPresetFields" hidden>
+              <label for="contentPreset">Pornhub content preset</label>
+              <select
+                id="contentPreset"
+                name="contentPreset"
+                aria-describedby="draftErrors"
+              >
+                <option value="">Choose when Pornhub is selected</option>
+                <option value="Straight">Straight</option>
+                <option value="Gay">Gay</option>
+                <option value="Lesbian">Lesbian</option>
+                <option value="Bisexual Male">Bisexual Male</option>
+                <option value="Transgender">Transgender</option>
+              </select>
             </div>
-            <span id="matchBadge" class="local-badge"></span>
-          </div>
-          <p id="matchQuestion" class="confirmation-question"></p>
-          <dl id="uploadSummary" class="upload-summary"></dl>
-          <p id="confirmationNotice" class="hint">
-            Yes may upload and schedule real platform posts and fill only the
-            confirmed catalogue row's empty platform link cells.
-          </p>
-          <div class="confirmation-actions">
-            <button id="confirmUpload" class="primary" type="button">
-              Yes, upload now
+          </section>
+
+          <section class="card" aria-labelledby="targetsHeading">
+            <div class="section-heading">
+              <div>
+                <h2 id="targetsHeading">Destinations</h2>
+              </div>
+            </div>
+
+            <div id="mainDestinations" class="target-grid">
+              <label class="target-option">
+                <input
+                  id="targetOnlyfans"
+                  name="paidTargets"
+                  type="checkbox"
+                  value="onlyfans"
+                  checked
+                />
+                <span
+                  ><strong>OnlyFans</strong
+                  ><small>Labels unchanged</small></span
+                >
+              </label>
+              <label class="target-option">
+                <input
+                  id="targetManyvids"
+                  name="paidTargets"
+                  type="checkbox"
+                  value="manyvids"
+                />
+                <span
+                  ><strong>ManyVids</strong
+                  ><small>Friday 15:00 UTC</small></span
+                >
+              </label>
+              <label class="target-option">
+                <input
+                  id="targetFansly"
+                  name="paidTargets"
+                  type="checkbox"
+                  value="fansly"
+                  checked
+                />
+                <span
+                  ><strong>Fansly</strong><small>Locked full video</small></span
+                >
+              </label>
+              <label class="target-option">
+                <input
+                  id="targetPornhub"
+                  name="paidTargets"
+                  type="checkbox"
+                  value="pornhub"
+                />
+                <span
+                  ><strong>Pornhub</strong><small>Manual Submit</small></span
+                >
+              </label>
+            </div>
+
+            <details id="selectedPlatformDetails" class="inline-details">
+              <summary>Selected platform settings</summary>
+              <div id="platformSettings"></div>
+            </details>
+            <p id="pornhubRecommendation" class="hint" role="status"></p>
+
+            <p id="draftErrors" class="error" role="alert"></p>
+            <div class="field-grid run-settings">
+              <div id="mainPublishFields">
+                <label for="mainPublishMode">Main-video publishing</label>
+                <select id="mainPublishMode">
+                  <option value="manual">Prepare, then let me publish</option>
+                  <option value="autonomous" selected>
+                    Publish or schedule on Upload
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label for="catalogueAssociation">Catalogue entry</label>
+                <select id="catalogueAssociation">
+                  <option value="later">
+                    Choose later — keep results locally
+                  </option>
+                  <option value="now">Choose an entry now</option>
+                </select>
+              </div>
+            </div>
+            <p id="catalogueConnectionStatus" class="hint" role="status"></p>
+            <p id="catalogueSelectionStatus" class="status" role="status"></p>
+            <button id="changeCatalogueEntry" type="button" hidden>
+              Change catalogue entry
             </button>
-            <button id="rejectMatch" type="button">No</button>
-          </div>
-        </section>
-        <section
-          id="preparationControls"
-          class="card"
-          hidden
-          aria-label="Preparation controls"
-        >
-          <div class="confirmation-actions">
+            <button id="continueWithoutSheet" type="button" hidden>
+              Continue without sheet
+            </button>
+            <div id="cataloguePicker" class="catalogue-picker" hidden>
+              <label for="catalogueSearch">Search catalogue</label>
+              <input
+                id="catalogueSearch"
+                name="catalogueSearch"
+                type="search"
+                autocomplete="off"
+                placeholder="Title, ID, series, or episode…"
+              />
+              <label for="catalogueRow">Catalogue episode</label>
+              <select id="catalogueRow" name="catalogueRow"></select>
+              <label class="catalogue-picker-toggle">
+                <input
+                  id="showAllCatalogue"
+                  name="showAllCatalogue"
+                  type="checkbox"
+                />
+                Show all catalogue entries
+              </label>
+              <button id="refreshCatalogue" type="button">
+                Refresh catalogue
+              </button>
+              <p id="selectedCatalogueReason" class="hint" role="status"></p>
+            </div>
+            <details class="settings-details">
+              <summary>Advanced: legacy sheet bridge</summary>
+              <p class="hint">
+                <a
+                  data-chrome-only
+                  href="options.html#catalogueBridgeHeading"
+                  target="_blank"
+                  rel="noopener"
+                  >Configure a legacy Apps Script bridge</a
+                >
+                <span data-desktop-only hidden
+                  >Configure the optional Apps Script bridge in the Chrome
+                  uploader</span
+                >
+                for matching and saving post links.
+              </p>
+            </details>
+          </section>
+
+          <section
+            class="card social-card"
+            aria-labelledby="socialHeading"
+            hidden
+          >
+            <div class="section-heading">
+              <div>
+                <h2 id="socialHeading">Distribute a social teaser</h2>
+              </div>
+              <span class="local-badge">Optional</span>
+            </div>
+            <p class="section-copy">
+              Choose the teaser and destinations. Reddit drafts need a confirmed
+              Redgifs link; final publishing stays manual until verified
+              automation is available.
+            </p>
+
+            <div class="file-picker">
+              <div class="file-information">
+                <label for="uploadSocialTeaser">Social teaser</label>
+                <p
+                  id="socialFileSummary"
+                  class="file-summary"
+                  aria-live="polite"
+                >
+                  Choose a video for social posts
+                </p>
+                <span id="socialFileSummarySize" class="file-size"></span>
+              </div>
+              <input
+                id="uploadSocialTeaser"
+                name="uploadSocialTeaser"
+                type="file"
+                class="file-input-native"
+                tabindex="-1"
+                accept="video/*,.mkv,.avi"
+                aria-describedby="socialFileSummary socialErrors"
+              />
+              <div class="file-actions">
+                <button
+                  type="button"
+                  data-choose-file="uploadSocialTeaser"
+                  aria-label="Choose social teaser"
+                >
+                  Choose file
+                </button>
+                <button
+                  type="button"
+                  data-remove-file="uploadSocialTeaser"
+                  aria-label="Remove social teaser"
+                  hidden
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+
+            <label for="socialCaption">Social caption</label>
+            <textarea
+              id="socialCaption"
+              name="socialCaption"
+              rows="4"
+              maxlength="5000"
+              spellcheck="true"
+              autocomplete="off"
+              placeholder="Used for the X caption and as each Reddit post's default title…"
+              aria-describedby="socialErrors"
+            ></textarea>
+
+            <div
+              class="social-targets"
+              role="group"
+              aria-label="Social destinations"
+            >
+              <label class="target-option">
+                <input
+                  id="targetSocialX"
+                  name="socialTargets"
+                  type="checkbox"
+                  value="x"
+                />
+                <span
+                  ><strong>X</strong
+                  ><small
+                    >Teaser + caption · paid link in the first reply</small
+                  ></span
+                >
+              </label>
+              <label class="target-option">
+                <input
+                  id="targetSocialReddit"
+                  name="socialTargets"
+                  type="checkbox"
+                  value="reddit"
+                />
+                <span
+                  ><strong>Reddit</strong
+                  ><small
+                    >Redgifs first · then each selected subreddit</small
+                  ></span
+                >
+              </label>
+            </div>
+
+            <div id="socialPaidLinkFields" hidden>
+              <label for="socialPaidLink"
+                >Paid-video link for the X reply</label
+              >
+              <select
+                id="socialPaidLink"
+                name="socialPaidLink"
+                aria-describedby="socialPaidLinkHint socialErrors"
+              >
+                <option value="">Choose the paid-video link</option>
+              </select>
+              <p id="socialPaidLinkHint" class="hint">
+                Existing catalogue links appear automatically. A missing link
+                can come from the main-video upload in this run.
+              </p>
+              <div id="socialCustomPaidLinkField" hidden>
+                <label for="socialCustomPaidLink">Custom paid-video URL</label>
+                <input
+                  id="socialCustomPaidLink"
+                  name="socialCustomPaidLink"
+                  type="url"
+                  inputmode="url"
+                  autocomplete="off"
+                  placeholder="https://…"
+                  aria-describedby="socialErrors"
+                />
+              </div>
+            </div>
+
+            <fieldset class="mode-choice">
+              <legend>Publishing mode</legend>
+              <label>
+                <input type="radio" name="socialMode" value="manual" checked />
+                <span
+                  ><strong>Confirm manually</strong
+                  ><small
+                    >Fill and upload, then stop before each final
+                    publish.</small
+                  ></span
+                >
+              </label>
+              <label>
+                <input type="radio" name="socialMode" value="autonomous" />
+                <span
+                  ><strong>Autonomous on Upload</strong
+                  ><small
+                    >Use only approved presets and click final controls.</small
+                  ></span
+                >
+              </label>
+            </fieldset>
+
+            <div id="subredditFields" hidden>
+              <div class="subreddit-heading">
+                <div>
+                  <h3>Subreddits</h3>
+                  <p class="hint">
+                    Your last selection becomes the next default.
+                  </p>
+                </div>
+                <button id="refreshSubreddits" type="button">
+                  Refresh list
+                </button>
+              </div>
+              <label class="subreddit-filter" for="subredditSearch"
+                >Filter subreddits</label
+              >
+              <input
+                id="subredditSearch"
+                name="subredditSearch"
+                type="search"
+                autocomplete="off"
+                placeholder="Name, status, or note…"
+              />
+              <p id="subredditStatus" class="status" role="status"></p>
+              <div id="subredditList" class="subreddit-list"></div>
+            </div>
+
+            <p id="socialErrors" class="error" role="alert"></p>
+            <p id="socialTraceStatus" class="trace-status" role="status">
+              Select X or Reddit to check recorded-flow evidence.
+            </p>
+          </section>
+
+          <section
+            id="preparationControls"
+            class="preparation-controls"
+            hidden
+            aria-label="Preparation progress"
+          >
+            <p>
+              Keep this window open while files transfer. Follow the platform
+              results below.
+            </p>
             <button id="cancelPreparation" type="button">
               Stop preparation
             </button>
-            <button id="exportPreparation" type="button">
-              Preview preparation diagnostics
-            </button>
+          </section>
+          <details id="uploadRecovery" class="draft-actions">
+            <summary>Draft tools &amp; recovery</summary>
+            <div class="secondary-actions">
+              <button id="newUploadDraft" type="button">
+                Start a new draft
+              </button>
+              <button id="refreshRecovery" type="button">
+                Refresh recovery
+              </button>
+              <button id="exportPreparation" type="button">
+                Preview preparation diagnostics
+              </button>
+            </div>
+            <p class="hint">
+              A new draft clears this form, not previous uploads. Unresolved
+              drafts must be reviewed before the same work can run again.
+            </p>
+            <p id="recoveryStatus" class="status" role="status"></p>
+            <div id="recoveryRecords"></div>
             <button id="resetPreparation" type="button">
-              Clear all preparation evidence
+              Review clearing abandoned preparation evidence
             </button>
+            <dialog id="resetPreparationDialog">
+              <p>
+                Remove all locally saved preparation evidence for abandoned test
+                runs. Check remote drafts first: this cannot cancel or delete
+                anything on a platform, and durable publication records remain.
+              </p>
+              <div class="secondary-actions">
+                <button id="confirmPreparationReset" type="button">
+                  Clear all preparation evidence
+                </button>
+                <button id="closePreparationReset" type="button">Cancel</button>
+              </div>
+            </dialog>
             <dialog id="preparationDiagnostics">
               <p>
                 Sanitized step evidence. Review before saving or sharing. No
@@ -678,70 +696,88 @@
                 Close
               </button>
             </dialog>
-          </div>
-          <dialog id="resetPreparationDialog">
-            <p>
-              Remove all locally saved preparation evidence for abandoned test
-              runs. Check remote drafts first: this cannot cancel or delete
-              anything on a platform, and durable publication records remain.
-            </p>
-            <div class="confirmation-actions">
-              <button id="confirmPreparationReset" type="button">
-                Clear all preparation evidence
-              </button>
-              <button id="closePreparationReset" type="button">Cancel</button>
-            </div>
-          </dialog>
-        </section>
+          </details>
 
-        <section id="results" class="results" aria-live="polite"></section>
-        <section
-          id="redditLinkStep"
-          class="card"
-          hidden
-          aria-labelledby="redditLinkHeading"
-        >
-          <h2 id="redditLinkHeading">
-            Add the Redgifs link to your Reddit drafts
-          </h2>
-          <label for="redditWatchUrl">Published Redgifs watch URL</label>
-          <input
-            id="redditWatchUrl"
-            type="url"
-            placeholder="https://www.redgifs.com/watch/…"
-          />
-          <button id="prepareRedditLinks" type="button">
-            Fill Reddit draft links
-          </button>
-          <p id="redditLinkStatus" class="status" role="status"></p>
-        </section>
-        <details id="savedCatalogueAssociation" class="card" hidden>
-          <summary>Associate saved results with a catalogue entry</summary>
-          <p class="hint">
-            This saves captured links. It never uploads or publishes again.
-          </p>
-          <button id="loadAssociationRows" type="button">
-            Load catalogue entries
-          </button>
-          <label for="savedCatalogueRow">Catalogue entry</label>
-          <select id="savedCatalogueRow">
-            <option value="">Choose an entry</option>
-          </select>
-          <button id="associateSavedResults" type="button" disabled>
-            Save association
-          </button>
-          <p id="savedAssociationStatus" class="status" role="status"></p>
-        </details>
-
-        <aside class="safety-note">
-          <strong>Safety boundary</strong>
-          <span
-            >Files stay in this tab and are transferred through the sites' real
-            controls. The extension never stores video bytes or recreates
-            private authenticated API requests.</span
+          <section id="results" class="results" aria-live="polite"></section>
+          <section
+            id="redditLinkStep"
+            class="card"
+            hidden
+            aria-labelledby="redditLinkHeading"
           >
-        </aside>
+            <h2 id="redditLinkHeading">
+              Add the Redgifs link to your Reddit drafts
+            </h2>
+            <label for="redditWatchUrl">Published Redgifs watch URL</label>
+            <input
+              id="redditWatchUrl"
+              type="url"
+              placeholder="https://www.redgifs.com/watch/…"
+            />
+            <button id="prepareRedditLinks" type="button">
+              Fill Reddit draft links
+            </button>
+            <p id="redditLinkStatus" class="status" role="status"></p>
+          </section>
+          <details id="savedCatalogueAssociation" class="card" hidden>
+            <summary>Associate saved results with a catalogue entry</summary>
+            <p class="hint">
+              This saves captured links. It never uploads or publishes again.
+            </p>
+            <button id="loadAssociationRows" type="button">
+              Load catalogue entries
+            </button>
+            <label for="savedCatalogueRow">Catalogue entry</label>
+            <select id="savedCatalogueRow">
+              <option value="">Choose an entry</option>
+            </select>
+            <button id="associateSavedResults" type="button" disabled>
+              Save association
+            </button>
+            <p id="savedAssociationStatus" class="status" role="status"></p>
+          </details>
+
+          <details class="safety-note">
+            <summary>File handling</summary>
+            <p>
+              Files are transferred through the sites' real controls. OFEnhancer
+              never stores video bytes or recreates private authenticated API
+              requests. Selections are cleared when this window closes.
+            </p>
+          </details>
+        </div>
       </div>
+      <footer
+        id="uploadActions"
+        class="upload-actions"
+        aria-label="Upload actions"
+      >
+        <div class="action-status">
+          <p id="matchStatus" class="status" role="status">
+            Choose your video and destinations.
+          </p>
+          <p id="uploadError" class="error" role="alert"></p>
+          <p id="runNotice" class="hint"></p>
+        </div>
+        <div class="action-secondary">
+          <button id="reviewRecovery" type="button" hidden>
+            Review previous drafts
+          </button>
+          <button id="refreshReadiness" type="button" hidden>
+            Check readiness
+          </button>
+        </div>
+        <button
+          id="uploadButton"
+          class="primary"
+          type="button"
+          disabled
+          aria-busy="false"
+          aria-describedby="matchStatus uploadError runNotice"
+        >
+          Upload
+        </button>
+      </footer>
 
       <section
         id="settingsPanel"

@@ -54,6 +54,61 @@ Chrome setup/reload guides use Chrome, current data survives update/repair, and
 external media/profiles remain untouched. A StageOnly pass is not a compiled or
 installed Setup pass. Unsigned local output is not a signed public release.
 
+### Single-action uploader - 0.20.41
+
+The 0.20.40 preparing-to-confirmation bounce was reproduced with the installed
+personal Chrome uploader and with its retained preparation records in the real
+extension worker and desktop runtime transport. PREPARE rejected with
+`An existing prepared or uncertain draft exists for this work item.` The journal
+was a legitimate duplicate-preparation blocker; the defective UI hid recovery
+and reconstructed confirmation after the rejection. No journal was cleared to
+make this release appear ready.
+
+The shared uploader now checks availability before enabling one sticky **Upload**
+action, awaits the file-port binding acknowledgement, and dispatches PREPARE and
+START once for an admitted run. Known pre-admission rejection retains editable
+files/details and requires a successful readiness check before retry. Uncertain
+admission or START retains the bound run and exposes reconciliation instead of
+repeating work. Runtime versions, catalogue revalidation, durable publication
+intents and page/document bindings remain enforced. Optional media, destination
+settings and catalogue selection use compact conditional disclosure; the generic
+confirmation step and summary table are removed.
+
+September 22 verification: `npm run check` passed (469 portable tests plus one
+stage-dependent skip, 371 .NET tests, 13 native tests, and 14 Windows packaging
+tests plus one compiler-dependent skip). Both skipped tests subsequently passed
+against the built package: genuine isolated Chromium installation lifecycle and
+the compiled installer's recovery/ordinary-update integration. The packaging
+suite's isolated GUI-launch subcheck remained skipped while a real desktop
+authority was running. New full-worker regressions cover both launcher paths,
+file handoff, the actual recovery rejection, safe retry, uncertain START,
+publication blocking, rejected binding and an offline desktop connection.
+
+Impeccable context, Distill, Layout and Clarify were applied. The finish pass
+checked initial, ready, loading, error and progress views, wide/narrow layouts,
+long filenames and 200% text/zoom behavior. The final mechanical scan's only
+finding was the incumbent Inter font, retained to preserve the product identity.
+All 854 staged package files passed their size/SHA-256 verification.
+
+The normal 0.20.41 update was installed successfully and the existing personal
+Chrome extension reloaded at its unchanged ID and load location. The desktop
+reported `Chrome connected. Ready to prepare uploads.` Three readable saved
+settings/credential files retained their hashes; a before-hash of the open
+catalogue database was unavailable and is not claimed. The next personal-profile
+UI automation step was blocked by a tooling safety check. Post-fix authenticated
+platform file handoff remains unverified; fixture results are not live publication
+evidence. No public publication or catalogue mutation was performed.
+
+For the remaining bounded live gate, select the generated
+`.local/uploader-041/media/ofe-041-extension-benign-20260922.mp4` in Chrome (or the
+corresponding `ofe-041-desktop-benign-20260922.mp4` in the desktop uploader).
+Choose OnlyFans, **Prepare, then let me publish**, and **Choose later** for the
+catalogue. Enter neutral development metadata and click **Upload** once. Stop at
+the prepared/unpublished composer, never Publish; retain **Draft tools & recovery
+
+> Export diagnostics** and the displayed result/error as evidence. Existing work
+> that needs reconciliation must not be cleared merely to pass this gate.
+
 ### MainHub schedule and certifications — 0.20.40
 
 The current upload form's publication dropdown now opens its owned schedule

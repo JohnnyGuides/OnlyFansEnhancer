@@ -77,6 +77,45 @@ public class BrowserUploadChannelTests
         }
     }
 
+    [TestMethod]
+    public async Task PreparationRejectionPreservesAdmissionAndRecoveryFieldsWithoutReplayingCommand()
+    {
+        using var channel = new BrowserUploadChannel();
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        var pending = channel.RequestAsync(Json(new { kind = "message", message = new { type = "PREPARE_CREATOR_UPLOAD", sessionId = "neutral-preparation-run" } }));
+        var exchange = Json(channel.Exchange(Json(new { browserId = browser })));
+        Assert.AreEqual(1, exchange.GetProperty("commands").GetArrayLength());
+        string commandId = exchange.GetProperty("commands")[0].GetProperty("id").GetString()!;
+        var rejection = new { ok = false, error = "A previous draft needs review.", rejectionCode = "upload-preparation-recovery-required", recoveryRequired = true, uploadAdmission = "not-started" };
+        channel.Exchange(Json(new { browserId = browser, replies = new[] { new { id = commandId, result = rejection } } }));
+        JsonElement result = await pending;
+        Assert.IsFalse(result.GetProperty("ok").GetBoolean());
+        Assert.AreEqual(rejection.error, result.GetProperty("error").GetString());
+        Assert.AreEqual(rejection.rejectionCode, result.GetProperty("rejectionCode").GetString());
+        Assert.AreEqual("not-started", result.GetProperty("uploadAdmission").GetString());
+        Assert.IsTrue(result.GetProperty("recoveryRequired").GetBoolean());
+        Assert.AreEqual(0, Json(channel.Exchange(Json(new { browserId = browser }))).GetProperty("commands").GetArrayLength());
+    }
+
+    [TestMethod]
+    public void UploadBindingAcknowledgementOnlyComesFromTheSelectedLiveBrowser()
+    {
+        using var channel = new BrowserUploadChannel();
+        string selected = Guid.NewGuid().ToString(), foreign = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = selected }));
+        channel.Select(selected);
+        List<JsonElement> received = [];
+        channel.EventReceived += value => received.Add(value);
+        var events = new[] { new { portId = Guid.NewGuid().ToString(), message = new { type = "session-bound", sessionId = "neutral-preparation-run" } } };
+        channel.Exchange(Json(new { browserId = foreign, events }));
+        Assert.AreEqual(0, received.Count);
+        channel.Exchange(Json(new { browserId = selected, events }));
+        Assert.AreEqual(1, received.Count);
+        Assert.AreEqual("session-bound", received[0].GetProperty("message").GetProperty("type").GetString());
+        Assert.AreEqual("neutral-preparation-run", received[0].GetProperty("message").GetProperty("sessionId").GetString());
+    }
+
     private static JsonElement Json(object value)
     {
         var result = JsonSerializer.SerializeToElement(value);

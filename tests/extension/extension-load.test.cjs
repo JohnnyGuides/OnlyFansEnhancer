@@ -511,7 +511,10 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
       await uploadConsole.locator("#targetFansly").isChecked(),
       true,
     );
-    assert.equal(await uploadConsole.locator("#confirmation").isHidden(), true);
+    assert.equal(
+      await uploadConsole.locator("#uploadButton").isDisabled(),
+      true,
+    );
     const tabsBeforePreview = context.pages().map((tab) => tab.url());
     await uploadConsole.locator("#uploadFullVideo").setInputFiles({
       name: "Upload-only smoke fixture.mp4",
@@ -521,13 +524,15 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     await uploadConsole
       .locator("#uploadDescription")
       .fill("Preview only; never submit.");
-    await uploadConsole.locator("#confirmation").waitFor();
+    await uploadConsole.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
     assert.equal(
-      await uploadConsole.locator("#confirmUpload").isEnabled(),
+      await uploadConsole.locator("#uploadButton").isEnabled(),
       true,
     );
     assert.match(
-      await uploadConsole.locator("#matchBadge").textContent(),
+      await uploadConsole.locator("#catalogueSelectionStatus").textContent(),
       /without sheet/i,
     );
     assert.equal(
@@ -535,18 +540,21 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
       true,
     );
     // Moving focus must not dismiss the preview while the user clicks a button.
-    await uploadConsole.locator("#confirmUpload").focus();
+    await uploadConsole.locator("#uploadButton").focus();
     assert.equal(
-      await uploadConsole.locator("#confirmation").isVisible(),
+      await uploadConsole.locator("#uploadActions").isVisible(),
       true,
     );
     assert.deepEqual(
       context.pages().map((tab) => tab.url()),
       tabsBeforePreview,
-      "An upload preview must not open any platform tab before Yes.",
+      "An upload preview must not open any platform tab before Upload.",
     );
-    await uploadConsole.locator("#rejectMatch").click();
-    assert.equal(await uploadConsole.locator("#confirmation").isHidden(), true);
+    await uploadConsole.locator("#uploadTitle").fill("");
+    assert.equal(
+      await uploadConsole.locator("#uploadButton").isDisabled(),
+      true,
+    );
     assert.deepEqual(
       context.pages().map((tab) => tab.url()),
       tabsBeforePreview,

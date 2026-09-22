@@ -251,6 +251,7 @@ for (const optional of [false, true])
       clearTimeout,
       channelFor: () => channel,
       setPlatformState() {},
+      updateUploadAction() {},
       chrome: {
         runtime: {
           connect: () => ({
@@ -268,13 +269,15 @@ for (const optional of [false, true])
     const start = source.indexOf("    function fileIdentity(");
     const end = source.indexOf("    async function retryPlatform", start);
     vm.runInContext(source.slice(start, end), context);
-    const filesStart = source.indexOf("const confirmedFiles = {");
+    const filesStart = source.indexOf("const selectedFiles = {");
     const filesEnd = source.indexOf(";", filesStart);
     vm.runInContext(
       source.slice(filesStart, filesEnd + 1) +
-        '\nglobalThis.session = connectSession("file-session", { files: confirmedFiles, proof: {} });',
+        '\nglobalThis.session = connectSession("file-session", { files: selectedFiles, proof: {} });',
       context,
     );
+    receive({ type: "session-bound", sessionId: "file-session" });
+    await context.session.whenBound;
     receive({
       type: "file-request",
       sessionId: "file-session",

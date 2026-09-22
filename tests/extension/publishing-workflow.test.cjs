@@ -60,6 +60,9 @@ function installScriptProperties(context, values = {}) {
 }
 
 async function addUploadConsoleScripts(page, options = {}) {
+  await require("../support/uploader-mock-admission.cjs").installUploaderMockAdmission(
+    page,
+  );
   await page.evaluate(async () => {
     if (!globalThis.crypto.subtle) {
       Object.defineProperty(globalThis.crypto, "subtle", {
@@ -2452,7 +2455,7 @@ test("catalogue client allow-lists Reddit, ledger, and preset contracts", async 
   assert.deepEqual(sent[2].payload, {});
 });
 
-test("upload console performs no platform mutation before the single Yes confirmation", async () => {
+test("upload console performs no platform mutation before the single Upload action", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -2547,8 +2550,7 @@ test("upload console performs no platform mutation before the single Yes confirm
                 globalThis.rejectFirstPreparation = false;
                 callback({
                   ok: false,
-                  error:
-                    "Creator workflow profiles changed after confirmation.",
+                  error: "Creator workflow profiles changed during preflight.",
                 });
                 return;
               }
@@ -2582,7 +2584,7 @@ test("upload console performs no platform mutation before the single Yes confirm
       buffer: Buffer.from("full-video"),
     });
     await page.locator("#uploadTitle").fill("Episode 42");
-    await page.getByText(/Likely episode/i).waitFor();
+    await page.getByText(/Catalogue row/i).waitFor();
 
     assert.deepEqual(
       await page.evaluate(() =>
@@ -2602,30 +2604,34 @@ test("upload console performs no platform mutation before the single Yes confirm
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
     assert.equal(await page.locator("#targetFansly").isChecked(), true);
     assert.match(
-      await page.locator("#uploadSummary").textContent(),
-      /Fansly saved toggles.*Post to FYP: off.*Post to Walls: on.*Lock Replies: off/s,
+      await page.locator("#platformSettings").textContent(),
+      /Fansly:.*Post to FYP: off.*Post to Walls: on.*Lock Replies: off/s,
     );
 
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     await page
-      .getByText("Creator workflow profiles changed after confirmation.", {
-        exact: true,
-      })
+      .getByText(/Creator workflow profiles changed during preflight/)
+      .first()
       .waitFor();
-    assert.equal(await page.locator("#confirmation").isVisible(), true);
-    assert.equal(await page.locator(".result-card").count(), 0);
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.equal(await page.locator("#uploadButton").isEnabled(), true);
+    assert.equal(await page.locator(".result-card").count(), 2);
+    assert.match(await page.locator("#results").textContent(), /Not started/);
     assert.equal(await page.getByRole("button", { name: "Retry" }).count(), 0);
     await page.evaluate(() => {
       globalThis.consoleMessages = [];
     });
 
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     await page
       .getByText(/Sheet updated and verified/i)
       .first()
       .waitFor();
-    assert.equal(await page.locator("#confirmation").isVisible(), false);
+    assert.equal(await page.locator("#uploadButton").isEnabled(), false);
     assert.equal(await page.locator("#cancelPreparation").isVisible(), true);
+    await page.locator("#uploadRecovery > summary").click();
     assert.equal(await page.locator("#exportPreparation").isVisible(), true);
     const mutationMessages = await page.evaluate(() =>
       globalThis.consoleMessages.filter((message) =>
@@ -2719,20 +2725,29 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
       mimeType: "video/mp4",
       buffer: Buffer.from("neutral fixture"),
     });
-    await page.locator("#confirmUpload").waitFor({ state: "visible" });
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
     await page.locator("#uploadManyvidsThumbnail").setInputFiles({
       name: "empty.png",
       mimeType: "image/png",
       buffer: Buffer.alloc(0),
     });
-    await page.locator("#confirmUpload").waitFor({ state: "hidden" });
+    await page.waitForFunction(
+      () => document.querySelector("#uploadButton").disabled,
+    );
     assert.match(
       await page.locator("#draftErrors").textContent(),
       /Choose a PNG or JPEG ManyVids thumbnail or leave it blank/,
     );
     await page.locator("#uploadManyvidsThumbnail").setInputFiles([]);
-    await page.locator("#confirmUpload").waitFor({ state: "visible" });
-    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.equal(await page.locator("#uploadButton").isEnabled(), true);
     assert.equal(await page.locator("#draftErrors").textContent(), "");
     assert.equal(
       await page.locator("#catalogueAssociation").inputValue(),
@@ -2743,7 +2758,7 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
   }
 });
 
-test("strong catalogue proposal shows one Yes card and No opens the searchable picker", async () => {
+test("strong catalogue proposal shows an inline match and Change catalogue entry opens the searchable picker", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -2824,7 +2839,7 @@ test("strong catalogue proposal shows one Yes card and No opens the searchable p
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
-    await page.getByText(/Likely episode/i).waitFor();
+    await page.getByText(/Catalogue row/i).waitFor();
 
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
     assert.equal(await page.locator("#targetFansly").isChecked(), false);
@@ -2833,10 +2848,13 @@ test("strong catalogue proposal shows one Yes card and No opens the searchable p
       await page.locator("#pornhubRecommendation").textContent(),
       /recommended.*choose an exact content preset/i,
     );
-    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.equal(await page.locator("#uploadButton").isEnabled(), true);
     assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
 
-    await page.locator("#rejectMatch").click();
+    await page.locator("#changeCatalogueEntry").click();
     await page.locator("#cataloguePicker").waitFor();
     await page.locator("#catalogueSearch").fill("battlefield");
     assert.equal(
@@ -2858,7 +2876,7 @@ test("strong catalogue proposal shows one Yes card and No opens the searchable p
   }
 });
 
-test("ambiguous catalogue wording opens the picker without offering Yes", async () => {
+test("ambiguous catalogue wording opens the picker without enabling Upload", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -2932,7 +2950,7 @@ test("ambiguous catalogue wording opens the picker without offering Yes", async 
     });
     await page.locator("#cataloguePicker").waitFor();
 
-    assert.equal(await page.locator("#confirmation").isHidden(), true);
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     assert.equal(await page.locator("#catalogueRow option").count(), 4);
     assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
 
@@ -2946,13 +2964,16 @@ test("ambiguous catalogue wording opens the picker without offering Yes", async 
     await page.locator("#uploadTitle").fill("claire-b");
     await page.waitForTimeout(350);
     assert.equal(await page.locator("#catalogueRow").inputValue(), "row:20");
-    assert.match(await page.locator("#matchBadge").textContent(), /Row 20/);
+    assert.match(
+      await page.locator("#catalogueSelectionStatus").textContent(),
+      /row 20/i,
+    );
   } finally {
     await browser.close();
   }
 });
 
-test("unverified platform queue keeps Yes disabled and offers explicit upload without the sheet", async () => {
+test("unverified platform queue keeps Upload disabled and offers explicit upload without the sheet", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -3007,17 +3028,20 @@ test("unverified platform queue keeps Yes disabled and offers explicit upload wi
     });
     await page.getByText(/OnlyFans queue is not verified/i).waitFor();
 
-    assert.equal(await page.locator("#confirmUpload").isDisabled(), true);
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     await page.locator("#continueWithoutSheet").click();
     await page.getByText(/Upload without sheet/i).waitFor();
-    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.equal(await page.locator("#uploadButton").isEnabled(), true);
     assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
   } finally {
     await browser.close();
   }
 });
 
-test("Yes rechecks the proposed catalogue row and stops before platform mutation when it changed", async () => {
+test("Upload rechecks the proposed catalogue row and stops before platform mutation when it changed", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -3089,10 +3113,10 @@ test("Yes rechecks the proposed catalogue row and stops before platform mutation
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
-    await page.getByText(/Likely episode/i).waitFor();
+    await page.getByText(/Catalogue row/i).waitFor();
 
-    await page.locator("#confirmUpload").click();
-    await page.getByText(/changed.*review.*Yes again/i).waitFor();
+    await page.locator("#uploadButton").click();
+    await page.getByText(/changed.*review.*Upload again/i).waitFor();
 
     assert.equal(await page.evaluate(() => globalThis.snapshotRequests), 2);
     assert.equal(await page.evaluate(() => globalThis.permissionRequests), 0);
@@ -3119,7 +3143,7 @@ for (const scenario of [
     requests: 1,
   },
 ]) {
-  test(`upload console can upload with an ${scenario.name} sheet bridge after explicit confirmation`, async () => {
+  test(`upload console can upload with an ${scenario.name} sheet bridge after an explicit upload-only choice`, async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     try {
@@ -3195,22 +3219,26 @@ for (const scenario of [
         buffer: Buffer.from("full-video"),
       });
       await page.locator("#uploadDescription").fill("My description");
-      if (scenario.config) {
+      {
         await page.locator("#continueWithoutSheet").waitFor({ timeout: 3000 });
-        assert.equal(await page.locator("#confirmation").isVisible(), false);
+        assert.equal(await page.locator("#uploadButton").isEnabled(), false);
         assert.match(
           await page.locator("#matchStatus").textContent(),
-          /invalid|Apps Script|HTTP 503/i,
+          /invalid|Apps Script|HTTP 503|not connected/i,
         );
         await page.locator("#continueWithoutSheet").click();
       }
-      await page.locator("#confirmation").waitFor({ timeout: 3000 });
+      await page.waitForFunction(
+        () => !document.querySelector("#uploadButton").disabled,
+        null,
+        { timeout: 3000 },
+      );
       assert.match(
-        await page.locator("#matchBadge").textContent(),
+        await page.locator("#catalogueSelectionStatus").textContent(),
         /without sheet/i,
       );
       assert.match(
-        await page.locator("#confirmationNotice").textContent(),
+        await page.locator("#runNotice").textContent(),
         /no sheet data will be read or written/i,
       );
       assert.equal(
@@ -3233,12 +3261,16 @@ for (const scenario of [
 
       // Editing must keep the explicit upload-only choice and invalidate the old preview.
       await page.locator("#uploadDescription").fill("My final description");
-      await page.locator("#confirmation").waitFor({ timeout: 3000 });
+      await page.waitForFunction(
+        () => !document.querySelector("#uploadButton").disabled,
+        null,
+        { timeout: 3000 },
+      );
       assert.equal(
         await page.evaluate(() => globalThis.catalogueRequests),
         scenario.requests,
       );
-      await page.locator("#confirmUpload").click();
+      await page.locator("#uploadButton").click();
       await page
         .getByText("Scheduled · sheet not connected", { exact: true })
         .first()
@@ -3392,8 +3424,10 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
         mimeType: "video/mp4",
         buffer: Buffer.from("inert test media"),
       });
-      await page.locator("#confirmUpload").waitFor({ state: "visible" });
-      await page.locator("#confirmUpload").click();
+      await page.waitForFunction(
+        () => !document.querySelector("#uploadButton").disabled,
+      );
+      await page.locator("#uploadButton").click();
       const fansly = page.locator(".result-card").filter({
         has: page.getByRole("heading", { name: "Fansly", exact: true }),
       });
@@ -3585,8 +3619,10 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       ),
       saved,
     );
-    await page.locator("#confirmUpload").waitFor({ state: "visible" });
-    await page.locator("#confirmUpload").click();
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    await page.locator("#uploadButton").click();
     await page.waitForFunction(() => typeof finishNeutralStart === "function");
     await page.locator(".draft-actions summary").click();
     await page.locator("#newUploadDraft").click();

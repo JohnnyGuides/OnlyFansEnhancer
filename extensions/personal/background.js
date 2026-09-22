@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.40"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.41"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -2758,6 +2758,7 @@ function cancelCreatorUploadResponseObserverInPage(config) {
   );
 }
 const creatorUploadSessions = new Map();
+const creatorUploadPreparations = new Set();
 const creatorUploadConsolePorts = new Set();
 const creatorUploadFileRequests = new Map();
 let creatorUploadForeground = null;
@@ -2944,6 +2945,7 @@ async function getCreatorUploadSession(sessionId) {
     updatedAt: stored.updatedAt || Date.now(),
     draft: stored.draft || {},
     catalogue: stored.catalogue ?? null,
+    launcher: stored.launcher || "extension",
     platforms: new Map(Object.entries(stored.platforms || {})),
     commitChain: Promise.resolve(),
     cleanupTimer: null,
@@ -3067,7 +3069,9 @@ async function validateCreatorUploadRequest(message) {
     providedProfileSignature !== draft.profileSignature &&
     providedProfileSignature !== legacyProfileSignature
   ) {
-    throw new Error("Creator workflow profiles changed after confirmation.");
+    throw new Error(
+      "Creator workflow profiles changed during preflight. Review the settings and click Upload again.",
+    );
   }
   if (providedProfileSignature === legacyProfileSignature) {
     draft.legacyProfileSignature = legacyProfileSignature;
@@ -3460,7 +3464,10 @@ function creatorUploadHandlePortMessage(port, message) {
     port.creatorUploadSessionId = sessionId;
     void getCreatorUploadSession(sessionId)
       .then((session) => {
-        if (!session) return;
+        if (!session) {
+          port.postMessage({ type: "session-bound", sessionId });
+          return;
+        }
         if (!creatorUploadSessionProofMatches(session, message.proof)) {
           port.creatorUploadSessionId = "";
           port.postMessage({
@@ -3473,6 +3480,7 @@ function creatorUploadHandlePortMessage(port, message) {
         }
         if (session.restored && !session.executionPort)
           session.executionPort = port;
+        port.postMessage({ type: "session-bound", sessionId });
         port.postMessage({
           type: "session-restored",
           sessionId,
@@ -3485,7 +3493,21 @@ function creatorUploadHandlePortMessage(port, message) {
           })),
         });
       })
-      .catch(() => {});
+      .catch((error) => {
+        console.error("Upload console binding failed.", error);
+        try {
+          port.postMessage({
+            type: "session-restore-rejected",
+            sessionId,
+            error: error.message,
+          });
+        } catch (closed) {
+          console.warn(
+            "Upload console closed before binding failure could be delivered.",
+            closed,
+          );
+        }
+      });
     return;
   }
   if (message?.type !== "file-response") return;
@@ -3984,7 +4006,7 @@ async function prepareCreatorManyVidsEdit(session, target) {
   });
 }
 
-async function prepareCreatorUpload(message, launcher = "extension") {
+async function checkCreatorUploadPreflight(message, launcher = "extension") {
   await ensureCreatorUploadRuntimeVersion();
   const request = await validateCreatorUploadRequest(message);
   request.launcher = launcher === "desktop" ? "desktop" : "extension";
@@ -4015,43 +4037,67 @@ async function prepareCreatorUpload(message, launcher = "extension") {
           `The catalogue already contains a ${platform} result or a link requiring review.`,
         );
   }
-  if (await getCreatorUploadSession(request.sessionId)) {
-    throw new Error("This creator upload session already exists.");
-  }
-  const session = {
-    id: request.sessionId,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    draft: request.draft,
-    catalogue: request.catalogue,
-    launcher: request.launcher,
-    platforms: new Map(),
-    commitChain: Promise.resolve(),
-    cleanupTimer: null,
-  };
-  creatorUploadSessions.set(session.id, session);
-  await checkpointCreatorUploadSession(session);
-  session.cleanupTimer = setTimeout(
-    () => creatorUploadSessions.delete(session.id),
-    2 * 60 * 60_000,
-  );
-  const platforms = [];
-  for (const platform of request.targets) {
-    try {
-      const prepared = await prepareCreatorUploadPlatform(session, platform);
-      platforms.push({
-        platform,
-        status: prepared.status,
-        tabId: prepared.tabId,
-      });
-    } catch (error) {
-      const failed = { platform, status: "failed", error: error.message };
-      session.platforms.set(platform, failed);
-      await checkpointCreatorUploadSession(session);
-      platforms.push(failed);
+  return request;
+}
+
+async function prepareCreatorUpload(message, launcher = "extension") {
+  const id = message?.sessionId;
+  if (creatorUploadPreparations.has(id))
+    throw Object.assign(
+      new Error(
+        "This upload is already preparing. Review the existing run; do not start it again.",
+      ),
+      { uploadAdmission: "uncertain" },
+    );
+  creatorUploadPreparations.add(id);
+  let admitted = false;
+  try {
+    const request = await checkCreatorUploadPreflight(message, launcher);
+    if (await getCreatorUploadSession(request.sessionId)) {
+      throw new Error("This creator upload session already exists.");
     }
+    const session = {
+      id: request.sessionId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      draft: request.draft,
+      catalogue: request.catalogue,
+      launcher: request.launcher,
+      platforms: new Map(),
+      commitChain: Promise.resolve(),
+      cleanupTimer: null,
+    };
+    creatorUploadSessions.set(session.id, session);
+    admitted = true;
+    await checkpointCreatorUploadSession(session);
+    session.cleanupTimer = setTimeout(
+      () => creatorUploadSessions.delete(session.id),
+      2 * 60 * 60_000,
+    );
+    const platforms = [];
+    for (const platform of request.targets) {
+      try {
+        const prepared = await prepareCreatorUploadPlatform(session, platform);
+        platforms.push({
+          platform,
+          status: prepared.status,
+          tabId: prepared.tabId,
+        });
+      } catch (error) {
+        const failed = { platform, status: "failed", error: error.message };
+        session.platforms.set(platform, failed);
+        await checkpointCreatorUploadSession(session);
+        platforms.push(failed);
+      }
+    }
+    return { sessionId: session.id, platforms };
+  } catch (error) {
+    error.uploadAdmission ||=
+      admitted || creatorUploadSessions.has(id) ? "uncertain" : "not-started";
+    throw error;
+  } finally {
+    creatorUploadPreparations.delete(id);
   }
-  return { sessionId: session.id, platforms };
 }
 
 async function invokeCreatorUploadAdapter(args) {
@@ -4247,7 +4293,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.40"
+      "upload-hub-0.20.41"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -5254,6 +5300,12 @@ function handleExtensionMessage(message, sender, sendResponse) {
         return {
           results: await probeCreatorUploadTargets(message.targets),
         };
+      case "CHECK_CREATOR_UPLOAD_AVAILABILITY":
+        await checkCreatorUploadPreflight(
+          message,
+          sender?.desktopUploadRuntime ? "desktop" : "extension",
+        );
+        return { availability: { ready: true } };
       case "PREPARE_CREATOR_UPLOAD":
         return {
           uploadSession: await prepareCreatorUpload(
@@ -5705,6 +5757,10 @@ function handleExtensionMessage(message, sender, sendResponse) {
       sendResponse({
         ok: false,
         error: error.message,
+        ...(error.uploadAdmission
+          ? { uploadAdmission: error.uploadAdmission }
+          : {}),
+        ...(error.recoveryRequired ? { recoveryRequired: true } : {}),
         rejectionCode:
           error.rejectionCode ||
           {

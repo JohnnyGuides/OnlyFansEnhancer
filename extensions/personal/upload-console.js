@@ -1,6 +1,12 @@
 "use strict";
 
 (() => {
+  const PLATFORM_LABELS = {
+    onlyfans: "OnlyFans",
+    fansly: "Fansly",
+    manyvids: "ManyVids",
+    pornhub: "Pornhub",
+  };
   const VIDEO_EXTENSIONS = /\.(?:mp4|m4v|mov|webm|avi|mkv)$/i;
   const IMAGE_EXTENSIONS = /\.(?:jpe?g|png)$/i;
   const TARGETS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
@@ -658,11 +664,24 @@
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+          reject(
+            Object.assign(new Error(chrome.runtime.lastError.message), {
+              uploadAdmission: chrome.runtime.lastError.uploadAdmission,
+            }),
+          );
           return;
         }
         if (!response?.ok) {
-          reject(new Error(response?.error || "Extension request failed."));
+          reject(
+            Object.assign(
+              new Error(response?.error || "Extension request failed."),
+              {
+                rejectionCode: response?.rejectionCode,
+                uploadAdmission: response?.uploadAdmission,
+                recoveryRequired: response?.recoveryRequired === true,
+              },
+            ),
+          );
           return;
         }
         resolve(response);
@@ -723,13 +742,13 @@
     const refreshSubreddits = get("#refreshSubreddits");
     const socialErrors = get("#socialErrors");
     const socialTraceStatus = get("#socialTraceStatus");
-    const confirmation = get("#confirmation");
-    const confirmationNotice = get("#confirmationNotice");
-    const matchBadge = get("#matchBadge");
-    const matchQuestion = get("#matchQuestion");
-    const uploadSummary = get("#uploadSummary");
-    const confirmUpload = get("#confirmUpload");
-    const rejectMatch = get("#rejectMatch");
+    const uploadButton = get("#uploadButton");
+    const uploadError = get("#uploadError");
+    const catalogueSelectionStatus = get("#catalogueSelectionStatus");
+    const changeCatalogueEntry = get("#changeCatalogueEntry");
+    const runNotice = get("#runNotice");
+    const reviewRecovery = get("#reviewRecovery");
+    const refreshReadiness = get("#refreshReadiness");
     const results = get("#results");
     const workspaceTabs = get("#workspaceTabs");
     const uploaderTab = get("#uploaderTab");
@@ -763,6 +782,11 @@
     let uploadWithoutSheet = catalogueAssociation?.value === "later";
     let activeSession = null;
     let runBusy = false;
+    let readiness = null;
+    let readinessRevision = 0;
+    const lockedControls = new Map();
+    let lastAttempt = null;
+    let optionalSelectionCount = 0;
     let socialPollTimer = null;
     let workflowProfiles = null;
     let profilesLoaded = false;
@@ -798,6 +822,7 @@
 
     function selectWorkspaceTab(nextTab, focus = false) {
       const showSettings = nextTab === settingsTab;
+      get("#uploadActions").hidden = showSettings;
       for (const [tab, panel, selected] of [
         [uploaderTab, uploaderPanel, !showSettings],
         [settingsTab, settingsPanel, showSettings],
@@ -1282,7 +1307,7 @@
       renderSubredditPresets();
       refreshSocialReview();
       throw new Error(
-        "Subreddit presets changed. Review the refreshed settings and click Yes again.",
+        "Subreddit presets changed. Review the refreshed settings and click Upload again.",
       );
     }
 
@@ -1305,7 +1330,7 @@
         ? "Select X or Reddit to check recorded-flow evidence."
         : missingTrace ||
           missingRuntime ||
-          "Recorded-flow evidence is ready. The final plan still waits for the one Yes confirmation.";
+          "Recorded-flow evidence is ready. Upload authorizes the selected social mode.";
       if (currentMatch) renderMatch(currentMatch);
     }
 
@@ -1413,9 +1438,15 @@
     }
 
     function invalidateMatch() {
+      readiness = null;
+      ++readinessRevision;
+      uploadError.textContent = "";
+      reviewRecovery.hidden = true;
+      refreshReadiness.hidden = true;
+      updateUploadAction();
       currentMatch = null;
       currentProposal = null;
-      confirmation.hidden = true;
+      uploadButton.disabled = true;
       cataloguePicker.hidden = true;
       pornhubRecommendation.textContent = "";
       selectedCatalogueReason.textContent = "";
@@ -1579,7 +1610,7 @@
       }
       if (!candidate) {
         currentMatch = null;
-        confirmation.hidden = true;
+        uploadButton.disabled = true;
         renderPicker();
         return;
       }
@@ -1624,7 +1655,7 @@
       matchStatus.textContent = `Catalogue row ${candidate.row} is the strongest deterministic proposal.`;
       renderMatch(currentMatch);
       if (proposal.status !== "ready") {
-        confirmUpload.disabled = true;
+        updateUploadAction();
         if (proposal.status === "needs-queue-evidence") {
           const unverified = proposal.targets.executable
             .filter((platform) => !proposal.schedules[platform]?.verified)
@@ -1637,233 +1668,281 @@
                   pornhub: "Pornhub",
                 })[platform],
             );
-          matchQuestion.textContent = `${unverified.join(" and ")} queue${unverified.length === 1 ? " is" : "s are"} not verified yet.`;
+          catalogueSelectionStatus.textContent = `${unverified.join(" and ")} queue${unverified.length === 1 ? " is" : "s are"} not verified yet.`;
         } else if (proposal.status === "not-executable") {
-          matchQuestion.textContent =
+          catalogueSelectionStatus.textContent =
             "The missing platform is recommended but not executable yet.";
         }
       }
     }
 
-    function summaryRow(label, value) {
-      const term = document.createElement("dt");
-      term.textContent = label;
-      const detail = document.createElement("dd");
-      detail.textContent = value;
-      uploadSummary.append(term, detail);
+    function creatorUploadRequest(value, sessionId, targets) {
+      return {
+        type: "PREPARE_CREATOR_UPLOAD",
+        sessionId,
+        targets,
+        draft: {
+          title: value.title,
+          hasTeaser: value.hasTeaser,
+          publishMode: value.publishMode,
+          description: value.description,
+          fullFilename: fullFile?.name || "",
+          releaseDate: value.releaseDate,
+          scheduledIso: value.scheduledIso,
+          timeZone,
+          fanslyPreset: "defaulT",
+          fanslyPresetSelection: "first",
+          manyvidsThumbnail: Boolean(thumbnailFile),
+          pornhubFilename: pornhubFile?.name || fullFile?.name || "",
+          contentPreset: value.contentPreset,
+          fanslyCaption: value.fanslyCaption,
+          profiles: value.profiles,
+          profileSignature: value.profileSignature,
+        },
+        catalogue:
+          currentMatch.status === "upload-only"
+            ? null
+            : {
+                ...(currentSnapshot?.source === "desktop"
+                  ? {
+                      source: "desktop",
+                      itemId:
+                        currentMatch.candidate.itemId ||
+                        currentMatch.candidate.id,
+                    }
+                  : {}),
+                publicationState: currentMatch.candidate.publicationState,
+                row: currentMatch.candidate.row,
+                id: currentMatch.candidate.id,
+                releaseDate: currentMatch.candidate.releaseDate,
+                title: currentMatch.candidate.title,
+                description: currentMatch.candidate.description,
+                seasonArc: currentMatch.candidate.seasonArc || "",
+                episode: currentMatch.candidate.episode || "",
+                pornhubLink: currentMatch.candidate.pornhubLink || "",
+                onlyfansLink: currentMatch.candidate.onlyfansLink || "",
+                fanslyLink: currentMatch.candidate.fanslyLink || "",
+                manyvidsLink: currentMatch.candidate.manyvidsLink || "",
+                fingerprint: currentMatch.candidate.fingerprint,
+                status: currentMatch.status,
+              },
+      };
     }
 
-    function renderMatch(match) {
-      const candidate = match.candidate;
-      if (!socialCaption.value.trim() && candidate.title) {
-        socialCaption.value = candidate.title;
-      }
-      renderPaidLinkOptions(candidate);
-      const social = socialDraft(candidate);
-      const uploadOnly = match.status === "upload-only";
-      matchBadge.textContent = uploadOnly
-        ? "Upload without sheet"
-        : currentProposal
-          ? `Row ${candidate.row} proposed`
-          : match.status === "matched"
-            ? `Row ${candidate.row} matched`
-            : `New row ${candidate.row}`;
-      matchQuestion.textContent = uploadOnly
-        ? `Prepare “${candidate.title}” for the selected platforms?`
-        : currentProposal
-          ? `Likely episode: “${candidate.title}”. Upload to the missing executable platforms?`
-          : match.status === "matched"
-            ? `Is this your video from the sheet: “${candidate.title}”?`
-            : `No credible existing episode matched. Create row ${candidate.row} for “${candidate.title}”?`;
-      rejectMatch.textContent = currentProposal
-        ? "No"
-        : match.status === "matched"
-          ? "No, use a new row"
-          : "No, edit details";
-      uploadSummary.replaceChildren();
-      const value = draft();
+    function draftBlocker(value, social) {
+      if (!value.valid) return value.errors.join(" ");
+      if (!social.valid) return social.errors.join(" ");
+      if (!currentMatch)
+        return "Choose the catalogue entry or wait for the draft check.";
+      if (
+        value.targets.some(
+          (platform) =>
+            currentMatch.candidate.publicationState?.[platform] === "review",
+        )
+      )
+        return "A selected platform has an unresolved catalogue link. Review that link or deselect the platform.";
+      if (
+        currentProposal &&
+        workflowMode.value !== "teaser" &&
+        currentProposal.status !== "ready" &&
+        !(currentProposal.status === "nothing-pending" && social.enabled)
+      )
+        return currentProposal.status === "needs-queue-evidence"
+          ? "Verify the selected platform queues, or explicitly continue without the sheet."
+          : "Resolve the catalogue recommendation before uploading. Choose an executable destination.";
+      if (!pendingTargets(value, currentMatch).length && !social.enabled)
+        return "Every selected platform already has a catalogue link. Nothing will be uploaded.";
+      return "";
+    }
+
+    function renderRunSettings(value = draft()) {
       const authorization = profileAuthorizationSummary(
         value.profiles,
         value.contentPreset,
       );
-      summaryRow(
-        "Catalogue",
-        uploadOnly
-          ? "Choose later · results stay saved locally"
-          : `2026 Video Catalogue row ${candidate.row} · ${candidate.id}`,
+      const settings = get("#platformSettings");
+      settings.replaceChildren();
+      for (const platform of value.targets) {
+        const line = document.createElement("p");
+        const label = document.createElement("strong");
+        label.textContent = PLATFORM_LABELS[platform] + ": ";
+        const detail = {
+          onlyfans:
+            "Full video and description; existing labels are left unchanged.",
+          fansly:
+            "Full video restricted with the first Load Preset entry; a selected teaser becomes Free Preview. " +
+            authorization.fansly,
+          manyvids: authorization.manyvids,
+          pornhub:
+            authorization.pornhub +
+            ". File and metadata preparation only; final Submit stays manual.",
+        }[platform];
+        line.append(label, document.createTextNode(detail));
+        settings.append(line);
+      }
+      get("#selectedPlatformDetails").hidden = !value.targets.length;
+      const social = socialDraft();
+      const automatic =
+        value.targets.some((p) => p !== "pornhub") &&
+        value.publishMode === "autonomous";
+      runNotice.textContent =
+        automatic || (social.enabled && social.mode === "autonomous")
+          ? "Upload authorizes publishing or scheduling in the selected automatic modes. Pornhub Submit stays manual."
+          : "Upload prepares unpublished drafts. You review and publish on each site.";
+      if (currentMatch?.status === "upload-only")
+        runNotice.textContent += " No sheet data will be read or written.";
+      updateMediaRelevance();
+    }
+
+    function updateUploadAction() {
+      uploadButton.disabled =
+        runBusy || Boolean(activeSession) || readiness?.ready !== true;
+      const ongoing =
+        activeSession &&
+        !activeSession.needsReconciliation &&
+        !activeSession.connectionLost &&
+        [...platformStates.values()].some((state) =>
+          [
+            "preparing",
+            "prepared",
+            "uploading-full",
+            "configuring",
+            "waiting-for-teaser",
+            "waiting-for-thumbnail",
+            "upload-ready",
+            "edit-requested",
+            "upload-observing",
+            "upload-progress-unknown",
+          ].includes(state.status),
+        );
+      uploadButton.setAttribute(
+        "aria-busy",
+        String(runBusy || Boolean(ongoing)),
       );
-      if (value.targets.length)
-        summaryRow(
-          "Release",
-          `${currentProposal ? releaseDate.value : candidate.releaseDate} · 15:00 UTC`,
-        );
-      if (value.targets.length)
-        summaryRow(
-          "Full video",
-          fullFile?.name || "Not selected · separate Pornhub video only",
-        );
-      if (selectedTargets().includes("fansly")) {
-        const existing = catalogueLink(candidate, "fansly");
-        if (existing) summaryRow("Fansly", `Already linked · ${existing}`);
-        else {
-          summaryRow("Fansly teaser", teaserFile?.name || "No custom preview");
-          summaryRow(
-            "Fansly access",
-            `Full restricted with the first Load Preset entry${teaserFile ? " · teaser attached as Free Preview" : ""}`,
+      get("#uploadActions").dataset.state = activeSession?.needsReconciliation
+        ? "attention"
+        : runBusy || ongoing
+          ? "busy"
+          : uploadError.textContent
+            ? "error"
+            : readiness?.ready
+              ? "ready"
+              : "incomplete";
+    }
+
+    function lockDraft(locked) {
+      if (locked) {
+        for (const control of document.querySelectorAll(
+          "#workflowMode, .workflow-panel input, .workflow-panel button, .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #catalogueAssociation, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #changeCatalogueEntry, #continueWithoutSheet",
+        )) {
+          if (!lockedControls.has(control))
+            lockedControls.set(control, control.disabled);
+          control.disabled = true;
+        }
+      } else {
+        for (const [control, disabled] of lockedControls)
+          control.disabled = disabled;
+        lockedControls.clear();
+      }
+      renderFilePickers();
+    }
+
+    async function checkReadiness() {
+      if (runBusy || activeSession) return;
+      const revision = ++readinessRevision;
+      readiness = null;
+      const value = draft(),
+        social = socialDraft();
+      const blocker = draftBlocker(value, social);
+      updateUploadAction();
+      if (blocker) {
+        matchStatus.textContent = blocker;
+        return;
+      }
+      matchStatus.textContent =
+        "Checking previous runs and platform configuration…";
+      try {
+        const targets = pendingTargets(value, currentMatch);
+        if (targets.length) {
+          value.profileSignature = await creatorRegistry.uploadProfileSignature(
+            value.profiles,
           );
-          summaryRow("Fansly caption", value.fanslyCaption || "Empty");
-          summaryRow("Fansly saved toggles", authorization.fansly);
-        }
-      }
-      if (selectedTargets().includes("onlyfans")) {
-        const existing = catalogueLink(candidate, "onlyfans");
-        summaryRow(
-          "OnlyFans",
-          existing
-            ? `Already linked · ${existing}`
-            : "Full upload · labels left completely unchanged",
-        );
-      }
-      if (selectedTargets().includes("manyvids")) {
-        const existing = catalogueLink(candidate, "manyvids");
-        summaryRow(
-          "ManyVids",
-          existing
-            ? `Already linked · ${existing}`
-            : `Full · ${teaserFile?.name || "no custom preview"} · $${value.profiles.manyvidsAutofill.price} · ${thumbnailFile?.name || "site-generated thumbnail"}`,
-        );
-        if (!existing) {
-          summaryRow("ManyVids saved recipe", authorization.manyvids);
-        }
-      }
-      if (selectedTargets().includes("pornhub")) {
-        const existing = catalogueLink(candidate, "pornhub");
-        summaryRow(
-          "Pornhub",
-          existing
-            ? `Already linked · ${existing}`
-            : `${pornhubFile?.name || fullFile.name} · ${contentPreset.value || "preset required"} · file and metadata preparation; final Submit remains manual`,
-        );
-        if (!existing) {
-          summaryRow("Pornhub saved preset", authorization.pornhub);
-        }
-      }
-      if (social.enabled) {
-        summaryRow(
-          "Social teaser",
-          socialFile?.name || "Social teaser required",
-        );
-        summaryRow(
-          "Social mode",
-          social.mode === "autonomous"
-            ? "Autonomous after this Yes"
-            : "Fill and upload, then stop before final publish",
-        );
-        summaryRow("Social caption", social.caption);
-        if (social.targets.includes("x")) {
-          summaryRow(
-            "X",
-            social.paidLink?.kind === "upload-result"
-              ? `Caption + teaser · first reply uses the new ${social.paidLink.platform} link from this run`
-              : `Caption + teaser · first reply ${social.paidLink?.url || "needs a paid link"}`,
-          );
-        }
-        if (social.targets.includes("reddit")) {
-          if (!social.subreddits.length) {
-            summaryRow("Reddit", "Choose at least one subreddit");
-          }
-          for (const target of social.subreddits) {
-            summaryRow(
-              `Reddit · r/${target.subreddit}`,
-              [
-                `Title: ${target.title || social.caption}`,
-                `Body: ${target.body || "Empty"}`,
-                `Flair: ${target.flair || "None"}`,
-                `NSFW: ${target.nsfw ? "Yes" : "No"}`,
-              ].join(" · "),
+          if (revision !== readinessRevision || runBusy || activeSession)
+            return;
+          const response = await sendMessage({
+            ...creatorUploadRequest(value, randomSessionId(), targets),
+            type: "CHECK_CREATOR_UPLOAD_AVAILABILITY",
+          });
+          if (response.availability?.ready !== true)
+            throw new Error(
+              "The running extension could not verify readiness. Reload the matching OFEnhancer version, then check readiness again.",
             );
-          }
         }
+        if (revision !== readinessRevision || runBusy || activeSession) return;
+        readiness = { ready: true };
+        matchStatus.textContent = uploadError.textContent
+          ? "Ready to retry. Review the error before continuing."
+          : "Ready. Upload starts this run.";
+        reviewRecovery.hidden = true;
+        refreshReadiness.hidden = true;
+      } catch (error) {
+        if (revision !== readinessRevision || runBusy || activeSession) return;
+        readiness = { ready: false };
+        matchStatus.textContent = error.recoveryRequired
+          ? "Previous work needs review before Upload."
+          : "Upload readiness could not be verified.";
+        uploadError.textContent =
+          error.message +
+          (error.recoveryRequired
+            ? " Open Review previous drafts to reconcile the existing work. Your selections are unchanged."
+            : " Correct the issue, then check readiness. Your selections are unchanged.");
+        reviewRecovery.hidden = !error.recoveryRequired;
+        refreshReadiness.hidden = false;
       }
-      summaryRow("Description", description.value.trim() || "Empty");
-      summaryRow(
-        "Sheet cells",
-        uploadOnly
-          ? "None · post links will appear here when captured"
-          : [
-              match.status === "new"
-                ? `A${candidate.row}:D${candidate.row}`
-                : "Existing metadata unchanged",
-              selectedTargets().includes("onlyfans")
-                ? `J${candidate.row} if empty`
-                : "",
-              selectedTargets().includes("fansly")
-                ? `K${candidate.row} if empty`
-                : "",
-              selectedTargets().includes("manyvids")
-                ? `L${candidate.row} if empty`
-                : "",
-              selectedTargets().includes("pornhub")
-                ? `H${candidate.row} only after a future verified link capture`
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" · "),
-      );
-      confirmationNotice.textContent = uploadOnly
-        ? "The catalogue entry can wait. Results remain saved locally; no sheet data will be read or written. Review existing posts before uploading again."
-        : social.enabled
-          ? "One Yes freezes the paid upload and social distribution plan. Manual mode stops before final social publishing; Autonomous mode may click only trace-verified final controls."
-          : "Yes opens or reuses your selected platform tabs, uploads and schedules real posts, and fills only the confirmed catalogue row's empty platform link cells.";
-      if (value.targets.length) {
-        summaryRow(
-          "Main publishing",
-          value.publishMode === "manual"
-            ? "Prepare the form; I will publish"
-            : "Publish or schedule after this confirmation",
-        );
-      }
-      confirmation.hidden = false;
-      const nothingMissing = value.valid
-        ? pendingTargets(value, match).length === 0 && !social.enabled
-        : false;
-      confirmUpload.disabled = !value.valid || !social.valid || nothingMissing;
-      if (
-        value.targets.some(
-          (platform) => candidate.publicationState?.[platform] === "review",
-        )
-      ) {
-        confirmUpload.disabled = true;
-        confirmationNotice.textContent =
-          "A selected platform has an unresolved catalogue link. Review that link or deselect the platform before continuing.";
-      }
-      if (nothingMissing) {
-        matchQuestion.textContent =
-          "Every selected platform already has a catalogue link. Nothing will be uploaded.";
-      }
+      updateUploadAction();
+    }
+
+    function renderMatch(match) {
+      const candidate = match.candidate;
+      if (!socialCaption.value.trim() && candidate.title)
+        socialCaption.value = candidate.title;
+      renderPaidLinkOptions(candidate);
+      catalogueSelectionStatus.textContent =
+        match.status === "upload-only"
+          ? "Catalogue deferred · upload without sheet"
+          : (match.status === "new" ? "New catalogue row " : "Catalogue row ") +
+            candidate.row +
+            " · " +
+            candidate.id +
+            " · " +
+            candidate.title;
+      changeCatalogueEntry.hidden = match.status === "upload-only";
+      renderRunSettings();
+      void checkReadiness();
     }
 
     function previewWithoutSheet(value) {
       currentMatch = { status: "upload-only", candidate: value };
       matchStatus.textContent =
-        "Review the plan. You can associate captured results with the catalogue later.";
+        "Results will stay local until you associate a catalogue entry.";
       renderMatch(currentMatch);
     }
 
     async function matchCatalogue(forceNew = false) {
+      if (runBusy || activeSession) return;
       clearTimeout(matchTimer);
       const revision = ++matchRevision;
       currentMatch = null;
       currentProposal = null;
-      confirmation.hidden = true;
+      uploadButton.disabled = true;
       cataloguePicker.hidden = true;
       continueWithoutSheet.hidden = uploadWithoutSheet;
       const value = validate(true);
       if (!value.valid || activeSession) {
-        confirmation.hidden = true;
+        uploadButton.disabled = true;
         matchStatus.textContent = value.valid
           ? "An upload session is already active."
-          : "Complete the required fields to preview the upload.";
+          : "Complete the required fields to enable Upload.";
         return;
       }
       if (uploadWithoutSheet) {
@@ -1873,7 +1952,7 @@
       matchStatus.textContent = forceNew
         ? "Finding the next safe empty catalogue row…"
         : "Loading the catalogue and ranking likely episodes…";
-      confirmation.hidden = true;
+      uploadButton.disabled = true;
       try {
         const client = globalThis.CreatorCatalogueClient;
         if (!client?.loadConfig || !globalThis.CreatorCatalogueProposal) {
@@ -1884,8 +1963,9 @@
         const config = await client.loadConfig();
         if (revision !== matchRevision) return;
         if (!config.connected && !config.endpoint && !config.secret) {
-          previewWithoutSheet(value);
-          return;
+          throw new Error(
+            "Catalogue matching is not connected. Restore the catalogue connection, or explicitly choose Continue without sheet.",
+          );
         }
         currentSnapshot = await loadCatalogueSnapshot();
         get("#catalogueConnectionStatus").textContent =
@@ -1910,13 +1990,15 @@
     }
 
     function scheduleMatch() {
+      if (runBusy || activeSession) return;
       clearTimeout(matchTimer);
       invalidateMatch();
       refreshReleaseSummary();
+      renderRunSettings();
       const value = validate(true);
       if (!value.valid || activeSession) {
         matchStatus.textContent =
-          "Complete the required fields to preview the upload.";
+          "Complete the required fields to enable Upload.";
         return;
       }
       matchStatus.textContent = "Waiting for edits to settle…";
@@ -1926,7 +2008,9 @@
     function statusLabel(status) {
       return (
         {
-          prepared: "Opening preparation interface",
+          preparing: "Preparing authenticated interface",
+          "not-started": "Not started · draft preserved",
+          prepared: "Authenticated interface ready",
           cancelled: "Stopped · draft preserved",
           "uploading-full": "Uploading full video",
           "upload-observing":
@@ -2052,6 +2136,7 @@
         ...patch,
       });
       renderPlatformStates();
+      updateUploadAction();
       if (patch.postUrl && activeSession?.catalogueDeferred)
         get("#savedCatalogueAssociation").hidden = false;
     }
@@ -2286,7 +2371,22 @@
     }
 
     function connectSession(sessionId, confirmed) {
+      let acceptBinding, rejectBinding;
+      const bound = new Promise((resolve, reject) => {
+        acceptBinding = resolve;
+        rejectBinding = reject;
+      });
+      const bindingTimer = setTimeout(
+        () =>
+          rejectBinding(
+            new Error(
+              "The browser did not acknowledge the upload connection. Reconnect Chrome and check readiness before retrying.",
+            ),
+          ),
+        15000,
+      );
       const session = {
+        whenBound: bound.finally(() => clearTimeout(bindingTimer)),
         id: sessionId,
         files: { ...confirmed.files },
         fileProof: Object.fromEntries(
@@ -2313,6 +2413,12 @@
             message?.sessionId !== sessionId
           )
             return;
+          if (message.type === "session-bound") {
+            session.connectionLost = false;
+            acceptBinding();
+            updateUploadAction();
+            return;
+          }
           if (message.type === "file-request") {
             deliverFile(session, message);
             return;
@@ -2336,13 +2442,31 @@
           }
           if (message.type === "session-restore-rejected") {
             session.closed = true;
-            matchStatus.textContent = message.error;
+            session.needsReconciliation = true;
+            rejectBinding(new Error(message.error));
+            uploadError.textContent =
+              message.error + " Review recovery before starting another run.";
+            matchStatus.textContent = "Upload connection requires review.";
+            reviewRecovery.hidden = false;
+            updateUploadAction();
           }
         });
         port.onDisconnect.addListener(() => {
           if (session.port !== port || session.closed) return;
           session.channel?.close();
           session.channel = null;
+          session.connectionLost = true;
+          const error = new Error(
+            chrome.runtime.lastError?.message ||
+              "The browser upload connection was interrupted.",
+          );
+          rejectBinding(error);
+          uploadError.textContent =
+            error.message +
+            " Restore Chrome, then review this run. Upload will not be repeated automatically.";
+          matchStatus.textContent = "Browser connection interrupted.";
+          reviewRecovery.hidden = false;
+          updateUploadAction();
           setTimeout(connectPort, 250);
         });
         port.postMessage({
@@ -2357,7 +2481,11 @@
           });
         }
       }
-      connectPort();
+      try {
+        connectPort();
+      } catch (error) {
+        rejectBinding(error);
+      }
       return session;
     }
 
@@ -2389,7 +2517,7 @@
       if (priorProfiles !== currentProfiles) {
         scheduleMatch();
         throw new Error(
-          "Workflow profiles changed. Review the updated plan and click Yes again.",
+          "Workflow profiles changed. Review the updated plan and click Upload again.",
         );
       }
       if (!currentProposal || currentMatch?.status === "upload-only") return;
@@ -2410,7 +2538,7 @@
           refreshed.fingerprint !== currentMatch.candidate.fingerprint
         ) {
           throw new Error(
-            "The matched catalogue row changed. Review it and click Yes again.",
+            "The matched catalogue row changed. Review it and click Upload again.",
           );
         }
         currentMatch = { ...currentMatch, candidate: refreshed };
@@ -2428,7 +2556,7 @@
       ) {
         applyProposal(refreshed, selectedRow === "new" ? "new" : "matched");
         throw new Error(
-          "Catalogue or queue changed. Review the updated proposal and click Yes again.",
+          "Catalogue or queue changed. Review the updated proposal and click Upload again.",
         );
       }
       currentProposal = refreshed;
@@ -2439,6 +2567,9 @@
     }
 
     async function startUpload() {
+      if (runBusy || activeSession || readiness?.ready !== true) return;
+      let prepareDispatched = false;
+      let recheckAfterFailure = false;
       let value = validate(true);
       let social = socialDraft();
       if (!value.valid || !social.valid || !currentMatch || activeSession)
@@ -2452,8 +2583,15 @@
         return;
       let targets = [];
       runBusy = true;
-      confirmUpload.disabled = true;
-      rejectMatch.disabled = true;
+      clearTimeout(matchTimer);
+      ++matchRevision;
+      ++readinessRevision;
+      uploadError.textContent = "";
+      reviewRecovery.hidden = true;
+      refreshReadiness.hidden = true;
+      matchStatus.textContent = "Checking the selected run…";
+      lockDraft(true);
+      updateUploadAction();
       try {
         await recheckProposalBeforeUpload();
         social = socialDraft(currentMatch.candidate);
@@ -2462,6 +2600,8 @@
         }
         await recheckSubredditPresets(social);
         value = validate(true);
+        const blocker = draftBlocker(value, social);
+        if (blocker) throw new Error(blocker);
         value.profileSignature = await creatorRegistry.uploadProfileSignature(
           value.profiles,
         );
@@ -2469,8 +2609,7 @@
         if (!targets.length && !social.enabled) {
           matchStatus.textContent =
             "Every selected platform is already linked. Nothing was uploaded.";
-          confirmUpload.disabled = false;
-          rejectMatch.disabled = false;
+          uploadButton.disabled = false;
           return;
         }
         const sessionId = randomSessionId();
@@ -2496,7 +2635,7 @@
               authorizationAt: Date.now(),
             })
           : null;
-        const confirmedFiles = {
+        const selectedFiles = {
           full: fullFile,
           teaser: teaserFile,
           thumbnail: thumbnailFile,
@@ -2504,7 +2643,7 @@
           social: socialFile,
         };
         activeSession = connectSession(sessionId, {
-          files: confirmedFiles,
+          files: selectedFiles,
           socialSessionId: socialPlan?.id || "",
           proof: {
             fullFilename: fullFile?.name || "",
@@ -2514,13 +2653,14 @@
           },
         });
         activeSession.catalogueDeferred = uploadWithoutSheet;
+        lastAttempt = { sessionId, phase: "connecting" };
         if (workflowMode) workflowMode.disabled = true;
         if (catalogueAssociation) catalogueAssociation.disabled = true;
         fullInput.disabled = true;
         thumbnailInput.disabled = true;
         pornhubInput.disabled = true;
-        teaserInput.disabled = Boolean(teaserFile);
-        socialInput.disabled = Boolean(socialFile);
+        teaserInput.disabled = true;
+        socialInput.disabled = true;
         platformStates.clear();
         for (const platform of value.targets) {
           const postUrl = catalogueLink(currentMatch.candidate, platform);
@@ -2528,68 +2668,39 @@
             platform,
             postUrl
               ? { status: "already-linked", postUrl }
-              : { status: "prepared" },
+              : { status: "preparing" },
           );
         }
         if (socialPlan?.targets.x) {
-          platformStates.set("x", { status: "prepared" });
+          platformStates.set("x", { status: "preparing" });
         }
         renderPlatformStates();
-        confirmation.hidden = true;
-        matchStatus.textContent = "Preparing authenticated platform composers…";
+        uploadButton.disabled = true;
+        matchStatus.textContent = "Connecting this run to Chrome…";
         get("#preparationControls").hidden = false;
         if (targets.length) {
-          const response = await sendMessage({
-            type: "PREPARE_CREATOR_UPLOAD",
-            sessionId,
-            targets,
-            draft: {
-              title: value.title,
-              hasTeaser: value.hasTeaser,
-              publishMode: value.publishMode,
-              description: value.description,
-              fullFilename: fullFile?.name || "",
-              releaseDate: value.releaseDate,
-              scheduledIso: value.scheduledIso,
-              timeZone,
-              fanslyPreset: "defaulT",
-              fanslyPresetSelection: "first",
-              manyvidsThumbnail: Boolean(thumbnailFile),
-              pornhubFilename: pornhubFile?.name || fullFile?.name || "",
-              contentPreset: value.contentPreset,
-              fanslyCaption: value.fanslyCaption,
-              profiles: value.profiles,
-              profileSignature: value.profileSignature,
-            },
-            catalogue:
-              currentMatch.status === "upload-only"
-                ? null
-                : {
-                    ...(currentSnapshot?.source === "desktop"
-                      ? {
-                          source: "desktop",
-                          itemId:
-                            currentMatch.candidate.itemId ||
-                            currentMatch.candidate.id,
-                        }
-                      : {}),
-                    publicationState: currentMatch.candidate.publicationState,
-                    row: currentMatch.candidate.row,
-                    id: currentMatch.candidate.id,
-                    releaseDate: currentMatch.candidate.releaseDate,
-                    title: currentMatch.candidate.title,
-                    description: currentMatch.candidate.description,
-                    seasonArc: currentMatch.candidate.seasonArc || "",
-                    episode: currentMatch.candidate.episode || "",
-                    pornhubLink: currentMatch.candidate.pornhubLink || "",
-                    onlyfansLink: currentMatch.candidate.onlyfansLink || "",
-                    fanslyLink: currentMatch.candidate.fanslyLink || "",
-                    manyvidsLink: currentMatch.candidate.manyvidsLink || "",
-                    fingerprint: currentMatch.candidate.fingerprint,
-                    status: currentMatch.status,
-                  },
-          });
+          await activeSession.whenBound;
+          if (activeSession.closed)
+            throw new Error(
+              "The upload connection closed before preparation. Reconnect Chrome and retry.",
+            );
+          prepareDispatched = true;
+          lastAttempt.phase = "preparing";
+          matchStatus.textContent =
+            "Preparing authenticated platform composers…";
+          const response = await sendMessage(
+            creatorUploadRequest(value, sessionId, targets),
+          );
+          if (
+            response.uploadSession?.sessionId !== sessionId ||
+            !Array.isArray(response.uploadSession.platforms)
+          )
+            throw new Error(
+              "The preparation acknowledgement is invalid. Review this run before retrying; preparation may already exist.",
+            );
           activeSession.accepted = true;
+          lastAttempt.phase = "accepted";
+          teaserInput.disabled = Boolean(teaserFile);
           for (const platform of response.uploadSession.platforms || []) {
             setPlatformState(platform.platform, platform);
           }
@@ -2603,15 +2714,28 @@
           }
           matchStatus.textContent =
             "Uploading through the real authenticated pages…";
-          const started = await sendMessage({
-            type: "START_CREATOR_UPLOAD",
-            sessionId,
-            targets,
-          });
-          for (const result of started.results || [])
-            setPlatformState(result.platform, result);
+          const preparedTargets = response.uploadSession.platforms
+            .filter((platform) => platform.status === "prepared")
+            .map((platform) => platform.platform);
+          if (preparedTargets.length) {
+            activeSession.startRequested = true;
+            lastAttempt.phase = "starting";
+            const started = await sendMessage({
+              type: "START_CREATOR_UPLOAD",
+              sessionId,
+              targets: preparedTargets,
+            });
+            if (started.accepted !== true)
+              throw new Error(
+                "The start acknowledgement is missing. Review this run; do not repeat Upload.",
+              );
+            for (const result of started.results || [])
+              setPlatformState(result.platform, result);
+          }
         }
         if (socialPlan) {
+          await activeSession.whenBound;
+          prepareDispatched = true;
           const preparedSocial = await sendMessage({
             type: "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
             plan: socialPlan,
@@ -2621,6 +2745,7 @@
               title: target.title || social.caption,
             })),
           });
+          activeSession.accepted = true;
           for (const [destination, target] of Object.entries(
             preparedSocial.socialDistribution?.targets || {},
           ))
@@ -2636,73 +2761,81 @@
           scheduleSocialResume(socialPlan.id, xJob);
         }
         matchStatus.textContent =
-          "Run accepted. Follow each platform card for its confirmed result.";
+          activeSession.startRequested || socialPlan
+            ? "Run accepted. Follow the platform results below; Upload will not repeat this run."
+            : "Preparation needs attention. Review the platform results before starting another run.";
       } catch (error) {
-        matchStatus.textContent = error.message;
-        if (
-          activeSession &&
-          targets.length &&
-          activeSession.accepted !== true
-        ) {
-          activeSession.closed = true;
-          activeSession.channel?.close();
-          activeSession.port?.disconnect();
-          activeSession = null;
-          platformStates.clear();
-          renderPlatformStates();
-          confirmation.hidden = false;
-          get("#preparationControls").hidden = true;
-          if (workflowMode) workflowMode.disabled = neutralTestMode;
-          if (catalogueAssociation)
-            catalogueAssociation.disabled = neutralTestMode;
-          for (const input of [
-            fullInput,
-            teaserInput,
-            thumbnailInput,
-            pornhubInput,
-            socialInput,
-          ])
-            input.disabled = false;
-        } else if (activeSession) {
-          for (const platform of targets) {
-            if (
-              !new Set([
-                "manual-submit-required",
-                "recorded-local",
-                "catalogue-updated",
-                "uploaded-no-sheet",
-                "already-linked",
-                "idempotent",
-                "cancelled",
-                "failed",
-              ]).has(platformStates.get(platform)?.status)
-            ) {
+        const notStarted =
+          !prepareDispatched ||
+          (activeSession?.accepted !== true &&
+            error.uploadAdmission === "not-started");
+        lastAttempt = {
+          ...lastAttempt,
+          phase: notStarted ? "not-started" : "needs-reconciliation",
+          error: error.message,
+          rejectionCode: error.rejectionCode || "transport-or-preflight-error",
+        };
+        uploadError.textContent =
+          error.message +
+          (notStarted
+            ? error.recoveryRequired
+              ? " Review previous drafts before retrying. Your files and details are unchanged."
+              : " Your files and details are unchanged. Correct the issue, then click Upload to retry."
+            : " This run may already have started. Restore the connection and review its progress or recovery evidence; do not start another upload.");
+        if (notStarted) {
+          if (activeSession) {
+            activeSession.closed = true;
+            activeSession.channel?.close();
+            activeSession.port?.disconnect();
+            activeSession = null;
+            for (const platform of targets)
               setPlatformState(platform, {
-                status: "failed",
+                status: "not-started",
                 error: error.message,
               });
-            }
           }
+          get("#preparationControls").hidden = true;
+          matchStatus.textContent = "Upload did not start.";
+          readiness = null;
+          recheckAfterFailure = true;
+        } else if (activeSession) {
+          activeSession.needsReconciliation = true;
+          matchStatus.textContent =
+            "Run needs attention. Files remain associated with this run.";
         }
-        confirmUpload.disabled = false;
-        rejectMatch.disabled = false;
+        reviewRecovery.hidden = !(error.recoveryRequired || !notStarted);
+        refreshReadiness.hidden = !notStarted;
       } finally {
         runBusy = false;
+        if (!activeSession) lockDraft(false);
+        updateUploadAction();
+        if (recheckAfterFailure) void checkReadiness();
       }
     }
 
     get("#cancelPreparation")?.addEventListener("click", async () => {
-      if (!activeSession) return;
-      activeSession.cancelled = true;
+      const session = activeSession;
+      if (!session) return;
+      const button = get("#cancelPreparation");
+      button.disabled = true;
       try {
-        await sendMessage({
+        const response = await sendMessage({
           type: "CANCEL_CREATOR_UPLOAD",
-          sessionId: activeSession.id,
+          sessionId: session.id,
         });
+        if (response.cancelled !== true)
+          throw new Error(
+            "The browser did not confirm cancellation. Review the existing run before retrying.",
+          );
+        if (activeSession !== session) return;
+        session.cancelled = true;
         matchStatus.textContent =
-          "Preparation stopped. The site may continue an upload already started; drafts are preserved.";
+          "Preparation stopped. The site may continue an upload already started; drafts and recovery evidence are preserved.";
       } catch (error) {
-        matchStatus.textContent = error.message;
+        uploadError.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        updateUploadAction();
       }
     });
     get("#exportPreparation")?.addEventListener("click", async () => {
@@ -2714,6 +2847,13 @@
         get("#preparationDiagnosticsText").textContent = JSON.stringify(
           {
             schemaVersion: 1,
+            lastAttempt: lastAttempt
+              ? {
+                  sessionId: lastAttempt.sessionId,
+                  phase: lastAttempt.phase,
+                  rejectionCode: lastAttempt.rejectionCode,
+                }
+              : null,
             records: result.records || [],
             publication: result.publication || [],
           },
@@ -2729,6 +2869,11 @@
       get("#preparationDiagnostics").close(),
     );
     get("#resetPreparation")?.addEventListener("click", async () => {
+      if (runBusy || (activeSession && !activeSession.cancelled)) {
+        get("#recoveryStatus").textContent =
+          "Stop or finish the current run and review its remote drafts before clearing any preparation evidence.";
+        return;
+      }
       get("#resetPreparationDialog").showModal();
     });
     get("#closePreparationReset")?.addEventListener("click", () =>
@@ -2746,10 +2891,13 @@
           type: "CLEAR_CREATOR_UPLOAD_PREPARATION",
         });
         get("#resetPreparationDialog").close();
+        uploadError.textContent = "";
         matchStatus.textContent =
-          "All locally saved preparation evidence was cleared. You can start a fresh test run after checking remote drafts.";
+          "Preparation evidence cleared by your explicit request. Publication records are unchanged.";
+        void loadRecovery();
+        if (!activeSession) void checkReadiness();
       } catch (error) {
-        matchStatus.textContent = error.message;
+        get("#recoveryStatus").textContent = error.message;
       }
     });
     get("#savePreparationDiagnostics")?.addEventListener("click", () => {
@@ -2762,6 +2910,76 @@
       anchor.download = "ofenhancer-preparation-diagnostics.json";
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    async function loadRecovery() {
+      const button = get("#refreshRecovery");
+      button.disabled = true;
+      get("#recoveryStatus").textContent =
+        "Reading preparation and publication history…";
+      try {
+        const response = await sendMessage({
+          type: "GET_CREATOR_UPLOAD_RECOVERY",
+        });
+        const records = response.records || [],
+          publication = response.publication || [];
+        const container = get("#recoveryRecords");
+        container.replaceChildren();
+        for (const record of records) {
+          const item = document.createElement("article");
+          item.className = "recovery-record";
+          const heading = document.createElement("h3");
+          heading.textContent = "Previous run " + record.id.slice(-8);
+          const detail = document.createElement("p");
+          const platforms = [
+            ...new Set(
+              record.steps.map(
+                (step) => PLATFORM_LABELS[step.platform] || step.platform,
+              ),
+            ),
+          ];
+          detail.textContent =
+            platforms.join(" · ") +
+            (record.archivedVersion
+              ? " · retained from " + record.archivedVersion
+              : "") +
+            ". A prepared or uncertain draft may still exist. Inspect the platform drafts; do not upload the same work again until reconciled.";
+          item.append(heading, detail);
+          container.append(item);
+        }
+        for (const record of publication) {
+          const item = document.createElement("p");
+          item.className = "error";
+          item.textContent =
+            (PLATFORM_LABELS[record.platform] || record.platform) +
+            " · publication attempt recorded. Recover the existing result; clearing preparation evidence will not permit another publication.";
+          container.append(item);
+        }
+        get("#recoveryStatus").textContent =
+          records.length || publication.length
+            ? records.length +
+              " preparation run(s), " +
+              publication.length +
+              " publication receipt(s). Clearing evidence does not stop an upload, delete a remote draft, or undo a publication. Export diagnostics before clearing abandoned test runs."
+            : "No retained preparation or publication records. Files and details in this window are unchanged.";
+        get("#resetPreparation").hidden = !records.length;
+      } catch (error) {
+        get("#recoveryStatus").textContent =
+          error.message +
+          " Keep existing evidence and restore the browser connection before retrying.";
+      } finally {
+        button.disabled = false;
+      }
+    }
+    get("#refreshRecovery").addEventListener(
+      "click",
+      () => void loadRecovery(),
+    );
+    reviewRecovery.addEventListener("click", () => {
+      get("#uploadRecovery").open = true;
+      get("#uploadRecovery").scrollIntoView({ block: "start" });
+      get("#refreshRecovery").focus();
+      void loadRecovery();
     });
 
     function newUploadDraft() {
@@ -2780,6 +2998,7 @@
       ]);
       if (
         runBusy ||
+        (activeSession?.needsReconciliation && !activeSession.cancelled) ||
         activeSession?.pendingFiles?.size ||
         (activeSession &&
           (platformStates.size === 0 ||
@@ -2797,6 +3016,7 @@
       }
       activeSession = null;
       templateRevision++;
+      lockDraft(false);
       leaveNeutralTest();
       selectedCatalogueRow = null;
       clearTimeout(socialPollTimer);
@@ -2820,7 +3040,6 @@
       if (catalogueAssociation) catalogueAssociation.disabled = neutralTestMode;
       mainPublishMode.disabled = neutralTestMode;
       contentPreset.disabled = neutralTestMode;
-      rejectMatch.disabled = false;
       get("#preparationControls").hidden = true;
       get("#savedCatalogueAssociation").hidden = true;
       get("#redditLinkStep").hidden = true;
@@ -2930,6 +3149,29 @@
       }
     });
 
+    function updateMediaRelevance() {
+      const targets = new Set(selectedTargets());
+      const files = [teaserFile, thumbnailFile, pornhubFile];
+      const rows = [...document.querySelectorAll("[data-media-for]")];
+      let relevant = 0;
+      rows.forEach((row, index) => {
+        const used = row.dataset.mediaFor
+          .split(" ")
+          .some((target) => targets.has(target));
+        row.hidden = !used && !files[index];
+        row.dataset.inactive = String(!used);
+        if (!row.hidden) relevant++;
+      });
+      get("#optionalMedia").hidden = !relevant;
+      const selected = files.filter(Boolean).length;
+      if (selected > optionalSelectionCount) get("#optionalMedia").open = true;
+      optionalSelectionCount = selected;
+      get("#optionalMediaCount").textContent = selected
+        ? "· " + selected + " selected"
+        : "";
+      get("#pornhubPresetFields").hidden = !targets.has("pornhub");
+    }
+
     function renderFilePickers() {
       for (const [input, file, summary, empty] of [
         [fullInput, fullFile, "fullFileSummary", "Choose the main video"],
@@ -2977,6 +3219,7 @@
         remove.hidden = !file;
         remove.disabled = input.disabled;
       }
+      updateMediaRelevance();
     }
     for (const button of document.querySelectorAll("[data-choose-file]"))
       button.addEventListener("click", () => {
@@ -3027,6 +3270,7 @@
       get(".social-card").hidden = workflowMode?.value === "main";
       fullInput.required = !teaserOnly;
       if (teaserOnly) showAllCatalogue.checked = true;
+      updateMediaRelevance();
     }
     workflowMode?.addEventListener("change", () => {
       updateWorkflowVisibility();
@@ -3219,7 +3463,7 @@
         scheduleMatch();
       });
     }
-    confirmUpload.addEventListener("click", () => startUpload());
+    uploadButton.addEventListener("click", () => startUpload());
     catalogueSearch.addEventListener("input", () => renderPicker());
     showAllCatalogue.addEventListener("change", () => renderPicker());
     catalogueRow.addEventListener("change", () => {
@@ -3268,25 +3512,16 @@
       if (catalogueAssociation) catalogueAssociation.value = "later";
       previewWithoutSheet(value);
     });
-    rejectMatch.addEventListener("click", () => {
-      if (currentProposal) {
-        selectedCatalogueRow =
-          currentMatch?.status === "new"
-            ? "new"
-            : currentMatch?.candidate?.row || selectedCatalogueRow;
-        confirmation.hidden = true;
-        renderPicker();
-        matchStatus.textContent =
-          "Choose another catalogue episode or add a new entry.";
-        catalogueSearch.focus();
-      } else if (currentMatch?.status === "matched") {
-        matchCatalogue(true);
-      } else {
-        invalidateMatch();
-        matchStatus.textContent =
-          "Edit the title, description, or Friday; the preview will update.";
-        title.focus();
-      }
+    changeCatalogueEntry.addEventListener("click", () => {
+      if (runBusy || activeSession) return;
+      currentMatch = null;
+      readiness = null;
+      ++readinessRevision;
+      updateUploadAction();
+      renderPicker();
+      matchStatus.textContent =
+        "Choose another catalogue episode or a new entry.";
+      catalogueSearch.focus();
     });
     globalThis.addEventListener("beforeunload", (event) => {
       if (
@@ -3306,6 +3541,21 @@
       activeSession?.channel?.close();
     });
 
+    const actionResize = new ResizeObserver(() => {
+      const height = get("#uploadActions").getBoundingClientRect().height;
+      if (height)
+        document.documentElement.style.setProperty(
+          "--upload-action-height",
+          height + "px",
+        );
+    });
+    actionResize.observe(get("#uploadActions"));
+    refreshReadiness.addEventListener("click", () => {
+      if (runBusy || activeSession) return;
+      uploadError.textContent = "";
+      if (currentMatch) void checkReadiness();
+      else scheduleMatch();
+    });
     updateWorkflowVisibility();
     void globalThis.CreatorCatalogueClient?.loadConfig?.()
       .then((config) => {

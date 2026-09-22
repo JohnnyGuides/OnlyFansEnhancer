@@ -118,8 +118,14 @@
         ),
       )
     )
-      throw new Error(
-        "An existing prepared or uncertain draft exists for this work item. Reconcile the existing draft before starting another session.",
+      throw Object.assign(
+        new Error(
+          "An existing prepared or uncertain draft exists for this work item. Reconcile the existing draft before starting another session.",
+        ),
+        {
+          rejectionCode: "upload-preparation-recovery-required",
+          recoveryRequired: true,
+        },
       );
     if (
       (await actionRecords()).some(
@@ -128,8 +134,14 @@
           platforms.includes(item.platform),
       )
     )
-      throw new Error(
-        "An unresolved publication attempt already exists for this work item. Recover the existing result; do not start another upload.",
+      throw Object.assign(
+        new Error(
+          "An unresolved publication attempt already exists for this work item. Recover the existing result; do not start another upload.",
+        ),
+        {
+          rejectionCode: "upload-publication-recovery-required",
+          recoveryRequired: true,
+        },
       );
   }
 

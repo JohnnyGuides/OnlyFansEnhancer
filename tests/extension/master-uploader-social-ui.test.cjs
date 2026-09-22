@@ -485,6 +485,9 @@ async function mountConsole(page, options = {}) {
       profileRetryDelayMs: options.profileRetryDelayMs ?? 10,
     },
   );
+  await require("../support/uploader-mock-admission.cjs").installUploaderMockAdmission(
+    page,
+  );
   for (const relative of [
     "workflows/registry.js",
     "workflows/common.js",
@@ -519,9 +522,9 @@ async function mountConsole(page, options = {}) {
   try {
     if (options.deferCatalogue)
       await page
-        .locator("#confirmation")
+        .locator("#uploadActions")
         .waitFor({ state: "visible", timeout: 5000 });
-    else await page.getByText(/Likely episode/i).waitFor({ timeout: 5000 });
+    else await page.getByText(/Catalogue row/i).waitFor({ timeout: 5000 });
   } catch (error) {
     const status = await page.locator("#matchStatus").textContent();
     const errors = await page.locator("#draftErrors").textContent();
@@ -554,9 +557,9 @@ test("teaser-only prepares without a full video or catalogue entry", async () =>
       .locator("#socialCustomPaidLink")
       .fill("https://onlyfans.com/123/example");
     await page.waitForFunction(
-      () => !document.querySelector("#confirmUpload").disabled,
+      () => !document.querySelector("#uploadButton").disabled,
     );
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     await page.waitForFunction(() =>
       __socialUiMessages.some(
         (message) => message.type === "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
@@ -588,9 +591,9 @@ test("main-only defaults to confirmed autonomous scheduling with no teaser and d
     assert.equal(await page.locator(".social-card").isVisible(), false);
     await page.locator("#targetManyvids").check();
     await page.waitForFunction(
-      () => !document.querySelector("#confirmUpload").disabled,
+      () => !document.querySelector("#uploadButton").disabled,
     );
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     await page.waitForFunction(() =>
       __socialUiMessages.some(
         (message) => message.type === "PREPARE_CREATOR_UPLOAD",
@@ -630,13 +633,16 @@ test("desktop profile loading recovers when Chrome connects after the page mount
       await page.locator("#draftErrors").textContent(),
       /profiles are still loading/i,
     );
-    assert.equal(await page.locator("#confirmUpload").isEnabled(), true);
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.equal(await page.locator("#uploadButton").isEnabled(), true);
   } finally {
     await browser.close();
   }
 });
 
-test("one Yes starts an X-only social run even when paid catalogue links already exist", async () => {
+test("one Upload starts an X-only social run even when paid catalogue links already exist", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
     viewport: { width: 1280, height: 900 },
@@ -671,7 +677,7 @@ test("one Yes starts an X-only social run even when paid catalogue links already
     await page.locator("#socialCaption").fill("Caption");
     try {
       await page.waitForFunction(
-        () => !document.querySelector("#confirmUpload").disabled,
+        () => !document.querySelector("#uploadButton").disabled,
         null,
         { timeout: 5000 },
       );
@@ -686,16 +692,18 @@ test("one Yes starts an X-only social run even when paid catalogue links already
         paidOptions: [...document.querySelector("#socialPaidLink").options].map(
           (option) => ({ value: option.value, label: option.textContent }),
         ),
-        question: document.querySelector("#matchQuestion")?.textContent || "",
+        question:
+          document.querySelector("#catalogueSelectionStatus")?.textContent ||
+          "",
       }));
       throw new Error(
-        `Social confirmation stayed disabled: ${JSON.stringify(state)}`,
+        `Social Upload stayed disabled: ${JSON.stringify(state)}`,
         {
           cause: error,
         },
       );
     }
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     try {
       await page.waitForFunction(
         () =>
@@ -781,10 +789,7 @@ test("workflow helpers are active and configured only inside the uploader Settin
     const settingsTab = page.getByRole("tab", { name: "Settings" });
     assert.equal(await uploaderTab.getAttribute("aria-selected"), "true");
     assert.equal(await page.locator("#settingsPanel").isHidden(), true);
-    assert.equal(
-      await page.locator("#confirmation").getAttribute("hidden"),
-      null,
-    );
+    assert.equal(await page.locator("#uploadActions").isVisible(), true);
 
     await settingsTab.click();
     assert.equal(await settingsTab.getAttribute("aria-selected"), "true");
@@ -803,10 +808,7 @@ test("workflow helpers are active and configured only inside the uploader Settin
     );
     await page.locator("#saveWorkflowSettings").click();
     await page.getByText(/Helper settings saved/i).waitFor();
-    assert.equal(
-      await page.locator("#confirmation").getAttribute("hidden"),
-      "",
-    );
+    assert.equal(await page.locator("#uploadActions").isVisible(), false);
 
     const persisted = await page.evaluate(() => ({
       settings: structuredClone(__socialUiStorage.creatorToolkitV2),
@@ -852,7 +854,7 @@ test("workflow helpers are active and configured only inside the uploader Settin
   }
 });
 
-test("Yes rechecks selected subreddit revisions before any platform mutation", async () => {
+test("Upload rechecks selected subreddit revisions before any platform mutation", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
     viewport: { width: 1280, height: 900 },
@@ -896,16 +898,16 @@ test("Yes rechecks selected subreddit revisions before any platform mutation", a
     await page.locator("#socialCaption").fill("Ashley cosplay");
     await page.getByText("GamesGoneWild", { exact: true }).waitFor();
     await page.waitForFunction(
-      () => !document.querySelector("#confirmUpload").disabled,
+      () => !document.querySelector("#uploadButton").disabled,
       null,
       { timeout: 3000 },
     );
 
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     await page.waitForTimeout(100);
     assert.match(
-      await page.locator("#matchStatus").textContent(),
-      /subreddit presets changed.*review.*Yes again/i,
+      await page.locator("#uploadError").textContent(),
+      /subreddit presets changed.*review.*Upload again/i,
     );
     const messages = await page.evaluate(() => globalThis.__socialUiMessages);
     assert.equal(
@@ -968,13 +970,31 @@ for (const viewport of [
         await page.locator("#socialTraceStatus").textContent(),
         /record.*X.*Redgifs.*Reddit/i,
       );
-      assert.equal(await page.locator("#confirmUpload").isDisabled(), true);
-      const exactSummary = await page.locator("#uploadSummary").textContent();
-      assert.match(exactSummary, /Ashley found the wrong kind of mod/);
-      assert.match(exactSummary, /Title: Ashley cosplay title/);
-      assert.match(exactSummary, /Body: Exact Reddit body/);
-      assert.match(exactSummary, /Flair: Cosplay/);
-      assert.match(exactSummary, /NSFW: Yes/);
+      assert.equal(await page.locator("#uploadButton").isDisabled(), true);
+      assert.equal(
+        await page.locator("#socialCaption").inputValue(),
+        "Ashley found the wrong kind of mod",
+      );
+      const fields = page
+        .locator('[data-subreddit="gamesgonewild"]')
+        .locator("xpath=ancestor::div[contains(@class, 'subreddit-preset')]");
+      assert.equal(
+        await fields.locator('[data-field="title"]').inputValue(),
+        "Ashley cosplay title",
+      );
+      assert.equal(
+        await fields.locator('[data-field="body"]').inputValue(),
+        "Exact Reddit body",
+      );
+      assert.equal(
+        await fields.locator('[data-field="flair"]').inputValue(),
+        "Cosplay",
+      );
+      assert.equal(
+        await fields.locator('[data-field="nsfw"]').isChecked(),
+        true,
+      );
+      assert.equal(await page.locator("#uploadSummary").count(), 0);
       assert.equal(await page.locator("#subredditSearch").count(), 1);
       await page.locator("#subredditSearch").fill("Review");
       assert.equal(
@@ -1033,7 +1053,7 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
     await page.locator("#catalogueRow").waitFor({ state: "visible" });
     await page.locator("#catalogueRow").selectOption("row:125");
     assert.equal(
-      await page.locator("#confirmUpload").isDisabled(),
+      await page.locator("#uploadButton").isDisabled(),
       true,
       "an empty custom paid-link selection must still require a choice",
     );
@@ -1042,7 +1062,7 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
       .selectOption("https://onlyfans.com/1/johnny_guides");
     try {
       await page.waitForFunction(
-        () => !document.querySelector("#confirmUpload").disabled,
+        () => !document.querySelector("#uploadButton").disabled,
         null,
         { timeout: 5000 },
       );
@@ -1051,14 +1071,15 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
         socialErrors: document.querySelector("#socialErrors").textContent,
         draftErrors: document.querySelector("#draftErrors").textContent,
         paidLink: document.querySelector("#socialPaidLink").value,
-        question: document.querySelector("#matchQuestion").textContent,
+        question: document.querySelector("#catalogueSelectionStatus")
+          .textContent,
       }));
       throw new Error(
         `Teaser association stayed disabled: ${JSON.stringify(state)}`,
         { cause: error },
       );
     }
-    await page.locator("#confirmUpload").click();
+    await page.locator("#uploadButton").click();
     await page.waitForFunction(() =>
       __socialUiMessages.some(
         (message) => message.type === "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",

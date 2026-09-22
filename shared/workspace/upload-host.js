@@ -172,12 +172,23 @@
       );
   }
   const rpc = async (command) => {
-    await ensureBrowser();
+    try {
+      await ensureBrowser();
+    } catch (error) {
+      // No browserRequest was sent. Later transport failures remain uncertain.
+      error.uploadAdmission = "not-started";
+      throw error;
+    }
     return call("browserRequest", command);
   };
   function withLastError(reason, callback) {
     if (reason)
-      globalThis.chrome.runtime.lastError = { message: String(reason) };
+      globalThis.chrome.runtime.lastError = {
+        message: reason instanceof Error ? reason.message : String(reason),
+        ...(reason?.uploadAdmission
+          ? { uploadAdmission: reason.uploadAdmission }
+          : {}),
+      };
     try {
       return callback();
     } finally {
@@ -188,7 +199,7 @@
     if (typeof callback !== "function") return result;
     void result.then(
       (value) => callback(value),
-      (error) => withLastError(error.message, () => callback(undefined)),
+      (error) => withLastError(error, () => callback(undefined)),
     );
     return undefined;
   }
