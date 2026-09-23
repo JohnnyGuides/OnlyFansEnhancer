@@ -3381,7 +3381,7 @@
       title.value = "";
       description.value = "";
       pornhubVideoType.value = "free";
-      pornhubCertificationsConfirmed.checked = false;
+      pornhubCertificationsConfirmed.checked = true;
       socialCaption.value = "";
       socialCustomPaidLink.value = "";
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
@@ -3462,7 +3462,7 @@
       contentPreset.disabled = true;
       pornhubVideoType.value = "free";
       pornhubVideoType.disabled = true;
-      pornhubCertificationsConfirmed.checked = false;
+      pornhubCertificationsConfirmed.checked = true;
       title.value = "Neutral upload verification";
       description.value = "Neutral upload verification. Unpublished test.";
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
@@ -3647,7 +3647,6 @@
 
     fullInput.addEventListener("change", () => {
       fullFile = fullInput.files?.[0] || null;
-      pornhubCertificationsConfirmed.checked = false;
       selectedCatalogueRow = null;
       manualTargets = null;
       get("#fullFileSummary").textContent = fileSummary(
@@ -3769,7 +3768,6 @@
     });
     thumbnailInput.addEventListener("change", () => {
       thumbnailFile = thumbnailInput.files?.[0] || null;
-      pornhubCertificationsConfirmed.checked = false;
       get("#manyvidsThumbnailSummary").textContent = fileSummary(
         thumbnailFile,
         "Center-cropped to 640 × 360 for ManyVids and Pornhub",
@@ -3778,7 +3776,6 @@
     });
     pornhubInput.addEventListener("change", () => {
       pornhubFile = pornhubInput.files?.[0] || null;
-      pornhubCertificationsConfirmed.checked = false;
       get("#pornhubFileSummary").textContent = fileSummary(
         pornhubFile,
         "Uses the full video unless replaced",
@@ -3863,12 +3860,7 @@
     ]) {
       control.addEventListener("input", scheduleMatch);
     }
-    for (const control of [title, releaseDate, contentPreset])
-      control.addEventListener("input", () => {
-        pornhubCertificationsConfirmed.checked = false;
-      });
     pornhubVideoType.addEventListener("change", () => {
-      pornhubCertificationsConfirmed.checked = false;
       scheduleMatch();
     });
     for (const control of [onlyfans, fansly, manyvids, pornhub]) {

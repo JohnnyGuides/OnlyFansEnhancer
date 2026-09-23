@@ -3581,6 +3581,10 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     });
     await addUploadConsoleScripts(page);
     assert.equal(await page.locator("#loadTemplate").count(), 1);
+    assert.equal(
+      await page.locator("#pornhubCertificationsConfirmed").isChecked(),
+      true,
+    );
     const saved = await page.evaluate(async () =>
       JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
     );
@@ -3605,6 +3609,10 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     assert.equal(
       await page.locator("#uploadDescription").inputValue(),
       "Neutral upload verification. Unpublished test.",
+    );
+    assert.equal(
+      await page.locator("#pornhubCertificationsConfirmed").isChecked(),
+      true,
     );
     assert.equal(await page.locator("#mainPublishMode").inputValue(), "manual");
     assert.equal(await page.locator("#mainPublishMode").isDisabled(), true);
@@ -3655,6 +3663,7 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
     const prepared = await page.evaluate(() => preparedDraft);
     assert.equal(prepared.publishMode, "manual");
+    assert.equal(prepared.pornhubCertificationsConfirmed, true);
     assert.equal(
       prepared.description,
       "Neutral upload verification. Unpublished test.",
@@ -3691,6 +3700,10 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     );
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), false);
     assert.equal(await page.locator("#uploadFullVideo").inputValue(), "");
+    assert.equal(
+      await page.locator("#pornhubCertificationsConfirmed").isChecked(),
+      true,
+    );
     assert.equal(await page.locator(".result-card").count(), 0);
     await page.evaluate(() =>
       deliverOld({
@@ -3708,6 +3721,10 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       false,
     );
     await page.locator("#uploadTitle").fill("changed test title");
+    assert.equal(
+      await page.locator("#pornhubCertificationsConfirmed").isChecked(),
+      true,
+    );
     await page.locator("#loadTemplate").click();
     assert.equal(
       await page.locator("#uploadTitle").inputValue(),
@@ -3716,6 +3733,13 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     await page.locator("#newUploadDraft").click();
     assert.equal(await page.locator("#mainPublishMode").isDisabled(), false);
     assert.equal(await page.locator("#contentPreset").inputValue(), "");
+    await page.locator("#targetPornhub").check();
+    await page.locator("#pornhubCertificationsConfirmed").uncheck();
+    await page.locator("#uploadTitle").fill("opted out upload");
+    assert.equal(
+      await page.locator("#pornhubCertificationsConfirmed").isChecked(),
+      false,
+    );
     assert.equal(
       await page.evaluate(async () =>
         JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
