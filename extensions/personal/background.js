@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.50"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.51"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -3401,7 +3401,11 @@ function creatorSocialPort(sessionId) {
 function creatorUploadPost(sessionId, message) {
   const port = creatorUploadPort(sessionId);
   if (!port) throw new Error("The upload console is not connected.");
-  port.postMessage({ sessionId, ...message });
+  try {
+    port.postMessage({ sessionId, ...message });
+  } catch {
+    throw new Error("The upload port disconnected.");
+  }
 }
 
 function creatorUploadRequestFile(session, platform, role) {
@@ -4259,6 +4263,11 @@ async function invokeCreatorUploadAdapter(args) {
             ? response.rejectionCode || "preparation-request-rejected"
             : "preparation-response-missing";
           const facts = response?.bindingFacts;
+          const detail =
+            code === "preparation-request-rejected" &&
+            typeof response?.error === "string"
+              ? response.error.slice(0, 300)
+              : "";
           reject(
             Object.assign(
               new Error(
@@ -4268,6 +4277,7 @@ async function invokeCreatorUploadAdapter(args) {
                   ":" +
                   (args.stage || "upload") +
                   "]" +
+                  (detail ? " " + detail : "") +
                   (facts ? " " + JSON.stringify(facts) : ""),
               ),
               {
@@ -4289,7 +4299,11 @@ async function invokeCreatorUploadAdapter(args) {
         return await sendOnce(message);
       } catch (error) {
         if (
-          error.transientTransport !== true ||
+          (error.transientTransport !== true &&
+            ![
+              "upload-console-disconnected",
+              "upload-connection-changed",
+            ].includes(error.rejectionCode)) ||
           ![
             "CREATOR_UPLOAD_PLATFORM_PROGRESS",
             "CHECKPOINT_CREATOR_UPLOAD_STEP",
@@ -4413,7 +4427,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.50"
+      "upload-hub-0.20.51"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -6018,6 +6032,13 @@ function handleExtensionMessage(message, sender, sendResponse) {
             "Preparation progress has no document or sequence binding.":
               "preparation-progress-binding-missing",
             "Unauthorized preparation step.": "preparation-step-unauthorized",
+            "Unauthorized creator upload progress update.":
+              "preparation-progress-unauthorized",
+            "Invalid creator upload progress state.":
+              "preparation-progress-state-invalid",
+            "The upload console is not connected.":
+              "upload-console-disconnected",
+            "The upload port disconnected.": "upload-console-disconnected",
           }[error.message] ||
           "preparation-request-rejected",
         ...(error.bindingFacts ? { bindingFacts: error.bindingFacts } : {}),

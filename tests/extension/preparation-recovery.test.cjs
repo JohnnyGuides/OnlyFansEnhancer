@@ -133,6 +133,54 @@ test("permanent checkpoint rejection fails once without pausing or replaying", a
   assert.equal(messages.length, 1);
 });
 
+test("desktop port loss pauses progress and resumes only the bound observation", async () => {
+  const { context, messages, runtime, args } = harness();
+  let rejected = true;
+  runtime.sendMessage = (message, callback) => {
+    messages.push(message);
+    if (rejected) {
+      callback({
+        ok: false,
+        rejectionCode: "upload-console-disconnected",
+        error: "The upload port disconnected.",
+      });
+      return;
+    }
+    callback({ ok: true });
+  };
+  let mutations = 0;
+  context.CreatorUploadPlatformAdapters.runFansly = async (run) => {
+    await run.progress("configuring");
+    mutations++;
+    return { status: "manual-submit-required" };
+  };
+  const completion = context.invokeCreatorUploadAdapter(args);
+  await new Promise((resolve) => setImmediate(resolve));
+  const run = context.CreatorUploadRuns.get("recovery-test:fansly:upload");
+  assert.equal(run.state.status, "paused");
+  assert.equal(mutations, 0);
+  rejected = false;
+  assert.equal(run.resumeObservation(), true);
+  await completion;
+  assert.equal(mutations, 1);
+  assert.deepEqual(messages[0], messages[2]);
+});
+
+test("generic progress rejection preserves the extension's actual error", async () => {
+  const { context, runtime, args } = harness();
+  runtime.sendMessage = (_message, callback) =>
+    callback({
+      ok: false,
+      error: "The saved progress checkpoint could not be written.",
+    });
+  context.CreatorUploadPlatformAdapters.runFansly = (run) =>
+    run.progress("configuring");
+  await assert.rejects(
+    context.invokeCreatorUploadAdapter(args),
+    /preparation-request-rejected \[CREATOR_UPLOAD_PLATFORM_PROGRESS:upload\] The saved progress checkpoint could not be written/,
+  );
+});
+
 test("uncertain file delivery is never automatically replayed", async () => {
   const { context, messages, runtime, args } = harness();
   runtime.sendMessage = (message, callback) => {
