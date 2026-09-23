@@ -310,6 +310,7 @@ for (const suggestion of ["Assisted Blowjob", null])
         [
           {
             label: "Assisted Masturbation",
+            field: "tag",
             status: "unavailable",
             detail: "No exact site suggestion; omitted from this draft",
           },
@@ -321,3 +322,63 @@ for (const suggestion of ["Assisted Blowjob", null])
       await browser.close();
     }
   });
+
+test("Pornhub omits an unavailable category while preserving accepted categories", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<style>v-input,input,.c-pill,.selectedValue { display:block; min-height:24px; width:200px }</style>
+      <div data-error="orientation" class="dropdownElement"><div class="selectedValue">Straight</div></div>
+      <div class="form-section column">
+        <div class="c-pills-container"></div>
+        <v-input><input name="tags"></v-input><ul id="inputTag"></ul>
+      </div>
+      <div class="form-section column full">
+        <div class="c-pills-container"><div class="c-pill">Fetish</div><div class="c-pill">Gaming</div></div>
+        <v-input><input name="category"></v-input><ul id="f2vCategory"></ul>
+      </div>`);
+    for (const script of ["registry.js", "common.js", "ph-uploader.js"])
+      await page.addScriptTag({
+        path: path.resolve(
+          __dirname,
+          "../../extensions/personal/workflows",
+          script,
+        ),
+      });
+    const result = await page.evaluate(async () => {
+      const adapter = CreatorToolkitAdapters.phUploader;
+      const input = document.querySelector('input[name="category"]');
+      const plan = adapter.inspectPreset("Straight", {
+        orientation: "Straight",
+        tags: [],
+        categories: ["Fetish", "Gaming", "cartoon"],
+      });
+      const outcome = await adapter.applyPreset(
+        plan,
+        new AbortController().signal,
+        { step() {} },
+      );
+      return {
+        outcome,
+        input: input.value,
+        labels: [...adapter.selectedTokenLabels(input, "f2vCategory")].sort(),
+      };
+    });
+    assert.equal(result.outcome.status, "success");
+    assert.deepEqual(
+      result.outcome.items.filter((item) => item.status === "unavailable"),
+      [
+        {
+          label: "cartoon",
+          field: "category",
+          status: "unavailable",
+          detail: "No exact site suggestion; omitted from this draft",
+        },
+      ],
+    );
+    assert.deepEqual(result.labels, ["fetish", "gaming"]);
+    assert.equal(result.input, "");
+  } finally {
+    await browser.close();
+  }
+});

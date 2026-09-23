@@ -73,6 +73,7 @@
     signal,
     budget,
     allowUnavailable = false,
+    field = "tag",
   }) {
     const expectedKey = toolkit.normalizeText(token);
     if (selectedTokenLabels(input, suggestionListId).has(expectedKey)) {
@@ -132,6 +133,7 @@
       toolkit.setControlValue(input, "");
       return {
         label: token,
+        field,
         status: "unavailable",
         detail: "No exact site suggestion; omitted from this draft",
       };
@@ -404,11 +406,29 @@
               suggestionListId: "f2vCategory",
               signal,
               budget,
+              allowUnavailable: true,
+              field: "category",
             }),
           ))
         ) {
           return failedResult(outcomes);
         }
+      }
+      if (
+        outcomes.some(
+          (item) => item.field === "category" && item.status === "unavailable",
+        ) &&
+        selectedTokenLabels(categoryInput, "f2vCategory").size < 2
+      ) {
+        return failedResult([
+          ...outcomes,
+          {
+            label: "Categories",
+            status: "failed",
+            detail:
+              "Fewer than two accepted site categories remain after omitting unavailable categories.",
+          },
+        ]);
       }
     }
 

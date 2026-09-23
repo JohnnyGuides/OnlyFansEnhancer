@@ -11,6 +11,7 @@ for (const variant of [
   "delayed-time-control",
   "unmarked-time-control",
   "unavailable-tag",
+  "unavailable-category",
   "ambiguous-unmarked-time-control",
   "time-menu-noop",
   "next-month",
@@ -178,10 +179,16 @@ for (const variant of [
               applyPreset: async () => ({
                 status: "success",
                 items:
-                  variant === "unavailable-tag"
+                  variant === "unavailable-tag" ||
+                  variant === "unavailable-category"
                     ? [
                         {
-                          label: "Assisted Masturbation",
+                          label:
+                            variant === "unavailable-tag"
+                              ? "Assisted Masturbation"
+                              : "cartoon",
+                          field:
+                            variant === "unavailable-tag" ? "tag" : "category",
                           status: "unavailable",
                         },
                       ]
@@ -257,6 +264,7 @@ for (const variant of [
           "delayed-time-control",
           "unmarked-time-control",
           "unavailable-tag",
+          "unavailable-category",
           "already-checked",
           "next-month",
           "thumbnail",
@@ -279,17 +287,23 @@ for (const variant of [
                 "custom thumbnail (optional)",
                 "final Submit",
               ]
-            : variant === "thumbnail"
-              ? ["final Submit"]
-              : variant.startsWith("paid")
+            : variant === "unavailable-category"
+              ? [
+                  "Unavailable categories omitted: cartoon",
+                  "custom thumbnail (optional)",
+                  "final Submit",
+                ]
+              : variant === "thumbnail"
                 ? ["final Submit"]
-                : variant === "unconfirmed"
-                  ? [
-                      "custom thumbnail (optional)",
-                      "site certifications",
-                      "final Submit",
-                    ]
-                  : ["custom thumbnail (optional)", "final Submit"],
+                : variant.startsWith("paid")
+                  ? ["final Submit"]
+                  : variant === "unconfirmed"
+                    ? [
+                        "custom thumbnail (optional)",
+                        "site certifications",
+                        "final Submit",
+                      ]
+                    : ["custom thumbnail (optional)", "final Submit"],
         );
         assert.deepEqual(
           result.attached,

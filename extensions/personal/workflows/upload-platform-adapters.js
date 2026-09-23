@@ -862,7 +862,12 @@
       );
     }
     const unavailableTags = (result.items || [])
-      .filter((item) => item.status === "unavailable")
+      .filter((item) => item.status === "unavailable" && item.field === "tag")
+      .map((item) => item.label);
+    const unavailableCategories = (result.items || [])
+      .filter(
+        (item) => item.status === "unavailable" && item.field === "category",
+      )
       .map((item) => item.label);
     const finalTitle = one(
       'input[name="title"]',
@@ -935,6 +940,11 @@
       manualFields: [
         ...(unavailableTags.length
           ? [`Unavailable tags omitted: ${unavailableTags.join(", ")}`]
+          : []),
+        ...(unavailableCategories.length
+          ? [
+              `Unavailable categories omitted: ${unavailableCategories.join(", ")}`,
+            ]
           : []),
         ...(!currentForm ? ["schedule"] : []),
         ...(mode === "free" && !draft.pornhubThumbnail
@@ -3367,7 +3377,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.58",
+    revision: "upload-hub-0.20.59",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
