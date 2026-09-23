@@ -6,10 +6,13 @@ Do not treat the fact that it is a personal or signed-in profile as a blocker,
 or require a disposable profile merely for that reason.
 
 Preserve existing extension identities, load locations, Chrome storage, settings,
-and upload checkpoints. This preference does not authorize removing/reinstalling
-extensions, changing native-host registration, public publishing, live Google
-mutation, real-media moves, or unrelated account actions. Follow the task's
-explicit authorization for those operations.
+and upload checkpoints where practical. The owner gives standing authorization,
+until revoked, to install this repository's versioned Windows release as a normal
+update and to interrupt or retry an in-progress live upload for relevant product
+verification. Use this authorization to finish live retesting without asking
+again. It does not authorize a Fresh reinstall, removing/reinstalling extensions,
+changing native-host registration beyond the normal update, public publishing,
+live Google mutation, real-media moves, or unrelated account actions.
 
 # Development scope and content neutrality
 
@@ -65,10 +68,11 @@ product version and build a matching Windows installer. Include a direct,
 clickable link to that versioned installer in the final response so the owner
 can install it immediately. Do not merely promise an installer or omit its link.
 
-Install the release when authorized and safely feasible, or provide the installer
-link for the owner to run. State clearly whether installation actually occurred,
-what was verified, and any remaining blockers. Preserve existing settings,
-extension identities, load locations, storage, and upload checkpoints.
+Install the release as a normal update and retry the relevant live workflow when
+feasible under the standing authorization above. If installation cannot complete,
+provide the installer link for the owner to run. State clearly whether installation
+and live verification actually occurred, and report any remaining blockers.
+Preserve existing settings, extension identities, load locations, and storage.
 
 # Google OAuth recovery knowledge
 
