@@ -87,7 +87,6 @@
     const listSelector = `#${CSS.escape(suggestionListId)}`;
     const list = root.querySelector(listSelector);
     const beforeSignature = listSignature(list);
-    let sawFreshSuggestions = false;
     let ambiguousSuggestions = false;
     input.focus();
     toolkit.setControlValue(input, "");
@@ -101,7 +100,6 @@
           if (!currentList || !toolkit.isVisible(currentList)) return null;
           const signature = listSignature(currentList);
           if (!signature || signature === beforeSignature) return null;
-          sawFreshSuggestions = true;
           const items = Array.from(currentList.querySelectorAll("li")).filter(
             toolkit.isVisible,
           );
@@ -130,12 +128,7 @@
           "AMBIGUOUS_TARGET",
           `Multiple exact Pornhub suggestions match “${token}”.`,
         );
-      if (
-        !allowUnavailable ||
-        error?.code !== "TIMEOUT" ||
-        !sawFreshSuggestions
-      )
-        throw error;
+      if (!allowUnavailable || error?.code !== "TIMEOUT") throw error;
       toolkit.setControlValue(input, "");
       return {
         label: token,

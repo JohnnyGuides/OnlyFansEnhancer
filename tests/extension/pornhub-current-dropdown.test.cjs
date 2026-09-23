@@ -251,11 +251,12 @@ test("Pornhub preset reads and appends chips beside the live input widgets", asy
   }
 });
 
-test("Pornhub omits an unavailable tag only after fresh nonmatching suggestions", async () => {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(`<style>v-input,input,li,.c-pill,.selectedValue { display:block; min-height:24px; width:200px }</style>
+for (const suggestion of ["Assisted Blowjob", null])
+  test(`Pornhub omits an unavailable tag with ${suggestion ? "nonmatching" : "no"} suggestions`, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(`<style>v-input,input,li,.c-pill,.selectedValue { display:block; min-height:24px; width:200px }</style>
       <div data-error="orientation" class="dropdownElement"><div class="selectedValue">Straight</div></div>
       <div class="form-section column">
         <div class="c-pills-container"><div class="c-pill">Gaming</div><div class="c-pill">Robot</div></div>
@@ -267,56 +268,56 @@ test("Pornhub omits an unavailable tag only after fresh nonmatching suggestions"
         <v-input><div class="c-input-wrapper"><input name="category"></div></v-input>
         <div><ul id="f2vCategory"></ul></div>
       </div>`);
-    for (const script of ["registry.js", "common.js", "ph-uploader.js"])
-      await page.addScriptTag({
-        path: path.resolve(
-          __dirname,
-          "../../extensions/personal/workflows",
-          script,
-        ),
-      });
-    const result = await page.evaluate(async () => {
-      const input = document.querySelector('input[name="tags"]');
-      const list = document.querySelector("#inputTag");
-      input.addEventListener("input", () => {
-        list.replaceChildren();
-        if (input.value) {
-          const item = document.createElement("li");
-          item.textContent = "Assisted Blowjob";
-          list.append(item);
-        }
-      });
-      const adapter = CreatorToolkitAdapters.phUploader;
-      const plan = adapter.inspectPreset("Straight", {
-        orientation: "Straight",
-        tags: ["Gaming", "Robot", "Assisted Masturbation"],
-        categories: [],
-      });
-      const outcome = await adapter.applyPreset(
-        plan,
-        new AbortController().signal,
-        { step() {} },
+      for (const script of ["registry.js", "common.js", "ph-uploader.js"])
+        await page.addScriptTag({
+          path: path.resolve(
+            __dirname,
+            "../../extensions/personal/workflows",
+            script,
+          ),
+        });
+      const result = await page.evaluate(async (suggestion) => {
+        const input = document.querySelector('input[name="tags"]');
+        const list = document.querySelector("#inputTag");
+        input.addEventListener("input", () => {
+          list.replaceChildren();
+          if (input.value && suggestion) {
+            const item = document.createElement("li");
+            item.textContent = suggestion;
+            list.append(item);
+          }
+        });
+        const adapter = CreatorToolkitAdapters.phUploader;
+        const plan = adapter.inspectPreset("Straight", {
+          orientation: "Straight",
+          tags: ["Gaming", "Robot", "Assisted Masturbation"],
+          categories: [],
+        });
+        const outcome = await adapter.applyPreset(
+          plan,
+          new AbortController().signal,
+          { step() {} },
+        );
+        return {
+          outcome,
+          input: input.value,
+          labels: [...adapter.selectedTokenLabels(input, "inputTag")].sort(),
+        };
+      }, suggestion);
+      assert.equal(result.outcome.status, "success");
+      assert.deepEqual(
+        result.outcome.items.filter((item) => item.status === "unavailable"),
+        [
+          {
+            label: "Assisted Masturbation",
+            status: "unavailable",
+            detail: "No exact site suggestion; omitted from this draft",
+          },
+        ],
       );
-      return {
-        outcome,
-        input: input.value,
-        labels: [...adapter.selectedTokenLabels(input, "inputTag")].sort(),
-      };
-    });
-    assert.equal(result.outcome.status, "success");
-    assert.deepEqual(
-      result.outcome.items.filter((item) => item.status === "unavailable"),
-      [
-        {
-          label: "Assisted Masturbation",
-          status: "unavailable",
-          detail: "No exact site suggestion; omitted from this draft",
-        },
-      ],
-    );
-    assert.deepEqual(result.labels, ["gaming", "robot"]);
-    assert.equal(result.input, "");
-  } finally {
-    await browser.close();
-  }
-});
+      assert.deepEqual(result.labels, ["gaming", "robot"]);
+      assert.equal(result.input, "");
+    } finally {
+      await browser.close();
+    }
+  });
