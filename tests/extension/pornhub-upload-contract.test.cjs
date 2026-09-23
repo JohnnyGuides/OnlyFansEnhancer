@@ -6,7 +6,7 @@ const test = require("node:test");
 const { chromium } = require("../support/browser.cjs");
 const root = path.resolve(__dirname, "../../extensions/personal");
 
-test("Pornhub production bridge accepts only its approved role and manifest origin", async () => {
+test("Pornhub production bridge accepts video and owned thumbnail roles on its manifest origin", async () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(root, "manifest.json"), "utf8"),
   );
@@ -18,7 +18,9 @@ test("Pornhub production bridge accepts only its approved role and manifest orig
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent('<input type="file" class="dz-hidden-input">');
+    await page.setContent(
+      '<input type="file" class="dz-hidden-input"><div class="custom-thumbnails pcView"><input type="file" class="uploadFile"></div>',
+    );
     await page.addScriptTag({
       path: path.join(root, "workflows/upload-file-bridge.js"),
     });
@@ -34,6 +36,11 @@ test("Pornhub production bridge accepts only its approved role and manifest orig
             kind: "video",
             token: "approved-role-token-123456",
           },
+          thumbnail: {
+            selector: ".custom-thumbnails.pcView input.uploadFile",
+            kind: "image",
+            token: "approved-thumbnail-token-123456",
+          },
         },
       };
       const installed = CreatorUploadFileBridge.install(config);
@@ -45,7 +52,75 @@ test("Pornhub production bridge accepts only its approved role and manifest orig
       }
       return { roles: installed.roles, rejected };
     });
-    assert.deepEqual(result, { roles: ["pornhub"], rejected: true });
+    assert.deepEqual(result, {
+      roles: ["pornhub", "thumbnail"],
+      rejected: true,
+    });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Pornhub bridge assigns the approved thumbnail to its own input", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      '<input id="video" type="file"><div class="custom-thumbnails pcView"><input id="thumbnail" type="file"></div>',
+    );
+    await page.addScriptTag({
+      path: path.join(root, "workflows/upload-file-bridge.js"),
+    });
+    await page.evaluate(() =>
+      CreatorUploadFileBridge.install({
+        sessionId: "pornhub-thumbnail-12345678",
+        platform: "pornhub",
+        bridgeUrl: "about:blank",
+        bridgeOrigin: "null",
+        roles: {
+          pornhub: {
+            selector: "#video",
+            kind: "video",
+            token: "video-token-123456",
+          },
+          thumbnail: {
+            selector: "#thumbnail",
+            kind: "image",
+            token: "thumbnail-token-123456",
+          },
+        },
+      }),
+    );
+    const frame = page
+      .frames()
+      .find((candidate) => candidate !== page.mainFrame());
+    assert.ok(frame);
+    await frame.evaluate(() => {
+      parent.postMessage(
+        {
+          source: "creator-upload-file-bridge",
+          sessionId: "pornhub-thumbnail-12345678",
+          platform: "pornhub",
+          role: "thumbnail",
+          token: "thumbnail-token-123456",
+          file: new File(["image"], "neutral-thumbnail.png", {
+            type: "image/png",
+          }),
+        },
+        "*",
+      );
+    });
+    await page.waitForFunction(
+      () => document.querySelector("#thumbnail").files.length === 1,
+    );
+    assert.equal(
+      await page.locator("#thumbnail").evaluate((input) => input.files[0].name),
+      "neutral-thumbnail.png",
+    );
+    assert.equal(
+      await page.locator("#video").evaluate((input) => input.files.length),
+      0,
+    );
   } finally {
     await browser.close();
   }

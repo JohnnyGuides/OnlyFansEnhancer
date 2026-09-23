@@ -218,7 +218,7 @@ for (const desktop of [false, true]) {
         );
         assert.match(
           await page.locator("#recoveryStatus").textContent(),
-          /does not stop an upload/,
+          /keeps this history and does not change remote drafts/,
         );
         assert.deepEqual(
           await worker.evaluate(() => CreatorUploadSessionStore.listRecovery()),
@@ -400,12 +400,12 @@ test("compact UI has one in-flow Upload rail, conditional media, no Step 4 and n
     });
     await page.locator("#targetManyvids").uncheck();
     assert.equal(
-      await page.locator('[data-media-for="manyvids"]').isVisible(),
+      await page.locator('[data-media-for="manyvids pornhub"]').isVisible(),
       true,
     );
     assert.equal(
       await page
-        .locator('[data-media-for="manyvids"]')
+        .locator('[data-media-for="manyvids pornhub"]')
         .getAttribute("data-inactive"),
       "true",
     );
@@ -574,6 +574,99 @@ test("desktop disconnection before dispatch keeps the draft and permits retry on
     assert.deepEqual(
       (await fixture.commands()).map((command) => command.type),
       ["PREPARE_CREATOR_UPLOAD", "START_CREATOR_UPLOAD"],
+    );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("reopened console offers the latest upload and rebinds only after exact file reselection", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    await fixture.ready();
+    await fixture.page.locator("#uploadButton").click();
+    await fixture.page.waitForFunction(() =>
+      document
+        .querySelector("#matchStatus")
+        .textContent.includes("Run accepted"),
+    );
+    const savedProof = await fixture.worker.evaluate(async () => {
+      const [session] = await CreatorUploadSessionStore.list();
+      return session.draft.fileProof.full;
+    });
+    await fixture.page.close();
+    const reopened = await fixture.context.newPage();
+    reopened.setDefaultTimeout(8000);
+    reopened.on("pageerror", (error) => fixture.errors.push(error.message));
+    await reopened.goto(
+      fixture.worker.url().replace("background.js", "upload-console.html"),
+    );
+    await reopened.locator("#resumePrompt").waitFor({ state: "visible" });
+    assert.match(
+      await reopened.locator("#resumeSummary").textContent(),
+      /benign-new-clip\.mp4/,
+    );
+    await reopened.locator("#resumeUpload").click();
+    assert.match(
+      await reopened.locator("#resumeError").textContent(),
+      /Reselect the exact saved video/,
+    );
+    await reopened.evaluate((proof) => {
+      const file = new File(["benign generated fixture bytes"], proof.name, {
+        type: proof.type,
+        lastModified: proof.lastModified,
+      });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      const input = document.querySelector("#uploadFullVideo");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, savedProof);
+    await reopened.locator("#resumeUpload").click();
+    await reopened.waitForFunction(() =>
+      document
+        .querySelector("#matchStatus")
+        .textContent.includes("Reconnected"),
+    );
+    assert.equal(await reopened.locator("#resumePrompt").isVisible(), false);
+    assert.equal(await reopened.locator("#uploadButton").isDisabled(), true);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("New retires old preparation without deleting its review record", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    await fixture.seedPreparation();
+    await fixture.page.reload();
+    await fixture.page.locator("#resumePrompt").waitFor({ state: "visible" });
+    assert.match(
+      await fixture.page.locator("#resumeHeading").textContent(),
+      /Previous upload needs review/,
+    );
+    await fixture.page.locator("#uploadTitle").fill("Old draft title");
+    await fixture.page.locator("#newFromResume").click();
+    await fixture.page.waitForFunction(() =>
+      document
+        .querySelector("#neutralTestStatus")
+        .textContent.includes("New upload ready"),
+    );
+    const records = await fixture.worker.evaluate(() =>
+      CreatorUploadSessionStore.listRecovery(),
+    );
+    assert.equal(records.length, 1);
+    assert.ok(records[0].supersededAt > 0);
+    assert.equal(
+      await fixture.page.locator("#resumePrompt").isVisible(),
+      false,
+    );
+    assert.equal(await fixture.page.locator("#uploadTitle").inputValue(), "");
+    assert.equal(
+      await fixture.page.locator("#mainPublishMode").inputValue(),
+      "manual",
     );
     assert.deepEqual(fixture.errors, []);
   } finally {

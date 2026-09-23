@@ -274,6 +274,7 @@ async function createUploadFixture({ desktop = false } = {}) {
           await CreatorUploadSessionStore.recordStep(
             "previous-unpublished-run",
             {
+              launcher: desktop ? "desktop" : "extension",
               actionId: "select-full",
               platform: "onlyfans",
               outcome: "intent",

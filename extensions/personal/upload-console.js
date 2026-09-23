@@ -85,9 +85,75 @@
       file &&
       Number(file.size) > 0 &&
       (mimeType
-        ? mimeType.startsWith("image/")
+        ? ["image/png", "image/jpeg"].includes(mimeType)
         : IMAGE_EXTENSIONS.test(String(file.name || ""))),
     );
+  }
+
+  const normalizedThumbnails = new WeakMap();
+  function normalizeThumbnailFile(file) {
+    if (!(file instanceof File) || !isImageFile(file))
+      return Promise.reject(
+        new Error("Choose a readable PNG or JPEG thumbnail."),
+      );
+    if (file.size > 50 * 1024 * 1024)
+      return Promise.reject(new Error("Choose a thumbnail under 50 MB."));
+    if (normalizedThumbnails.has(file)) return normalizedThumbnails.get(file);
+    const conversion = (async () => {
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(file, {
+          imageOrientation: "from-image",
+        });
+      } catch {
+        throw new Error("Choose a readable PNG or JPEG thumbnail.");
+      }
+      try {
+        if (
+          !bitmap.width ||
+          !bitmap.height ||
+          bitmap.width > 10000 ||
+          bitmap.height > 10000
+        )
+          throw new Error("The thumbnail dimensions are unsupported.");
+        const width = 640;
+        const height = 360;
+        const scale = Math.max(width / bitmap.width, height / bitmap.height);
+        const cropWidth = width / scale;
+        const cropHeight = height / scale;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Thumbnail conversion is unavailable.");
+        context.fillStyle = "#000";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(
+          bitmap,
+          (bitmap.width - cropWidth) / 2,
+          (bitmap.height - cropHeight) / 2,
+          cropWidth,
+          cropHeight,
+          0,
+          0,
+          width,
+          height,
+        );
+        const blob = await new Promise((resolve) =>
+          canvas.toBlob(resolve, "image/png"),
+        );
+        if (!blob?.size || blob.size >= 2_000_000)
+          throw new Error("The converted thumbnail exceeds 2 MB.");
+        const base = file.name.replace(/\.[^.]+$/, "").slice(0, 100);
+        return new File([blob], `${base} (640x360).png`, {
+          type: "image/png",
+        });
+      } finally {
+        bitmap.close();
+      }
+    })();
+    normalizedThumbnails.set(file, conversion);
+    return conversion;
   }
 
   function scheduledIsoForReleaseDate(releaseDate) {
@@ -245,7 +311,7 @@
       errors.push("Choose a non-empty teaser video or leave it blank.");
     }
     if (mainEnabled && thumbnailFile && !isImageFile(thumbnailFile)) {
-      errors.push("Choose a PNG or JPEG ManyVids thumbnail or leave it blank.");
+      errors.push("Choose a PNG or JPEG thumbnail or leave it blank.");
     }
     if (mainEnabled && pornhubFile && !isVideoFile(pornhubFile)) {
       errors.push("Choose a non-empty Pornhub video or leave it blank.");
@@ -316,6 +382,7 @@
               pornhub: {
                 file: pornhubFile?.name || fullFile?.name || "",
                 source: pornhubFile ? "pornhub" : "full",
+                thumbnail: thumbnailFile?.name || null,
               },
             }
           : {}),
@@ -781,6 +848,7 @@
     let manualTargets = null;
     let uploadWithoutSheet = catalogueAssociation?.value === "later";
     let activeSession = null;
+    let resumable = null;
     let runBusy = false;
     let readiness = null;
     let readinessRevision = 0;
@@ -1693,7 +1761,15 @@
           fanslyPreset: "defaulT",
           fanslyPresetSelection: "first",
           manyvidsThumbnail: Boolean(thumbnailFile),
+          pornhubThumbnail:
+            targets.includes("pornhub") && Boolean(thumbnailFile),
           pornhubFilename: pornhubFile?.name || fullFile?.name || "",
+          fileProof: {
+            full: fileResumeProof(fullFile),
+            teaser: fileResumeProof(teaserFile),
+            thumbnail: fileResumeProof(thumbnailFile),
+            pornhub: fileResumeProof(pornhubFile || fullFile),
+          },
           contentPreset: value.contentPreset,
           fanslyCaption: value.fanslyCaption,
           profiles: value.profiles,
@@ -1894,7 +1970,7 @@
         uploadError.textContent =
           error.message +
           (error.recoveryRequired
-            ? " Open Review previous drafts to reconcile the existing work. Your selections are unchanged."
+            ? " Open Upload history to review the existing work. Your selections are unchanged."
             : " Correct the issue, then check readiness. Your selections are unchanged.");
         reviewRecovery.hidden = !error.recoveryRequired;
         refreshReadiness.hidden = false;
@@ -2098,8 +2174,20 @@
           remaining.textContent = `Review in your browser: ${state.manualFields.join(", ")}.`;
           card.append(remaining);
         }
+        const retryNeedsNew =
+          platform === "pornhub" &&
+          state.status === "failed" &&
+          state.stage === "upload" &&
+          !state.postUrl;
+        if (retryNeedsNew) {
+          const next = document.createElement("p");
+          next.textContent =
+            "Inspect the existing site draft, then Start new upload to try again.";
+          card.append(next);
+        }
         if (
-          new Set([
+          !retryNeedsNew &&
+          (new Set([
             "failed",
             "edit-failed",
             "catalogue-commit-failed",
@@ -2107,14 +2195,14 @@
             "stale",
             "conflict",
           ]).has(state.status) ||
-          (Boolean(state.postUrl) &&
-            !new Set([
-              "catalogue-updated",
-              "uploaded-no-sheet",
-              "recorded-local",
-              "published-local",
-              "idempotent",
-            ]).has(state.status))
+            (Boolean(state.postUrl) &&
+              !new Set([
+                "catalogue-updated",
+                "uploaded-no-sheet",
+                "recorded-local",
+                "published-local",
+                "idempotent",
+              ]).has(state.status)))
         ) {
           const retry = document.createElement("button");
           retry.type = "button";
@@ -2235,6 +2323,30 @@
         : null;
     }
 
+    function fileResumeProof(file) {
+      const identity = fileIdentity(file);
+      return identity
+        ? {
+            name: identity.name,
+            size: identity.size,
+            lastModified: identity.lastModified,
+            type: identity.type,
+          }
+        : null;
+    }
+
+    function matchesResumeFile(expected, file) {
+      if (!expected) return true;
+      const actual = fileResumeProof(file);
+      return Boolean(
+        actual &&
+        actual.name === expected.name &&
+        actual.size === expected.size &&
+        actual.lastModified === expected.lastModified &&
+        actual.type === expected.type,
+      );
+    }
+
     function sessionFile(session, role) {
       const file = session.files[role] || null;
       const expected = session.fileProof[role] || null;
@@ -2284,6 +2396,26 @@
             error: error.message,
           });
         });
+      if (request.role === "thumbnail") {
+        void normalizeThumbnailFile(file)
+          .then((converted) => {
+            if (!session.cancelled)
+              deliverBrowserFile(session, request, converted);
+          })
+          .catch((error) => {
+            session.port.postMessage({
+              type: "file-response",
+              requestId: request.requestId,
+              ok: false,
+              error: error.message,
+            });
+          });
+        return;
+      }
+      deliverBrowserFile(session, request, file);
+    }
+
+    function deliverBrowserFile(session, request, file) {
       const channel = channelFor(session);
       let sent = false;
       const probe = () =>
@@ -2414,6 +2546,14 @@
           )
             return;
           if (message.type === "session-bound") {
+            if (confirmed.existing && message.existing !== true) {
+              rejectBinding(
+                new Error(
+                  "The saved upload is no longer available. Start New after reviewing upload history.",
+                ),
+              );
+              return;
+            }
             session.connectionLost = false;
             acceptBinding();
             updateUploadAction();
@@ -2612,6 +2752,12 @@
           uploadButton.disabled = false;
           return;
         }
+        if (
+          thumbnailFile &&
+          thumbnailFile.source !== "development-fixture" &&
+          targets.some((target) => ["manyvids", "pornhub"].includes(target))
+        )
+          await normalizeThumbnailFile(thumbnailFile);
         const sessionId = randomSessionId();
         const socialPlan = social.enabled
           ? await buildSocialDistributionPlan({
@@ -2649,7 +2795,15 @@
             fullFilename: fullFile?.name || "",
             pornhubFilename: pornhubFile?.name || fullFile?.name || "",
             manyvidsThumbnail: Boolean(thumbnailFile),
+            pornhubThumbnail:
+              targets.includes("pornhub") && Boolean(thumbnailFile),
             profileSignature: value.profileSignature,
+            fileProof: {
+              full: fileResumeProof(fullFile),
+              teaser: fileResumeProof(teaserFile),
+              thumbnail: fileResumeProof(thumbnailFile),
+              pornhub: fileResumeProof(pornhubFile || fullFile),
+            },
           },
         });
         activeSession.catalogueDeferred = uploadWithoutSheet;
@@ -2779,7 +2933,7 @@
           error.message +
           (notStarted
             ? error.recoveryRequired
-              ? " Review previous drafts before retrying. Your files and details are unchanged."
+              ? " Review Upload history before retrying. Your files and details are unchanged."
               : " Your files and details are unchanged. Correct the issue, then click Upload to retry."
             : " This run may already have started. Restore the connection and review its progress or recovery evidence; do not start another upload.");
         if (notStarted) {
@@ -2912,6 +3066,146 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
 
+    async function loadResumePrompt() {
+      const prompt = get("#resumePrompt");
+      try {
+        const response = await sendMessage({
+          type: "GET_CREATOR_UPLOAD_RESUMABLE",
+        });
+        if (activeSession) return;
+        resumable = response.resumable || null;
+        prompt.hidden = !resumable && !response.pendingRecovery;
+        if (prompt.hidden) return;
+        get("#resumeError").textContent = "";
+        get("#resumeUpload").hidden = !resumable;
+        get("#resumeHeading").textContent = resumable
+          ? "Upload in queue"
+          : "Previous upload needs review";
+        const savedFiles = resumable
+          ? [
+              ...new Set(
+                [
+                  resumable.draft.fullFilename,
+                  resumable.draft.pornhubFilename,
+                ].filter(Boolean),
+              ),
+            ]
+          : [];
+        get("#resumeSummary").textContent = resumable
+          ? `Detected ${savedFiles.length > 1 ? "videos" : "video"} “${savedFiles.join(" + ") || resumable.draft.title}” in the queue.`
+          : `${response.pendingRecovery} previous preparation ${response.pendingRecovery === 1 ? "run is" : "runs are"} saved in upload history.`;
+        get("#resumeInstructions").textContent = resumable
+          ? "Reselect the saved files, then Resume to reconnect to this run. New stops old local sessions; remote drafts and review history remain."
+          : "Check any remote draft, then start a new upload. Review history remains available.";
+      } catch (error) {
+        if (activeSession) return;
+        prompt.hidden = false;
+        get("#resumeUpload").hidden = true;
+        get("#newFromResume").hidden = true;
+        get("#resumeHeading").textContent = "Upload recovery unavailable";
+        get("#resumeSummary").textContent =
+          "The saved upload state could not be checked.";
+        get("#resumeInstructions").textContent =
+          "Restore the browser connection, then reopen Upload.";
+        get("#resumeError").textContent = error.message;
+      }
+    }
+
+    get("#resumeUpload")?.addEventListener("click", async () => {
+      if (!resumable || activeSession || runBusy) return;
+      const expected = resumable.draft;
+      const selectedPornhub = pornhubFile || fullFile;
+      if (
+        (expected.fullFilename && fullFile?.name !== expected.fullFilename) ||
+        (expected.pornhubFilename &&
+          selectedPornhub?.name !== expected.pornhubFilename) ||
+        (expected.hasTeaser && !teaserFile) ||
+        (expected.manyvidsThumbnail && !thumbnailFile) ||
+        (expected.pornhubThumbnail && !thumbnailFile) ||
+        !matchesResumeFile(expected.fileProof?.full, fullFile) ||
+        !matchesResumeFile(expected.fileProof?.teaser, teaserFile) ||
+        !matchesResumeFile(expected.fileProof?.thumbnail, thumbnailFile) ||
+        !matchesResumeFile(expected.fileProof?.pornhub, selectedPornhub)
+      ) {
+        get("#resumeError").textContent =
+          "Reselect the exact saved video and any selected preview or thumbnail before resuming.";
+        return;
+      }
+      const button = get("#resumeUpload");
+      button.disabled = true;
+      get("#resumeError").textContent = "";
+      try {
+        if (
+          thumbnailFile &&
+          thumbnailFile.source !== "development-fixture" &&
+          (expected.manyvidsThumbnail || expected.pornhubThumbnail)
+        )
+          await normalizeThumbnailFile(thumbnailFile);
+        const targetNames = new Set(
+          resumable.platforms.map((target) => target.platform),
+        );
+        workflowMode.value = "main";
+        onlyfans.checked = targetNames.has("onlyfans");
+        fansly.checked = targetNames.has("fansly");
+        manyvids.checked = targetNames.has("manyvids");
+        pornhub.checked = targetNames.has("pornhub");
+        mainPublishMode.value = expected.publishMode;
+        title.value = expected.title;
+        description.value = expected.description;
+        releaseDate.value = expected.releaseDate;
+        if (
+          expected.contentPreset &&
+          ![...contentPreset.options].some(
+            (option) => option.value === expected.contentPreset,
+          )
+        )
+          contentPreset.add(
+            new Option(expected.contentPreset, expected.contentPreset),
+          );
+        contentPreset.value = expected.contentPreset;
+        refreshReleaseSummary();
+        ++readinessRevision;
+        activeSession = connectSession(resumable.id, {
+          existing: true,
+          files: {
+            full: fullFile,
+            teaser: teaserFile,
+            thumbnail: thumbnailFile,
+            pornhub: selectedPornhub,
+          },
+          proof: {
+            fullFilename: expected.fullFilename,
+            pornhubFilename: expected.pornhubFilename,
+            manyvidsThumbnail: expected.manyvidsThumbnail,
+            pornhubThumbnail: expected.pornhubThumbnail,
+            profileSignature: expected.profileSignature,
+            fileProof: {
+              full: fileResumeProof(fullFile),
+              teaser: fileResumeProof(teaserFile),
+              thumbnail: fileResumeProof(thumbnailFile),
+              pornhub: fileResumeProof(selectedPornhub),
+            },
+          },
+        });
+        platformStates.clear();
+        for (const target of resumable.platforms)
+          platformStates.set(target.platform, target);
+        await activeSession.whenBound;
+        get("#resumePrompt").hidden = true;
+        get("#preparationControls").hidden = false;
+        lockDraft(true);
+        renderPlatformStates();
+        matchStatus.textContent =
+          "Reconnected to the saved upload. Review the platform result before continuing.";
+        uploadError.textContent = "";
+        updateUploadAction();
+      } catch (error) {
+        get("#resumeError").textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     async function loadRecovery() {
       const button = get("#refreshRecovery");
       button.disabled = true;
@@ -2938,12 +3232,13 @@
               ),
             ),
           ];
-          detail.textContent =
-            platforms.join(" · ") +
-            (record.archivedVersion
-              ? " · retained from " + record.archivedVersion
-              : "") +
-            ". A prepared or uncertain draft may still exist. Inspect the platform drafts; do not upload the same work again until reconciled.";
+          detail.textContent = record.supersededAt
+            ? `${platforms.join(" · ")} · previous local run retired. Remote drafts were not changed.`
+            : platforms.join(" · ") +
+              (record.archivedVersion
+                ? " · retained from " + record.archivedVersion
+                : "") +
+              ". A prepared or uncertain draft may still exist. Inspect the platform drafts before starting New.";
           item.append(heading, detail);
           container.append(item);
         }
@@ -2957,10 +3252,12 @@
         }
         get("#recoveryStatus").textContent =
           records.length || publication.length
-            ? records.length +
-              " preparation run(s), " +
+            ? records.filter((record) => !record.supersededAt).length +
+              " active preparation run(s), " +
+              records.filter((record) => record.supersededAt).length +
+              " retired run(s), " +
               publication.length +
-              " publication receipt(s). Clearing evidence does not stop an upload, delete a remote draft, or undo a publication. Export diagnostics before clearing abandoned test runs."
+              " publication receipt(s). New keeps this history and does not change remote drafts."
             : "No retained preparation or publication records. Files and details in this window are unchanged.";
         get("#resetPreparation").hidden = !records.length;
       } catch (error) {
@@ -2983,42 +3280,22 @@
     });
 
     function newUploadDraft() {
-      const settled = new Set([
-        "manual-submit-required",
-        "failed",
-        "cancelled",
-        "edit-failed",
-        "posted-link-unresolved",
-        "catalogue-commit-failed",
-        "recorded-local",
-        "catalogue-updated",
-        "uploaded-no-sheet",
-        "already-linked",
-        "idempotent",
-      ]);
-      if (
-        runBusy ||
-        (activeSession?.needsReconciliation && !activeSession.cancelled) ||
-        activeSession?.pendingFiles?.size ||
-        (activeSession &&
-          (platformStates.size === 0 ||
-            [...platformStates.values()].some(
-              (state) => !settled.has(state.status),
-            )))
-      )
-        throw new Error(
-          "This run is still active or its file delivery is unresolved. Stop or finish observation before starting a new draft; nothing was reset.",
-        );
       if (activeSession) {
         activeSession.closed = true;
         activeSession.channel?.close();
         activeSession.port?.disconnect();
       }
       activeSession = null;
+      resumable = null;
+      get("#resumePrompt").hidden = true;
       templateRevision++;
       lockDraft(false);
       leaveNeutralTest();
+      neutralTestFiles = null;
       selectedCatalogueRow = null;
+      manualTargets = null;
+      currentSnapshot = null;
+      snapshotPromise = null;
       clearTimeout(socialPollTimer);
       clearTimeout(matchTimer);
       platformStates.clear();
@@ -3036,6 +3313,21 @@
       }
       title.value = "";
       description.value = "";
+      socialCaption.value = "";
+      socialCustomPaidLink.value = "";
+      releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
+      refreshReleaseSummary();
+      workflowMode.value = "main";
+      mainPublishMode.value = "manual";
+      catalogueAssociation.value = "later";
+      uploadWithoutSheet = true;
+      for (const target of [onlyfans, fansly, manyvids, pornhub])
+        target.checked = target.defaultChecked;
+      socialX.checked = false;
+      socialReddit.checked = false;
+      get('input[name="socialMode"][value="manual"]').checked = true;
+      get('input[name="socialMode"][value="autonomous"]').checked = false;
+      lastAttempt = null;
       if (workflowMode) workflowMode.disabled = neutralTestMode;
       if (catalogueAssociation) catalogueAssociation.disabled = neutralTestMode;
       mainPublishMode.disabled = neutralTestMode;
@@ -3043,18 +3335,39 @@
       get("#preparationControls").hidden = true;
       get("#savedCatalogueAssociation").hidden = true;
       get("#redditLinkStep").hidden = true;
+      updateWorkflowVisibility();
+      refreshSocialReview();
       invalidateMatch();
       scheduleMatch();
       get("#neutralTestStatus").textContent =
-        "New draft. Previous uploads and recovery data are unchanged.";
+        "New upload ready. Earlier local sessions are retired; review history is preserved.";
     }
-    get("#newUploadDraft")?.addEventListener("click", () => {
-      try {
-        newUploadDraft();
-      } catch (error) {
-        get("#neutralTestStatus").textContent = error.message;
-      }
-    });
+
+    async function startNewUpload() {
+      if (runBusy)
+        throw new Error(
+          "Wait for the current Upload request to finish connecting, then start New.",
+        );
+      const reset = await sendMessage({ type: "START_NEW_CREATOR_UPLOAD" });
+      if (!reset.reset)
+        throw new Error("The previous upload state could not be retired.");
+      newUploadDraft();
+      void loadRecovery();
+    }
+    for (const id of ["#newUploadDraft", "#newFromResume"])
+      get(id)?.addEventListener("click", async () => {
+        const button = get(id);
+        button.disabled = true;
+        get("#resumeError").textContent = "";
+        try {
+          await startNewUpload();
+        } catch (error) {
+          get("#neutralTestStatus").textContent = error.message;
+          get("#resumeError").textContent = error.message;
+        } finally {
+          button.disabled = false;
+        }
+      });
 
     function applyNeutralTestPreset() {
       if (activeSession)
@@ -3185,7 +3498,7 @@
           thumbnailInput,
           thumbnailFile,
           "manyvidsThumbnailSummary",
-          "Uses a site-generated thumbnail",
+          "Center-cropped to 640 × 360 for ManyVids and Pornhub",
         ],
         [
           pornhubInput,
@@ -3372,7 +3685,7 @@
       thumbnailFile = thumbnailInput.files?.[0] || null;
       get("#manyvidsThumbnailSummary").textContent = fileSummary(
         thumbnailFile,
-        "Uses a site-generated thumbnail",
+        "Center-cropped to 640 × 360 for ManyVids and Pornhub",
       );
       if (!activeSession) scheduleMatch();
     });
@@ -3574,6 +3887,7 @@
       .catch((error) => {
         matchStatus.textContent = error.message;
       });
+    void loadResumePrompt();
     validate();
   }
 
@@ -3584,6 +3898,7 @@
     learnSeriesPresetMap,
     normalizeDraft,
     neutralTestSelection,
+    normalizeThumbnailFile,
     neutralTestProfiles,
     normalizeSocialDraft,
     profileAuthorizationSummary,

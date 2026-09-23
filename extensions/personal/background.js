@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.43"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.45"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -2985,6 +2985,19 @@ async function getCreatorUploadSession(sessionId) {
 
 function creatorUploadSessionProofMatches(session, proof) {
   if (!session?.draft || !proof || typeof proof !== "object") return false;
+  for (const role of ["full", "teaser", "thumbnail", "pornhub"]) {
+    const expected = session.draft.fileProof?.[role];
+    if (!expected) continue;
+    const actual = proof.fileProof?.[role];
+    if (
+      !actual ||
+      actual.name !== expected.name ||
+      actual.size !== expected.size ||
+      actual.lastModified !== expected.lastModified ||
+      actual.type !== expected.type
+    )
+      return false;
+  }
   return (
     creatorUploadClean(proof.fullFilename, 500) ===
       session.draft.fullFilename &&
@@ -2992,6 +3005,8 @@ function creatorUploadSessionProofMatches(session, proof) {
       session.draft.pornhubFilename &&
     (proof.manyvidsThumbnail === true) ===
       (session.draft.manyvidsThumbnail === true) &&
+    (proof.pornhubThumbnail === true) ===
+      (session.draft.pornhubThumbnail === true) &&
     (creatorUploadClean(proof.profileSignature, 50_000) ===
       session.draft.profileSignature ||
       creatorUploadClean(proof.profileSignature, 50_000) ===
@@ -3003,6 +3018,33 @@ function creatorUploadClean(value, maximum) {
   return String(value || "")
     .trim()
     .slice(0, maximum);
+}
+
+function creatorUploadResumeFileProof(value) {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid upload file proof.");
+  const proof = {};
+  for (const role of ["full", "teaser", "thumbnail", "pornhub"]) {
+    const item = value[role];
+    if (item == null) continue;
+    const name = creatorUploadClean(item.name, 500);
+    if (
+      !name ||
+      !Number.isSafeInteger(item.size) ||
+      item.size <= 0 ||
+      !Number.isSafeInteger(item.lastModified) ||
+      item.lastModified <= 0
+    )
+      throw new Error("Invalid upload file proof.");
+    proof[role] = {
+      name,
+      size: item.size,
+      lastModified: item.lastModified,
+      type: creatorUploadClean(item.type, 100),
+    };
+  }
+  return proof;
 }
 
 async function validateCreatorUploadRequest(message) {
@@ -3039,9 +3081,11 @@ async function validateCreatorUploadRequest(message) {
     fanslyPresetSelection:
       message.draft?.fanslyPresetSelection === "first" ? "first" : "exact",
     manyvidsThumbnail: message.draft?.manyvidsThumbnail === true,
+    pornhubThumbnail: message.draft?.pornhubThumbnail === true,
     hasTeaser: message.draft?.hasTeaser !== false,
     publishMode: message.draft?.publishMode ?? "manual",
     pornhubFilename: creatorUploadClean(message.draft?.pornhubFilename, 500),
+    fileProof: creatorUploadResumeFileProof(message.draft?.fileProof),
     contentPreset: creatorUploadClean(message.draft?.contentPreset, 100),
     fanslyCaption: creatorUploadClean(message.draft?.fanslyCaption, 15_000),
   };
@@ -3076,6 +3120,17 @@ async function validateCreatorUploadRequest(message) {
   if (providedProfileSignature === legacyProfileSignature) {
     draft.legacyProfileSignature = legacyProfileSignature;
   }
+  if (
+    (draft.fileProof.full &&
+      draft.fileProof.full.name !== draft.fullFilename) ||
+    (draft.fileProof.pornhub &&
+      draft.fileProof.pornhub.name !== draft.pornhubFilename) ||
+    (draft.fileProof.thumbnail &&
+      !draft.manyvidsThumbnail &&
+      !draft.pornhubThumbnail) ||
+    (draft.fileProof.teaser && !draft.hasTeaser)
+  )
+    throw new Error("Upload file proof does not match the selected draft.");
   const scheduled = new Date(draft.scheduledIso);
   if (
     !draft.title ||
@@ -3100,6 +3155,12 @@ async function validateCreatorUploadRequest(message) {
     draft.fanslyCaption = draft.description;
   }
   if (targets.includes("pornhub")) {
+    if (
+      Object.hasOwn(message.draft || {}, "pornhubThumbnail") &&
+      typeof message.draft.pornhubThumbnail !== "boolean"
+    ) {
+      throw new Error("Invalid Pornhub thumbnail selection.");
+    }
     if (!draft.pornhubFilename || !draft.contentPreset) {
       throw new Error(
         "Pornhub preparation requires a file and content preset.",
@@ -3465,7 +3526,11 @@ function creatorUploadHandlePortMessage(port, message) {
     void getCreatorUploadSession(sessionId)
       .then((session) => {
         if (!session) {
-          port.postMessage({ type: "session-bound", sessionId });
+          port.postMessage({
+            type: "session-bound",
+            sessionId,
+            existing: false,
+          });
           return;
         }
         if (!creatorUploadSessionProofMatches(session, message.proof)) {
@@ -3478,14 +3543,27 @@ function creatorUploadHandlePortMessage(port, message) {
           });
           return;
         }
-        if (session.restored && !session.executionPort)
-          session.executionPort = port;
-        port.postMessage({ type: "session-bound", sessionId });
+        if (
+          session.executionPort &&
+          session.executionPort !== port &&
+          creatorUploadConsolePorts.has(session.executionPort)
+        ) {
+          port.creatorUploadSessionId = "";
+          port.postMessage({
+            type: "session-restore-rejected",
+            sessionId,
+            error: "This upload is already connected in another console tab.",
+          });
+          return;
+        }
+        session.executionPort = port;
+        port.postMessage({ type: "session-bound", sessionId, existing: true });
         port.postMessage({
           type: "session-restored",
           sessionId,
           platforms: [...session.platforms.values()].map((target) => ({
             platform: target.platform,
+            stage: target.stage,
             status: target.status,
             postUrl: target.postUrl,
             manyvidsId: target.manyvidsId,
@@ -3740,7 +3818,12 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
   const injectionTarget = { tabId: tab.id, documentIds: [frame.documentId] };
   const tokens =
     platform === "pornhub"
-      ? { pornhub: creatorUploadRandomToken() }
+      ? {
+          pornhub: creatorUploadRandomToken(),
+          ...(session.draft.pornhubThumbnail
+            ? { thumbnail: creatorUploadRandomToken() }
+            : {}),
+        }
       : {
           full: creatorUploadRandomToken(),
           ...(["fansly", "manyvids"].includes(platform) &&
@@ -3759,6 +3842,16 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
             token: tokens.pornhub,
             kind: "video",
           },
+          ...(tokens.thumbnail
+            ? {
+                thumbnail: {
+                  selector:
+                    "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']",
+                  token: tokens.thumbnail,
+                  kind: "image",
+                },
+              }
+            : {}),
         }
       : platform === "onlyfans"
         ? { full: { selector: "#file_upload_input", token: tokens.full } }
@@ -4238,7 +4331,11 @@ async function invokeCreatorUploadAdapter(args) {
       }
       const commandId = crypto.randomUUID();
       await context.checkpointStep(`select-${role}`, commandId, "intent");
-      if (args.platform === "pornhub" && !context.supportsNativePicker) {
+      if (
+        args.platform === "pornhub" &&
+        role === "pornhub" &&
+        !context.supportsNativePicker
+      ) {
         const input =
           await globalThis.CreatorUploadPlatformAdapters.activatePornhubUploader(
             context.signal,
@@ -4293,7 +4390,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.43"
+      "upload-hub-0.20.45"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4652,6 +4749,12 @@ async function runCreatorPornhubPlatform(session, target) {
           stage: "upload",
           selectors: {
             pornhub: "input.dz-hidden-input[type='file']",
+            ...(session.draft.pornhubThumbnail
+              ? {
+                  thumbnail:
+                    "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']",
+                }
+              : {}),
           },
           draft: session.draft,
           nativePicker: creatorUploadPort(session.id)?.desktop === true,
@@ -4676,7 +4779,12 @@ async function runCreatorPornhubPlatform(session, target) {
     });
     return result;
   } catch (error) {
-    const result = { platform, status: "failed", error: error.message };
+    const result = {
+      platform,
+      stage: target.stage,
+      status: "failed",
+      error: error.message,
+    };
     Object.assign(target, result);
     await checkpointCreatorUploadSession(session);
     try {
@@ -5207,6 +5315,105 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
+async function stopCreatorUploadSession(session) {
+  session.cancelled = true;
+  for (const [id, pending] of creatorUploadFileRequests) {
+    if (pending.sessionId !== session.id) continue;
+    clearTimeout(pending.timeout);
+    pending.fileController?.abort();
+    pending.reject(new Error("Preparation was cancelled."));
+    creatorUploadFileRequests.delete(id);
+  }
+  for (const target of session.platforms.values()) {
+    if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
+    target.status = "cancelled";
+    target.stage = "cancelled";
+    if (target.tabId) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: target.tabId, documentIds: [target.documentId] },
+          func: (sessionId) => {
+            for (const [key, run] of globalThis.CreatorUploadRuns || [])
+              if (key.startsWith(`${sessionId}:`)) run.controller.abort();
+          },
+          args: [session.id],
+        });
+      } catch {
+        /* A closed document has already stopped its executor. */
+      }
+    }
+    creatorUploadPost(session.id, {
+      type: "platform-result",
+      platform: target.platform,
+      result: {
+        platform: target.platform,
+        status: "cancelled",
+        error:
+          "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
+      },
+    });
+  }
+  await checkpointCreatorUploadSession(session);
+}
+
+const creatorUploadRetirements = new Map();
+async function retireCreatorUploadSessions(launcher = "extension") {
+  if (creatorUploadRetirements.has(launcher))
+    return creatorUploadRetirements.get(launcher);
+  const retirement = (async () => {
+    await ensureCreatorUploadRuntimeVersion();
+    const records = await CREATOR_UPLOAD_SESSION_STORE.list();
+    const otherIds = records
+      .filter((record) => (record.launcher || "extension") !== launcher)
+      .map((record) => record.id);
+    let retired = 0;
+    for (const record of records) {
+      if ((record.launcher || "extension") !== launcher || !record.draft)
+        continue;
+      const session = await getCreatorUploadSession(record.id);
+      if (session) {
+        await stopCreatorUploadSession(session);
+        if (session.execution) {
+          let timeout;
+          try {
+            await Promise.race([
+              session.execution,
+              new Promise((_, reject) => {
+                timeout = setTimeout(
+                  () =>
+                    reject(
+                      new Error(
+                        "The current upload has not stopped yet. Review it before starting New.",
+                      ),
+                    ),
+                  15_000,
+                );
+              }),
+            ]);
+          } finally {
+            clearTimeout(timeout);
+          }
+        }
+        clearTimeout(session.cleanupTimer);
+        creatorUploadSessions.delete(record.id);
+      }
+      await CREATOR_UPLOAD_SESSION_STORE.remove(record.id);
+      retired++;
+    }
+    const recovery = await CREATOR_UPLOAD_SESSION_STORE.supersedePreparation(
+      otherIds,
+      launcher,
+    );
+    return { retired, ...recovery };
+  })();
+  creatorUploadRetirements.set(launcher, retirement);
+  try {
+    return await retirement;
+  } finally {
+    creatorUploadRetirements.delete(launcher);
+  }
+}
+
 function handleExtensionMessage(message, sender, sendResponse) {
   (async () => {
     if (
@@ -5279,6 +5486,73 @@ function handleExtensionMessage(message, sender, sendResponse) {
             : records,
         };
       }
+      case "GET_CREATOR_UPLOAD_RESUMABLE": {
+        await ensureCreatorUploadRuntimeVersion();
+        const launcher = sender?.desktopUploadRuntime ? "desktop" : "extension";
+        const allSessions = await CREATOR_UPLOAD_SESSION_STORE.list();
+        const sessions = allSessions
+          .filter(
+            (record) =>
+              (record.launcher || "extension") === launcher &&
+              record.draft &&
+              Object.keys(record.platforms || {}).length,
+          )
+          .sort(
+            (left, right) =>
+              (right.updatedAt || right.createdAt || 0) -
+              (left.updatedAt || left.createdAt || 0),
+          );
+        const latest = sessions[0];
+        const recovery = await CREATOR_UPLOAD_SESSION_STORE.listRecovery();
+        const otherIds = new Set(
+          allSessions
+            .filter((record) => (record.launcher || "extension") !== launcher)
+            .map((record) => record.id),
+        );
+        return {
+          resumable: latest
+            ? {
+                id: latest.id,
+                draft: {
+                  title: latest.draft.title || "",
+                  fullFilename: latest.draft.fullFilename || "",
+                  pornhubFilename: latest.draft.pornhubFilename || "",
+                  fileProof: latest.draft.fileProof || {},
+                  hasTeaser: latest.draft.hasTeaser === true,
+                  manyvidsThumbnail: latest.draft.manyvidsThumbnail === true,
+                  pornhubThumbnail: latest.draft.pornhubThumbnail === true,
+                  profileSignature: latest.draft.profileSignature || "",
+                  releaseDate: latest.draft.releaseDate || "",
+                  description: latest.draft.description || "",
+                  contentPreset: latest.draft.contentPreset || "",
+                  publishMode: latest.draft.publishMode || "manual",
+                },
+                platforms: Object.values(latest.platforms || {}).map(
+                  (target) => ({
+                    platform: target.platform,
+                    stage: target.stage,
+                    status: target.status,
+                    error: target.error,
+                    postUrl: target.postUrl,
+                  }),
+                ),
+              }
+            : null,
+          olderSessions: Math.max(0, sessions.length - 1),
+          pendingRecovery: recovery.filter(
+            (record) =>
+              !record.supersededAt &&
+              !otherIds.has(record.id) &&
+              (record.launcher || "extension") === launcher,
+          ).length,
+        };
+      }
+      case "START_NEW_CREATOR_UPLOAD":
+        return {
+          reset: await retireCreatorUploadSessions(
+            sender?.desktopUploadRuntime ? "desktop" : "extension",
+          ),
+        };
       case "CLEAR_CREATOR_UPLOAD_PREPARATION":
         return {
           reset: await CREATOR_UPLOAD_SESSION_STORE.clearPreparation(),
@@ -5321,47 +5595,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
       case "CANCEL_CREATOR_UPLOAD": {
         const session = await getCreatorUploadSession(message.sessionId);
         if (!session) throw new Error("Unknown preparation run.");
-        session.cancelled = true;
-        for (const [id, pending] of creatorUploadFileRequests) {
-          if (pending.sessionId !== session.id) continue;
-          clearTimeout(pending.timeout);
-          pending.fileController?.abort();
-          pending.reject(new Error("Preparation was cancelled."));
-          creatorUploadFileRequests.delete(id);
-        }
-        for (const target of session.platforms.values()) {
-          if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
-          target.status = "cancelled";
-          target.stage = "cancelled";
-          if (target.tabId) {
-            try {
-              await chrome.scripting.executeScript({
-                target: {
-                  tabId: target.tabId,
-                  documentIds: [target.documentId],
-                },
-                func: (sessionId) => {
-                  for (const [key, run] of globalThis.CreatorUploadRuns || [])
-                    if (key.startsWith(`${sessionId}:`)) run.controller.abort();
-                },
-                args: [session.id],
-              });
-            } catch {
-              /* A closed document has already stopped its executor. */
-            }
-          }
-          creatorUploadPost(session.id, {
-            type: "platform-result",
-            platform: target.platform,
-            result: {
-              platform: target.platform,
-              status: "cancelled",
-              error:
-                "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
-            },
-          });
-        }
-        await checkpointCreatorUploadSession(session);
+        await stopCreatorUploadSession(session);
         return { cancelled: true };
       }
       case "PREPARE_CREATOR_SOCIAL_DISTRIBUTION":
@@ -5456,6 +5690,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
           .map((value) => value.toString(16).padStart(2, "0"))
           .join("");
         const step = await CREATOR_UPLOAD_SESSION_STORE.recordStep(session.id, {
+          launcher: session.launcher,
           actionId: message.actionId,
           commandId: message.commandId,
           outcome: message.outcome,
@@ -5612,6 +5847,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
           );
         await CREATOR_UPLOAD_SESSION_STORE.recordStep(session.id, {
           ...intent,
+          launcher: session.launcher,
           outcome: "issued",
         });
         await assertCreatorUploadPageBinding(session, target, sender);
@@ -5935,7 +6171,7 @@ async function attachBoundUploadFile(command) {
   });
   await validateBinding();
   let pickerSelector;
-  if (pending.platform === "pornhub") {
+  if (pending.platform === "pornhub" && pending.role === "pornhub") {
     const [binding] = await chrome.scripting.executeScript({
       target: injectionTarget,
       func: () =>
@@ -5949,7 +6185,7 @@ async function attachBoundUploadFile(command) {
     validateBinding,
     validatePicker: async () => {
       await validateBinding();
-      if (pending.platform !== "pornhub") return;
+      if (pending.platform !== "pornhub" || pending.role !== "pornhub") return;
       const [verified] = await chrome.scripting.executeScript({
         target: injectionTarget,
         func: (selector) =>
@@ -5970,7 +6206,8 @@ async function attachBoundUploadFile(command) {
         : pending.platform === "pornhub" && pending.role === "pornhub"
           ? pickerSelector
           : undefined,
-    activatePicker: pending.platform === "pornhub",
+    activatePicker:
+      pending.platform === "pornhub" && pending.role === "pornhub",
     requireConnectedInput: pending.platform === "pornhub",
     filePath: command.filePath,
     allowedOrigins: [origin],

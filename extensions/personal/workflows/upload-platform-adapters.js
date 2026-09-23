@@ -851,6 +851,45 @@
     const currentForm = title.closest("form.video-details-form");
     if (currentForm) {
       await configurePornhubSchedule(currentForm, draft.scheduledIso, signal);
+      if (draft.pornhubThumbnail) {
+        const owner = currentForm.closest("v-upload-video-details[form-id]");
+        const selector =
+          "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']";
+        const thumbnail = currentForm.querySelector(
+          ".custom-thumbnails.pcView",
+        );
+        const input = thumbnail?.querySelector("input.uploadFile[type='file']");
+        if (
+          !owner ||
+          !thumbnail ||
+          !visible(thumbnail) ||
+          !input ||
+          document.querySelectorAll(selector).length !== 1 ||
+          input.files?.length
+        )
+          throw new Error(
+            "Pornhub [thumbnail]: The empty thumbnail control is unavailable or ambiguous; inspect the existing draft.",
+          );
+        await context.progress?.("waiting-for-thumbnail");
+        const receipt = await context.attachFile("thumbnail", selector);
+        await waitFor(
+          () =>
+            currentForm.isConnected &&
+            owner.contains(currentForm) &&
+            input.isConnected &&
+            input.files?.length === 1 &&
+            input.files[0].name === receipt.name &&
+            [...thumbnail.querySelectorAll(".thumbSuccess")].some(
+              (message) =>
+                visible(message) &&
+                normalizedText(message.textContent) ===
+                  "custom thumbnail added",
+            ),
+          "Pornhub accepted custom thumbnail",
+          DEFAULT_DOM_TIMEOUT,
+          signal,
+        );
+      }
       await acceptPornhubCertifications(currentForm, signal);
     }
     await context.progress?.("prepared");
@@ -859,7 +898,7 @@
       status: "manual-submit-required",
       manualFields: [
         ...(!currentForm ? ["schedule"] : []),
-        "custom thumbnail (optional)",
+        ...(!draft.pornhubThumbnail ? ["custom thumbnail (optional)"] : []),
         "final Submit",
       ],
       effectiveFilename: draft.pornhubFilename,
@@ -1009,10 +1048,32 @@
       ),
       "Pornhub schedule day",
     );
-    const time = one(
-      '[data-error="scheduleTime"]',
-      "Pornhub schedule time",
-      picker,
+    const time = await waitFor(
+      () => {
+        verifyOwner();
+        const selected = [
+          ...picker.querySelectorAll(
+            ".dp-day.dp-selected:not(.dp-other-month)",
+          ),
+        ].filter(visible);
+        if (
+          selected.length !== 1 ||
+          selected[0].textContent.trim() !== parts.day ||
+          picker
+            .querySelector(".dp-date-info .dp-info-value")
+            ?.textContent.trim() !== dateText
+        )
+          return null;
+        const controls = [
+          ...picker.querySelectorAll('[data-error="scheduleTime"]'),
+        ].filter(visible);
+        if (controls.length > 1)
+          throw new Error("Pornhub schedule time is ambiguous.");
+        return controls[0];
+      },
+      "Pornhub schedule time control",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
     );
     click(
       one(".c-drop-wrapper__selected", "Pornhub schedule time trigger", time),
@@ -3132,7 +3193,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.43",
+    revision: "upload-hub-0.20.45",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

@@ -2537,7 +2537,8 @@ test("upload console performs no platform mutation before the single Upload acti
             return port;
           },
           sendMessage(message, callback) {
-            globalThis.consoleMessages.push(structuredClone(message));
+            if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
+              globalThis.consoleMessages.push(structuredClone(message));
             if (message.type === "SYNC_CREATOR_TOOLS") {
               callback({
                 ok: true,
@@ -2738,7 +2739,7 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
     );
     assert.match(
       await page.locator("#draftErrors").textContent(),
-      /Choose a PNG or JPEG ManyVids thumbnail or leave it blank/,
+      /Choose a PNG or JPEG thumbnail or leave it blank/,
     );
     await page.locator("#uploadManyvidsThumbnail").setInputFiles([]);
     await page.waitForFunction(
@@ -2826,7 +2827,8 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
         runtime: {
           lastError: null,
           sendMessage(message, callback) {
-            globalThis.consoleMessages.push(structuredClone(message));
+            if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
+              globalThis.consoleMessages.push(structuredClone(message));
             callback({ ok: true });
           },
         },
@@ -2935,7 +2937,8 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
         runtime: {
           lastError: null,
           sendMessage(message, callback) {
-            globalThis.consoleMessages.push(structuredClone(message));
+            if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
+              globalThis.consoleMessages.push(structuredClone(message));
             callback({ ok: true });
           },
         },
@@ -3014,7 +3017,8 @@ test("unverified platform queue keeps Upload disabled and offers explicit upload
         runtime: {
           lastError: null,
           sendMessage(message, callback) {
-            globalThis.consoleMessages.push(structuredClone(message));
+            if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
+              globalThis.consoleMessages.push(structuredClone(message));
             callback({ ok: true });
           },
         },
@@ -3101,7 +3105,8 @@ test("Upload rechecks the proposed catalogue row and stops before platform mutat
         runtime: {
           lastError: null,
           sendMessage(message, callback) {
-            globalThis.consoleMessages.push(structuredClone(message));
+            if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
+              globalThis.consoleMessages.push(structuredClone(message));
             callback({ ok: true });
           },
         },
@@ -3180,7 +3185,8 @@ for (const scenario of [
                 disconnect() {},
               }),
               sendMessage(message, callback) {
-                globalThis.consoleMessages.push(structuredClone(message));
+                if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
+                  globalThis.consoleMessages.push(structuredClone(message));
                 if (message.type === "PREPARE_CREATOR_UPLOAD") {
                   callback({
                     ok: true,
@@ -3549,6 +3555,8 @@ test("Load Template fills the actual Upload Console with path descriptors withou
                 });
               return;
             }
+            if (message.type === "START_NEW_CREATOR_UPLOAD")
+              return callback({ ok: true, reset: true, retired: 1 });
             callback({
               ok: true,
               creatorTools: { registered: [], skipped: [] },
@@ -3628,7 +3636,7 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     await page.locator("#newUploadDraft").click();
     assert.match(
       await page.locator("#neutralTestStatus").textContent(),
-      /still active|unresolved/,
+      /finish connecting|unresolved/,
     );
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
     const prepared = await page.evaluate(() => preparedDraft);
@@ -3648,6 +3656,9 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       .waitFor();
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
     await page.locator("#newUploadDraft").click();
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadFullVideo").disabled,
+    );
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), false);
     assert.equal(await page.locator("#uploadFullVideo").inputValue(), "");
     assert.equal(await page.locator(".result-card").count(), 0);

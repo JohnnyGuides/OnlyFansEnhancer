@@ -21,7 +21,7 @@
       file.size > 0 &&
       (kind === "image"
         ? type
-          ? type.startsWith("image/")
+          ? ["image/png", "image/jpeg"].includes(type)
           : IMAGE_EXTENSIONS.test(file.name)
         : type
           ? type.startsWith("video/")
@@ -66,7 +66,9 @@
         !new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
           role,
         ) ||
-        (platform === "pornhub") !== (role === "pornhub") ||
+        (platform === "pornhub"
+          ? !["pornhub", "thumbnail"].includes(role)
+          : role === "pornhub") ||
         (["x", "redgifs"].includes(platform) && role !== "social") ||
         (!["x", "redgifs"].includes(platform) && role === "social")
       ) {
@@ -137,7 +139,9 @@
         !input.isConnected ||
         !input.matches(entry.selector) ||
         input.type !== "file" ||
-        (platform === "pornhub" && !entry.activatedInput)
+        (platform === "pornhub" &&
+          data.role === "pornhub" &&
+          !entry.activatedInput)
       ) {
         postAck(event, {
           sessionId,

@@ -8,6 +8,7 @@ for (const variant of [
   "hidden-timezone-note",
   "hidden-wrong-zone",
   "delayed-time-menu",
+  "delayed-time-control",
   "time-menu-noop",
   "next-month",
   "wrong-month-navigation",
@@ -17,6 +18,8 @@ for (const variant of [
   "duplicate-certification",
   "checkbox-noop",
   "already-checked",
+  "thumbnail",
+  "thumbnail-no-ack",
 ]) {
   test("Pornhub UTC scheduling and certifications: " + variant, async () => {
     const browser = await chromium.launch({ headless: true });
@@ -27,6 +30,7 @@ for (const variant of [
  <input name="title"><input name="tags"><input name="category"><div class="dropdownElement" data-error="orientation"></div>
  <div data-error="videoPublishedDate"><div class="selectedValue">Publish Now</div><div data-key="date">Schedule date</div></div>
  <input type="checkbox" name="promotion"><input type="checkbox" name="reaction">
+ <div class="custom-thumbnails pcView"><input class="uploadFile" type="file"><p class="thumbSuccess" hidden>Custom thumbnail added</p></div>
  <div id="termsWrapper"><v-checkbox id="selectAll"><input type="checkbox" id="selectAll"><label><span class="termsTitle">SELECT ALL AND CERTIFY.</span></label><div class="nested-checkboxes">
  ${["certifyDocumentationAndConsent", "certifyNoViolations", "acknowledgeReviewAndPublication"].map((id) => '<label for="' + id + '"><v-svg-icon name="checkMark" style="display:none">checked</v-svg-icon>Declaration</label>').join("")}
  </div></v-checkbox></div><button type="button" id="submit">Submit for Review</button></form></v-upload-video-details>
@@ -40,6 +44,7 @@ for (const variant of [
             group = form.querySelector("v-checkbox");
           let submitted = 0,
             accepted = 0;
+          const attached = [];
           if (["next-month", "wrong-month-navigation"].includes(variant))
             picker.querySelector(".dp-current").textContent = "August 2026";
           picker.querySelector(".dp-nav-btn").onclick = () => {
@@ -50,7 +55,10 @@ for (const variant of [
           };
           if (variant === "wrong-owner")
             picker.setAttribute("form-id", "other-upload");
-          if (variant.startsWith("hidden-")) {
+          if (
+            variant.startsWith("hidden-") ||
+            variant === "delayed-time-control"
+          ) {
             picker.querySelector(".dp-info").style.visibility = "hidden";
             picker.querySelector(".dp-info").style.opacity = "0";
           }
@@ -74,10 +82,15 @@ for (const variant of [
             (picker.hidden = false);
           picker.querySelector(".dp-day").onclick = (e) => {
             e.target.classList.add("dp-selected");
-            picker.querySelector(".dp-info-value").textContent =
-              "25 September, 2026";
-            picker.querySelector(".dp-info").style.visibility = "visible";
-            picker.querySelector(".dp-info").style.opacity = "1";
+            setTimeout(
+              () => {
+                picker.querySelector(".dp-info-value").textContent =
+                  "25 September, 2026";
+                picker.querySelector(".dp-info").style.visibility = "visible";
+                picker.querySelector(".dp-info").style.opacity = "1";
+              },
+              variant === "delayed-time-control" ? 40 : 0,
+            );
           };
           const timeList = picker.querySelector(".c-drop-wrapper__list");
           picker.querySelector(".c-drop-wrapper__selected").onclick = () => {
@@ -123,8 +136,23 @@ for (const variant of [
               title: "Neutral test",
               scheduledIso: "2026-09-25T15:00:00Z",
               publishMode: "manual",
+              pornhubThumbnail: variant.startsWith("thumbnail"),
             },
-            attachFile: async () => {},
+            attachFile: async (role) => {
+              attached.push(role);
+              if (role !== "thumbnail") return { name: "neutral-full.mp4" };
+              const input = form.querySelector(".custom-thumbnails input");
+              const transfer = new DataTransfer();
+              transfer.items.add(
+                new File(["neutral image"], "neutral-thumbnail-valid.png", {
+                  type: "image/png",
+                }),
+              );
+              input.files = transfer.files;
+              if (variant !== "thumbnail-no-ack")
+                form.querySelector(".thumbSuccess").hidden = false;
+              return { name: "neutral-thumbnail-valid.png" };
+            },
           }).catch((e) => ({ status: "failed", error: e.message }));
           return {
             outcome,
@@ -134,6 +162,7 @@ for (const variant of [
               form.querySelectorAll("[name=promotion],[name=reaction]"),
             ).some((e) => e.checked),
             checked: group.querySelector("input").checked,
+            attached,
           };
         },
         {
@@ -154,8 +183,10 @@ for (const variant of [
           "owned",
           "hidden-timezone-note",
           "delayed-time-menu",
+          "delayed-time-control",
           "already-checked",
           "next-month",
+          "thumbnail",
         ].includes(variant)
       ) {
         assert.equal(
@@ -163,14 +194,28 @@ for (const variant of [
           "manual-submit-required",
           result.outcome.error,
         );
-        assert.deepEqual(result.outcome.manualFields, [
-          "custom thumbnail (optional)",
-          "final Submit",
-        ]);
+        assert.deepEqual(
+          result.outcome.manualFields,
+          variant === "thumbnail"
+            ? ["final Submit"]
+            : ["custom thumbnail (optional)", "final Submit"],
+        );
+        assert.deepEqual(
+          result.attached,
+          variant === "thumbnail" ? ["pornhub", "thumbnail"] : ["pornhub"],
+        );
         assert.equal(result.checked, true);
         assert.equal(result.accepted, variant === "already-checked" ? 0 : 1);
       } else {
         assert.equal(result.outcome.status, "failed");
+        if (variant === "thumbnail-no-ack") {
+          assert.match(
+            result.outcome.error,
+            /Upload cancelled|accepted custom thumbnail/i,
+          );
+          assert.deepEqual(result.attached, ["pornhub", "thumbnail"]);
+          assert.equal(result.accepted, 0);
+        }
         if (["wrong-zone", "hidden-wrong-zone"].includes(variant))
           assert.match(result.outcome.error, /timezone is unverified/);
         if (variant !== "checkbox-noop") assert.equal(result.accepted, 0);

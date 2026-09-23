@@ -42,6 +42,7 @@ async function fixture(
     url = canonical,
     body = '<section aria-label="Video upload"><button type="button" class="uploadButton">Upload from Device</button><input class="dz-hidden-input" type="file" hidden></section>',
     replaceDocument = false,
+    thumbnail = false,
   } = {},
 ) {
   await page.route("**/*", (route) =>
@@ -58,10 +59,11 @@ async function fixture(
   const events = [];
   const session = {
     id: "fixture-session",
-    draft: { hasTeaser: false },
+    draft: { hasTeaser: false, pornhubThumbnail: thumbnail },
     platforms: new Map(),
   };
   const bridge = function installCreatorUploadFileBridge() {};
+  let boundRoles = null;
   const context = vm.createContext({
     URL,
     Date,
@@ -105,6 +107,7 @@ async function fixture(
           }
           if (details.func === bridge) {
             events.push("bridge");
+            boundRoles = details.args[0].roles;
             return [{ frameId: 0, documentId: frame.documentId }];
           }
           const result = await page.evaluate(
@@ -133,8 +136,21 @@ async function fixture(
     changeFrame: (changes) => {
       frame = { ...frame, ...changes };
     },
+    roles: () => boundRoles,
   };
 }
+test("Pornhub acquisition reserves a separate image role for a selected thumbnail", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const f = await fixture(await browser.newPage(), { thumbnail: true });
+    const target = await f.run();
+    assert.equal(target.tokens.thumbnail, "fixture-role-token");
+    assert.equal(f.roles().thumbnail.kind, "image");
+    assert.match(f.roles().thumbnail.selector, /custom-thumbnails\.pcView/);
+  } finally {
+    await browser.close();
+  }
+});
 for (const url of [canonical, "https://pornhub.mainhub.com/upload/uploader"]) {
   test(
     "Pornhub acquisition binds the exact capable resolved route: " +

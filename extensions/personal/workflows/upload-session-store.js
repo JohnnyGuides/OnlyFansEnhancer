@@ -107,15 +107,17 @@
     );
     const signature = await digest(sanitizeDraft(record.draft));
     if (
-      (await listRecovery()).some((item) =>
-        item.steps.some(
-          (step) =>
-            (step.work === work ||
-              step.work === legacyWork ||
-              (!step.work && step.signature === signature) ||
-              item.id === record.id) &&
-            platforms.includes(step.platform),
-        ),
+      (await listRecovery()).some(
+        (item) =>
+          !item.supersededAt &&
+          item.steps.some(
+            (step) =>
+              (step.work === work ||
+                step.work === legacyWork ||
+                (!step.work && step.signature === signature) ||
+                item.id === record.id) &&
+              platforms.includes(step.platform),
+          ),
       )
     )
       throw Object.assign(
@@ -299,9 +301,13 @@
       id: record.id,
       schemaVersion: 1,
       explicitResumeRequired: true,
+      ...(LAUNCHERS.has(record.launcher) ? { launcher: record.launcher } : {}),
       ...(record.archivedVersion === "legacy" ||
       VERSION.test(record.archivedVersion || "")
         ? { archivedVersion: record.archivedVersion }
+        : {}),
+      ...(finiteInteger(record.supersededAt, 1)
+        ? { supersededAt: record.supersededAt }
         : {}),
       steps: record.steps.map((step) => ({
         ...recoveryStep(step),
@@ -317,7 +323,7 @@
       const records = await listRecovery();
       let record = records.find((item) => item.id === id);
       if (!record) {
-        if (records.length >= 20)
+        if (records.length >= 200)
           throw new Error(
             "Preparation recovery journal is full. Inspect and reconcile existing drafts before starting new work; no recovery records were removed.",
           );
@@ -325,10 +331,20 @@
           id,
           schemaVersion: 1,
           explicitResumeRequired: true,
+          launcher: LAUNCHERS.has(value.launcher)
+            ? value.launcher
+            : "extension",
           steps: [],
         };
         records.push(record);
       }
+      if (LAUNCHERS.has(value.launcher)) {
+        if (record.launcher && record.launcher !== value.launcher)
+          throw new Error("Preparation launcher changed.");
+        record.launcher = value.launcher;
+      }
+      if (record.supersededAt)
+        throw new Error("A retired preparation run cannot accept new actions.");
       const previous = record.steps.find(
         (item) => item.commandId === step.commandId,
       );
@@ -358,6 +374,7 @@
           step.actionId !== "verify" &&
           records.some(
             (item) =>
+              !item.supersededAt &&
               (item.id === id ||
                 (step.work &&
                   item.steps.some((entry) => entry.work === step.work))) &&
@@ -390,6 +407,39 @@
       const records = await listRecovery();
       await chrome.storage.local.set({ [RECOVERY_KEY]: [] });
       return { cleared: records.length };
+    });
+  }
+  async function supersedePreparation(exceptIds = [], launcher = "extension") {
+    const protectedIds = new Set([
+      ...exceptIds,
+      ...(await actionRecords()).map((record) => record.id),
+    ]);
+    return enqueueWrite(RECOVERY_KEY, async () => {
+      const records = await listRecovery();
+      const at = Date.now();
+      let superseded = 0;
+      for (const record of records) {
+        if (
+          record.supersededAt ||
+          protectedIds.has(record.id) ||
+          (record.launcher || "extension") !== launcher
+        )
+          continue;
+        record.supersededAt = at;
+        superseded++;
+      }
+      await chrome.storage.local.set({ [RECOVERY_KEY]: records });
+      const readback = await listRecovery();
+      if (
+        readback.length !== records.length ||
+        readback.some(
+          (record, index) =>
+            record.id !== records[index].id ||
+            record.supersededAt !== records[index].supersededAt,
+        )
+      )
+        throw new Error("Preparation retirement was not durable.");
+      return { superseded };
     });
   }
   async function ensureRuntimeVersion(version) {
@@ -542,8 +592,31 @@
     if (Object.hasOwn(value, "manyvidsThumbnail")) {
       output.manyvidsThumbnail = value.manyvidsThumbnail === true;
     }
+    if (Object.hasOwn(value, "pornhubThumbnail")) {
+      output.pornhubThumbnail = value.pornhubThumbnail === true;
+    }
     if (Object.hasOwn(value, "hasTeaser"))
       output.hasTeaser = value.hasTeaser !== false;
+    if (Object.hasOwn(value, "fileProof")) {
+      if (!value.fileProof || typeof value.fileProof !== "object")
+        throw new Error("Invalid saved upload file proof.");
+      output.fileProof = {};
+      for (const role of ["full", "teaser", "thumbnail", "pornhub"]) {
+        const item = value.fileProof[role];
+        if (item == null) continue;
+        const name = clean(item.name, 500);
+        const size = finiteInteger(item.size, 1);
+        const lastModified = finiteInteger(item.lastModified, 1);
+        if (!name || size === undefined || lastModified === undefined)
+          throw new Error("Invalid saved upload file proof.");
+        output.fileProof[role] = {
+          name,
+          size,
+          lastModified,
+          type: clean(item.type, 100),
+        };
+      }
+    }
     if (value.fanslyPresetSelection === "first")
       output.fanslyPresetSelection = "first";
     if (!["manual", "autonomous"].includes(value.publishMode ?? "manual"))
@@ -778,6 +851,7 @@
     listRecovery,
     recordStep,
     clearPreparation,
+    supersedePreparation,
     ensureRuntimeVersion,
     assertAvailable,
     ACTION_KEY,

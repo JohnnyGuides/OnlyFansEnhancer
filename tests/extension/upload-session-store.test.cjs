@@ -89,14 +89,14 @@ test("recovery capacity refuses new work without evicting unresolved sessions", 
     tabId: 42,
     frameId: 0,
   };
-  for (let index = 0; index < 20; index++)
+  for (let index = 0; index < 200; index++)
     await store.recordStep(`capacity-session-${index}`, step);
   await assert.rejects(
     store.recordStep("capacity-session-overflow", step),
     /journal is full/i,
   );
   assert.equal((await store.listRecovery())[0].id, "capacity-session-0");
-  assert.equal((await store.listRecovery()).length, 20);
+  assert.equal((await store.listRecovery()).length, 200);
   await store.recordStep("capacity-session-0", {
     ...step,
     outcome: "observed",
@@ -303,6 +303,113 @@ test("another command or session cannot repeat a selected role after acknowledge
   await store.assertAvailable({ ...record, id: "new-preparation-session" }, [
     "fansly",
   ]);
+});
+
+test("New retires old preparation blocks while retaining their records", async () => {
+  const { store } = loadStore();
+  const old = {
+    id: "old-preparation-session",
+    draft: { fullFilename: "neutral.mp4" },
+  };
+  const step = {
+    actionId: "select-full",
+    platform: "pornhub",
+    outcome: "intent",
+    commandId: "11111111-1111-4111-8111-111111111111",
+    documentId: "22222222-2222-4222-8222-222222222222",
+    signature: "a".repeat(64),
+    work: await store.workIdentity(old),
+    tabId: 42,
+    frameId: 0,
+  };
+  await store.recordStep(old.id, step);
+  await assert.rejects(
+    store.assertAvailable({ ...old, id: "new-preparation-session" }, [
+      "pornhub",
+    ]),
+    /existing.*draft/i,
+  );
+  assert.deepEqual(plain(await store.supersedePreparation()), {
+    superseded: 1,
+  });
+  const [retired] = await store.listRecovery();
+  assert.equal(retired.id, old.id);
+  assert.ok(retired.supersededAt > 0);
+  assert.equal(retired.steps[0].outcome, "intent");
+  await assert.rejects(
+    store.recordStep(old.id, { ...step, outcome: "observed" }),
+    /retired preparation/i,
+  );
+  const fresh = { ...old, id: "new-preparation-session" };
+  await store.assertAvailable(fresh, ["pornhub"]);
+  await store.recordStep(fresh.id, {
+    ...step,
+    commandId: "33333333-3333-4333-8333-333333333333",
+  });
+  assert.equal((await store.listRecovery()).length, 2);
+});
+
+test("New keeps publication receipts and their preparation evidence active", async () => {
+  const { store } = loadStore();
+  const old = {
+    id: "submitted-preparation-session",
+    draft: { fullFilename: "neutral.mp4" },
+  };
+  await store.recordStep(old.id, {
+    actionId: "select-full",
+    platform: "pornhub",
+    outcome: "intent",
+    commandId: "11111111-1111-4111-8111-111111111111",
+    documentId: "22222222-2222-4222-8222-222222222222",
+    signature: "a".repeat(64),
+    work: await store.workIdentity(old),
+    tabId: 42,
+    frameId: 0,
+  });
+  await store.save({
+    ...old,
+    platforms: {
+      pornhub: { platform: "pornhub", submitAttempted: true },
+    },
+  });
+  assert.deepEqual(plain(await store.supersedePreparation()), {
+    superseded: 0,
+  });
+  assert.equal((await store.listRecovery())[0].supersededAt, undefined);
+  assert.equal((await store.listPublication()).length, 1);
+  await assert.rejects(
+    store.assertAvailable({ ...old, id: "another-submitted-session" }, [
+      "pornhub",
+    ]),
+    /existing.*draft|unresolved publication/i,
+  );
+});
+
+test("New retires only the selected upload surface", async () => {
+  const { store } = loadStore();
+  const base = {
+    actionId: "select-full",
+    platform: "onlyfans",
+    outcome: "intent",
+    commandId: "11111111-1111-4111-8111-111111111111",
+    documentId: "22222222-2222-4222-8222-222222222222",
+    signature: "a".repeat(64),
+    tabId: 42,
+    frameId: 0,
+  };
+  await store.recordStep("extension-run", { ...base, launcher: "extension" });
+  await store.recordStep("desktop-run", { ...base, launcher: "desktop" });
+  assert.deepEqual(plain(await store.supersedePreparation([], "extension")), {
+    superseded: 1,
+  });
+  const records = await store.listRecovery();
+  assert.ok(
+    records.find((record) => record.id === "extension-run").supersededAt,
+  );
+  assert.equal(
+    records.find((record) => record.id === "desktop-run").supersededAt,
+    undefined,
+  );
 });
 
 test("desktop and extension preparation journals do not collide", async () => {

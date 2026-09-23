@@ -321,6 +321,22 @@ test("desktop transport cannot rewrite publication checkpoints or read arbitrary
   assert.equal(permission.granted, false);
 });
 
+test("desktop Upload Hub can inspect its saved run and start a new one", async () => {
+  const browser = extension();
+  const ui = host((request) => browser.runtime.execute(request.payload));
+  for (const type of [
+    "GET_CREATOR_UPLOAD_RESUMABLE",
+    "START_NEW_CREATOR_UPLOAD",
+  ]) {
+    const response = await ui.context.chrome.runtime.sendMessage({ type });
+    assert.equal(response.ok, true);
+  }
+  assert.deepEqual(
+    browser.actions.map((message) => message.type),
+    ["GET_CREATOR_UPLOAD_RESUMABLE", "START_NEW_CREATOR_UPLOAD"],
+  );
+});
+
 test("native transport correlates responses, deduplicates commands, and never replays after disconnect", async () => {
   const fixture = extension();
   await fixture.runtime.start();

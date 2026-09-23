@@ -39,7 +39,7 @@ filename nor a convenient default is permission to publish or bind identity.
 | Windows workspace                     | Tray/single-user agent; real local catalogue and thumbnails; Google connection/import/sync controls; selected-Chrome connection and shared uploader UI                                                                                                                                                   |
 | Desktop upload transport              | Authorized browser command/file channel and local upload result recording. The extension still owns browser execution and monotonic checkpoints; local recording is not a claim of Google synchronization                                                                                                |
 | OnlyFans / Fansly / ManyVids uploader | Trace-grounded field/file preparation and final-submit paths, exact identity/readback, independent outcomes, and protected catalogue commits                                                                                                                                                             |
-| Pornhub uploader                      | Activates the uploader, assigns the approved full/Pornhub file once, applies the selected metadata preset and verifies the title. Scheduling, final submission, and result capture remain manual                                                                                                         |
+| Pornhub uploader                      | Activates the uploader, assigns the approved video and optional converted thumbnail, applies the selected metadata preset, and verifies the title and UTC schedule. Final submission and result capture remain manual                                                                                    |
 | X distributor                         | Traced main-post and paid-link first-reply phases. Manual mode stops before final controls; authorized autonomous phases require separate durable attempt checkpoints                                                                                                                                    |
 | Redgifs / Reddit                      | Manual draft preparation is implemented. Redgifs selects the exact upload file input; Reddit prepares title and inserts a verified canonical Redgifs link into the exact empty link editor. Required remaining fields and publication are manual. Autonomous publishing remains trace-gated and disabled |
 | X teaser recorder                     | Explicit file/catalogue pairing, semantic status capture, ordered local audit → catalogue append → receipt-protected Done move; separate from autonomous publication                                                                                                                                     |
@@ -63,7 +63,10 @@ video's editor through the recorded Edit action and its first verified navigatio
 an independently maintained product table.
 
 The optional Pornhub video falls back to the full video, never the teaser. The
-creator selects one exact content preset. Only a creator-confirmed exact
+shared PNG/JPEG thumbnail is center-cropped into a temporary 640 × 360 PNG
+before delivery to ManyVids or Pornhub. The adapter verifies Pornhub's acceptance
+before marking the draft prepared. The creator selects one exact content preset.
+Only a creator-confirmed exact
 Season/Arc mapping may preselect it; never infer orientation from performers,
 titles, filenames, descriptions, or tags. Existing metadata is preserved while
 missing exact tags/categories are added. Title readback follows the preset. The file bridge supports the Pornhub role and only its approved uploader origin. A preparation result is not publication success.
@@ -182,9 +185,15 @@ draft; existing pricing/access settings and saved presets are unchanged.
 Loading does not start uploading. Review the files and destinations, then click
 **Upload**. The template remains in manual preparation mode.
 
-**Draft actions → Start a new draft** clears the form after a settled run and
-leaves neutral mode. Remote uploads and recovery/publication evidence remain.
-An active run or unresolved file request prevents replacing the draft.
+When the Upload Console reopens with an unfinished local run, it shows the
+latest video's name and offers **Resume this run** or **Start new upload**.
+Resume requires reselecting files that match the saved name, size, type, and
+modification time because file bytes are not cached. It reconnects to the saved
+run without replaying an uncertain upload.
+New stops local execution, clears old upload sessions and the form, and retires
+preparation blocks while retaining their review history and any publication
+receipts. Remote drafts are unchanged and must be inspected before starting
+another upload of the same work.
 
 ## Normal update versus Fresh reset
 

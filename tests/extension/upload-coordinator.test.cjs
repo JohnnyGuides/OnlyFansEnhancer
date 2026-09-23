@@ -157,6 +157,7 @@ test("upload console validates one local video and allow-listed targets", () => 
     hooks.normalizeDraft({
       fullFile,
       pornhubFile: limitedFile,
+      thumbnailFile: { name: "cover.png", type: "image/png", size: 80 },
       title: "Episode 42",
       description: "Description",
       scheduledIso: "2026-08-28T15:00:00.000Z",
@@ -168,6 +169,7 @@ test("upload console validates one local video and allow-listed targets", () => 
   assert.deepEqual(pornhub.media.pornhub, {
     file: "episode (limited).mp4",
     source: "pornhub",
+    thumbnail: "cover.png",
   });
   assert.equal(pornhub.contentPreset, "Straight");
 
@@ -184,6 +186,7 @@ test("upload console validates one local video and allow-listed targets", () => 
   assert.deepEqual(pornhubOnly.media.pornhub, {
     file: "episode (limited).mp4",
     source: "pornhub",
+    thumbnail: null,
   });
 
   const pornhubFallback = plain(
@@ -198,6 +201,7 @@ test("upload console validates one local video and allow-listed targets", () => 
   assert.deepEqual(pornhubFallback.media.pornhub, {
     file: "episode (full).mp4",
     source: "full",
+    thumbnail: null,
   });
 });
 

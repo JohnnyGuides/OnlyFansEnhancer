@@ -199,9 +199,11 @@ public partial class MainWindow : Window, IDisposable
                 if (info.Name != payload.GetProperty("name").GetString() || info.Length != payload.GetProperty("size").GetInt64()
                     || new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() != payload.GetProperty("lastModified").GetInt64())
                     throw new InvalidOperationException("Template changed. Click Load Template again.");
+                FileInfo delivered = payload.GetProperty("role").GetString() == "thumbnail"
+                    ? UploadThumbnailConverter.Convert(info) : info;
                 result = await uploads.RequestNativeFileAsync(JsonSerializer.SerializeToElement(new {
-                    kind = "file", filePath = info.FullName, name = info.Name, size = info.Length,
-                    lastModified = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+                    kind = "file", filePath = delivered.FullName, name = delivered.Name, size = delivered.Length,
+                    lastModified = new DateTimeOffset(delivered.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
                     requestId = payload.GetProperty("requestId").GetString(), sessionId = payload.GetProperty("sessionId").GetString(),
                     platform = payload.GetProperty("platform").GetString(), role = payload.GetProperty("role").GetString(), token = payload.GetProperty("token").GetString()
                 }));
@@ -215,8 +217,13 @@ public partial class MainWindow : Window, IDisposable
                     Math.Abs(new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds() - payload.GetProperty("lastModified").GetInt64()) > 2)
                     throw new InvalidOperationException("The selected file changed. Choose it again before uploading.");
                 var command = payload.EnumerateObject().ToDictionary(item => item.Name, item => (object)item.Value.Clone());
+                FileInfo delivered = payload.GetProperty("role").GetString() == "thumbnail"
+                    ? UploadThumbnailConverter.Convert(info) : info;
                 command["kind"] = "file";
-                command["filePath"] = info.FullName;
+                command["filePath"] = delivered.FullName;
+                command["name"] = delivered.Name;
+                command["size"] = delivered.Length;
+                command["lastModified"] = new DateTimeOffset(delivered.LastWriteTimeUtc).ToUnixTimeMilliseconds();
                 result = await uploads.RequestNativeFileAsync(JsonSerializer.SerializeToElement(command));
             }
             else result = await uploads.RequestAsync(payload);

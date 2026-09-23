@@ -253,6 +253,38 @@ h2 {
   background: rgba(18, 22, 30, 0.94);
 }
 
+.resume-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid #35657a;
+  border-radius: 10px;
+  background: #172733;
+}
+
+.resume-prompt[hidden] {
+  display: none;
+}
+
+.resume-prompt h2 {
+  margin-bottom: 6px;
+}
+
+.resume-prompt p {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.resume-prompt .secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .section-heading,
 .result-heading {
   display: flex;
