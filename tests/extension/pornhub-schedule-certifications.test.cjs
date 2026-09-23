@@ -7,6 +7,8 @@ for (const variant of [
   "owned",
   "hidden-timezone-note",
   "hidden-wrong-zone",
+  "delayed-time-menu",
+  "time-menu-noop",
   "next-month",
   "wrong-month-navigation",
   "wrong-owner",
@@ -29,7 +31,7 @@ for (const variant of [
  ${["certifyDocumentationAndConsent", "certifyNoViolations", "acknowledgeReviewAndPublication"].map((id) => '<label for="' + id + '"><v-svg-icon name="checkMark" style="display:none">checked</v-svg-icon>Declaration</label>').join("")}
  </div></v-checkbox></div><button type="button" id="submit">Submit for Review</button></form></v-upload-video-details>
  <schedule-date form-id="owned-upload" hidden><button class="dp-nav-btn">›</button><div class="dp-current">September 2026</div><div class="dp-day">25</div><div class="dp-date-info"><div class="dp-info-value"></div></div>
- <div class="dp-info"><div data-error="scheduleTime"><div class="selectedValue"></div><div class="c-drop-wrapper__option">03:00:00 PM</div></div><div class="dp-info-note">All upload times are in UTC.</div><button class="dp-schedule-btn">Schedule</button></div></schedule-date>
+ <div class="dp-info"><div data-error="scheduleTime"><div class="c-drop-wrapper__selected selectedValue"></div><div class="c-drop-wrapper__list" hidden><div class="c-drop-wrapper__option">03:00:00 PM</div></div></div><div class="dp-info-note">All upload times are in UTC.</div><button class="dp-schedule-btn">Schedule</button></div></schedule-date>
  `);
       const result = await page.evaluate(
         async ({ variant, source }) => {
@@ -77,9 +79,19 @@ for (const variant of [
             picker.querySelector(".dp-info").style.visibility = "visible";
             picker.querySelector(".dp-info").style.opacity = "1";
           };
-          picker.querySelector(".c-drop-wrapper__option").onclick = () =>
-            (picker.querySelector(".selectedValue").textContent =
-              "03:00:00 PM");
+          const timeList = picker.querySelector(".c-drop-wrapper__list");
+          picker.querySelector(".c-drop-wrapper__selected").onclick = () => {
+            if (variant !== "time-menu-noop")
+              setTimeout(
+                () => (timeList.hidden = false),
+                variant === "delayed-time-menu" ? 30 : 0,
+              );
+          };
+          picker.querySelector(".c-drop-wrapper__option").onclick = () => {
+            picker.querySelector(".c-drop-wrapper__selected").textContent =
+              "03:00:00 PM";
+            timeList.hidden = true;
+          };
           picker.querySelector(".dp-schedule-btn").onclick = () => {
             picker.hidden = true;
             form.insertAdjacentHTML(
@@ -141,6 +153,7 @@ for (const variant of [
         [
           "owned",
           "hidden-timezone-note",
+          "delayed-time-menu",
           "already-checked",
           "next-month",
         ].includes(variant)

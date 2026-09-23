@@ -1014,13 +1014,28 @@
       "Pornhub schedule time",
       picker,
     );
-    click(time, "Pornhub schedule time");
     click(
-      exactText(
-        ".c-drop-wrapper__option",
-        timeText,
+      one(".c-drop-wrapper__selected", "Pornhub schedule time trigger", time),
+      "Pornhub schedule time trigger",
+    );
+    click(
+      await waitFor(
+        () => {
+          verifyOwner();
+          const options = [
+            ...time.querySelectorAll(".c-drop-wrapper__option"),
+          ].filter(
+            (option) =>
+              visible(option) &&
+              normalizedText(option.textContent) === normalizedText(timeText),
+          );
+          if (options.length > 1)
+            throw new Error("Pornhub UTC time option is ambiguous.");
+          return options[0];
+        },
         "Pornhub UTC time option",
-        time,
+        DEFAULT_DOM_TIMEOUT,
+        signal,
       ),
       "Pornhub UTC time option",
     );
@@ -3117,7 +3132,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.42",
+    revision: "upload-hub-0.20.43",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
