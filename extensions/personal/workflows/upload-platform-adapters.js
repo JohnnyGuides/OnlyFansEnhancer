@@ -1218,9 +1218,16 @@
             ?.textContent.trim() !== dateText
         )
           return null;
-        const controls = [
+        const marked = [
           ...picker.querySelectorAll('[data-error="scheduleTime"]'),
         ].filter(visible);
+        const controls = marked.length
+          ? marked
+          : [...picker.querySelectorAll("v-dropdown")].filter(
+              (node) =>
+                visible(node) &&
+                node.querySelector(".c-drop-wrapper__selected"),
+            );
         if (controls.length > 1)
           throw new Error("Pornhub schedule time is ambiguous.");
         return controls[0];
@@ -3347,7 +3354,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.51",
+    revision: "upload-hub-0.20.52",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

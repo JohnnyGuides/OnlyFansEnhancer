@@ -9,6 +9,8 @@ for (const variant of [
   "hidden-wrong-zone",
   "delayed-time-menu",
   "delayed-time-control",
+  "unmarked-time-control",
+  "ambiguous-unmarked-time-control",
   "time-menu-noop",
   "next-month",
   "wrong-month-navigation",
@@ -41,7 +43,7 @@ for (const variant of [
  ${["certifyDocumentationAndConsent", "certifyNoViolations", "acknowledgeReviewAndPublication"].map((id) => '<label for="' + id + '"><v-svg-icon name="checkMark" style="display:none">checked</v-svg-icon>Declaration</label>').join("")}
  </div></v-checkbox></div><button type="button" id="submit">Submit for Review</button></form></v-upload-video-details>
  <schedule-date form-id="owned-upload" hidden><button class="dp-nav-btn">›</button><div class="dp-current">September 2026</div><div class="dp-day">25</div><div class="dp-date-info"><div class="dp-info-value"></div></div>
- <div class="dp-info"><div data-error="scheduleTime"><div class="c-drop-wrapper__selected selectedValue"></div><div class="c-drop-wrapper__list" hidden><div class="c-drop-wrapper__option">03:00:00 PM</div></div></div><div class="dp-info-note">All upload times are in UTC.</div><button class="dp-schedule-btn">Schedule</button></div></schedule-date>
+ <div class="dp-info"><v-dropdown data-error="scheduleTime"><div class="c-drop-wrapper__selected selectedValue"></div><div class="c-drop-wrapper__list" hidden><div class="c-drop-wrapper__option">03:00:00 PM</div></div></v-dropdown><div class="dp-info-note">All upload times are in UTC.</div><button class="dp-schedule-btn">Schedule</button></div></schedule-date>
  `);
       const result = await page.evaluate(
         async ({ variant, source }) => {
@@ -89,6 +91,12 @@ for (const variant of [
           };
           if (variant === "wrong-owner")
             picker.setAttribute("form-id", "other-upload");
+          if (variant.includes("unmarked-time-control")) {
+            const timeControl = picker.querySelector("v-dropdown");
+            timeControl.removeAttribute("data-error");
+            if (variant.startsWith("ambiguous-"))
+              timeControl.after(timeControl.cloneNode(true));
+          }
           if (
             variant.startsWith("hidden-") ||
             variant === "delayed-time-control"
@@ -230,6 +238,7 @@ for (const variant of [
           "hidden-timezone-note",
           "delayed-time-menu",
           "delayed-time-control",
+          "unmarked-time-control",
           "already-checked",
           "next-month",
           "thumbnail",
@@ -285,6 +294,8 @@ for (const variant of [
         }
         if (["wrong-zone", "hidden-wrong-zone"].includes(variant))
           assert.match(result.outcome.error, /timezone is unverified/);
+        if (variant === "ambiguous-unmarked-time-control")
+          assert.match(result.outcome.error, /schedule time is ambiguous/);
         if (variant !== "checkbox-noop") assert.equal(result.accepted, 0);
       }
     } finally {
