@@ -20,7 +20,7 @@ test("Chrome native package is versioned from the personal manifest and installa
     path.join(root, "native-host", "install-current-user.ps1"),
     "utf8",
   );
-  assert.equal(manifest.version, "0.20.54");
+  assert.equal(manifest.version, "0.20.55");
   assert.match(build, /\$manifest\.version/);
   assert.match(build, /--self-contained false/);
   assert.match(install, /\^\[a-p\]\{32\}\$/);

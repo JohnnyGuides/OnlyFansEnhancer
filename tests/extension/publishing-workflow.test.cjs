@@ -3510,6 +3510,11 @@ test("Load Template fills the actual Upload Console with path descriptors withou
           },
           sendMessage(message, callback) {
             sent.push(message.type);
+            if (
+              message.type === "LOAD_DEVELOPMENT_TEMPLATE" &&
+              window.failTemplate
+            )
+              return callback({ ok: false, error: "extension-not-admitted" });
             if (message.type === "LOAD_DEVELOPMENT_TEMPLATE")
               return callback({
                 ok: true,
@@ -3664,6 +3669,22 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       .first()
       .waitFor();
     assert.equal(await page.locator("#uploadFullVideo").isDisabled(), true);
+    assert.equal(await page.locator("#loadTemplate").isDisabled(), false);
+    await page.locator("#loadTemplate").click();
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "Neutral upload verification",
+    );
+    assert.match(
+      await page.locator("#neutralTestStatus").textContent(),
+      /Template loaded/,
+    );
+    assert.equal(
+      (await page.evaluate(() => sent)).filter(
+        (type) => type === "START_NEW_CREATOR_UPLOAD",
+      ).length,
+      1,
+    );
     await page.locator("#newUploadDraft").click();
     await page.waitForFunction(
       () => !document.querySelector("#uploadFullVideo").disabled,
@@ -3700,6 +3721,12 @@ test("Load Template fills the actual Upload Console with path descriptors withou
         JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
       ),
       saved,
+    );
+    await page.evaluate(() => (window.failTemplate = true));
+    await page.locator("#loadTemplate").click();
+    assert.match(
+      await page.locator("#neutralTestStatus").textContent(),
+      /Reload Creator Workflow Toolkit in Chrome/,
     );
   } finally {
     await browser.close();

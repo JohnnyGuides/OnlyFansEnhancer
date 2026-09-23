@@ -1958,7 +1958,7 @@
     function lockDraft(locked) {
       if (locked) {
         for (const control of document.querySelectorAll(
-          "#workflowMode, .workflow-panel input, .workflow-panel button, .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #catalogueAssociation, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #changeCatalogueEntry, #continueWithoutSheet",
+          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #catalogueAssociation, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #changeCatalogueEntry, #continueWithoutSheet",
         )) {
           if (!lockedControls.has(control))
             lockedControls.set(control, control.disabled);
@@ -3512,13 +3512,14 @@
     }
     get("#loadTemplate")?.addEventListener("click", async () => {
       const button = get("#loadTemplate");
-      const revision = templateRevision;
       button.disabled = true;
       try {
-        if (activeSession || runBusy)
+        if (runBusy)
           throw new Error(
-            "Finish this preparation, then start a new draft before loading a template.",
+            "Wait for the current Upload request to finish connecting, then load the template.",
           );
+        if (activeSession) await startNewUpload();
+        const revision = templateRevision;
         const files = globalThis.OFEnhancerDesktopUpload
           ? await globalThis.OFEnhancerDesktopUpload.loadDevelopmentFixtures()
           : (await sendMessage({ type: "LOAD_DEVELOPMENT_TEMPLATE" })).files;
@@ -3529,7 +3530,12 @@
         neutralTestFiles = neutralTestSelection(files);
         applyNeutralTestPreset();
       } catch (error) {
-        get("#neutralTestStatus").textContent = error.message;
+        get("#neutralTestStatus").textContent =
+          /extension-not-admitted|Connect the current personal extension/i.test(
+            error.message,
+          )
+            ? "Load Template needs the current Chrome extension. Reload Creator Workflow Toolkit in Chrome, reopen Upload Hub, and try again."
+            : error.message;
       } finally {
         button.disabled = false;
       }
