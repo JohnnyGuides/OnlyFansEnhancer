@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.52",
+          productVersion: "0.20.53",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -582,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.52",
+    productVersion: "0.20.53",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -602,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.52");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.53");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -2291,6 +2291,7 @@ function send(message) {
         await run.progress("uploading-full");
         if (["stable", "alias"].includes(variant))
           await run.progress("configuring");
+        if (variant === "stable") await run.progress("waiting-for-thumbnail");
         return { status: "manual-submit-required" };
       },
     };
@@ -2305,9 +2306,14 @@ function send(message) {
         promise,
         /upload-page-binding-.*CREATOR_UPLOAD_PLATFORM_PROGRESS:upload/,
       );
-    assert.equal(sent.length, ["stable", "alias"].includes(variant) ? 2 : 1);
+    assert.equal(
+      sent.length,
+      variant === "stable" ? 3 : variant === "alias" ? 2 : 1,
+    );
     assert.equal(sent[0].type, "CREATOR_UPLOAD_PLATFORM_PROGRESS");
-    if (sent.length === 2) assert.equal(sent[1].status, "configuring");
+    if (sent.length >= 2) assert.equal(sent[1].status, "configuring");
+    if (sent.length === 3)
+      assert.equal(sent[2].status, "waiting-for-thumbnail");
   }
   console.log(
     "PASS: persistent aliases, upload lifecycle and exact navigation handoff",
