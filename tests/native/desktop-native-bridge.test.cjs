@@ -119,7 +119,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.20.48",
+        productVersion: "0.20.49",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
@@ -165,7 +165,7 @@ async function main() {
     );
     const nativeDesktopExit = await waitForExit(nativeDesktop);
     if (nativeDesktopExit === 0) {
-      assert.equal(nativeResponse.status.productVersion, "0.20.48");
+      assert.equal(nativeResponse.status.productVersion, "0.20.49");
     } else {
       assert.equal(
         nativeDesktopExit,

@@ -22,6 +22,7 @@ for (const variant of [
   "thumbnail-no-ack",
   "paid",
   "paid-stale-label",
+  "paid-price-reverts-label",
   "unconfirmed",
 ]) {
   test("Pornhub UTC scheduling and certifications: " + variant, async () => {
@@ -67,6 +68,17 @@ for (const variant of [
             form.querySelector("#p2vNotice").hidden = false;
             form.querySelector('[name="title"]').value = "";
           };
+          if (variant === "paid-price-reverts-label") {
+            form.querySelector('[name="p2vPrice"]').addEventListener(
+              "input",
+              () =>
+                setTimeout(() => {
+                  typeHost.querySelector(".selectedValue").textContent =
+                    "Free To View";
+                }, 120),
+              { once: true },
+            );
+          }
           if (["next-month", "wrong-month-navigation"].includes(variant))
             picker.querySelector(".dp-current").textContent = "August 2026";
           picker.querySelector(".dp-nav-btn").onclick = () => {
@@ -157,7 +169,7 @@ for (const variant of [
           (0, eval)(source);
           const outcome = await CreatorUploadPlatformAdapters.runPornhub({
             signal: AbortSignal.timeout(
-              variant === "paid-stale-label" ? 5000 : 1200,
+              variant === "paid-stale-label" ? 5000 : 2000,
             ),
             draft: {
               title: "Neutral test",
@@ -223,6 +235,7 @@ for (const variant of [
           "thumbnail",
           "paid",
           "paid-stale-label",
+          "paid-price-reverts-label",
           "unconfirmed",
         ].includes(variant)
       ) {

@@ -1044,6 +1044,27 @@
         DEFAULT_DOM_TIMEOUT,
         signal,
       );
+      // MainHub can revert the selected label when the price update redraws
+      // the paid form. A transient Pay To View readback is not sufficient.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      abortIfNeeded(signal);
+      if (!selectedReady()) {
+        if (!formReady() || normalizedText(selected()?.textContent) === desired)
+          throw new Error(
+            "Pornhub Pay To View form changed after setting price.",
+          );
+        await choose();
+        await waitFor(
+          selectedReady,
+          "Pornhub settled paid video type after price",
+          DEFAULT_DOM_TIMEOUT,
+          signal,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        abortIfNeeded(signal);
+        if (!selectedReady())
+          throw new Error("Pornhub Pay To View selection did not settle.");
+      }
     }
   }
 
@@ -3326,7 +3347,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.48",
+    revision: "upload-hub-0.20.49",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
