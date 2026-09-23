@@ -146,7 +146,10 @@ test("Pornhub acquisition reserves a separate image role for a selected thumbnai
     const target = await f.run();
     assert.equal(target.tokens.thumbnail, "fixture-role-token");
     assert.equal(f.roles().thumbnail.kind, "image");
-    assert.match(f.roles().thumbnail.selector, /custom-thumbnails\.pcView/);
+    assert.equal(
+      f.roles().thumbnail.selector,
+      "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']",
+    );
   } finally {
     await browser.close();
   }

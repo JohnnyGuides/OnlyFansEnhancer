@@ -48,6 +48,8 @@ for (const variant of [
  `);
       const result = await page.evaluate(
         async ({ variant, source }) => {
+          if (variant.startsWith("thumbnail"))
+            document.querySelector('[form-id="rejected-upload"]').remove();
           const form = [...document.querySelectorAll("form")].find(
               (item) => item.getClientRects().length,
             ),
@@ -58,6 +60,7 @@ for (const variant of [
           let inspectedMode = "";
           let typeChoices = 0;
           const attached = [];
+          const attachmentSelectors = [];
           const typeHost = form.querySelector('[data-error="videoType"]');
           typeHost.querySelector(".selectedValue").onclick = () =>
             (typeHost.querySelector(".c-drop-wrapper__list").hidden = false);
@@ -200,8 +203,9 @@ for (const variant of [
               pornhubCertificationsConfirmed: variant !== "unconfirmed",
               profiles: { manyvidsAutofill: { price: "19.99" } },
             },
-            attachFile: async (role) => {
+            attachFile: async (role, selector) => {
               attached.push(role);
+              attachmentSelectors.push(selector);
               if (role !== "thumbnail") return { name: "neutral-full.mp4" };
               const input = form.querySelector(".custom-thumbnails input");
               const transfer = new DataTransfer();
@@ -229,6 +233,7 @@ for (const variant of [
             inspectedMode,
             typeChoices,
             attached,
+            attachmentSelectors,
           };
         },
         {
@@ -290,6 +295,11 @@ for (const variant of [
           result.attached,
           variant === "thumbnail" ? ["pornhub", "thumbnail"] : ["pornhub"],
         );
+        if (variant === "thumbnail")
+          assert.equal(
+            result.attachmentSelectors[1],
+            "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']",
+          );
         assert.equal(result.checked, variant !== "unconfirmed");
         assert.equal(
           result.accepted,
@@ -309,6 +319,10 @@ for (const variant of [
             /Upload cancelled|accepted custom thumbnail/i,
           );
           assert.deepEqual(result.attached, ["pornhub", "thumbnail"]);
+          assert.equal(
+            result.attachmentSelectors[1],
+            "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']",
+          );
           assert.equal(result.accepted, 0);
         }
         if (["wrong-zone", "hidden-wrong-zone"].includes(variant))

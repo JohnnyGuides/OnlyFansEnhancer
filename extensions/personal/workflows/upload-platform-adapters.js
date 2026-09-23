@@ -883,6 +883,9 @@
         const selector =
           `v-upload-video-details[form-id="${ownerId}"] form.video-details-form ` +
           ".custom-thumbnails.pcView input.uploadFile[type='file']";
+        const authorizedSelector =
+          "v-upload-video-details[form-id] form.video-details-form " +
+          ".custom-thumbnails.pcView input.uploadFile[type='file']";
         const thumbnail = currentForm.querySelector(
           ".custom-thumbnails.pcView",
         );
@@ -893,13 +896,17 @@
           !visible(thumbnail) ||
           !input ||
           document.querySelectorAll(selector).length !== 1 ||
+          document.querySelectorAll(authorizedSelector).length !== 1 ||
           input.files?.length
         )
           throw new Error(
             "Pornhub [thumbnail]: The empty thumbnail control is unavailable or ambiguous; inspect the existing draft.",
           );
         await context.progress?.("waiting-for-thumbnail");
-        const receipt = await context.attachFile("thumbnail", selector);
+        const receipt = await context.attachFile(
+          "thumbnail",
+          authorizedSelector,
+        );
         await waitFor(
           () =>
             currentForm.isConnected &&
@@ -3360,7 +3367,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.56",
+    revision: "upload-hub-0.20.57",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
