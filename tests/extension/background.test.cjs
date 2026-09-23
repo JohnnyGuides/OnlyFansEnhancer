@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.45",
+          productVersion: "0.20.46",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -582,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.45",
+    productVersion: "0.20.46",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -602,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.45");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.46");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -733,6 +733,7 @@ function send(message) {
     fullFilename: validatedUpload.draft.fullFilename,
     pornhubFilename: validatedUpload.draft.pornhubFilename,
     manyvidsThumbnail: validatedUpload.draft.manyvidsThumbnail,
+    pornhubMode: validatedUpload.draft.pornhubMode,
     profileSignature: validatedUpload.draft.profileSignature,
   };
   assert.equal(
@@ -743,6 +744,14 @@ function send(message) {
     true,
   );
   context.changedProof = { ...context.validProof, fullFilename: "other.mp4" };
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(proofSession, changedProof)",
+      context,
+    ),
+    false,
+  );
+  context.changedProof = { ...context.validProof, pornhubMode: "paid" };
   assert.equal(
     vm.runInContext(
       "creatorUploadSessionProofMatches(proofSession, changedProof)",

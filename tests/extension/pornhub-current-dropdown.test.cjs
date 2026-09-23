@@ -106,3 +106,139 @@ for (const variant of ["unchanged", "change", "ambiguous", "unacknowledged"]) {
     }
   });
 }
+
+test("Pornhub preset reads and appends chips beside the live input widgets", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<style>v-input,input,li,.c-pill,.selectedValue { display:block; min-height:24px; width:200px }</style>
+      <div data-error="orientation" class="dropdownElement"><div class="selectedValue">Straight</div></div>
+      <div class="form-section column">
+        <div class="c-pills-container"><v-pill text="Gaming"><div class="c-pill"><span>Gaming</span></div></v-pill></div>
+        <v-input><div class="c-input-wrapper"><input name="tags"></div></v-input>
+        <v-autocomplete><ul id="inputTag"></ul></v-autocomplete>
+      </div>
+      <div class="form-section column full">
+        <div class="c-pills-container"><v-pill text="fetish"><div class="c-pill"><span>fetish</span></div></v-pill></div>
+        <v-input><div class="c-input-wrapper"><input name="category"></div></v-input>
+        <div><ul id="f2vCategory"></ul></div>
+      </div>`);
+    for (const script of ["registry.js", "common.js", "ph-uploader.js"])
+      await page.addScriptTag({
+        path: path.resolve(
+          __dirname,
+          "../../extensions/personal/workflows",
+          script,
+        ),
+      });
+    const result = await page.evaluate(async () => {
+      for (const [name, listId] of [
+        ["tags", "inputTag"],
+        ["category", "f2vCategory"],
+      ]) {
+        const field = document.querySelector(`input[name="${name}"]`);
+        const list = document.getElementById(listId);
+        field.addEventListener("input", () => {
+          list.replaceChildren();
+          if (!field.value) return;
+          const item = document.createElement("li");
+          item.textContent = field.value;
+          list.append(item);
+        });
+        list.addEventListener("click", (event) => {
+          const pill = document.createElement("div");
+          pill.className = "c-pill";
+          pill.textContent = event.target.textContent;
+          field
+            .closest(".form-section")
+            .querySelector(".c-pills-container")
+            .append(pill);
+        });
+      }
+      const adapter = CreatorToolkitAdapters.phUploader;
+      const plan = adapter.inspectPreset("Straight", {
+        orientation: "Straight",
+        tags: ["Gaming", "Robot"],
+        categories: ["fetish", "reaction"],
+      });
+      const applied = await adapter.applyPreset(
+        plan,
+        new AbortController().signal,
+        { step() {} },
+      );
+      const paidPlan = adapter.inspectPreset(
+        "Straight",
+        {
+          orientation: "Straight",
+          tags: [
+            "Gaming",
+            "Robot",
+            "One",
+            "Two",
+            "Three",
+            "Four",
+            "Five",
+            "Six",
+          ],
+          categories: ["a category unavailable in Pay To View"],
+        },
+        { mode: "paid" },
+      );
+      const paidApplied = await adapter.applyPreset(
+        paidPlan,
+        new AbortController().signal,
+        { step() {} },
+      );
+      return {
+        missingTags: plan.tagsToAdd,
+        missingCategories: plan.categoriesToAdd,
+        applied: applied.status,
+        items: applied.items,
+        paidStatus: paidApplied.status,
+        paidItems: paidApplied.items,
+        paidTagsToAdd: paidPlan.tagsToAdd,
+        paidCategoriesToAdd: paidPlan.categoriesToAdd,
+        tags: [
+          ...adapter.selectedTokenLabels(
+            document.querySelector('input[name="tags"]'),
+            "inputTag",
+          ),
+        ],
+        categories: [
+          ...adapter.selectedTokenLabels(
+            document.querySelector('input[name="category"]'),
+            "f2vCategory",
+          ),
+        ],
+      };
+    });
+    assert.deepEqual(result.missingTags, ["Robot"]);
+    assert.deepEqual(result.missingCategories, ["reaction"]);
+    assert.equal(result.applied, "success", JSON.stringify(result.items));
+    assert.equal(
+      result.paidStatus,
+      "success",
+      JSON.stringify(result.paidItems),
+    );
+    assert.deepEqual(result.paidTagsToAdd, [
+      "One",
+      "Two",
+      "Three",
+      "Four",
+      "Five",
+    ]);
+    assert.deepEqual(result.paidCategoriesToAdd, []);
+    assert.deepEqual(result.tags.sort(), [
+      "five",
+      "four",
+      "gaming",
+      "one",
+      "robot",
+      "three",
+      "two",
+    ]);
+    assert.deepEqual(result.categories.sort(), ["fetish", "reaction"]);
+  } finally {
+    await browser.close();
+  }
+});

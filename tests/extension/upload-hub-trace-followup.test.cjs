@@ -141,6 +141,7 @@ for (const presetOk of [false, true]) {
         assert.deepEqual(result.outcome.manualFields, [
           "schedule",
           "custom thumbnail (optional)",
+          "site certifications",
           "final Submit",
         ]);
       else

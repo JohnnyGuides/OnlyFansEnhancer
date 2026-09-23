@@ -12,6 +12,9 @@
   const ORIENTATION_TRIGGER = ".customSelectTrigger, .selectedValue";
 
   function tokenFieldRoot(input) {
+    const siteField = input.closest("v-input")?.parentElement;
+    if (siteField?.querySelector(":scope > .c-pills-container"))
+      return siteField;
     return (
       input.closest(".c-input-container")?.parentElement ||
       input.closest(".c-input-wrapper")?.parentElement ||
@@ -30,6 +33,7 @@
       "[data-tag-name]",
       "[data-category-name]",
       ".c-tag",
+      ".c-pill",
       ".tag",
       ".chip",
       ".token",
@@ -209,23 +213,34 @@
     });
   }
 
-  function inspectPreset(name, preset) {
+  function inspectPreset(name, preset, { mode = "free" } = {}) {
+    if (!["free", "paid"].includes(mode))
+      throw new Error("Unsupported Pornhub video type.");
     const tagInput = document.querySelector(TAG_INPUT_SELECTOR);
-    const categoryInput = document.querySelector(CATEGORY_INPUT_SELECTOR);
+    const categoryInput =
+      mode === "free" ? document.querySelector(CATEGORY_INPUT_SELECTOR) : null;
     const currentTags = tagInput
       ? selectedTokenLabels(tagInput, "inputTag")
       : new Set();
     const currentCategories = categoryInput
       ? selectedTokenLabels(categoryInput, "f2vCategory")
       : new Set();
-    const tagsToAdd = preset.tags.filter(
+    const desiredTags = mode === "paid" ? preset.tags.slice(0, 7) : preset.tags;
+    if (mode === "paid" && (desiredTags.length < 2 || desiredTags.length > 7))
+      throw new Error("Pornhub Pay To View requires 2–7 saved tags.");
+    const tagsToAdd = desiredTags.filter(
       (tag) => !currentTags.has(toolkit.normalizeText(tag)),
     );
-    const categoriesToAdd = preset.categories.filter(
+    if (mode === "paid" && currentTags.size + tagsToAdd.length > 7)
+      throw new Error(
+        "Pornhub Pay To View already has tags outside the saved seven-tag preset; review them before retrying.",
+      );
+    const categoriesToAdd = (mode === "free" ? preset.categories : []).filter(
       (category) => !currentCategories.has(toolkit.normalizeText(category)),
     );
     return {
       name,
+      mode,
       preset,
       tagsToAdd,
       categoriesToAdd,
@@ -313,24 +328,26 @@
       }
     }
 
-    const categoryInput = toolkit.queryUnique(
-      CATEGORY_INPUT_SELECTOR,
-      document,
-      { description: "Pornhub category input" },
-    );
-    for (const category of plan.categoriesToAdd) {
-      if (
-        !(await step(`Category ${category}`, () =>
-          selectExactToken({
-            input: categoryInput,
-            token: category,
-            suggestionListId: "f2vCategory",
-            signal,
-            budget,
-          }),
-        ))
-      ) {
-        return failedResult(outcomes);
+    if (plan.mode !== "paid") {
+      const categoryInput = toolkit.queryUnique(
+        CATEGORY_INPUT_SELECTOR,
+        document,
+        { description: "Pornhub category input" },
+      );
+      for (const category of plan.categoriesToAdd) {
+        if (
+          !(await step(`Category ${category}`, () =>
+            selectExactToken({
+              input: categoryInput,
+              token: category,
+              suggestionListId: "f2vCategory",
+              signal,
+              budget,
+            }),
+          ))
+        ) {
+          return failedResult(outcomes);
+        }
       }
     }
 

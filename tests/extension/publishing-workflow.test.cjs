@@ -200,6 +200,8 @@ test("draft normalization maps full and teaser files without requiring a teaser"
     releaseDate: "2026-08-28",
     targets: ["onlyfans", "fansly"],
     contentPreset: "",
+    pornhubMode: "free",
+    pornhubCertificationsConfirmed: false,
     media: {
       onlyfans: { full: "episode full.mp4" },
       fansly: { full: "episode full.mp4", teaser: null },

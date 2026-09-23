@@ -522,6 +522,7 @@
     fanslyCaption: 15_000,
     contentPreset: 100,
     profileSignature: 50_000,
+    pornhubMode: 10,
   });
   const CATALOGUE_STRINGS = Object.freeze({
     source: 20,
@@ -594,6 +595,10 @@
     }
     if (Object.hasOwn(value, "pornhubThumbnail")) {
       output.pornhubThumbnail = value.pornhubThumbnail === true;
+    }
+    if (Object.hasOwn(value, "pornhubCertificationsConfirmed")) {
+      output.pornhubCertificationsConfirmed =
+        value.pornhubCertificationsConfirmed === true;
     }
     if (Object.hasOwn(value, "hasTeaser"))
       output.hasTeaser = value.hasTeaser !== false;

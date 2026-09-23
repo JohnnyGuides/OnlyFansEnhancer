@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.45"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.46"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -3007,6 +3007,7 @@ function creatorUploadSessionProofMatches(session, proof) {
       (session.draft.manyvidsThumbnail === true) &&
     (proof.pornhubThumbnail === true) ===
       (session.draft.pornhubThumbnail === true) &&
+    (proof.pornhubMode || "free") === (session.draft.pornhubMode || "free") &&
     (creatorUploadClean(proof.profileSignature, 50_000) ===
       session.draft.profileSignature ||
       creatorUploadClean(proof.profileSignature, 50_000) ===
@@ -3082,6 +3083,9 @@ async function validateCreatorUploadRequest(message) {
       message.draft?.fanslyPresetSelection === "first" ? "first" : "exact",
     manyvidsThumbnail: message.draft?.manyvidsThumbnail === true,
     pornhubThumbnail: message.draft?.pornhubThumbnail === true,
+    pornhubMode: creatorUploadClean(message.draft?.pornhubMode || "free", 10),
+    pornhubCertificationsConfirmed:
+      message.draft?.pornhubCertificationsConfirmed === true,
     hasTeaser: message.draft?.hasTeaser !== false,
     publishMode: message.draft?.publishMode ?? "manual",
     pornhubFilename: creatorUploadClean(message.draft?.pornhubFilename, 500),
@@ -3155,6 +3159,25 @@ async function validateCreatorUploadRequest(message) {
     draft.fanslyCaption = draft.description;
   }
   if (targets.includes("pornhub")) {
+    if (!["free", "paid"].includes(draft.pornhubMode))
+      throw new Error("Invalid MainHub video type.");
+    if (
+      Object.hasOwn(message.draft || {}, "pornhubCertificationsConfirmed") &&
+      typeof message.draft.pornhubCertificationsConfirmed !== "boolean"
+    )
+      throw new Error("Invalid Pornhub certification authorization.");
+    if (draft.pornhubMode === "paid") {
+      if (draft.pornhubThumbnail)
+        throw new Error("Pay To View does not offer custom thumbnails.");
+      const price = Number(draft.profiles.manyvidsAutofill.price);
+      if (!Number.isFinite(price) || price <= 0)
+        throw new Error(
+          "Pay To View requires a positive saved ManyVids price.",
+        );
+      const tags = draft.profiles.phUploader.presets[draft.contentPreset]?.tags;
+      if (!Array.isArray(tags) || tags.length < 2)
+        throw new Error("Pay To View requires at least two preset tags.");
+    }
     if (
       Object.hasOwn(message.draft || {}, "pornhubThumbnail") &&
       typeof message.draft.pornhubThumbnail !== "boolean"
@@ -4390,7 +4413,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.45"
+      "upload-hub-0.20.46"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",

@@ -779,6 +779,9 @@
   async function runPornhub(context) {
     const { draft, signal } = context;
     publicationMode(draft);
+    const mode = draft.pornhubMode || "free";
+    if (!["free", "paid"].includes(mode))
+      throw new Error("Pornhub video type is unsupported.");
     abortIfNeeded(signal);
     const selector = "input.dz-hidden-input[type='file']";
     await context.progress?.("uploading-full");
@@ -789,14 +792,24 @@
           'custom-dropdown[data-key="orientation"], .dropdownElement[data-error="orientation"]',
         ) &&
         document.querySelector('input[name="tags"]') &&
-        document.querySelector(
-          'input[name="category"], input[name="categoryInput"]',
-        ),
+        document.querySelector('input[name="title"]'),
       "Pornhub metadata form",
       UPLOAD_TIMEOUT,
       signal,
     );
     await context.progress?.("configuring");
+    const form = one('input[name="title"]', "Pornhub initial title").closest(
+      "form.video-details-form",
+    );
+    if (form)
+      await configurePornhubVideoType(
+        form,
+        mode,
+        draft.profiles?.manyvidsAutofill?.price,
+        signal,
+      );
+    else if (mode === "paid")
+      throw new Error("Pornhub Pay To View form is unavailable.");
     const title = one('input[name="title"]', "Pornhub title");
     if (!draft.title) throw new Error("Pornhub approved title is missing.");
     if (!enabled(title) || title.readOnly)
@@ -823,7 +836,9 @@
       draft.contentPreset,
     );
     if (!resolved) throw new Error("Pornhub content preset is unavailable.");
-    const plan = adapter.inspectPreset(resolved.name, resolved.preset);
+    const plan = adapter.inspectPreset(resolved.name, resolved.preset, {
+      mode,
+    });
     const result = await adapter.applyPreset(
       plan,
       signal,
@@ -841,17 +856,18 @@
             : result.summary || "Metadata preparation stopped."),
       );
     }
-    if (
-      one('input[name="title"]', "Pornhub final title readback").value !==
-      draft.title
-    )
+    const finalTitle = one(
+      'input[name="title"]',
+      "Pornhub final title readback",
+    );
+    if (finalTitle.value !== draft.title)
       throw new Error(
         "Pornhub [title]: Approved title changed during metadata preparation.",
       );
-    const currentForm = title.closest("form.video-details-form");
+    const currentForm = finalTitle.closest("form.video-details-form");
     if (currentForm) {
       await configurePornhubSchedule(currentForm, draft.scheduledIso, signal);
-      if (draft.pornhubThumbnail) {
+      if (mode === "free" && draft.pornhubThumbnail) {
         const owner = currentForm.closest("v-upload-video-details[form-id]");
         const selector =
           "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']";
@@ -890,7 +906,8 @@
           signal,
         );
       }
-      await acceptPornhubCertifications(currentForm, signal);
+      if (draft.pornhubCertificationsConfirmed === true)
+        await acceptPornhubCertifications(currentForm, signal);
     }
     await context.progress?.("prepared");
     return {
@@ -898,7 +915,12 @@
       status: "manual-submit-required",
       manualFields: [
         ...(!currentForm ? ["schedule"] : []),
-        ...(!draft.pornhubThumbnail ? ["custom thumbnail (optional)"] : []),
+        ...(mode === "free" && !draft.pornhubThumbnail
+          ? ["custom thumbnail (optional)"]
+          : []),
+        ...(draft.pornhubCertificationsConfirmed === true
+          ? []
+          : ["site certifications"]),
         "final Submit",
       ],
       effectiveFilename: draft.pornhubFilename,
@@ -912,6 +934,93 @@
       .trim()
       .replace(/\s+/g, " ")
       .toLowerCase();
+  }
+
+  async function configurePornhubVideoType(form, mode, savedPrice, signal) {
+    const label = [
+      ...form.querySelectorAll(
+        "label, .form-label, .field-label, .c-drop-label p",
+      ),
+    ].filter(
+      (item) =>
+        visible(item) && /^video type\b/.test(normalizedText(item.textContent)),
+    );
+    const host =
+      form.querySelector('[data-error="videoType"], [data-key="videoType"]') ||
+      (label.length === 1 &&
+        label[0]
+          .closest(".c-dropdown")
+          ?.querySelector(".dropdownElement, custom-dropdown")) ||
+      (label.length === 1 &&
+        label[0].parentElement?.querySelector(
+          ".dropdownElement, custom-dropdown",
+        ));
+    if (!host || !visible(host))
+      throw new Error("Pornhub video type control is unavailable.");
+    const selected = () =>
+      host.querySelector(".selectedValue, .customSelectTrigger");
+    const desired = mode === "paid" ? "pay to view" : "free to view";
+    if (normalizedText(selected()?.textContent) !== desired) {
+      click(selected(), "Pornhub video type");
+      const option = await waitFor(
+        () => {
+          const candidates = [
+            ...host.querySelectorAll(
+              ".c-drop-wrapper__option, .customOption, [role='option']",
+            ),
+          ].filter(
+            (item) =>
+              visible(item) && normalizedText(item.textContent) === desired,
+          );
+          if (candidates.length > 1)
+            throw new Error("Pornhub video type choice is ambiguous.");
+          return candidates[0];
+        },
+        "Pornhub video type choice",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+      click(option, "Pornhub video type choice");
+    }
+    await waitFor(
+      () =>
+        form.isConnected &&
+        normalizedText(selected()?.textContent) === desired &&
+        (mode === "paid"
+          ? visible(form.querySelector('input[name="p2vPrice"]')) &&
+            normalizedText(form.textContent).includes(
+              "pay to view on fancentro",
+            )
+          : visible(
+              form.querySelector(
+                'input[name="category"], input[name="categoryInput"]',
+              ),
+            )),
+      "Pornhub selected video type",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    if (mode === "paid") {
+      const price = Number(savedPrice);
+      if (!Number.isFinite(price) || price <= 0)
+        throw new Error(
+          "Pornhub Pay To View requires a positive saved ManyVids price.",
+        );
+      const input = one(
+        'input[name="p2vPrice"]',
+        "Pornhub Pay To View price",
+        form,
+      );
+      if (!enabled(input) || input.readOnly)
+        throw new Error("Pornhub Pay To View price is unavailable.");
+      fillTextControl(input, price.toFixed(2));
+      await waitFor(
+        () => Number(input.value) === price,
+        "Pornhub Pay To View price readback",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
   }
 
   async function configurePornhubSchedule(form, iso, signal) {
@@ -3193,7 +3302,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.45",
+    revision: "upload-hub-0.20.46",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

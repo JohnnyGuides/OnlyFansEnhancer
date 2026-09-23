@@ -20,6 +20,8 @@ for (const variant of [
   "already-checked",
   "thumbnail",
   "thumbnail-no-ack",
+  "paid",
+  "unconfirmed",
 ]) {
   test("Pornhub UTC scheduling and certifications: " + variant, async () => {
     const browser = await chromium.launch({ headless: true });
@@ -27,6 +29,7 @@ for (const variant of [
       const page = await browser.newPage();
       await page.setContent(`
  <v-upload-video-details form-id="owned-upload"><form class="video-details-form">
+ <div data-error="videoType" class="dropdownElement"><div class="selectedValue">Free To View</div><div class="c-drop-wrapper__list" hidden><div class="c-drop-wrapper__option">Pay To View</div></div></div><input name="p2vPrice" hidden><p id="p2vNotice" hidden>This video will be pay to view on Fancentro.</p>
  <input name="title"><input name="tags"><input name="category"><div class="dropdownElement" data-error="orientation"></div>
  <div data-error="videoPublishedDate"><div class="selectedValue">Publish Now</div><div data-key="date">Schedule date</div></div>
  <input type="checkbox" name="promotion"><input type="checkbox" name="reaction">
@@ -44,7 +47,19 @@ for (const variant of [
             group = form.querySelector("v-checkbox");
           let submitted = 0,
             accepted = 0;
+          let inspectedMode = "";
           const attached = [];
+          const typeHost = form.querySelector('[data-error="videoType"]');
+          typeHost.querySelector(".selectedValue").onclick = () =>
+            (typeHost.querySelector(".c-drop-wrapper__list").hidden = false);
+          typeHost.querySelector(".c-drop-wrapper__option").onclick = () => {
+            typeHost.querySelector(".selectedValue").textContent =
+              "Pay To View";
+            typeHost.querySelector(".c-drop-wrapper__list").hidden = true;
+            form.querySelector('[name="p2vPrice"]').hidden = false;
+            form.querySelector("#p2vNotice").hidden = false;
+            form.querySelector('[name="title"]').value = "";
+          };
           if (["next-month", "wrong-month-navigation"].includes(variant))
             picker.querySelector(".dp-current").textContent = "August 2026";
           picker.querySelector(".dp-nav-btn").onclick = () => {
@@ -125,7 +140,10 @@ for (const variant of [
           window.CreatorToolkitAdapters = {
             phUploader: {
               resolvePreset: () => ({ name: "Neutral", preset: {} }),
-              inspectPreset: () => ({}),
+              inspectPreset: (_name, _preset, options) => {
+                inspectedMode = options.mode;
+                return {};
+              },
               applyPreset: async () => ({ status: "success" }),
             },
           };
@@ -137,6 +155,9 @@ for (const variant of [
               scheduledIso: "2026-09-25T15:00:00Z",
               publishMode: "manual",
               pornhubThumbnail: variant.startsWith("thumbnail"),
+              pornhubMode: variant === "paid" ? "paid" : "free",
+              pornhubCertificationsConfirmed: variant !== "unconfirmed",
+              profiles: { manyvidsAutofill: { price: "19.99" } },
             },
             attachFile: async (role) => {
               attached.push(role);
@@ -162,6 +183,9 @@ for (const variant of [
               form.querySelectorAll("[name=promotion],[name=reaction]"),
             ).some((e) => e.checked),
             checked: group.querySelector("input").checked,
+            price: form.querySelector('[name="p2vPrice"]').value,
+            title: form.querySelector('[name="title"]').value,
+            inspectedMode,
             attached,
           };
         },
@@ -187,6 +211,8 @@ for (const variant of [
           "already-checked",
           "next-month",
           "thumbnail",
+          "paid",
+          "unconfirmed",
         ].includes(variant)
       ) {
         assert.equal(
@@ -198,14 +224,30 @@ for (const variant of [
           result.outcome.manualFields,
           variant === "thumbnail"
             ? ["final Submit"]
-            : ["custom thumbnail (optional)", "final Submit"],
+            : variant === "paid"
+              ? ["final Submit"]
+              : variant === "unconfirmed"
+                ? [
+                    "custom thumbnail (optional)",
+                    "site certifications",
+                    "final Submit",
+                  ]
+                : ["custom thumbnail (optional)", "final Submit"],
         );
         assert.deepEqual(
           result.attached,
           variant === "thumbnail" ? ["pornhub", "thumbnail"] : ["pornhub"],
         );
-        assert.equal(result.checked, true);
-        assert.equal(result.accepted, variant === "already-checked" ? 0 : 1);
+        assert.equal(result.checked, variant !== "unconfirmed");
+        assert.equal(
+          result.accepted,
+          ["already-checked", "unconfirmed"].includes(variant) ? 0 : 1,
+        );
+        if (variant === "paid") {
+          assert.equal(result.price, "19.99");
+          assert.equal(result.title, "Neutral test");
+          assert.equal(result.inspectedMode, "paid");
+        }
       } else {
         assert.equal(result.outcome.status, "failed");
         if (variant === "thumbnail-no-ack") {
