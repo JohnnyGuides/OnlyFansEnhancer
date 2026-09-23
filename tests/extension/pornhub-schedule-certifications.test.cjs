@@ -29,6 +29,7 @@ for (const variant of [
     try {
       const page = await browser.newPage();
       await page.setContent(`
+ <v-upload-video-details form-id="rejected-upload" hidden><form class="video-details-form"><input name="title"><input name="tags"><input name="category"><div data-error="orientation" class="dropdownElement"></div><div class="custom-thumbnails pcView"><input class="uploadFile" type="file"></div></form></v-upload-video-details>
  <v-upload-video-details form-id="owned-upload"><form class="video-details-form">
  <div data-error="videoType" class="dropdownElement"><div class="selectedValue">Free To View</div><div class="c-drop-wrapper__list" hidden><div class="c-drop-wrapper__option">Pay To View</div></div></div><input name="p2vPrice" hidden><p id="p2vNotice" hidden>This video will be pay to view on Fancentro.</p>
  <input name="title"><input name="tags"><input name="category"><div class="dropdownElement" data-error="orientation"></div>
@@ -43,7 +44,9 @@ for (const variant of [
  `);
       const result = await page.evaluate(
         async ({ variant, source }) => {
-          const form = document.querySelector("form"),
+          const form = [...document.querySelectorAll("form")].find(
+              (item) => item.getClientRects().length,
+            ),
             picker = document.querySelector("schedule-date"),
             group = form.querySelector("v-checkbox");
           let submitted = 0,

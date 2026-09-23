@@ -787,12 +787,17 @@
     await context.progress?.("uploading-full");
     await context.attachFile("pornhub", selector);
     await waitFor(
-      () =>
-        document.querySelector(
+      () => {
+        const titles = [
+          ...document.querySelectorAll('input[name="title"]'),
+        ].filter(visible);
+        if (titles.length !== 1) return false;
+        const owner = titles[0].closest("form.video-details-form") || document;
+        return [
           'custom-dropdown[data-key="orientation"], .dropdownElement[data-error="orientation"]',
-        ) &&
-        document.querySelector('input[name="tags"]') &&
-        document.querySelector('input[name="title"]'),
+          'input[name="tags"]',
+        ].every((part) => [...owner.querySelectorAll(part)].some(visible));
+      },
       "Pornhub metadata form",
       UPLOAD_TIMEOUT,
       signal,
@@ -869,8 +874,12 @@
       await configurePornhubSchedule(currentForm, draft.scheduledIso, signal);
       if (mode === "free" && draft.pornhubThumbnail) {
         const owner = currentForm.closest("v-upload-video-details[form-id]");
+        const ownerId = owner?.getAttribute("form-id");
+        if (!ownerId || !/^[a-zA-Z0-9-]{1,100}$/.test(ownerId))
+          throw new Error("Pornhub [thumbnail]: Upload ownership is invalid.");
         const selector =
-          "v-upload-video-details[form-id] form.video-details-form .custom-thumbnails.pcView input.uploadFile[type='file']";
+          `v-upload-video-details[form-id="${ownerId}"] form.video-details-form ` +
+          ".custom-thumbnails.pcView input.uploadFile[type='file']";
         const thumbnail = currentForm.querySelector(
           ".custom-thumbnails.pcView",
         );
@@ -3317,7 +3326,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.47",
+    revision: "upload-hub-0.20.48",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

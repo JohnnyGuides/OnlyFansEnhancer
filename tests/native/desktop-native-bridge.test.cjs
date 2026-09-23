@@ -119,7 +119,7 @@ async function main() {
       ok: true,
       requestId: request.requestId,
       status: {
-        productVersion: "0.20.47",
+        productVersion: "0.20.48",
         protocolVersion: 1,
         capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
       },
@@ -133,18 +133,22 @@ async function main() {
       stdio: "ignore",
     });
     let nativeBridge;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    let nativeResponse;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       nativeBridge = spawnSync(bridgeExe, [], {
         cwd: root,
         input: frame(request),
         timeout: 5000,
         windowsHide: true,
       });
-      if (nativeBridge.status === 0) break;
+      if (nativeBridge.status === 0) {
+        nativeResponse = parseFrame(nativeBridge.stdout);
+        if (nativeResponse.ok) break;
+      }
       await delay(100);
     }
     assert.equal(nativeBridge.status, 0, nativeBridge.stderr?.toString("utf8"));
-    const nativeResponse = parseFrame(nativeBridge.stdout);
+    assert.equal(nativeResponse?.ok, true, JSON.stringify(nativeResponse));
     assert.deepEqual(
       {
         ok: nativeResponse.ok,
@@ -161,7 +165,7 @@ async function main() {
     );
     const nativeDesktopExit = await waitForExit(nativeDesktop);
     if (nativeDesktopExit === 0) {
-      assert.equal(nativeResponse.status.productVersion, "0.20.47");
+      assert.equal(nativeResponse.status.productVersion, "0.20.48");
     } else {
       assert.equal(
         nativeDesktopExit,
