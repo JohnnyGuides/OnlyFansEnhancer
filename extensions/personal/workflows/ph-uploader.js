@@ -82,7 +82,9 @@
       };
     }
 
-    const list = document.getElementById(suggestionListId);
+    const root = tokenFieldRoot(input);
+    const listSelector = `#${CSS.escape(suggestionListId)}`;
+    const list = root.querySelector(listSelector);
     const beforeSignature = listSignature(list);
     input.focus();
     toolkit.setControlValue(input, "");
@@ -90,7 +92,7 @@
 
     const exactItem = await toolkit.waitFor(
       () => {
-        const currentList = document.getElementById(suggestionListId);
+        const currentList = root.querySelector(listSelector);
         if (!currentList || !toolkit.isVisible(currentList)) return null;
         const signature = listSignature(currentList);
         if (!signature || signature === beforeSignature) return null;
@@ -196,16 +198,33 @@
     };
   }
 
-  function formSignature() {
-    const orientation = document.querySelector(
-      'custom-dropdown[data-key="orientation"] .customSelectTrigger, .dropdownElement[data-error="orientation"] .selectedValue',
+  function formSignature(mode = "free") {
+    const orientationHost = toolkit.queryUnique(ORIENTATION_HOST, document, {
+      optional: true,
+    });
+    const orientation = orientationHost
+      ? toolkit.queryUnique(ORIENTATION_TRIGGER, orientationHost)
+      : null;
+    const videoType = toolkit.queryUnique(
+      '[data-error="videoType"] .selectedValue, [data-key="videoType"] .customSelectTrigger',
+      document,
+      { optional: true },
     );
-    const tagInput = document.querySelector(TAG_INPUT_SELECTOR);
-    const categoryInput = document.querySelector(CATEGORY_INPUT_SELECTOR);
+    const tagInput = toolkit.queryUnique(TAG_INPUT_SELECTOR, document, {
+      optional: true,
+    });
+    const categoryInput =
+      mode === "free"
+        ? toolkit.queryUnique(CATEGORY_INPUT_SELECTOR, document, {
+            optional: true,
+          })
+        : null;
+    const tagListId = mode === "paid" ? "inputFancentroTag" : "inputTag";
     return JSON.stringify({
+      videoType: toolkit.accessibleName(videoType),
       orientation: toolkit.accessibleName(orientation),
       tags: tagInput
-        ? Array.from(selectedTokenLabels(tagInput, "inputTag")).sort()
+        ? Array.from(selectedTokenLabels(tagInput, tagListId)).sort()
         : [],
       categories: categoryInput
         ? Array.from(selectedTokenLabels(categoryInput, "f2vCategory")).sort()
@@ -216,11 +235,18 @@
   function inspectPreset(name, preset, { mode = "free" } = {}) {
     if (!["free", "paid"].includes(mode))
       throw new Error("Unsupported Pornhub video type.");
-    const tagInput = document.querySelector(TAG_INPUT_SELECTOR);
+    const tagInput = toolkit.queryUnique(TAG_INPUT_SELECTOR, document, {
+      optional: true,
+    });
     const categoryInput =
-      mode === "free" ? document.querySelector(CATEGORY_INPUT_SELECTOR) : null;
+      mode === "free"
+        ? toolkit.queryUnique(CATEGORY_INPUT_SELECTOR, document, {
+            optional: true,
+          })
+        : null;
+    const tagListId = mode === "paid" ? "inputFancentroTag" : "inputTag";
     const currentTags = tagInput
-      ? selectedTokenLabels(tagInput, "inputTag")
+      ? selectedTokenLabels(tagInput, tagListId)
       : new Set();
     const currentCategories = categoryInput
       ? selectedTokenLabels(categoryInput, "f2vCategory")
@@ -241,10 +267,11 @@
     return {
       name,
       mode,
+      tagListId,
       preset,
       tagsToAdd,
       categoriesToAdd,
-      signature: formSignature(),
+      signature: formSignature(mode),
       items: [
         `Orientation: exact “${preset.orientation}”`,
         `Append ${tagsToAdd.length} missing tag(s): ${tagsToAdd.join(", ") || "none"}`,
@@ -279,7 +306,7 @@
   }
 
   async function applyPreset(plan, signal, budget) {
-    if (formSignature() !== plan.signature) {
+    if (formSignature(plan.mode) !== plan.signature) {
       throw new toolkit.ToolkitError(
         "STALE_PREVIEW",
         "The Pornhub uploader changed after preview. Preview the preset again.",
@@ -318,7 +345,7 @@
           selectExactToken({
             input: tagInput,
             token: tag,
-            suggestionListId: "inputTag",
+            suggestionListId: plan.tagListId || "inputTag",
             signal,
             budget,
           }),

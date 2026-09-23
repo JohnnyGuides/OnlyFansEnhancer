@@ -960,7 +960,20 @@
     const selected = () =>
       host.querySelector(".selectedValue, .customSelectTrigger");
     const desired = mode === "paid" ? "pay to view" : "free to view";
-    if (normalizedText(selected()?.textContent) !== desired) {
+    const formReady = () =>
+      mode === "paid"
+        ? visible(form.querySelector('input[name="p2vPrice"]')) &&
+          normalizedText(form.textContent).includes("pay to view on fancentro")
+        : visible(
+            form.querySelector(
+              'input[name="category"], input[name="categoryInput"]',
+            ),
+          );
+    const selectedReady = () =>
+      form.isConnected &&
+      normalizedText(selected()?.textContent) === desired &&
+      formReady();
+    async function choose() {
       click(selected(), "Pornhub video type");
       const option = await waitFor(
         () => {
@@ -982,24 +995,26 @@
       );
       click(option, "Pornhub video type choice");
     }
-    await waitFor(
-      () =>
-        form.isConnected &&
-        normalizedText(selected()?.textContent) === desired &&
-        (mode === "paid"
-          ? visible(form.querySelector('input[name="p2vPrice"]')) &&
-            normalizedText(form.textContent).includes(
-              "pay to view on fancentro",
-            )
-          : visible(
-              form.querySelector(
-                'input[name="category"], input[name="categoryInput"]',
-              ),
-            )),
-      "Pornhub selected video type",
-      DEFAULT_DOM_TIMEOUT,
-      signal,
-    );
+    if (normalizedText(selected()?.textContent) !== desired) await choose();
+    try {
+      await waitFor(selectedReady, "Pornhub selected video type", 2500, signal);
+    } catch (error) {
+      if (
+        error?.message !==
+          "Timed out waiting for Pornhub selected video type." ||
+        !form.isConnected
+      )
+        throw error;
+      if (formReady() && normalizedText(selected()?.textContent) !== desired)
+        await choose();
+      else if (normalizedText(selected()?.textContent) !== desired) throw error;
+      await waitFor(
+        selectedReady,
+        "Pornhub settled video type",
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
     if (mode === "paid") {
       const price = Number(savedPrice);
       if (!Number.isFinite(price) || price <= 0)
@@ -3302,7 +3317,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.46",
+    revision: "upload-hub-0.20.47",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

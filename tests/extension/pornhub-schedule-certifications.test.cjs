@@ -21,6 +21,7 @@ for (const variant of [
   "thumbnail",
   "thumbnail-no-ack",
   "paid",
+  "paid-stale-label",
   "unconfirmed",
 ]) {
   test("Pornhub UTC scheduling and certifications: " + variant, async () => {
@@ -48,13 +49,16 @@ for (const variant of [
           let submitted = 0,
             accepted = 0;
           let inspectedMode = "";
+          let typeChoices = 0;
           const attached = [];
           const typeHost = form.querySelector('[data-error="videoType"]');
           typeHost.querySelector(".selectedValue").onclick = () =>
             (typeHost.querySelector(".c-drop-wrapper__list").hidden = false);
           typeHost.querySelector(".c-drop-wrapper__option").onclick = () => {
-            typeHost.querySelector(".selectedValue").textContent =
-              "Pay To View";
+            typeChoices++;
+            if (variant !== "paid-stale-label" || typeChoices > 1)
+              typeHost.querySelector(".selectedValue").textContent =
+                "Pay To View";
             typeHost.querySelector(".c-drop-wrapper__list").hidden = true;
             form.querySelector('[name="p2vPrice"]').hidden = false;
             form.querySelector("#p2vNotice").hidden = false;
@@ -149,13 +153,15 @@ for (const variant of [
           };
           (0, eval)(source);
           const outcome = await CreatorUploadPlatformAdapters.runPornhub({
-            signal: AbortSignal.timeout(1200),
+            signal: AbortSignal.timeout(
+              variant === "paid-stale-label" ? 5000 : 1200,
+            ),
             draft: {
               title: "Neutral test",
               scheduledIso: "2026-09-25T15:00:00Z",
               publishMode: "manual",
               pornhubThumbnail: variant.startsWith("thumbnail"),
-              pornhubMode: variant === "paid" ? "paid" : "free",
+              pornhubMode: variant.startsWith("paid") ? "paid" : "free",
               pornhubCertificationsConfirmed: variant !== "unconfirmed",
               profiles: { manyvidsAutofill: { price: "19.99" } },
             },
@@ -186,6 +192,7 @@ for (const variant of [
             price: form.querySelector('[name="p2vPrice"]').value,
             title: form.querySelector('[name="title"]').value,
             inspectedMode,
+            typeChoices,
             attached,
           };
         },
@@ -212,6 +219,7 @@ for (const variant of [
           "next-month",
           "thumbnail",
           "paid",
+          "paid-stale-label",
           "unconfirmed",
         ].includes(variant)
       ) {
@@ -224,7 +232,7 @@ for (const variant of [
           result.outcome.manualFields,
           variant === "thumbnail"
             ? ["final Submit"]
-            : variant === "paid"
+            : variant.startsWith("paid")
               ? ["final Submit"]
               : variant === "unconfirmed"
                 ? [
@@ -243,10 +251,11 @@ for (const variant of [
           result.accepted,
           ["already-checked", "unconfirmed"].includes(variant) ? 0 : 1,
         );
-        if (variant === "paid") {
+        if (variant.startsWith("paid")) {
           assert.equal(result.price, "19.99");
           assert.equal(result.title, "Neutral test");
           assert.equal(result.inspectedMode, "paid");
+          assert.equal(result.typeChoices, variant === "paid" ? 1 : 2);
         }
       } else {
         assert.equal(result.outcome.status, "failed");

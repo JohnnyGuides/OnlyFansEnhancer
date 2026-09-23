@@ -112,6 +112,7 @@ test("Pornhub preset reads and appends chips beside the live input widgets", asy
   try {
     const page = await browser.newPage();
     await page.setContent(`<style>v-input,input,li,.c-pill,.selectedValue { display:block; min-height:24px; width:200px }</style>
+      <div hidden><div data-error="orientation" class="dropdownElement"><div class="selectedValue">Other</div></div><input name="tags"><ul id="inputTag"></ul><input name="category"></div>
       <div data-error="orientation" class="dropdownElement"><div class="selectedValue">Straight</div></div>
       <div class="form-section column">
         <div class="c-pills-container"><v-pill text="Gaming"><div class="c-pill"><span>Gaming</span></div></v-pill></div>
@@ -136,8 +137,8 @@ test("Pornhub preset reads and appends chips beside the live input widgets", asy
         ["tags", "inputTag"],
         ["category", "f2vCategory"],
       ]) {
-        const field = document.querySelector(`input[name="${name}"]`);
-        const list = document.getElementById(listId);
+        const field = CreatorToolkit.queryUnique(`input[name="${name}"]`);
+        const list = field.closest(".form-section").querySelector(`#${listId}`);
         field.addEventListener("input", () => {
           list.replaceChildren();
           if (!field.value) return;
@@ -166,6 +167,18 @@ test("Pornhub preset reads and appends chips beside the live input widgets", asy
         new AbortController().signal,
         { step() {} },
       );
+      const freeCategories = [
+        ...adapter.selectedTokenLabels(
+          CreatorToolkit.queryUnique('input[name="category"]'),
+          "f2vCategory",
+        ),
+      ];
+      CreatorToolkit.queryUnique('input[name="category"]')
+        .closest(".form-section")
+        .remove();
+      CreatorToolkit.queryUnique('input[name="tags"]')
+        .closest(".form-section")
+        .querySelector("#inputTag").id = "inputFancentroTag";
       const paidPlan = adapter.inspectPreset(
         "Straight",
         {
@@ -200,16 +213,11 @@ test("Pornhub preset reads and appends chips beside the live input widgets", asy
         paidCategoriesToAdd: paidPlan.categoriesToAdd,
         tags: [
           ...adapter.selectedTokenLabels(
-            document.querySelector('input[name="tags"]'),
-            "inputTag",
+            CreatorToolkit.queryUnique('input[name="tags"]'),
+            "inputFancentroTag",
           ),
         ],
-        categories: [
-          ...adapter.selectedTokenLabels(
-            document.querySelector('input[name="category"]'),
-            "f2vCategory",
-          ),
-        ],
+        categories: freeCategories,
       };
     });
     assert.deepEqual(result.missingTags, ["Robot"]);
