@@ -5,6 +5,8 @@ const path = require("node:path");
 const { chromium } = require("../support/browser.cjs");
 for (const variant of [
   "owned",
+  "hidden-timezone-note",
+  "hidden-wrong-zone",
   "next-month",
   "wrong-month-navigation",
   "wrong-owner",
@@ -27,7 +29,7 @@ for (const variant of [
  ${["certifyDocumentationAndConsent", "certifyNoViolations", "acknowledgeReviewAndPublication"].map((id) => '<label for="' + id + '"><v-svg-icon name="checkMark" style="display:none">checked</v-svg-icon>Declaration</label>').join("")}
  </div></v-checkbox></div><button type="button" id="submit">Submit for Review</button></form></v-upload-video-details>
  <schedule-date form-id="owned-upload" hidden><button class="dp-nav-btn">›</button><div class="dp-current">September 2026</div><div class="dp-day">25</div><div class="dp-date-info"><div class="dp-info-value"></div></div>
- <div data-error="scheduleTime"><div class="selectedValue"></div><div class="c-drop-wrapper__option">03:00:00 PM</div></div><div class="dp-info-note">All upload times are in UTC.</div><button class="dp-schedule-btn">Schedule</button></schedule-date>
+ <div class="dp-info"><div data-error="scheduleTime"><div class="selectedValue"></div><div class="c-drop-wrapper__option">03:00:00 PM</div></div><div class="dp-info-note">All upload times are in UTC.</div><button class="dp-schedule-btn">Schedule</button></div></schedule-date>
  `);
       const result = await page.evaluate(
         async ({ variant, source }) => {
@@ -46,7 +48,11 @@ for (const variant of [
           };
           if (variant === "wrong-owner")
             picker.setAttribute("form-id", "other-upload");
-          if (variant === "wrong-zone")
+          if (variant.startsWith("hidden-")) {
+            picker.querySelector(".dp-info").style.visibility = "hidden";
+            picker.querySelector(".dp-info").style.opacity = "0";
+          }
+          if (["wrong-zone", "hidden-wrong-zone"].includes(variant))
             picker.querySelector(".dp-info-note").textContent =
               "All upload times are local.";
           if (variant === "duplicate-certification")
@@ -68,6 +74,8 @@ for (const variant of [
             e.target.classList.add("dp-selected");
             picker.querySelector(".dp-info-value").textContent =
               "25 September, 2026";
+            picker.querySelector(".dp-info").style.visibility = "visible";
+            picker.querySelector(".dp-info").style.opacity = "1";
           };
           picker.querySelector(".c-drop-wrapper__option").onclick = () =>
             (picker.querySelector(".selectedValue").textContent =
@@ -129,7 +137,14 @@ for (const variant of [
       );
       assert.equal(result.submitted, 0);
       assert.equal(result.unrelated, false);
-      if (["owned", "already-checked", "next-month"].includes(variant)) {
+      if (
+        [
+          "owned",
+          "hidden-timezone-note",
+          "already-checked",
+          "next-month",
+        ].includes(variant)
+      ) {
         assert.equal(
           result.outcome.status,
           "manual-submit-required",
@@ -143,6 +158,8 @@ for (const variant of [
         assert.equal(result.accepted, variant === "already-checked" ? 0 : 1);
       } else {
         assert.equal(result.outcome.status, "failed");
+        if (["wrong-zone", "hidden-wrong-zone"].includes(variant))
+          assert.match(result.outcome.error, /timezone is unverified/);
         if (variant !== "checkbox-noop") assert.equal(result.accepted, 0);
       }
     } finally {

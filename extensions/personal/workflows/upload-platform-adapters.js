@@ -948,7 +948,9 @@
         throw new Error("Pornhub schedule ownership changed.");
       if (
         normalizedText(
-          one(".dp-info-note", "Pornhub schedule timezone", picker).textContent,
+          one(".dp-info-note", "Pornhub schedule timezone", picker, {
+            allowHidden: true,
+          }).textContent,
         ) !== "all upload times are in utc."
       )
         throw new Error("Pornhub schedule timezone is unverified.");
@@ -3115,7 +3117,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.41",
+    revision: "upload-hub-0.20.42",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
