@@ -72,6 +72,7 @@
     suggestionListId,
     signal,
     budget,
+    allowUnavailable = false,
   }) {
     const expectedKey = toolkit.normalizeText(token);
     if (selectedTokenLabels(input, suggestionListId).has(expectedKey)) {
@@ -86,37 +87,62 @@
     const listSelector = `#${CSS.escape(suggestionListId)}`;
     const list = root.querySelector(listSelector);
     const beforeSignature = listSignature(list);
+    let sawFreshSuggestions = false;
+    let ambiguousSuggestions = false;
     input.focus();
     toolkit.setControlValue(input, "");
     toolkit.setControlValue(input, token);
 
-    const exactItem = await toolkit.waitFor(
-      () => {
-        const currentList = root.querySelector(listSelector);
-        if (!currentList || !toolkit.isVisible(currentList)) return null;
-        const signature = listSignature(currentList);
-        if (!signature || signature === beforeSignature) return null;
-        const items = Array.from(currentList.querySelectorAll("li")).filter(
-          toolkit.isVisible,
-        );
-        const resolution = toolkit.resolveExact(items, token, (element) =>
-          toolkit.displayText(element.textContent),
-        );
-        if (resolution.status === "ambiguous") {
-          throw new toolkit.ToolkitError(
-            "AMBIGUOUS_TARGET",
-            `Multiple exact Pornhub suggestions match “${token}”.`,
+    let exactItem;
+    try {
+      exactItem = await toolkit.waitFor(
+        () => {
+          const currentList = root.querySelector(listSelector);
+          if (!currentList || !toolkit.isVisible(currentList)) return null;
+          const signature = listSignature(currentList);
+          if (!signature || signature === beforeSignature) return null;
+          sawFreshSuggestions = true;
+          const items = Array.from(currentList.querySelectorAll("li")).filter(
+            toolkit.isVisible,
           );
-        }
-        return resolution.status === "found" ? resolution.element : null;
-      },
-      {
-        signal,
-        timeoutMs: 6500,
-        intervalMs: 80,
-        description: `fresh exact Pornhub suggestion “${token}”`,
-      },
-    );
+          const resolution = toolkit.resolveExact(items, token, (element) =>
+            toolkit.displayText(element.textContent),
+          );
+          if (resolution.status === "ambiguous") {
+            ambiguousSuggestions = true;
+            throw new toolkit.ToolkitError(
+              "AMBIGUOUS_TARGET",
+              `Multiple exact Pornhub suggestions match “${token}”.`,
+            );
+          }
+          return resolution.status === "found" ? resolution.element : null;
+        },
+        {
+          signal,
+          timeoutMs: 6500,
+          intervalMs: 80,
+          description: `fresh exact Pornhub suggestion “${token}”`,
+        },
+      );
+    } catch (error) {
+      if (ambiguousSuggestions)
+        throw new toolkit.ToolkitError(
+          "AMBIGUOUS_TARGET",
+          `Multiple exact Pornhub suggestions match “${token}”.`,
+        );
+      if (
+        !allowUnavailable ||
+        error?.code !== "TIMEOUT" ||
+        !sawFreshSuggestions
+      )
+        throw error;
+      toolkit.setControlValue(input, "");
+      return {
+        label: token,
+        status: "unavailable",
+        detail: "No exact site suggestion; omitted from this draft",
+      };
+    }
 
     budget.step();
     toolkit.clickElement(exactItem, signal);
@@ -348,11 +374,26 @@
             suggestionListId: plan.tagListId || "inputTag",
             signal,
             budget,
+            allowUnavailable: true,
           }),
         ))
       ) {
         return failedResult(outcomes);
       }
+    }
+    if (
+      outcomes.some((item) => item.status === "unavailable") &&
+      selectedTokenLabels(tagInput, plan.tagListId).size < 2
+    ) {
+      return failedResult([
+        ...outcomes,
+        {
+          label: "Tags",
+          status: "failed",
+          detail:
+            "Fewer than two accepted site tags remain after omitting unavailable tags.",
+        },
+      ]);
     }
 
     if (plan.mode !== "paid") {
@@ -380,7 +421,7 @@
 
     return {
       status: "success",
-      summary: `Pornhub preset “${plan.name}” applied with exact verified values. Review and submit manually.`,
+      summary: `Pornhub preset “${plan.name}” applied with verified available values. Review and submit manually.`,
       items: outcomes,
     };
   }

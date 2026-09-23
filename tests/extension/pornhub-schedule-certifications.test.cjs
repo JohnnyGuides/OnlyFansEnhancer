@@ -10,6 +10,7 @@ for (const variant of [
   "delayed-time-menu",
   "delayed-time-control",
   "unmarked-time-control",
+  "unavailable-tag",
   "ambiguous-unmarked-time-control",
   "time-menu-noop",
   "next-month",
@@ -171,7 +172,18 @@ for (const variant of [
                 inspectedMode = options.mode;
                 return {};
               },
-              applyPreset: async () => ({ status: "success" }),
+              applyPreset: async () => ({
+                status: "success",
+                items:
+                  variant === "unavailable-tag"
+                    ? [
+                        {
+                          label: "Assisted Masturbation",
+                          status: "unavailable",
+                        },
+                      ]
+                    : [],
+              }),
             },
           };
           (0, eval)(source);
@@ -239,6 +251,7 @@ for (const variant of [
           "delayed-time-menu",
           "delayed-time-control",
           "unmarked-time-control",
+          "unavailable-tag",
           "already-checked",
           "next-month",
           "thumbnail",
@@ -255,17 +268,23 @@ for (const variant of [
         );
         assert.deepEqual(
           result.outcome.manualFields,
-          variant === "thumbnail"
-            ? ["final Submit"]
-            : variant.startsWith("paid")
+          variant === "unavailable-tag"
+            ? [
+                "Unavailable tags omitted: Assisted Masturbation",
+                "custom thumbnail (optional)",
+                "final Submit",
+              ]
+            : variant === "thumbnail"
               ? ["final Submit"]
-              : variant === "unconfirmed"
-                ? [
-                    "custom thumbnail (optional)",
-                    "site certifications",
-                    "final Submit",
-                  ]
-                : ["custom thumbnail (optional)", "final Submit"],
+              : variant.startsWith("paid")
+                ? ["final Submit"]
+                : variant === "unconfirmed"
+                  ? [
+                      "custom thumbnail (optional)",
+                      "site certifications",
+                      "final Submit",
+                    ]
+                  : ["custom thumbnail (optional)", "final Submit"],
         );
         assert.deepEqual(
           result.attached,

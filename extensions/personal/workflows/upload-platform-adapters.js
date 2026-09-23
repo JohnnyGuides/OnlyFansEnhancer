@@ -861,6 +861,9 @@
             : result.summary || "Metadata preparation stopped."),
       );
     }
+    const unavailableTags = (result.items || [])
+      .filter((item) => item.status === "unavailable")
+      .map((item) => item.label);
     const finalTitle = one(
       'input[name="title"]',
       "Pornhub final title readback",
@@ -923,6 +926,9 @@
       platform: "pornhub",
       status: "manual-submit-required",
       manualFields: [
+        ...(unavailableTags.length
+          ? [`Unavailable tags omitted: ${unavailableTags.join(", ")}`]
+          : []),
         ...(!currentForm ? ["schedule"] : []),
         ...(mode === "free" && !draft.pornhubThumbnail
           ? ["custom thumbnail (optional)"]
@@ -3354,7 +3360,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.53",
+    revision: "upload-hub-0.20.54",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
