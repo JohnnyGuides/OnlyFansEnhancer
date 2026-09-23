@@ -645,7 +645,7 @@ test("New retires old preparation without deleting its review record", async () 
     await fixture.page.locator("#resumePrompt").waitFor({ state: "visible" });
     assert.match(
       await fixture.page.locator("#resumeHeading").textContent(),
-      /Previous upload needs review/,
+      /Previous upload detected/,
     );
     await fixture.page.locator("#uploadTitle").fill("Old draft title");
     await fixture.page.locator("#newFromResume").click();
@@ -668,6 +668,57 @@ test("New retires old preparation without deleting its review record", async () 
       await fixture.page.locator("#mainPublishMode").inputValue(),
       "manual",
     );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("desktop opening offers New for older browser runs and retires both upload surfaces", async () => {
+  const fixture = await createUploadFixture({ desktop: true });
+  try {
+    await fixture.seedPreparation();
+    await fixture.worker.evaluate(async () => {
+      const work = await CreatorUploadSessionStore.workIdentity({
+        draft: { fullFilename: "benign-new-clip.mp4" },
+        launcher: "extension",
+      });
+      await CreatorUploadSessionStore.recordStep("older-browser-run", {
+        launcher: "extension",
+        actionId: "select-full",
+        platform: "onlyfans",
+        outcome: "intent",
+        work,
+        commandId: "33333333-3333-4333-8333-333333333333",
+        documentId: "44444444-4444-4444-8444-444444444444",
+        signature: "d".repeat(64),
+        tabId: 701,
+        frameId: 0,
+      });
+    });
+    await fixture.page.reload();
+    await fixture.page.locator("#resumePrompt").waitFor({ state: "visible" });
+    assert.match(
+      await fixture.page.locator("#resumeSummary").textContent(),
+      /2 previous preparation runs/,
+    );
+    assert.equal(
+      await fixture.page.locator("#resumeUpload").isVisible(),
+      false,
+    );
+    await fixture.page.locator("#newFromResume").click();
+    await fixture.page.waitForFunction(() =>
+      document
+        .querySelector("#neutralTestStatus")
+        .textContent.includes("New upload ready"),
+    );
+    const records = await fixture.worker.evaluate(() =>
+      CreatorUploadSessionStore.listRecovery(),
+    );
+    assert.equal(records.length, 2);
+    assert.ok(records.every((record) => record.supersededAt > 0));
+    await fixture.ready();
+    assert.equal(await fixture.page.locator("#uploadButton").isEnabled(), true);
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();

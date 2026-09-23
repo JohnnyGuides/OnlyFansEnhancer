@@ -2539,8 +2539,11 @@ test("upload console performs no platform mutation before the single Upload acti
             return port;
           },
           sendMessage(message, callback) {
-            if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
-              globalThis.consoleMessages.push(structuredClone(message));
+            if (message.type === "GET_CREATOR_UPLOAD_RESUMABLE") {
+              callback({ ok: true, resumable: null, pendingRecovery: 0 });
+              return;
+            }
+            globalThis.consoleMessages.push(structuredClone(message));
             if (message.type === "SYNC_CREATOR_TOOLS") {
               callback({
                 ok: true,
@@ -2709,7 +2712,11 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
       globalThis.chrome = {
         runtime: {
           lastError: null,
-          sendMessage() {
+          sendMessage(message, callback) {
+            if (message.type === "GET_CREATOR_UPLOAD_RESUMABLE") {
+              callback({ ok: true, resumable: null, pendingRecovery: 0 });
+              return;
+            }
             throw new Error("Preview must not start an upload.");
           },
         },

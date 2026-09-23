@@ -2735,7 +2735,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.49"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.50"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4413,7 +4413,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.49"
+      "upload-hub-0.20.50"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -5379,20 +5379,15 @@ async function stopCreatorUploadSession(session) {
   await checkpointCreatorUploadSession(session);
 }
 
-const creatorUploadRetirements = new Map();
-async function retireCreatorUploadSessions(launcher = "extension") {
-  if (creatorUploadRetirements.has(launcher))
-    return creatorUploadRetirements.get(launcher);
+let creatorUploadRetirement = null;
+async function retireCreatorUploadSessions() {
+  if (creatorUploadRetirement) return creatorUploadRetirement;
   const retirement = (async () => {
     await ensureCreatorUploadRuntimeVersion();
     const records = await CREATOR_UPLOAD_SESSION_STORE.list();
-    const otherIds = records
-      .filter((record) => (record.launcher || "extension") !== launcher)
-      .map((record) => record.id);
     let retired = 0;
     for (const record of records) {
-      if ((record.launcher || "extension") !== launcher || !record.draft)
-        continue;
+      if (!record.draft) continue;
       const session = await getCreatorUploadSession(record.id);
       if (session) {
         await stopCreatorUploadSession(session);
@@ -5423,17 +5418,21 @@ async function retireCreatorUploadSessions(launcher = "extension") {
       await CREATOR_UPLOAD_SESSION_STORE.remove(record.id);
       retired++;
     }
-    const recovery = await CREATOR_UPLOAD_SESSION_STORE.supersedePreparation(
-      otherIds,
-      launcher,
-    );
-    return { retired, ...recovery };
+    let superseded = 0;
+    for (const surface of ["extension", "desktop"]) {
+      const recovery = await CREATOR_UPLOAD_SESSION_STORE.supersedePreparation(
+        [],
+        surface,
+      );
+      superseded += recovery.superseded;
+    }
+    return { retired, superseded };
   })();
-  creatorUploadRetirements.set(launcher, retirement);
+  creatorUploadRetirement = retirement;
   try {
     return await retirement;
   } finally {
-    creatorUploadRetirements.delete(launcher);
+    creatorUploadRetirement = null;
   }
 }
 
@@ -5527,11 +5526,6 @@ function handleExtensionMessage(message, sender, sendResponse) {
           );
         const latest = sessions[0];
         const recovery = await CREATOR_UPLOAD_SESSION_STORE.listRecovery();
-        const otherIds = new Set(
-          allSessions
-            .filter((record) => (record.launcher || "extension") !== launcher)
-            .map((record) => record.id),
-        );
         return {
           resumable: latest
             ? {
@@ -5561,20 +5555,13 @@ function handleExtensionMessage(message, sender, sendResponse) {
                 ),
               }
             : null,
-          olderSessions: Math.max(0, sessions.length - 1),
-          pendingRecovery: recovery.filter(
-            (record) =>
-              !record.supersededAt &&
-              !otherIds.has(record.id) &&
-              (record.launcher || "extension") === launcher,
-          ).length,
+          pendingRecovery: recovery.filter((record) => !record.supersededAt)
+            .length,
         };
       }
       case "START_NEW_CREATOR_UPLOAD":
         return {
-          reset: await retireCreatorUploadSessions(
-            sender?.desktopUploadRuntime ? "desktop" : "extension",
-          ),
+          reset: await retireCreatorUploadSessions(),
         };
       case "CLEAR_CREATOR_UPLOAD_PREPARATION":
         return {

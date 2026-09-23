@@ -1918,7 +1918,10 @@
 
     function updateUploadAction() {
       uploadButton.disabled =
-        runBusy || Boolean(activeSession) || readiness?.ready !== true;
+        runBusy ||
+        Boolean(activeSession) ||
+        !get("#resumePrompt").hidden ||
+        readiness?.ready !== true;
       const ongoing =
         activeSession &&
         !activeSession.needsReconciliation &&
@@ -3130,12 +3133,14 @@
         if (activeSession) return;
         resumable = response.resumable || null;
         prompt.hidden = !resumable && !response.pendingRecovery;
+        updateUploadAction();
         if (prompt.hidden) return;
         get("#resumeError").textContent = "";
         get("#resumeUpload").hidden = !resumable;
+        get("#newFromResume").hidden = false;
         get("#resumeHeading").textContent = resumable
-          ? "Upload in queue"
-          : "Previous upload needs review";
+          ? "Resume or New"
+          : "Previous upload detected";
         const savedFiles = resumable
           ? [
               ...new Set(
@@ -3150,11 +3155,12 @@
           ? `Detected ${savedFiles.length > 1 ? "videos" : "video"} “${savedFiles.join(" + ") || resumable.draft.title}” in the queue.`
           : `${response.pendingRecovery} previous preparation ${response.pendingRecovery === 1 ? "run is" : "runs are"} saved in upload history.`;
         get("#resumeInstructions").textContent = resumable
-          ? "Reselect the saved files, then Resume to reconnect to this run. New stops old local sessions; remote drafts and review history remain."
-          : "Check any remote draft, then start a new upload. Review history remains available.";
+          ? "To Resume, reselect the exact saved files. New retires earlier local runs across Upload Hub and the browser extension. Remote drafts and review history remain."
+          : "This run cannot be resumed from the saved state. Review any remote draft, then choose New. Earlier local runs will be retired; remote drafts and review history remain.";
       } catch (error) {
         if (activeSession) return;
         prompt.hidden = false;
+        updateUploadAction();
         get("#resumeUpload").hidden = true;
         get("#newFromResume").hidden = true;
         get("#resumeHeading").textContent = "Upload recovery unavailable";
@@ -3251,6 +3257,7 @@
           platformStates.set(target.platform, target);
         await activeSession.whenBound;
         get("#resumePrompt").hidden = true;
+        updateUploadAction();
         get("#preparationControls").hidden = false;
         lockDraft(true);
         renderPlatformStates();
@@ -3347,6 +3354,7 @@
       activeSession = null;
       resumable = null;
       get("#resumePrompt").hidden = true;
+      updateUploadAction();
       templateRevision++;
       lockDraft(false);
       leaveNeutralTest();
