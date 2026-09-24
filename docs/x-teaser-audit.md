@@ -31,8 +31,9 @@ are a JSON object from a local path relative to `.TWEETS` to a catalogue ID.
 node tools/x-teaser-audit.mjs --sheet .local/twitter/sheet.json --x .local/twitter/x.json --teasers 'D:\MEDIA - SELFMADE\Youtube2\.TWEETS' --pairings .local/twitter/pairings.json --record-snapshots .local/twitter/snapshots.json --out .local/twitter/report.json --markdown .local/twitter/report.md --queue .local/twitter/queue.json --strict
 ```
 
-`--strict` exits nonzero for a visible X post missing from the Sheet or for a
-status linked to multiple catalogue rows. The optional recorder root is supplied
+`--strict` exits nonzero for a confirmed teaser missing from the Sheet, a
+status linked to multiple catalogue rows, an unpaired pending file, or a Done
+file without a recorder receipt. The optional recorder root is supplied
 with `--audit`; its `.creator-x-teaser-receipts` are read only. `--record-snapshots`
 requires an X inventory captured within the previous hour and retains one view
 sample per status and capture time. Repeated captures at 24 hours, 72 hours,

@@ -219,7 +219,10 @@ if (!sheetPath) {
     });
   if (
     process.argv.includes("--strict") &&
-    (report.xWithoutSheet.length || report.duplicateSheetBindings.length)
+    (report.xWithoutSheet.length ||
+      report.duplicateSheetBindings.length ||
+      report.unpairedAssets.length ||
+      report.doneWithoutReceipt.length)
   )
     process.exitCode = 1;
 }
