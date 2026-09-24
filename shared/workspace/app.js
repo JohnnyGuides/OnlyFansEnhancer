@@ -841,6 +841,13 @@
         label: "Try again",
         action: "connect",
       };
+    if (code === "authorization_timed_out")
+      return {
+        message:
+          "Google sign-in took longer than 20 minutes. The local callback closed; start a new connection and use its newest browser tab.",
+        label: "Reconnect",
+        action: "connect",
+      };
     if (
       [
         "invalid-workbook-date",
@@ -1248,10 +1255,14 @@
       googleSettingStatus.dataset.state = "connected";
       setGoogleSettingsAction("Open catalogue", "catalogue");
     } else if (
+      googleStatusView?.errorCode === "authorization_timed_out" ||
       googleStatusView?.errorCode === "google-authorization-required" ||
       googleStatusView?.errorCode === "google-token-refresh-failed"
     ) {
-      googleSettingStatus.textContent = "Authorization failed or expired";
+      googleSettingStatus.textContent =
+        googleStatusView?.errorCode === "authorization_timed_out"
+          ? "Google sign-in timed out. Use a new browser tab to reconnect."
+          : "Authorization failed or expired";
       googleSettingStatus.dataset.state = "error";
       setGoogleSettingsAction("Reconnect", "connect");
     } else {

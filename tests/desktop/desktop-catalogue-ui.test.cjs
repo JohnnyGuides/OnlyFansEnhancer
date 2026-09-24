@@ -228,7 +228,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.61",
+            productVersion: "0.20.62",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -1046,6 +1046,24 @@ async function testGoogleEndUserSettings(browser, port) {
     await settings.getByRole("button", { name: "Reconnect" }).count(),
     1,
   );
+  await page.evaluate((next) => __setGoogleState(next), {
+    state: "error",
+    errorCode: "authorization_timed_out",
+  });
+  await page.getByRole("button", { name: "Uploads", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settings
+    .getByText(
+      "Google sign-in timed out. Use a new browser tab to reconnect.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(
+    await settings.getByRole("button", { name: "Reconnect" }).count(),
+    1,
+  );
   assert.deepEqual(errors, []);
   await page.close();
 }
@@ -1507,6 +1525,14 @@ async function testGoogleErrorRecovery(browser, port) {
       action: "Sync again",
       operation: "syncGoogleCatalogue",
       disconnect: true,
+    },
+    {
+      code: "authorization_timed_out",
+      message:
+        "Google sign-in took longer than 20 minutes. The local callback closed; start a new connection and use its newest browser tab.",
+      action: "Reconnect",
+      operation: "startGoogleCatalogueConnection",
+      disconnect: false,
     },
     {
       code: "google-authorization-required",
