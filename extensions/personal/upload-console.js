@@ -783,6 +783,11 @@
     const fullInput = get("#uploadFullVideo");
     const teaserInput = get("#uploadTeaser");
     const thumbnailInput = get("#uploadManyvidsThumbnail");
+    const catalogueThumbnails = get("#catalogueThumbnails");
+    const loadCatalogueThumbnails = get("#loadCatalogueThumbnails");
+    const catalogueThumbnailStatus = get("#catalogueThumbnailStatus");
+    const catalogueThumbnailChoices = get("#catalogueThumbnailChoices");
+    const catalogueThumbnailHint = get("#catalogueThumbnailHint");
     const pornhubInput = get("#uploadPornhubVideo");
     const contentPreset = get("#contentPreset");
     const pornhubVideoType = get("#pornhubVideoType");
@@ -849,6 +854,9 @@
     let fullFile = null;
     let teaserFile = null;
     let thumbnailFile = null;
+    let thumbnailCatalogueId = null;
+    let thumbnailChoicesRevision = 0;
+    let thumbnailChoices = null;
     let pornhubFile = null;
     let socialFile = null;
     let matchTimer = null;
@@ -1536,6 +1544,128 @@
       return file ? file.name : emptyText;
     }
 
+    function showCatalogueThumbnailPicker(match) {
+      const id =
+        match?.status === "matched" &&
+        workflowMode.value !== "teaser" &&
+        !get("#optionalMedia").hidden &&
+        !thumbnailInput.closest("[data-media-for]").hidden
+          ? match.candidate?.id
+          : null;
+      catalogueThumbnails.hidden = !id;
+      if (!id) {
+        catalogueThumbnailHint.textContent = "";
+        return;
+      }
+      if (thumbnailCatalogueId === id) return;
+      if (
+        thumbnailFile?.source === "catalogue-thumbnail" &&
+        thumbnailFile.catalogueId !== id
+      ) {
+        thumbnailFile = null;
+        renderFilePickers();
+      }
+      thumbnailCatalogueId = id;
+      thumbnailChoices = null;
+      catalogueThumbnailHint.textContent = "";
+      catalogueThumbnailChoices.replaceChildren();
+      catalogueThumbnailStatus.textContent = "Looking for named thumbnails…";
+      void loadThumbnailChoices(id);
+    }
+
+    async function loadThumbnailChoices(id, refresh = false) {
+      const revision = ++thumbnailChoicesRevision;
+      loadCatalogueThumbnails.disabled = true;
+      try {
+        const { result } = await sendMessage({
+          type: "OFENHANCER_APP_REQUEST",
+          operation: "getUploadThumbnailOptions",
+          payload: { catalogueId: id, refresh },
+        });
+        if (
+          revision !== thumbnailChoicesRevision ||
+          thumbnailCatalogueId !== id
+        )
+          return;
+        thumbnailChoices = result.choices || [];
+        catalogueThumbnailHint.textContent = thumbnailChoices.length
+          ? ` · ${thumbnailChoices.length} named thumbnails`
+          : "";
+        catalogueThumbnailChoices.replaceChildren();
+        if (!result.configured) {
+          catalogueThumbnailStatus.textContent =
+            "Set a thumbnail folder in the desktop Catalogue to use named thumbnails.";
+          return;
+        }
+        if (!thumbnailChoices.length) {
+          catalogueThumbnailStatus.textContent =
+            "No named thumbnails found for this catalogue ID. You can choose a file above.";
+          return;
+        }
+        catalogueThumbnailStatus.textContent = `Choose one of ${thumbnailChoices.length} named thumbnails for ${id}.`;
+        for (const choice of thumbnailChoices) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "catalogue-thumbnail-choice";
+          button.dataset.assetId = choice.assetId;
+          button.setAttribute(
+            "aria-pressed",
+            String(thumbnailFile?.assetId === choice.assetId),
+          );
+          const preview = document.createElement("img");
+          preview.alt = "";
+          preview.loading = "lazy";
+          const label = document.createElement("span");
+          label.textContent = choice.name;
+          button.append(preview, label);
+          button.addEventListener("click", () => {
+            if (activeSession || runBusy) return;
+            thumbnailFile = {
+              name: choice.name,
+              size: choice.size,
+              type: choice.type,
+              lastModified: choice.lastModified,
+              source: "catalogue-thumbnail",
+              catalogueId: id,
+              assetId: choice.assetId,
+            };
+            thumbnailInput.value = "";
+            renderFilePickers();
+            scheduleMatch();
+          });
+          catalogueThumbnailChoices.append(button);
+        }
+        for (const choice of thumbnailChoices) {
+          if (revision !== thumbnailChoicesRevision) return;
+          try {
+            const { result: preview } = await sendMessage({
+              type: "OFENHANCER_APP_REQUEST",
+              operation: "getUploadThumbnailPreview",
+              payload: { catalogueId: id, assetId: choice.assetId },
+            });
+            if (
+              revision === thumbnailChoicesRevision &&
+              thumbnailCatalogueId === id
+            )
+              catalogueThumbnailChoices.querySelector(
+                `[data-asset-id="${choice.assetId}"] img`,
+              ).src = preview.dataUrl;
+          } catch {
+            // A missing or changed variant stays selectable only until native validation rejects it.
+          }
+        }
+      } catch (error) {
+        if (
+          revision === thumbnailChoicesRevision &&
+          thumbnailCatalogueId === id
+        )
+          catalogueThumbnailStatus.textContent = `Named thumbnails could not load: ${error.message}`;
+      } finally {
+        if (revision === thumbnailChoicesRevision)
+          loadCatalogueThumbnails.disabled = false;
+      }
+    }
+
     function invalidateMatch() {
       readiness = null;
       ++readinessRevision;
@@ -1547,6 +1677,7 @@
       currentProposal = null;
       uploadButton.disabled = true;
       cataloguePicker.hidden = true;
+      showCatalogueThumbnailPicker(null);
       pornhubRecommendation.textContent = "";
       selectedCatalogueReason.textContent = "";
       continueWithoutSheet.hidden = true;
@@ -2043,6 +2174,7 @@
             candidate.title;
       changeCatalogueEntry.hidden = match.status === "upload-only";
       renderRunSettings();
+      showCatalogueThumbnailPicker(match);
       void checkReadiness();
     }
 
@@ -2368,6 +2500,13 @@
             ...(file.source === "development-fixture"
               ? { source: file.source, fixtureToken: file.fixtureToken }
               : {}),
+            ...(file.source === "catalogue-thumbnail"
+              ? {
+                  source: file.source,
+                  catalogueId: file.catalogueId,
+                  assetId: file.assetId,
+                }
+              : {}),
           }
         : null;
     }
@@ -2434,6 +2573,27 @@
           role: request.role,
           token: request.token,
           fixtureToken: file.fixtureToken,
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+        }).catch((error) => {
+          session.port.postMessage({
+            type: "file-response",
+            requestId: request.requestId,
+            ok: false,
+            error: error.message,
+          });
+        });
+      if (file.source === "catalogue-thumbnail")
+        return sendMessage({
+          type: "DELIVER_CATALOGUE_THUMBNAIL_FILE",
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+          platform: request.platform,
+          role: request.role,
+          token: request.token,
+          catalogueId: file.catalogueId,
+          assetId: file.assetId,
           name: file.name,
           size: file.size,
           lastModified: file.lastModified,
@@ -2804,6 +2964,7 @@
         if (
           thumbnailFile &&
           thumbnailFile.source !== "development-fixture" &&
+          thumbnailFile.source !== "catalogue-thumbnail" &&
           targets.some((target) => ["manyvids", "pornhub"].includes(target)) &&
           (targets.includes("manyvids") || value.pornhubMode === "free")
         )
@@ -3199,6 +3360,7 @@
         if (
           thumbnailFile &&
           thumbnailFile.source !== "development-fixture" &&
+          thumbnailFile.source !== "catalogue-thumbnail" &&
           (expected.manyvidsThumbnail || expected.pornhubThumbnail)
         )
           await normalizeThumbnailFile(thumbnailFile);
@@ -3561,6 +3723,10 @@
         if (!row.hidden) relevant++;
       });
       get("#optionalMedia").hidden = !relevant;
+      if (!relevant || thumbnailInput.closest("[data-media-for]").hidden) {
+        catalogueThumbnails.hidden = true;
+        catalogueThumbnailHint.textContent = "";
+      }
       const selected = files.filter(Boolean).length;
       if (selected > optionalSelectionCount) get("#optionalMedia").open = true;
       optionalSelectionCount = selected;
@@ -3571,6 +3737,13 @@
     }
 
     function renderFilePickers() {
+      for (const button of catalogueThumbnailChoices.querySelectorAll(
+        "[data-asset-id]",
+      ))
+        button.setAttribute(
+          "aria-pressed",
+          String(thumbnailFile?.assetId === button.dataset.assetId),
+        );
       for (const [input, file, summary, empty] of [
         [fullInput, fullFile, "fullFileSummary", "Choose the main video"],
         [
@@ -3768,11 +3941,16 @@
     });
     thumbnailInput.addEventListener("change", () => {
       thumbnailFile = thumbnailInput.files?.[0] || null;
+      renderFilePickers();
       get("#manyvidsThumbnailSummary").textContent = fileSummary(
         thumbnailFile,
         "Center-cropped to 640 × 360 for ManyVids and Pornhub",
       );
       if (!activeSession) scheduleMatch();
+    });
+    loadCatalogueThumbnails.addEventListener("click", () => {
+      if (thumbnailCatalogueId)
+        void loadThumbnailChoices(thumbnailCatalogueId, true);
     });
     pornhubInput.addEventListener("change", () => {
       pornhubFile = pornhubInput.files?.[0] || null;

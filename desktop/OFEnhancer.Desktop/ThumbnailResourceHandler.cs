@@ -23,7 +23,7 @@ public sealed record ThumbnailResource(FileStream Stream, string ContentType) : 
 
 public sealed class ThumbnailResourceResolver(CatalogueStore catalogue)
 {
-    private const long MaximumThumbnailBytes = 25 * 1024 * 1024;
+    private const long MaximumThumbnailBytes = 50 * 1024 * 1024;
 
     public ThumbnailResource? Open(Uri uri)
     {

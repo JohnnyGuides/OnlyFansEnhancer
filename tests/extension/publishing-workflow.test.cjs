@@ -2863,7 +2863,16 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
       () => !document.querySelector("#uploadButton").disabled,
     );
     assert.equal(await page.locator("#uploadButton").isEnabled(), true);
-    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        globalThis.consoleMessages.filter(
+          (message) =>
+            message.operation !== "getUploadThumbnailOptions" &&
+            message.operation !== "getUploadThumbnailPreview",
+        ),
+      ),
+      [],
+    );
 
     await page.locator("#changeCatalogueEntry").click();
     await page.locator("#cataloguePicker").waitFor();
@@ -2881,7 +2890,124 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
       await page.locator("#selectedCatalogueReason").textContent(),
       /Episode 3/i,
     );
-    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        globalThis.consoleMessages.filter(
+          (message) =>
+            message.operation !== "getUploadThumbnailOptions" &&
+            message.operation !== "getUploadThumbnailPreview",
+        ),
+      ),
+      [],
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("named catalogue thumbnail variants can be selected for a matched upload", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent(
+      fs
+        .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
+        .replace(/<script[^>]+><\/script>/gi, ""),
+    );
+    await page.evaluate(() => {
+      globalThis.CreatorCatalogueClient = {
+        async loadConfig() {
+          return { endpoint: "https://script.google.com/fixture", secret: "x" };
+        },
+        async getCatalogueSnapshot() {
+          return {
+            status: "snapshot",
+            rows: [
+              {
+                row: 42,
+                id: "catalogue-ep01",
+                releaseDate: "2026-05-08",
+                title: "Catalogue episode 1",
+                description: "Test description",
+                seasonArc: "Catalogue",
+                episode: "1",
+                pornhubLink: "https://pornhub.com/view_video.php?viewkey=abc",
+                onlyfansLink: "https://onlyfans.com/1",
+                fanslyLink: "https://fansly.com/post/1",
+                manyvidsLink: "",
+                fingerprint: "1234abcd",
+              },
+            ],
+            emptyRow: { row: 43, fingerprint: "empty" },
+          };
+        },
+      };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot: () => ({
+          manyvids: {
+            verified: true,
+            scheduled: [],
+            occupiedFridays: [],
+          },
+        }),
+      };
+      globalThis.chrome = {
+        runtime: {
+          lastError: null,
+          sendMessage(message, callback) {
+            if (message.operation === "getUploadThumbnailOptions")
+              return callback({
+                ok: true,
+                result: {
+                  configured: true,
+                  choices: [
+                    {
+                      assetId: "11111111-1111-4111-8111-111111111111",
+                      name: "catalogue-ep01_v01.png",
+                      size: 1234,
+                      type: "image/png",
+                      lastModified: 123456789,
+                    },
+                  ],
+                },
+              });
+            if (message.operation === "getUploadThumbnailPreview")
+              return callback({
+                ok: true,
+                result: {
+                  dataUrl: "data:image/jpeg;base64,/9j/2Q==",
+                },
+              });
+            callback({ ok: true });
+          },
+        },
+      };
+    });
+    await addUploadConsoleScripts(page);
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "Catalogue episode 1.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("test-video"),
+    });
+    await page
+      .locator("#catalogueThumbnailChoices button")
+      .waitFor({ state: "attached" });
+    assert.equal(
+      await page.locator("#catalogueThumbnailHint").textContent(),
+      " · 1 named thumbnails",
+    );
+    await page.locator("#optionalMedia summary").click();
+    await page.locator("#catalogueThumbnailChoices button").click();
+    assert.equal(
+      await page.locator("#manyvidsThumbnailSummary").textContent(),
+      "catalogue-ep01_v01.png",
+    );
+    assert.equal(
+      await page
+        .locator("#catalogueThumbnailChoices button")
+        .getAttribute("aria-pressed"),
+      "true",
+    );
   } finally {
     await browser.close();
   }
@@ -3048,7 +3174,16 @@ test("unverified platform queue keeps Upload disabled and offers explicit upload
       () => !document.querySelector("#uploadButton").disabled,
     );
     assert.equal(await page.locator("#uploadButton").isEnabled(), true);
-    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        globalThis.consoleMessages.filter(
+          (message) =>
+            message.operation !== "getUploadThumbnailOptions" &&
+            message.operation !== "getUploadThumbnailPreview",
+        ),
+      ),
+      [],
+    );
   } finally {
     await browser.close();
   }
@@ -3134,7 +3269,16 @@ test("Upload rechecks the proposed catalogue row and stops before platform mutat
 
     assert.equal(await page.evaluate(() => globalThis.snapshotRequests), 2);
     assert.equal(await page.evaluate(() => globalThis.permissionRequests), 0);
-    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        globalThis.consoleMessages.filter(
+          (message) =>
+            message.operation !== "getUploadThumbnailOptions" &&
+            message.operation !== "getUploadThumbnailPreview",
+        ),
+      ),
+      [],
+    );
   } finally {
     await browser.close();
   }

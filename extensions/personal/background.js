@@ -102,6 +102,8 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
     new Set([
       "getCatalogue",
       "getUploadCatalogueSnapshot",
+      "getUploadThumbnailOptions",
+      "getUploadThumbnailPreview",
       "recordUploadResult",
       "getSubredditPresets",
     ]).has(operation)
@@ -2735,7 +2737,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.65"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.66"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4427,7 +4429,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.65"
+      "upload-hub-0.20.66"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -5478,6 +5480,9 @@ function handleExtensionMessage(message, sender, sendResponse) {
       case "DELIVER_DEVELOPMENT_FILE":
         assertDevelopmentConsole(sender);
         return attachDevelopmentFile(message, sender);
+      case "DELIVER_CATALOGUE_THUMBNAIL_FILE":
+        assertDevelopmentConsole(sender);
+        return attachCatalogueThumbnailFile(message, sender);
       case "GET_SETTINGS":
         return { settings: await getSettings() };
       case "SET_SETTINGS":
@@ -6132,6 +6137,35 @@ async function attachDevelopmentFile(message, sender) {
   )
     throw new Error("Template changed. Click Load Template again.");
   return attachBoundUploadFile({ ...message, filePath: file.filePath });
+}
+
+async function attachCatalogueThumbnailFile(message, sender) {
+  const pending = creatorUploadFileRequests.get(message.requestId);
+  if (
+    !pending ||
+    pending.role !== "thumbnail" ||
+    pending.port.desktop ||
+    !creatorUploadConsolePorts.has(pending.port) ||
+    pending.port.sender?.documentId !== sender.documentId ||
+    pending.port.sender?.tab?.id !== sender.tab?.id
+  )
+    throw new Error(
+      "The selected thumbnail no longer belongs to this upload window.",
+    );
+  const file = await sendDesktopRequest("resolveUploadThumbnail", {
+    catalogueId: message.catalogueId,
+    assetId: message.assetId,
+    name: message.name,
+    size: message.size,
+    lastModified: message.lastModified,
+  });
+  return attachBoundUploadFile({
+    ...message,
+    filePath: file.filePath,
+    name: file.name,
+    size: file.size,
+    lastModified: file.lastModified,
+  });
 }
 
 async function attachDesktopUploadFile(command, ports) {

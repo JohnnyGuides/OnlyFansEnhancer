@@ -908,6 +908,58 @@ button:disabled {
   color: #b8c1ce;
   border-color: transparent;
 }
+.catalogue-thumbnails {
+  margin: 10px 0 18px;
+  padding: 12px;
+  border: 1px solid #303744;
+  border-radius: 12px;
+  background: #151b24;
+}
+.catalogue-thumbnails[hidden] {
+  display: none;
+}
+.catalogue-thumbnails-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.catalogue-thumbnails-heading button {
+  min-height: 36px;
+}
+.catalogue-thumbnail-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.catalogue-thumbnail-choice {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid #3d4859;
+  border-radius: 9px;
+  background: #1b2430;
+  color: #f1f5fa;
+  text-align: left;
+}
+.catalogue-thumbnail-choice[aria-pressed="true"] {
+  border-color: #54c8fb;
+  box-shadow: 0 0 0 1px #54c8fb;
+}
+.catalogue-thumbnail-choice img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #0d1117;
+  border-radius: 5px;
+}
+.catalogue-thumbnail-choice span {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
 input.file-input-native,
 .visually-hidden {
   position: absolute;

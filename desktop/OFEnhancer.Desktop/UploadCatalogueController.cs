@@ -6,6 +6,7 @@ namespace OFEnhancer.Desktop;
 
 internal sealed class UploadCatalogueController(CatalogueStore store, Func<GoogleSubredditPresetSnapshot>? readSubredditPresets=null)
 {
+    private readonly UploadThumbnailCatalogue thumbnails = new(store);
     private static readonly JsonSerializerOptions JsonOptions=new()
     {
         PropertyNamingPolicy=JsonNamingPolicy.CamelCase,
@@ -33,6 +34,8 @@ internal sealed class UploadCatalogueController(CatalogueStore store, Func<Googl
     internal object Handle(string operation,JsonElement payload)
     {
         if(operation=="recordUploadResult") return RecordResult(payload);
+        if(operation=="getUploadThumbnailOptions") return thumbnails.List(payload);
+        if(operation=="getUploadThumbnailPreview") return thumbnails.Preview(payload);
         if(payload.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)
             && (payload.ValueKind!=JsonValueKind.Object || payload.EnumerateObject().Any()))
             throw new GoogleCatalogueControllerException("invalid-payload");

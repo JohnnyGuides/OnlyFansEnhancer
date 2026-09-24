@@ -66,6 +66,11 @@ The optional Pornhub video falls back to the full video, never the teaser. The
 shared PNG/JPEG thumbnail is center-cropped into a temporary 640 × 360 PNG
 before delivery to ManyVids or Pornhub. The adapter verifies Pornhub's acceptance
 before marking the draft prepared. The creator selects one exact content preset.
+For a matched catalogue entry, Upload Hub offers local PNG/JPEG files named with
+that entry's ID (for example `episode-id_v01.png`). The creator chooses one variant;
+no favourite is inferred. The desktop checks the scanned inventory and file hash,
+then performs the same conversion and bound file handoff. Refresh variants rescans
+the configured thumbnail folder; a manually chosen file remains available.
 Only a creator-confirmed exact
 Season/Arc mapping may preselect it; never infer orientation from performers,
 titles, filenames, descriptions, or tags. Existing metadata is preserved while

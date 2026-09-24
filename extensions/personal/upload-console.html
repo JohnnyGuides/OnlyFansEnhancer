@@ -146,7 +146,8 @@
             </div>
             <details id="optionalMedia" class="optional-media">
               <summary>
-                Optional media <span id="optionalMediaCount"></span>
+                Optional media <span id="optionalMediaCount"></span
+                ><span id="catalogueThumbnailHint"></span>
               </summary>
               <div class="file-picker" data-media-for="fansly manyvids">
                 <div class="file-information">
@@ -229,6 +230,29 @@
                   </button>
                 </div>
               </div>
+              <section
+                id="catalogueThumbnails"
+                class="catalogue-thumbnails"
+                hidden
+                aria-label="Catalogue thumbnails"
+              >
+                <div class="catalogue-thumbnails-heading">
+                  <strong>Catalogue thumbnails</strong>
+                  <button id="loadCatalogueThumbnails" type="button">
+                    Refresh variants
+                  </button>
+                </div>
+                <p id="catalogueThumbnailStatus" class="status" role="status">
+                  Choose a confirmed catalogue episode to see its local
+                  thumbnails.
+                </p>
+                <div
+                  id="catalogueThumbnailChoices"
+                  class="catalogue-thumbnail-choices"
+                  role="group"
+                  aria-label="Choose one thumbnail variant"
+                ></div>
+              </section>
               <div class="file-picker" data-media-for="pornhub">
                 <div class="file-information">
                   <label for="uploadPornhubVideo">Pornhub video</label>

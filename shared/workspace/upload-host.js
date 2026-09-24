@@ -27,6 +27,7 @@
           "browserRequest",
           "deliverUploadFile",
           "deliverDevelopmentFixture",
+          "deliverCatalogueThumbnail",
         ].includes(operation)
           ? 2 * 60 * 60_000
           : 30_000,
@@ -68,6 +69,7 @@
           "browserRequest",
           "deliverUploadFile",
           "deliverDevelopmentFixture",
+          "deliverCatalogueThumbnail",
         ]).has(item.operation)
       )
         continue;
@@ -264,23 +266,30 @@
       try {
         await ensureBrowser();
         return await call(
-          file.source === "development-fixture"
-            ? "deliverDevelopmentFixture"
-            : "deliverUploadFile",
+          file.source === "catalogue-thumbnail"
+            ? "deliverCatalogueThumbnail"
+            : file.source === "development-fixture"
+              ? "deliverDevelopmentFixture"
+              : "deliverUploadFile",
           {
             requestId: request.requestId,
             sessionId: request.sessionId,
             platform: request.platform,
             role: request.role,
             token: request.token,
-            ...(file.source === "development-fixture"
-              ? { fixtureToken: file.fixtureToken }
-              : {}),
+            ...(file.source === "catalogue-thumbnail"
+              ? { catalogueId: file.catalogueId, assetId: file.assetId }
+              : file.source === "development-fixture"
+                ? { fixtureToken: file.fixtureToken }
+                : {}),
             name: file.name,
             size: file.size,
             lastModified: file.lastModified,
           },
-          file.source === "development-fixture" ? undefined : [file],
+          file.source === "development-fixture" ||
+            file.source === "catalogue-thumbnail"
+            ? undefined
+            : [file],
         );
       } catch (error) {
         try {
@@ -392,6 +401,7 @@
               "browserRequest",
               "deliverUploadFile",
               "deliverDevelopmentFixture",
+              "deliverCatalogueThumbnail",
             ].includes(item.operation),
           )
         )
