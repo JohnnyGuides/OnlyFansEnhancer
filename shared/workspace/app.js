@@ -393,11 +393,18 @@
     return node;
   }
 
-  function makeThumbnail(assetId, className = "catalogue-thumbnail") {
-    if (!assetId)
+  function makeThumbnail(
+    assetId,
+    className = "catalogue-thumbnail",
+    sourceKey = "",
+  ) {
+    const legacyPoster = globalThis.OFEnhancerLegacyThumbnailIds?.has(sourceKey)
+      ? `./legacy-thumbnails/${sourceKey}.safe.webp`
+      : "";
+    if (!assetId && !legacyPoster)
       return element("div", `${className} thumbnail-placeholder`, "No image");
     const image = element("img", className);
-    image.src = thumbnailUrl(assetId);
+    image.src = assetId ? thumbnailUrl(assetId) : legacyPoster;
     image.alt = "";
     const sizes = {
       "catalogue-thumbnail": [128, 72],
@@ -421,7 +428,13 @@
   function renderCatalogueRow(item) {
     const row = element("li", "catalogue-row");
     row.dataset.catalogueRow = "";
-    row.append(makeThumbnail(item.thumbnailAssetId));
+    row.append(
+      makeThumbnail(
+        item.thumbnailAssetId,
+        "catalogue-thumbnail",
+        item.sourceKey,
+      ),
+    );
 
     const main = element("div", "catalogue-row-main");
     const titleLine = element("div", "catalogue-title-line");
@@ -432,7 +445,9 @@
         `binding-state ${item.thumbnailStatus === "bound" ? "is-bound" : ""}`,
         item.thumbnailStatus === "bound"
           ? "Thumbnail bound"
-          : "Needs thumbnail",
+          : item.thumbnailStatus === "suggested"
+            ? "Choose thumbnail"
+            : "Needs thumbnail",
       ),
     );
     main.append(titleLine);

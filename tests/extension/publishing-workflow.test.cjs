@@ -2838,6 +2838,20 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
           sendMessage(message, callback) {
             if (message.type !== "GET_CREATOR_UPLOAD_RESUMABLE")
               globalThis.consoleMessages.push(structuredClone(message));
+            if (message.operation === "getCatalogueThumbnailPreviews") {
+              callback({
+                ok: true,
+                result: {
+                  previews: Object.fromEntries(
+                    message.payload.catalogueIds.map((id) => [
+                      id,
+                      "data:image/png;base64,iVBORw0KGgo=",
+                    ]),
+                  ),
+                },
+              });
+              return;
+            }
             callback({ ok: true });
           },
         },
@@ -2868,7 +2882,8 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
         globalThis.consoleMessages.filter(
           (message) =>
             message.operation !== "getUploadThumbnailOptions" &&
-            message.operation !== "getUploadThumbnailPreview",
+            message.operation !== "getUploadThumbnailPreview" &&
+            message.operation !== "getCatalogueThumbnailPreviews",
         ),
       ),
       [],
@@ -2876,7 +2891,12 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
 
     await page.locator("#changeCatalogueEntry").click();
     await page.locator("#cataloguePicker").waitFor();
+    await page.locator(".catalogue-card img[src^='data:image/png']").waitFor();
     await page.locator("#catalogueSearch").fill("battlefield");
+    assert.match(
+      await page.locator(".catalogue-card").textContent(),
+      /BATTLEFIELD 6 Angry Sex/,
+    );
     assert.equal(
       await page.locator("#catalogueRow optgroup").getAttribute("label"),
       "Likely matches",
@@ -2895,7 +2915,8 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
         globalThis.consoleMessages.filter(
           (message) =>
             message.operation !== "getUploadThumbnailOptions" &&
-            message.operation !== "getUploadThumbnailPreview",
+            message.operation !== "getUploadThumbnailPreview" &&
+            message.operation !== "getCatalogueThumbnailPreviews",
         ),
       ),
       [],
@@ -3090,7 +3111,14 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
 
     assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     assert.equal(await page.locator("#catalogueRow option").count(), 4);
-    assert.deepEqual(await page.evaluate(() => globalThis.consoleMessages), []);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        globalThis.consoleMessages.filter(
+          (message) => message.operation !== "getCatalogueThumbnailPreviews",
+        ),
+      ),
+      [],
+    );
 
     await page.locator("#catalogueRow").selectOption("row:20");
     await page.locator("#targetManyvids").uncheck();
@@ -3179,7 +3207,8 @@ test("unverified platform queue keeps Upload disabled and offers explicit upload
         globalThis.consoleMessages.filter(
           (message) =>
             message.operation !== "getUploadThumbnailOptions" &&
-            message.operation !== "getUploadThumbnailPreview",
+            message.operation !== "getUploadThumbnailPreview" &&
+            message.operation !== "getCatalogueThumbnailPreviews",
         ),
       ),
       [],
@@ -3274,7 +3303,8 @@ test("Upload rechecks the proposed catalogue row and stops before platform mutat
         globalThis.consoleMessages.filter(
           (message) =>
             message.operation !== "getUploadThumbnailOptions" &&
-            message.operation !== "getUploadThumbnailPreview",
+            message.operation !== "getUploadThumbnailPreview" &&
+            message.operation !== "getCatalogueThumbnailPreviews",
         ),
       ),
       [],

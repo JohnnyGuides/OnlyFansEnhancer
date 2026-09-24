@@ -6,6 +6,24 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class CatalogueMatcherTests
 {
     [TestMethod]
+    public void ExactCatalogueIdFilenameShowsPreviewWithoutSelectingUploadThumbnail()
+    {
+        using TestDirectory temp = new();
+        string root = Directory.CreateDirectory(Path.Combine(temp.Path, "thumbs")).FullName;
+        File.WriteAllBytes(Path.Combine(root, "ashley-04_v01.png"), [1, 3, 3, 7]);
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.ImportSnapshot(MultiSnapshot());
+        store.ScanThumbnails(root);
+
+        CatalogueView view = store.GetCatalogue();
+        CatalogueItemSummary previewed = view.Items.Single(item => item.SourceKey == "ashley-04");
+        Assert.AreEqual("suggested", previewed.ThumbnailStatus);
+        Assert.AreEqual(store.GetAssets().Single().AssetId, previewed.ThumbnailAssetId);
+        Assert.AreEqual("missing", view.Items.Single(item => item.SourceKey == "ashley-05").ThumbnailStatus);
+        Assert.AreEqual(0L, ScalarLong(store.Connection, "SELECT count(*) FROM asset_bindings"));
+    }
+
+    [TestMethod]
     public void FilenameEvidenceRanksCandidatesButNeverCreatesABinding()
     {
         using TestDirectory temp = new();

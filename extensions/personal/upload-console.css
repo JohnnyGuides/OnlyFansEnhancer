@@ -604,6 +604,60 @@ button:disabled {
   gap: 8px;
 }
 
+.catalogue-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  max-height: 350px;
+  overflow-y: auto;
+}
+
+.catalogue-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid #303744;
+  border-radius: 9px;
+  background: #171d27;
+  color: #f1f5fa;
+  text-align: left;
+}
+
+.catalogue-card:hover,
+.catalogue-card[aria-pressed="true"] {
+  border-color: #54c8fb;
+  background: #1b2b37;
+}
+
+.catalogue-card img {
+  flex: none;
+  width: 112px;
+  height: 63px;
+  object-fit: cover;
+  border-radius: 5px;
+  background: #303744;
+}
+
+.catalogue-card-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.catalogue-card-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.catalogue-card-main small {
+  color: #a4adba;
+}
+
 .error {
   color: #ff9fb0;
 }

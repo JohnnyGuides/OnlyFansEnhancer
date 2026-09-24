@@ -12,12 +12,27 @@ internal static partial class CatalogueMatcher
     {
         List<CatalogueItemSummary> items = [.. store.GetItems()];
         Dictionary<string, string> primaryAssets = ReadPrimaryAssets(store.Connection);
+        MediaAssetSummary[] assets = [.. store.GetAssets()];
         for (int index = 0; index < items.Count; index++)
         {
             CatalogueItemSummary item = items[index];
-            items[index] = primaryAssets.TryGetValue(item.ItemId, out string? assetId)
-                ? item with { ThumbnailAssetId = assetId, ThumbnailStatus = "bound" }
-                : item with { ThumbnailAssetId = null, ThumbnailStatus = "missing" };
+            if (primaryAssets.TryGetValue(item.ItemId, out string? assetId))
+                items[index] = item with { ThumbnailAssetId = assetId, ThumbnailStatus = "bound" };
+            else
+            {
+                MediaAssetSummary? preview = assets
+                    .Where(asset => asset.BoundItemId is null
+                        && (Path.GetFileNameWithoutExtension(asset.FileName) == item.SourceKey
+                            || Path.GetFileNameWithoutExtension(asset.FileName).StartsWith(item.SourceKey + "_", StringComparison.Ordinal)))
+                    .OrderBy(asset => Path.GetFileNameWithoutExtension(asset.FileName) == item.SourceKey ? 0 : 1)
+                    .ThenBy(asset => asset.FileName, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                items[index] = item with
+                {
+                    ThumbnailAssetId = preview?.AssetId,
+                    ThumbnailStatus = preview is null ? "missing" : "suggested",
+                };
+            }
         }
 
         List<UnmatchedAssetSummary> unmatched = [];

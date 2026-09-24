@@ -34,6 +34,7 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
                 "The desktop request uses an unsupported protocol."
             );
         if (request.Operation is not (AgentProtocol.GetStatusOperation or "getCatalogue" or "getUploadCatalogueSnapshot"
+            or "getUploadThumbnailOptions" or "getUploadThumbnailPreview" or "getCatalogueThumbnailPreviews"
             or "recordUploadResult" or "getSubredditPresets" or "browserExchange" or "showChromeSetup"
             or "loadDevelopmentFixtures" or "resolveDevelopmentFixture"))
             throw new AgentProtocolException(
@@ -84,7 +85,7 @@ public static class AgentProtocol
 {
     public const int Version = 1;
     public const int MaxFrameBytes = 1_048_576;
-    public const string ProductVersion = "0.20.67";
+    public const string ProductVersion = "0.20.68";
     public const string GetStatusOperation = "getStatus";
 
     internal static JsonSerializerOptions JsonOptions { get; } =

@@ -8,6 +8,18 @@ public sealed class AgentProtocolTests
 {
     private const string RequestId = "9b8dcfd6-30c7-4dc0-b6da-fb4aec1c5a9c";
 
+    [DataTestMethod]
+    [DataRow("getUploadThumbnailOptions")]
+    [DataRow("getUploadThumbnailPreview")]
+    [DataRow("getCatalogueThumbnailPreviews")]
+    public void Parse_accepts_thumbnail_preview_operations(string operation)
+    {
+        AgentRequest request = AgentRequest.Parse(
+            JsonSerializer.Serialize(new { protocolVersion = 1, requestId = RequestId, operation, payload = new { catalogueId = "ashley-04" } })
+        );
+        Assert.AreEqual(operation, request.Operation);
+    }
+
     [TestMethod]
     public void CataloguePayloadAndResultRoundTripWithoutChangingStatusEnvelope()
     {
@@ -93,7 +105,7 @@ public sealed class AgentProtocolTests
         Assert.IsTrue(document.RootElement.GetProperty("ok").GetBoolean());
         Assert.AreEqual(RequestId, document.RootElement.GetProperty("requestId").GetString());
         JsonElement status = document.RootElement.GetProperty("status");
-        Assert.AreEqual("0.20.67", status.GetProperty("productVersion").GetString());
+        Assert.AreEqual("0.20.68", status.GetProperty("productVersion").GetString());
         CollectionAssert.AreEqual(
             new[] { "desktop-shell", "local-file-attach", "native-bridge" },
             status.GetProperty("capabilities").EnumerateArray().Select(value => value.GetString()).ToArray()

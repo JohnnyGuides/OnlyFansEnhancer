@@ -36,6 +36,7 @@ internal sealed class UploadCatalogueController(CatalogueStore store, Func<Googl
         if(operation=="recordUploadResult") return RecordResult(payload);
         if(operation=="getUploadThumbnailOptions") return thumbnails.List(payload);
         if(operation=="getUploadThumbnailPreview") return thumbnails.Preview(payload);
+        if(operation=="getCatalogueThumbnailPreviews") return thumbnails.CataloguePreviews(payload);
         if(payload.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)
             && (payload.ValueKind!=JsonValueKind.Object || payload.EnumerateObject().Any()))
             throw new GoogleCatalogueControllerException("invalid-payload");

@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.67
+AppVersion=0.20.68
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.67
+OutputBaseFilename=OFEnhancer-Setup-0.20.68
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -120,7 +120,7 @@ begin
   ErrorFile := ExpandConstant('{tmp}\ofenhancer-maintenance-error.txt');
   DeleteFile(ErrorFile);
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
-  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.67 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
+  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.68 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
   if LoadStringFromFile(ErrorFile, ErrorText) then MaintenanceError := UTF8Decode(ErrorText);
   if not Result then MaintenanceError := SysErrorMessage(ExitCode);
@@ -281,7 +281,7 @@ var
 begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.67',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.68',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
       RaiseException('The Windows package was copied, but verification or durable Chrome handoff failed. Run this installer again to resume.');
 end;

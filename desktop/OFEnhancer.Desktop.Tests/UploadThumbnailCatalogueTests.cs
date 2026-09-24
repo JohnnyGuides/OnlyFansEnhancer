@@ -54,6 +54,10 @@ public sealed class UploadThumbnailCatalogueTests
             });
             JsonElement preview = JsonSerializer.SerializeToElement(catalogue.Preview(request));
             StringAssert.StartsWith(preview.GetProperty("dataUrl").GetString()!, "data:image/jpeg;base64,");
+            JsonElement cataloguePreview = JsonSerializer.SerializeToElement(catalogue.CataloguePreviews(
+                JsonSerializer.SerializeToElement(new { catalogueIds = new[] { "episode-one", "episode-two" } })));
+            StringAssert.StartsWith(cataloguePreview.GetProperty("previews").GetProperty("episode-one").GetString()!, "data:image/jpeg;base64,");
+            StringAssert.StartsWith(cataloguePreview.GetProperty("previews").GetProperty("episode-two").GetString()!, "data:image/jpeg;base64,");
             FileInfo converted = catalogue.ConvertSelected(request);
             try
             {

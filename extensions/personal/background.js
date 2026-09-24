@@ -104,6 +104,7 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
       "getUploadCatalogueSnapshot",
       "getUploadThumbnailOptions",
       "getUploadThumbnailPreview",
+      "getCatalogueThumbnailPreviews",
       "recordUploadResult",
       "getSubredditPresets",
     ]).has(operation)
@@ -2737,7 +2738,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.67"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.68"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4429,7 +4430,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.67"
+      "upload-hub-0.20.68"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",

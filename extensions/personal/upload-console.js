@@ -808,6 +808,8 @@
     const cataloguePicker = get("#cataloguePicker");
     const catalogueSearch = get("#catalogueSearch");
     const catalogueRow = get("#catalogueRow");
+    const catalogueCards = get("#catalogueCards");
+    const showMoreCatalogue = get("#showMoreCatalogue");
     const showAllCatalogue = get("#showAllCatalogue");
     const refreshCatalogue = get("#refreshCatalogue");
     const selectedCatalogueReason = get("#selectedCatalogueReason");
@@ -866,6 +868,10 @@
     let currentSnapshot = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
+    let catalogueCardLimit = 18;
+    let catalogueCardRevision = 0;
+    let cataloguePreviewTimer = null;
+    const cataloguePreviewCache = new Map();
     let manualTargets = null;
     let uploadWithoutSheet = catalogueAssociation?.value === "later";
     let activeSession = null;
@@ -1795,6 +1801,71 @@
       else if (Number.isInteger(selectedCatalogueRow)) {
         catalogueRow.value = `row:${selectedCatalogueRow}`;
       }
+      const revision = ++catalogueCardRevision;
+      clearTimeout(cataloguePreviewTimer);
+      catalogueCards.replaceChildren();
+      const cards = visible.slice(0, catalogueCardLimit);
+      const pendingImages = new Map();
+      showMoreCatalogue.hidden = visible.length <= cards.length;
+      for (const candidate of cards) {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "catalogue-card";
+        card.setAttribute(
+          "aria-pressed",
+          String(candidate.row === selectedCatalogueRow),
+        );
+        const image = document.createElement("img");
+        image.alt = "";
+        image.width = 112;
+        image.height = 63;
+        image.loading = "lazy";
+        const main = document.createElement("span");
+        main.className = "catalogue-card-main";
+        const name = document.createElement("strong");
+        name.textContent = candidate.title || candidate.id;
+        const detail = document.createElement("small");
+        detail.textContent = [candidate.releaseDate, candidate.seasonArc]
+          .filter(Boolean)
+          .join(" · ");
+        main.append(name, detail);
+        card.append(image, main);
+        card.addEventListener("click", () => {
+          catalogueRow.value = `row:${candidate.row}`;
+          catalogueRow.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        catalogueCards.append(card);
+        const id = candidate.id;
+        if (!id || !/^[a-z0-9-]{1,200}$/.test(id)) continue;
+        if (cataloguePreviewCache.has(id)) {
+          if (cataloguePreviewCache.get(id))
+            image.src = cataloguePreviewCache.get(id);
+          continue;
+        }
+        pendingImages.set(id, image);
+      }
+      if (pendingImages.size)
+        cataloguePreviewTimer = setTimeout(() => {
+          if (revision !== catalogueCardRevision) return;
+          const ids = [...pendingImages.keys()];
+          for (let index = 0; index < ids.length; index += 18) {
+            const batch = ids.slice(index, index + 18);
+            void sendMessage({
+              type: "OFENHANCER_APP_REQUEST",
+              operation: "getCatalogueThumbnailPreviews",
+              payload: { catalogueIds: batch },
+            })
+              .then(({ result }) => {
+                for (const id of batch) {
+                  const dataUrl = result?.previews?.[id] || null;
+                  cataloguePreviewCache.set(id, dataUrl);
+                  if (revision === catalogueCardRevision && dataUrl)
+                    pendingImages.get(id).src = dataUrl;
+                }
+              })
+              .catch(() => {});
+          }
+        }, 120);
       cataloguePicker.hidden = false;
     }
 
@@ -4050,8 +4121,18 @@
       });
     }
     uploadButton.addEventListener("click", () => startUpload());
-    catalogueSearch.addEventListener("input", () => renderPicker());
-    showAllCatalogue.addEventListener("change", () => renderPicker());
+    catalogueSearch.addEventListener("input", () => {
+      catalogueCardLimit = 18;
+      renderPicker();
+    });
+    showAllCatalogue.addEventListener("change", () => {
+      catalogueCardLimit = 18;
+      renderPicker();
+    });
+    showMoreCatalogue.addEventListener("click", () => {
+      catalogueCardLimit += 18;
+      renderPicker();
+    });
     catalogueRow.addEventListener("change", () => {
       const value = catalogueRow.value;
       if (!value) return;

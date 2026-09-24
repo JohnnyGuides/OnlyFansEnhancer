@@ -41,6 +41,73 @@ internal sealed class UploadThumbnailCatalogue(CatalogueStore store)
     internal object Preview(JsonElement payload)
     {
         MediaAssetSummary asset = Select(payload);
+        return PreviewAsset(asset);
+    }
+
+    internal object CataloguePreviews(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("catalogueIds", out JsonElement ids)
+            || ids.ValueKind != JsonValueKind.Array
+            || ids.GetArrayLength() is < 1 or > 18)
+            throw new InvalidOperationException("invalid-thumbnail-catalogue-ids");
+        Dictionary<string, string?> previews = new(StringComparer.Ordinal);
+        int totalLength = 0;
+        foreach (JsonElement id in ids.EnumerateArray())
+        {
+            if (id.ValueKind != JsonValueKind.String)
+                throw new InvalidOperationException("invalid-thumbnail-catalogue-ids");
+            string sourceKey = ReadSourceKey(JsonSerializer.SerializeToElement(new { catalogueId = id.GetString() }));
+            if (previews.ContainsKey(sourceKey)) continue;
+            string? dataUrl;
+            try { dataUrl = PreviewCatalogueItem(sourceKey); }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException)
+            { dataUrl = null; }
+            if (dataUrl is not null && totalLength + dataUrl.Length <= 700_000)
+            {
+                previews[sourceKey] = dataUrl;
+                totalLength += dataUrl.Length;
+            }
+            else previews[sourceKey] = null;
+        }
+        return new { previews };
+    }
+
+    private string? PreviewCatalogueItem(string sourceKey)
+    {
+        CatalogueItemSummary? item = store.GetItems().SingleOrDefault(candidate => candidate.SourceKey == sourceKey);
+        if (item is null) throw new InvalidOperationException("thumbnail-catalogue-item-not-found");
+        MediaAssetSummary? asset = store.GetAssets()
+            .Where(candidate => candidate.BoundItemId == item.ItemId
+                || candidate.BoundItemId is null
+                    && (Path.GetFileNameWithoutExtension(candidate.FileName) == sourceKey
+                        || Path.GetFileNameWithoutExtension(candidate.FileName).StartsWith(sourceKey + "_", StringComparison.Ordinal)))
+            .OrderBy(candidate => candidate.BoundItemId == item.ItemId ? 0
+                : Path.GetFileNameWithoutExtension(candidate.FileName) == sourceKey ? 1 : 2)
+            .ThenBy(candidate => candidate.FileName, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (asset is not null)
+        {
+            if (Path.GetExtension(asset.FileName).Equals(".webp", StringComparison.OrdinalIgnoreCase))
+            {
+                using ThumbnailResource source = Open(asset.AssetId);
+                if (source.Stream.Length > 128_000) return null;
+                using MemoryStream output = new();
+                source.Stream.CopyTo(output);
+                return "data:image/webp;base64," + Convert.ToBase64String(output.ToArray());
+            }
+            JsonElement preview = JsonSerializer.SerializeToElement(PreviewAsset(asset));
+            return preview.GetProperty("dataUrl").GetString();
+        }
+        string path = Path.Combine(AppContext.BaseDirectory, "app", "legacy-thumbnails", sourceKey + ".safe.webp");
+        if (!File.Exists(path)) return null;
+        byte[] bytes = File.ReadAllBytes(path);
+        if (bytes.Length is < 1 or > 128_000) return null;
+        return "data:image/webp;base64," + Convert.ToBase64String(bytes);
+    }
+
+    private object PreviewAsset(MediaAssetSummary asset)
+    {
         using ThumbnailResource source = Open(asset.AssetId);
         using Image image = Image.FromStream(source.Stream, useEmbeddedColorManagement: true);
         if (image.Width is < 1 or > 10000 || image.Height is < 1 or > 10000)
