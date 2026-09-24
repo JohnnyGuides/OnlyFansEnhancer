@@ -127,6 +127,29 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public void RejectedDownloadedSecretDoesNotReplaceSavedCredential()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        using TestDirectory temp = new();
+        GoogleDesktopClientStore clientStore = new(Path.Combine(temp.Path, "client.dat"));
+        clientStore.Save(new(ClientId, "working-secret"));
+        string file = Path.Combine(temp.Path, "old-download.json");
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            installed = new { client_id = ClientId, client_secret = "stale-secret" }
+        }));
+        using GoogleCatalogueController controller = new(harness.Settings, harness.Store, harness.Vault,
+            (_, _, _) => throw new AssertFailedException(), (_, _) => harness.Session,
+            clientStore: clientStore,
+            validateClientSecret: _ => Task.FromException(new GoogleOAuthException("google_client_secret_rejected")));
+
+        GoogleCatalogueControllerException error = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => controller.ImportGoogleClientConfiguration(() => file));
+        Assert.AreEqual("google-client-secret-rejected", error.Code);
+        Assert.AreEqual("working-secret", clientStore.Load(ClientId)!.ClientSecret);
+    }
+
+    [TestMethod]
     public void ReadOnlyImportAddsLocalRowsWithoutMarkingSyncReadyOrCreatingBindings()
     {
         using ControllerHarness harness = new();

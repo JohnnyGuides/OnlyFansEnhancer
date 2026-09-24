@@ -121,7 +121,7 @@ public sealed class AgentPipeTests
 
         Assert.IsTrue(response.Ok);
         Assert.AreEqual(request.RequestId.ToString(), response.RequestId);
-        Assert.AreEqual("0.20.64", response.Status?.ProductVersion);
+        Assert.AreEqual("0.20.65", response.Status?.ProductVersion);
         CollectionAssert.AreEqual(
             new[] { "desktop-shell", "local-file-attach", "native-bridge" },
             response.Status?.Capabilities.ToArray()

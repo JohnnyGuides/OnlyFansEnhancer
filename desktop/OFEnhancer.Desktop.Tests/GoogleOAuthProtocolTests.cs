@@ -144,6 +144,29 @@ public sealed class GoogleOAuthProtocolTests
     }
 
     [TestMethod]
+    public async Task StaleDesktopSecretIsDistinguishedAndRejectedBeforeImport()
+    {
+        using HttpClient staleClient = new(new RecordingHandler(
+            """{"error":"invalid_client","error_description":"The provided client secret is invalid."}""",
+            HttpStatusCode.Unauthorized));
+        GoogleOAuthException exchange = await Assert.ThrowsExceptionAsync<GoogleOAuthException>(() =>
+            GoogleOAuthProtocol.ExchangeCodeAsync(staleClient, ClientId, "code", RedirectUri,
+                "verifier", CancellationToken.None, "old-secret"));
+        Assert.AreEqual("google_client_secret_rejected", exchange.ErrorCode);
+
+        GoogleOAuthException probe = await Assert.ThrowsExceptionAsync<GoogleOAuthException>(() =>
+            GoogleOAuthProtocol.ValidateClientSecretAsync(staleClient, ClientId, "old-secret", CancellationToken.None));
+        Assert.AreEqual("google_client_secret_rejected", probe.ErrorCode);
+
+        RecordingHandler validHandler = new("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest);
+        using HttpClient validClient = new(validHandler);
+        await GoogleOAuthProtocol.ValidateClientSecretAsync(validClient, ClientId, "current-secret", CancellationToken.None);
+        Dictionary<string, string> form = ParseForm(validHandler.Body);
+        Assert.AreEqual("current-secret", form["client_secret"]);
+        Assert.IsTrue(form["code"].StartsWith("ofenhancer-invalid-code-", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void DiagnosticsNeverRevealCodesVerifiersOrTokens()
     {
         GoogleOAuthStart start = GoogleOAuthProtocol.CreateStart(ClientId, RedirectUri);
@@ -174,7 +197,7 @@ public sealed class GoogleOAuthProtocolTests
         .Replace('+', '-')
         .Replace('/', '_');
 
-    private sealed class RecordingHandler(string responseBody) : HttpMessageHandler
+    private sealed class RecordingHandler(string responseBody, HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
     {
         public Uri? RequestUri { get; private set; }
         public HttpMethod? Method { get; private set; }
@@ -185,7 +208,7 @@ public sealed class GoogleOAuthProtocolTests
             RequestUri = request.RequestUri;
             Method = request.Method;
             Body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-            return new(HttpStatusCode.OK)
+            return new(statusCode)
             {
                 RequestMessage = request,
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")

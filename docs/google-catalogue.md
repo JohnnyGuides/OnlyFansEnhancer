@@ -68,6 +68,13 @@ of **Work → 2026 Video Catalogue** then succeeded. The installed app now has i
 client configuration; check that encrypted store before requesting another
 secret. The verification used a separate local catalogue, not the owner's live
 catalogue database, and did not write to Google Sheets.
+On 2026-09-24, importing the original 2026-09-08 downloaded client JSON replaced
+the working DPAPI secret. Google's token endpoint rejected it with `invalid_client`.
+Do not re-import that old JSON. Supply a current secret for the same OAuth client
+through Developer setup; never paste it into a chat, log, URL, or repository file.
+The import now verifies a client secret with Google before replacing the saved
+credential, and a rejected secret produces a specific recovery message.
+
 The workbook visibly includes **2026 Video Catalogue** and **2026 uploads**;
 do not mistake the workbook picker for worksheet selection or change either tab
 just to complete a connection test.

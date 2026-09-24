@@ -48,6 +48,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     private readonly CatalogueStore _store;
     private readonly IGoogleTokenVault _tokenVault;
     private readonly GoogleDesktopClientStore? _clientStore;
+    private readonly Func<GoogleDesktopClientCredential, Task>? _validateClientSecret;
     private bool _importingClient;
     private readonly Func<
         string,
@@ -82,13 +83,15 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         Func<string, IGoogleTokenVault, Action<GoogleConnectionCompletion>, IGoogleConnectionSession> connectionFactory,
         Func<string, GoogleConnectionCompletion, IGoogleCatalogueSession> sessionFactory,
         Func<Action, Task>? completionDispatcher = null,
-        GoogleDesktopClientStore? clientStore = null
+        GoogleDesktopClientStore? clientStore = null,
+        Func<GoogleDesktopClientCredential, Task>? validateClientSecret = null
     )
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _tokenVault = tokenVault ?? throw new ArgumentNullException(nameof(tokenVault));
         _clientStore = clientStore;
+        _validateClientSecret = validateClientSecret;
         _connectionFactory = connectionFactory
             ?? throw new ArgumentNullException(nameof(connectionFactory));
         _sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory));
@@ -140,7 +143,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 );
             },
             completionDispatcher,
-            clientStore
+            clientStore,
+            credential => GoogleOAuthProtocol.ValidateClientSecretAsync(
+                httpClient, credential.ClientId, credential.ClientSecret, CancellationToken.None)
         )
     {
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -223,6 +228,18 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             string? path = chooseFile();
             if (path is null) return getGoogleCatalogueStatus();
             GoogleDesktopClientCredential credential = GoogleDesktopClientStore.ReadFile(path);
+            lock (_gate)
+            {
+                DesktopSettings current = _settings.Load();
+                if (current.GoogleOAuthClientId is not null
+                    && !string.Equals(current.GoogleOAuthClientId, credential.ClientId, StringComparison.Ordinal))
+                    throw new GoogleCatalogueControllerException("google-client-configuration-mismatch");
+            }
+            try { if (_validateClientSecret is not null) _validateClientSecret(credential).GetAwaiter().GetResult(); }
+            catch (GoogleOAuthException error)
+            { throw new GoogleCatalogueControllerException(error.ErrorCode.Replace('_', '-')); }
+            catch (Exception)
+            { throw new GoogleCatalogueControllerException("google-client-configuration-check-failed"); }
             lock (_gate)
             {
                 ThrowIfDisposed();

@@ -804,6 +804,20 @@
         label: "Finish Google setup",
         action: "setup",
       };
+    if (code === "google-client-secret-rejected")
+      return {
+        message:
+          "Google rejected the saved OAuth client secret. Import a current Desktop client setup file; an older downloaded JSON may contain a disabled secret.",
+        label: "Import current setup",
+        action: "setup",
+      };
+    if (code === "google-client-configuration-check-failed")
+      return {
+        message:
+          "Google could not verify the setup file. The saved credential was not replaced. Check your connection and try the import again.",
+        label: "Check setup",
+        action: "setup",
+      };
     if (code === "workbook-profile-not-found")
       return {
         message:
@@ -1254,6 +1268,13 @@
       googleSettingStatus.textContent = `Connected to Google · ${googleStatusView.workbookName || "Your workbook"}${googleStatusView.sheetName ? ` — ${googleStatusView.sheetName}` : ""}`;
       googleSettingStatus.dataset.state = "connected";
       setGoogleSettingsAction("Open catalogue", "catalogue");
+    } else if (
+      googleStatusView?.errorCode === "google-client-secret-rejected"
+    ) {
+      googleSettingStatus.textContent =
+        "Google rejected the saved client secret";
+      googleSettingStatus.dataset.state = "error";
+      setGoogleSettingsAction("Import current setup", "setup");
     } else if (
       googleStatusView?.errorCode === "authorization_timed_out" ||
       googleStatusView?.errorCode === "google-authorization-required" ||
@@ -1791,9 +1812,13 @@
         "google-client-configuration-invalid":
           "Choose the Desktop app JSON file downloaded from Google Cloud.",
         "google-client-configuration-mismatch":
-          "That setup file belongs to a different Google app. Choose the file for OFEnhancer.",
+          "This file has a different Google client ID. Save that client ID in Developer setup first, then import this file.",
         "google-client-configuration-save-failed":
           "OFEnhancer could not save the setup file. Try again.",
+        "google-client-secret-rejected":
+          "Google rejected this file's client secret. The saved credential was not replaced. Download a current setup file.",
+        "google-client-configuration-check-failed":
+          "Google could not verify this setup file. The saved credential was not replaced. Check your connection and try again.",
       };
       googleSetupImportStatus.textContent =
         messages[error?.message] ||

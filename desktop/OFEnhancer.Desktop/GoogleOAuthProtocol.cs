@@ -122,6 +122,8 @@ internal static partial class GoogleOAuthProtocol
                     StringComparison.Ordinal
                 ))
             {
+                if (clientSecret is not null && IsGoogleError(body, "invalid_client"))
+                    throw new GoogleOAuthException("google_client_secret_rejected");
                 throw new GoogleOAuthException("token_exchange_failed");
             }
 
@@ -149,6 +151,60 @@ internal static partial class GoogleOAuthProtocol
         catch
         {
             throw new GoogleOAuthException("invalid_token_response");
+        }
+    }
+
+    internal static async Task ValidateClientSecretAsync(
+        HttpClient httpClient,
+        string clientId,
+        string clientSecret,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ValidateClient(clientId, new Uri("http://127.0.0.1:53123/"));
+        if (string.IsNullOrWhiteSpace(clientSecret))
+            throw new GoogleOAuthException("google_client_configuration_invalid");
+
+        // A deliberately invalid code tests whether Google accepts this client credential.
+        // Never replace a working DPAPI credential with an old downloaded JSON file.
+        using FormUrlEncodedContent content = new(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = "ofenhancer-invalid-code-" + RandomBase64Url(24),
+            ["client_id"] = clientId,
+            ["client_secret"] = clientSecret,
+            ["redirect_uri"] = "http://127.0.0.1:53123/",
+            ["code_verifier"] = RandomBase64Url(64)
+        });
+        using HttpRequestMessage request = new(HttpMethod.Post, TokenEndpoint) { Content = content };
+        using HttpResponseMessage response = await httpClient.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken
+        ).ConfigureAwait(false);
+        byte[] body = await ReadBoundedAsync(response.Content, MaximumTokenResponseLength, cancellationToken)
+            .ConfigureAwait(false);
+        if (!string.Equals(response.RequestMessage?.RequestUri?.GetLeftPart(UriPartial.Authority),
+                TokenEndpoint.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal))
+            throw new GoogleOAuthException("google_client_configuration_check_failed");
+        if (IsGoogleError(body, "invalid_client"))
+            throw new GoogleOAuthException("google_client_secret_rejected");
+        if (response.StatusCode != System.Net.HttpStatusCode.BadRequest
+            || !IsGoogleError(body, "invalid_grant"))
+            throw new GoogleOAuthException("google_client_configuration_check_failed");
+    }
+
+    private static bool IsGoogleError(byte[] body, string expected)
+    {
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(body, new() { MaxDepth = 8 });
+            return json.RootElement.TryGetProperty("error", out JsonElement error)
+                && error.ValueKind == JsonValueKind.String
+                && string.Equals(error.GetString(), expected, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 

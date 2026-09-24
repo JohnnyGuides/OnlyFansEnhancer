@@ -228,7 +228,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.64",
+            productVersion: "0.20.65",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -1527,6 +1527,14 @@ async function testGoogleErrorRecovery(browser, port) {
       disconnect: true,
     },
     {
+      code: "google-client-secret-rejected",
+      message:
+        "Google rejected the saved OAuth client secret. Import a current Desktop client setup file; an older downloaded JSON may contain a disabled secret.",
+      action: "Import current setup",
+      focus: "#importGoogleSetup",
+      disconnect: false,
+    },
+    {
       code: "authorization_timed_out",
       message:
         "Google sign-in took longer than 20 minutes. The local callback closed; start a new connection and use its newest browser tab.",
@@ -1613,8 +1621,8 @@ async function testGoogleErrorRecovery(browser, port) {
       await action.click();
       assert.equal(await page.locator("#googleSetup").getAttribute("open"), "");
       await page.waitForFunction(
-        () =>
-          document.querySelector("#googleClientId") === document.activeElement,
+        (focus) => document.querySelector(focus) === document.activeElement,
+        fixture.focus || "#googleClientId",
       );
       continue;
     }

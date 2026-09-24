@@ -85,6 +85,9 @@ and the existing Cloud client. A public client ID plus PKCE is not sufficient:
 Google requires this Desktop client's secret. Cloud no longer reveals existing
 secrets. Preserve this client and store imported credentials with DPAPI; commit
 recovery knowledge, never secrets or tokens. The owner's test workbook is **Work**.
+The original client JSON dated 2026-09-08 contains a rejected secret. Do not
+re-import it: it replaced a working DPAPI credential on 2026-09-24 and Google
+returned `invalid_client`. Verify any replacement secret before saving it.
 
 The owner trusts the existing OFEnhancer Personal Google OAuth application and
 authorizes the agent to complete its routine Google sign-in, consent, and Work
