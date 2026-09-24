@@ -104,7 +104,7 @@ function Normalize-OptionalSetting($Property, [string]$Pattern) {
 
 function Read-ExistingSettings([string]$SettingsPath) {
   if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
-    return [pscustomobject]@{ GoogleOAuthClientId = $null; BrowserId = $null }
+    return [pscustomobject]@{ GoogleOAuthClientId = $null; BrowserId = $null; GoogleSheetUrl = $null }
   }
   try {
     $settingsFile = Get-Item -LiteralPath $SettingsPath
@@ -115,7 +115,7 @@ function Read-ExistingSettings([string]$SettingsPath) {
     $json = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
     $payload = $json | ConvertFrom-Json -ErrorAction Stop
     if ($null -eq $payload) {
-      return [pscustomobject]@{ GoogleOAuthClientId = $null; BrowserId = $null }
+      return [pscustomobject]@{ GoogleOAuthClientId = $null; BrowserId = $null; GoogleSheetUrl = $null }
     }
     if ($payload -isnot [System.Management.Automation.PSCustomObject]) {
       throw "invalid"
@@ -125,7 +125,8 @@ function Read-ExistingSettings([string]$SettingsPath) {
       if (
         $property.Name -cne "extensionId" -and
         $property.Name -cne "googleOAuthClientId" -and
-        $property.Name -cne "browserId"
+        $property.Name -cne "browserId" -and
+        $property.Name -cne "googleSheetUrl"
       ) {
         throw "invalid"
       }
@@ -143,7 +144,11 @@ function Read-ExistingSettings([string]$SettingsPath) {
       Select-Object -First 1
     $browserId = Normalize-OptionalSetting $browserProperty '^(?i:system|chrome|edge|firefox|brave|opera|vivaldi)$'
     if ($null -ne $browserId) { $browserId = $browserId.ToLowerInvariant() }
-    return [pscustomobject]@{ GoogleOAuthClientId = $googleOAuthClientId; BrowserId = $browserId }
+    $sheetProperty = $properties |
+      Where-Object { $_.Name -ceq "googleSheetUrl" } |
+      Select-Object -First 1
+    $googleSheetUrl = Normalize-OptionalSetting $sheetProperty '^https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]{1,256}/edit(?:#gid=[0-9]{1,10})?$'
+    return [pscustomobject]@{ GoogleOAuthClientId = $googleOAuthClientId; BrowserId = $browserId; GoogleSheetUrl = $googleSheetUrl }
   } catch {
     throw "Existing settings.json is invalid. Registration stopped before making changes."
   }
@@ -154,6 +159,7 @@ function Write-SettingsAtomically(
   [string]$ExtensionId,
   [AllowNull()]$GoogleOAuthClientId,
   [AllowNull()]$BrowserId,
+  [AllowNull()]$GoogleSheetUrl,
   [scriptblock]$Commit
 ) {
   $settings = [ordered]@{ extensionId = $ExtensionId }
@@ -162,6 +168,9 @@ function Write-SettingsAtomically(
   }
   if ($null -ne $BrowserId) {
     $settings.browserId = $BrowserId
+  }
+  if ($null -ne $GoogleSheetUrl) {
+    $settings.googleSheetUrl = $GoogleSheetUrl
   }
   $utf8 = [System.Text.UTF8Encoding]::new($false)
   $bytes = $utf8.GetBytes(($settings | ConvertTo-Json -Compress))
@@ -223,6 +232,7 @@ Write-SettingsAtomically `
   $ExtensionId `
   $effectiveGoogleOAuthClientId `
   $existingSettings.BrowserId `
+  $existingSettings.GoogleSheetUrl `
   $SettingsCommit
 
 $nativeManifestPath = Join-Path $root "native\com.johnnyguides.ofenhancer.json"

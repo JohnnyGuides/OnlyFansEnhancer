@@ -222,7 +222,7 @@ public sealed class AppConfigurationTests
         );
         File.WriteAllText(
             settingsPath,
-            $$"""{"extensionId":"{{ExtensionId}}","browserId":"firefox"}"""
+            $$"""{"extensionId":"{{ExtensionId}}","browserId":"firefox","googleSheetUrl":"https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696"}"""
         );
         try
         {
@@ -232,6 +232,10 @@ public sealed class AppConfigurationTests
             Assert.AreEqual(ExtensionId, saved.ExtensionId);
             Assert.AreEqual(GoogleClientId, saved.GoogleOAuthClientId);
             Assert.AreEqual("firefox", saved.BrowserId);
+            Assert.AreEqual(
+                "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696",
+                saved.GoogleSheetUrl
+            );
         }
         finally
         {

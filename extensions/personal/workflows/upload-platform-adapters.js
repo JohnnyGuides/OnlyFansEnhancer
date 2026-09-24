@@ -3377,7 +3377,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.62",
+    revision: "upload-hub-0.20.63",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

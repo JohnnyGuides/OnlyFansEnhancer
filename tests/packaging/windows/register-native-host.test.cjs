@@ -231,6 +231,8 @@ test("registration preserves every supported browser preference and existing Goo
           extensionId: previousExtensionId,
           googleOAuthClientId,
           browserId,
+          googleSheetUrl:
+            "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696",
         }),
       );
       const result = runRegistration({
@@ -248,6 +250,8 @@ test("registration preserves every supported browser preference and existing Goo
       assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, "utf8")), {
         extensionId,
         googleOAuthClientId,
+        googleSheetUrl:
+          "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696",
         ...(browserId == null
           ? {}
           : { browserId: browserId.trim().toLowerCase() }),
@@ -273,6 +277,7 @@ test("registration rejects malformed or unknown settings before mutation", () =>
       }),
       "[]",
       JSON.stringify({ googleOAuthClientId: "invalid" }),
+      JSON.stringify({ googleSheetUrl: "https://example.com/not-a-sheet" }),
       ...[
         "safari",
         "",

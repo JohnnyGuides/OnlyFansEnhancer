@@ -19,7 +19,8 @@ public static partial class AppConfiguration
         DesktopSettings merged = new(
             current.ExtensionId ?? installerValues.ExtensionId,
             current.GoogleOAuthClientId ?? installerValues.GoogleOAuthClientId,
-            current.BrowserId ?? installerValues.BrowserId
+            current.BrowserId ?? installerValues.BrowserId,
+            current.GoogleSheetUrl ?? installerValues.GoogleSheetUrl
         );
         if (merged != current) settings.Save(merged);
     }
