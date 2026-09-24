@@ -74,6 +74,14 @@ Do not re-import that old JSON. Supply a current secret for the same OAuth clien
 through Developer setup; never paste it into a chat, log, URL, or repository file.
 The import now verifies a client secret with Google before replacing the saved
 credential, and a rejected secret produces a specific recovery message.
+Later on 2026-09-24, the owner created a new secret for the same Desktop client.
+OFEnhancer v0.20.65 validated and imported it into the current-user DPAPI store,
+completed the Google sign-in and Work selection, and imported 136 videos from
+**2026 Video Catalogue** into the owner's local catalogue. The connection and
+imported rows remained available after restarting the app. The import flagged
+one link cell for review and preserved its source value. It made no Google Sheet
+changes. The workbook still does not match the optional reviewed write-back
+layout; this does not prevent read-only catalogue import.
 
 The workbook visibly includes **2026 Video Catalogue** and **2026 uploads**;
 do not mistake the workbook picker for worksheet selection or change either tab

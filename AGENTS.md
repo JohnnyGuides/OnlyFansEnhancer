@@ -88,6 +88,11 @@ recovery knowledge, never secrets or tokens. The owner's test workbook is **Work
 The original client JSON dated 2026-09-08 contains a rejected secret. Do not
 re-import it: it replaced a working DPAPI credential on 2026-09-24 and Google
 returned `invalid_client`. Verify any replacement secret before saving it.
+On 2026-09-24, the owner supplied a newly created secret for that same Desktop
+client. OFEnhancer v0.20.65 validated and imported it into DPAPI, completed the
+Google sign-in and Work picker, and imported 136 videos from **2026 Video
+Catalogue**. The Google connection and local catalogue survived an app restart.
+Check the existing DPAPI configuration before requesting another secret.
 
 The owner trusts the existing OFEnhancer Personal Google OAuth application and
 authorizes the agent to complete its routine Google sign-in, consent, and Work
