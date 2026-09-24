@@ -2926,7 +2926,7 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
   }
 });
 
-test("named catalogue thumbnail variants can be selected for a matched upload", async () => {
+test("one named thumbnail is selected automatically and new variants restore the choice", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -2972,6 +2972,15 @@ test("named catalogue thumbnail variants can be selected for a matched upload", 
           },
         }),
       };
+      globalThis.testThumbnailChoices = [
+        {
+          assetId: "11111111-1111-4111-8111-111111111111",
+          name: "catalogue-ep01_v01.png",
+          size: 1234,
+          type: "image/png",
+          lastModified: 123456789,
+        },
+      ];
       globalThis.chrome = {
         runtime: {
           lastError: null,
@@ -2981,15 +2990,7 @@ test("named catalogue thumbnail variants can be selected for a matched upload", 
                 ok: true,
                 result: {
                   configured: true,
-                  choices: [
-                    {
-                      assetId: "11111111-1111-4111-8111-111111111111",
-                      name: "catalogue-ep01_v01.png",
-                      size: 1234,
-                      type: "image/png",
-                      lastModified: 123456789,
-                    },
-                  ],
+                  choices: globalThis.testThumbnailChoices,
                 },
               });
             if (message.operation === "getUploadThumbnailPreview")
@@ -3013,21 +3014,48 @@ test("named catalogue thumbnail variants can be selected for a matched upload", 
     await page
       .locator("#catalogueThumbnailChoices button")
       .waitFor({ state: "attached" });
+    await page.locator("#catalogueThumbnails").waitFor({ state: "visible" });
     assert.equal(
       await page.locator("#catalogueThumbnailHint").textContent(),
       " · 1 named thumbnails",
     );
-    await page.locator("#optionalMedia summary").click();
-    await page.locator("#catalogueThumbnailChoices button").click();
     assert.equal(
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       "catalogue-ep01_v01.png",
+    );
+    assert.match(
+      await page.locator("#catalogueThumbnailStatus").textContent(),
+      /Automatically selected/,
     );
     assert.equal(
       await page
         .locator("#catalogueThumbnailChoices button")
         .getAttribute("aria-pressed"),
       "true",
+    );
+    await page.evaluate(() =>
+      globalThis.testThumbnailChoices.push({
+        assetId: "22222222-2222-4222-8222-222222222222",
+        name: "catalogue-ep01_v02.png",
+        size: 2345,
+        type: "image/png",
+        lastModified: 123456790,
+      }),
+    );
+    await page.locator("#loadCatalogueThumbnails").click();
+    await page.locator("#catalogueThumbnailChoices button").nth(1).waitFor();
+    assert.match(
+      await page.locator("#catalogueThumbnailStatus").textContent(),
+      /Choose one of 2/,
+    );
+    assert.notEqual(
+      await page.locator("#manyvidsThumbnailSummary").textContent(),
+      "catalogue-ep01_v01.png",
+    );
+    await page.locator("#catalogueThumbnailChoices button").nth(1).click();
+    assert.equal(
+      await page.locator("#manyvidsThumbnailSummary").textContent(),
+      "catalogue-ep01_v02.png",
     );
   } finally {
     await browser.close();

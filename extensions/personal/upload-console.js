@@ -859,6 +859,7 @@
     let thumbnailCatalogueId = null;
     let thumbnailChoicesRevision = 0;
     let thumbnailChoices = null;
+    let autoThumbnailAssetId = null;
     let pornhubFile = null;
     let socialFile = null;
     let matchTimer = null;
@@ -1563,12 +1564,18 @@
         catalogueThumbnailHint.textContent = "";
         return;
       }
-      if (thumbnailCatalogueId === id) return;
+      if (thumbnailCatalogueId === id) {
+        catalogueThumbnailHint.textContent = thumbnailChoices?.length
+          ? ` · ${thumbnailChoices.length} named thumbnails`
+          : "";
+        return;
+      }
       if (
         thumbnailFile?.source === "catalogue-thumbnail" &&
         thumbnailFile.catalogueId !== id
       ) {
         thumbnailFile = null;
+        autoThumbnailAssetId = null;
         renderFilePickers();
       }
       thumbnailCatalogueId = id;
@@ -1594,6 +1601,17 @@
         )
           return;
         thumbnailChoices = result.choices || [];
+        if (
+          autoThumbnailAssetId &&
+          (thumbnailChoices.length !== 1 ||
+            thumbnailChoices[0].assetId !== autoThumbnailAssetId)
+        ) {
+          if (thumbnailFile?.assetId === autoThumbnailAssetId) {
+            thumbnailFile = null;
+            renderFilePickers();
+          }
+          autoThumbnailAssetId = null;
+        }
         catalogueThumbnailHint.textContent = thumbnailChoices.length
           ? ` · ${thumbnailChoices.length} named thumbnails`
           : "";
@@ -1608,7 +1626,31 @@
             "No named thumbnails found for this catalogue ID. You can choose a file above.";
           return;
         }
-        catalogueThumbnailStatus.textContent = `Choose one of ${thumbnailChoices.length} named thumbnails for ${id}.`;
+        if (
+          thumbnailChoices.length === 1 &&
+          !thumbnailFile &&
+          !activeSession &&
+          !runBusy
+        ) {
+          const choice = thumbnailChoices[0];
+          thumbnailFile = {
+            name: choice.name,
+            size: choice.size,
+            type: choice.type,
+            lastModified: choice.lastModified,
+            source: "catalogue-thumbnail",
+            catalogueId: id,
+            assetId: choice.assetId,
+          };
+          autoThumbnailAssetId = choice.assetId;
+          thumbnailInput.value = "";
+          renderFilePickers();
+          scheduleMatch();
+        }
+        catalogueThumbnailStatus.textContent =
+          autoThumbnailAssetId === thumbnailFile?.assetId
+            ? `Automatically selected ${thumbnailChoices[0].name} for ${id}.`
+            : `Choose one of ${thumbnailChoices.length} named thumbnails for ${id}.`;
         for (const choice of thumbnailChoices) {
           const button = document.createElement("button");
           button.type = "button";
@@ -1626,6 +1668,7 @@
           button.append(preview, label);
           button.addEventListener("click", () => {
             if (activeSession || runBusy) return;
+            autoThumbnailAssetId = null;
             thumbnailFile = {
               name: choice.name,
               size: choice.size,
@@ -1636,6 +1679,7 @@
               assetId: choice.assetId,
             };
             thumbnailInput.value = "";
+            catalogueThumbnailStatus.textContent = `Selected ${choice.name} for ${id}.`;
             renderFilePickers();
             scheduleMatch();
           });
@@ -4011,7 +4055,10 @@
       if (!activeSession) scheduleMatch();
     });
     thumbnailInput.addEventListener("change", () => {
+      autoThumbnailAssetId = null;
       thumbnailFile = thumbnailInput.files?.[0] || null;
+      if (thumbnailFile && !catalogueThumbnails.hidden)
+        catalogueThumbnailStatus.textContent = `Using ${thumbnailFile.name}.`;
       renderFilePickers();
       get("#manyvidsThumbnailSummary").textContent = fileSummary(
         thumbnailFile,
