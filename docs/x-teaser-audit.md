@@ -8,8 +8,9 @@ editing the workbook, or moving media:
 - the local `.TWEETS` directory and the separate recorder's audit receipts.
 
 It reports confirmed teaser posts without a Sheet link, X videos that still need
-teaser classification, duplicate Sheet bindings, local clips
-without an exact catalogue pairing, and a proposed queue. A Sheet link absent
+teaser classification, duplicate Sheet bindings, local clips without an exact
+catalogue pairing, historical Done clips without a recorder receipt, and a
+proposed queue. A Sheet link absent
 from one X profile sample is only a review item; the script does not assume a
 post was deleted. It never guesses a catalogue row for an unlinked X post.
 

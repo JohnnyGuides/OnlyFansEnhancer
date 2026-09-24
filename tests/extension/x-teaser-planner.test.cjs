@@ -94,11 +94,12 @@ test("reconciliation never infers a sheet row from an unpaired X post", async ()
   const result = reconcileTeasers({
     catalogue: [{ id: "item", links: ["1"], season: "S1" }],
     xPosts: [{ statusId: "2", teaser: true }, { statusId: "3" }],
-    assets: [],
+    assets: [{ assetId: "old", basename: "old.mp4", state: "done" }],
     receipts: [],
   });
   assert.deepEqual(result.xWithoutSheet, ["2"]);
   assert.deepEqual(result.xNeedsClassification, ["3"]);
+  assert.deepEqual(result.doneWithoutReceipt, ["old.mp4"]);
   assert.deepEqual(result.sheetNotObservedOnX, ["1"]);
   assert.equal(result.queue.length, 0);
 });

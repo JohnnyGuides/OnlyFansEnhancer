@@ -306,6 +306,9 @@ export function reconcileTeasers({
       sheetLinks.set(statusId, [...(sheetLinks.get(statusId) || []), item.id]);
   const xIds = new Set(xPosts.map((post) => post.statusId));
   const receiptIds = new Set(receipts.map((receipt) => receipt.statusId));
+  const receiptBasenames = new Set(
+    receipts.map((receipt) => receipt.basename.toLowerCase()).filter(Boolean),
+  );
   return {
     counts: {
       catalogueEntries: catalogue.length,
@@ -338,6 +341,13 @@ export function reconcileTeasers({
     ),
     unpairedAssets: assets
       .filter((asset) => asset.state === "pending" && !asset.catalogueId)
+      .map((asset) => asset.basename),
+    doneWithoutReceipt: assets
+      .filter(
+        (asset) =>
+          asset.state === "done" &&
+          !receiptBasenames.has(asset.basename.toLowerCase()),
+      )
       .map((asset) => asset.basename),
     performance: performanceReview(xPosts, snapshots),
     queue: scheduleQueue(recommendQueue(catalogue, assets, xPosts), xPosts),

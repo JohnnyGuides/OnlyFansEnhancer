@@ -94,6 +94,7 @@ function markdown(report) {
     `- Unlinked X videos needing teaser classification: ${report.xNeedsClassification.length}`,
     `- Sheet links not visible in the sampled X profile: ${report.sheetNotObservedOnX?.length ?? "not checked"}`,
     `- Pending files without an exact catalogue pairing: ${report.unpairedAssets.length}`,
+    `- Done files without a recorder receipt: ${report.doneWithoutReceipt.length}`,
     "",
   ];
   for (const id of report.xWithoutSheet)
@@ -101,6 +102,10 @@ function markdown(report) {
   for (const id of report.xNeedsClassification)
     lines.push(
       `- Classify X video ${id} before treating it as a missing teaser link.`,
+    );
+  if (report.doneWithoutReceipt.length)
+    lines.push(
+      "- Historical Done files have no recorder receipt; keep them in place and review provenance before any automated move.",
     );
   lines.push("", "## Suggested queue", "");
   if (!report.queue.length)
