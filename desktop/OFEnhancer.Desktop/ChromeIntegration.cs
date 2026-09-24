@@ -314,12 +314,19 @@ internal sealed class ChromeIntegration
         {
             using var existing = JsonDocument.Parse(ReadBounded(settings.SettingsPath));
             if (existing.RootElement.ValueKind != JsonValueKind.Object
-                || existing.RootElement.EnumerateObject().Any(property => property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId"))
+                || existing.RootElement.EnumerateObject().Any(property => property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId" or "googleSheetUrl"))
                 || existing.RootElement.TryGetProperty("extensionId", out var oldId) && oldId.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeExtensionId(oldId.GetString()) is null
                 || existing.RootElement.TryGetProperty("googleOAuthClientId", out var google) && google.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeGoogleOAuthClientId(google.GetString()) is null
-                || existing.RootElement.TryGetProperty("browserId", out var browser) && browser.ValueKind != JsonValueKind.Null && BrowserSelection.NormalizeId(browser.GetString()) is null)
+                || existing.RootElement.TryGetProperty("browserId", out var browser) && browser.ValueKind != JsonValueKind.Null && BrowserSelection.NormalizeId(browser.GetString()) is null
+                || existing.RootElement.TryGetProperty("googleSheetUrl", out var sheet) && sheet.ValueKind != JsonValueKind.Null && (sheet.ValueKind != JsonValueKind.String || !IsValidGoogleSheetUrl(sheet.GetString())))
                 throw new InvalidOperationException("Existing settings need repair. They were preserved; no new identity was assigned.");
         }
+    }
+
+    private static bool IsValidGoogleSheetUrl(string? value)
+    {
+        try { _ = GoogleSheetReference.Parse(value); return true; }
+        catch (GoogleSheetReferenceException) { return false; }
     }
 
     private void VerifyPackage()

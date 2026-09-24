@@ -57,6 +57,17 @@ public sealed class ChromeIntegrationTests
     }
 
     [TestMethod]
+    public void SavedGoogleSheetTargetDoesNotBlockChromePreparation()
+    {
+        using var fixture = new Fixture();
+        const string sheetUrl = "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696";
+        fixture.Settings.Save(new(null, null, "chrome", sheetUrl));
+
+        Assert.AreEqual("offline", fixture.Integration.Prepare().State);
+        Assert.AreEqual(sheetUrl, fixture.Settings.Load().GoogleSheetUrl);
+    }
+
+    [TestMethod]
     public void MatchingFreshChallengeAllowsUnselectedSoleBrowserButMultipleRequireChoice()
     {
         using var fixture = new Fixture();
