@@ -15,7 +15,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
     private const int ConnectionFinalizing = 3;
     private const int ConnectionFinished = 4;
     private const string SpreadsheetMimeType = "application/vnd.google-apps.spreadsheet";
-    private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromMinutes(20);
     private readonly object _gate = new();
     private readonly string _clientId;
     private readonly string? _clientSecret;
@@ -202,11 +202,15 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            SetSnapshot(new(GoogleConnectionState.Disconnected, null));
+            SetSnapshot(Volatile.Read(ref _connectionPhase) == ConnectionActive
+                ? new(GoogleConnectionState.Error, "authorization_timed_out")
+                : new(GoogleConnectionState.Disconnected, null));
         }
         catch (Exception) when (cancellation.IsCancellationRequested)
         {
-            SetSnapshot(new(GoogleConnectionState.Disconnected, null));
+            SetSnapshot(Volatile.Read(ref _connectionPhase) == ConnectionActive
+                ? new(GoogleConnectionState.Error, "authorization_timed_out")
+                : new(GoogleConnectionState.Disconnected, null));
         }
         catch (GoogleOAuthException error)
         {

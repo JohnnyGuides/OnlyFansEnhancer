@@ -86,6 +86,15 @@ Google requires this Desktop client's secret. Cloud no longer reveals existing
 secrets. Preserve this client and store imported credentials with DPAPI; commit
 recovery knowledge, never secrets or tokens. The owner's test workbook is **Work**.
 
+The owner trusts the existing OFEnhancer Personal Google OAuth application and
+authorizes the agent to complete its routine Google sign-in, consent, and Work
+picker flow when the connected browser tool permits it. Do not ask for separate
+approval merely because this known app shows Google's unverified-app notice.
+If the browser tool reserves a warning or consent screen for the human, respect
+that boundary, give the owner the exact remaining click, and resume verification
+afterward. Do not change the Google Cloud client, scopes, or workbook selection
+without a task-specific reason.
+
 # GitHub identity
 
 This repository belongs to the `JohnnyGuides` GitHub account. For GitHub
