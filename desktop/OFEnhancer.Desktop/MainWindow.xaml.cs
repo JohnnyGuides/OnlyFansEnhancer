@@ -334,8 +334,11 @@ public partial class MainWindow : Window, IDisposable
             CoreWebView2Deferral deferral = args.GetDeferral();
             try
             {
+                // WebView2 request members are COM objects bound to this UI thread.
+                // Snapshot the URI before queuing the catalogue lookup on a worker.
+                string requestUri = args.Request.Uri;
                 ThumbnailResource? resource = await dispatcher.EnqueueAsync(
-                    () => thumbnails.Open(new Uri(args.Request.Uri))
+                    () => thumbnails.Open(new Uri(requestUri))
                 );
                 if (resource is null)
                 {
