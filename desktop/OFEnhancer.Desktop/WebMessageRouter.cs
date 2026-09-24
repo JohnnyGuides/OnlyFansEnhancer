@@ -67,6 +67,11 @@ public sealed partial class WebMessageRouter(
                     request,
                     SaveGoogleClientId
                 ),
+                "saveGoogleSheetTarget" => WithGooglePayload(
+                    requestId,
+                    request,
+                    SaveGoogleSheetTarget
+                ),
                 "importGoogleClientConfiguration" => WithGoogle(
                     requestId,
                     request,
@@ -213,6 +218,14 @@ public sealed partial class WebMessageRouter(
     {
         GoogleSheetPayload payload = DeserializePayload<GoogleSheetPayload>(request.Payload);
         return googleCatalogue!.startGoogleCatalogueConnection(payload.SheetUrl);
+    }
+
+    private GoogleCatalogueStatusView SaveGoogleSheetTarget(WebRequest request)
+    {
+        GoogleSheetPayload payload = DeserializePayload<GoogleSheetPayload>(request.Payload);
+        if (payload.SheetUrl is null)
+            throw new WebPayloadException(new JsonException("Sheet URL is required."));
+        return googleCatalogue!.saveGoogleSheetTarget(payload.SheetUrl);
     }
 
     private GoogleCatalogueStatusView ApplyGoogleWorkbookMigration(WebRequest request)

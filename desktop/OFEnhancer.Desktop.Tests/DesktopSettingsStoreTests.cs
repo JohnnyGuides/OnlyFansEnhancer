@@ -14,6 +14,20 @@ public sealed class DesktopSettingsStoreTests
         "987654321098-zyxwvutsrqponmlkjihgfedcba654321.apps.googleusercontent.com";
 
     [TestMethod]
+    public void Preferred_sheet_survives_restart_and_retains_worksheet()
+    {
+        using TestDirectory temp = new();
+        DesktopSettingsStore store = new(Path.Combine(temp.Path, "settings.json"));
+        const string url = "https://docs.google.com/spreadsheets/d/Workbook_123/edit#gid=2126708696";
+        store.Save(new DesktopSettings(ExtensionId, FirstGoogleClientId, GoogleSheetUrl: url));
+        Assert.AreEqual(url, store.Load().GoogleSheetUrl);
+        DesktopSettingsException error = Assert.ThrowsException<DesktopSettingsException>(() =>
+            store.Save(store.Load() with { GoogleSheetUrl = "https://example.com/not-a-sheet" }));
+        Assert.AreEqual("invalid-google-sheet-url", error.Code);
+        Assert.AreEqual(url, store.Load().GoogleSheetUrl);
+    }
+
+    [TestMethod]
     public void Google_client_id_round_trips_without_losing_the_extension_id()
     {
         using TestDirectory temp = new();

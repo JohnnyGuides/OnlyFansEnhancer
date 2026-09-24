@@ -53,7 +53,8 @@ internal sealed class DesktopSettingsStore
             settings = new(
                 AppConfiguration.NormalizeExtensionId(payload.ExtensionId),
                 AppConfiguration.NormalizeGoogleOAuthClientId(payload.GoogleOAuthClientId),
-                BrowserSelection.NormalizeId(payload.BrowserId)
+                BrowserSelection.NormalizeId(payload.BrowserId),
+                NormalizeGoogleSheetUrl(payload.GoogleSheetUrl)
             );
             return true;
         }
@@ -70,8 +71,9 @@ internal sealed class DesktopSettingsStore
         string? extensionId = NullOrValidatedExtensionId(settings.ExtensionId);
         string? googleClientId = NullOrValidatedGoogleClientId(settings.GoogleOAuthClientId);
         string? browserId = NullOrValidatedBrowserId(settings.BrowserId);
+        string? googleSheetUrl = NullOrValidatedGoogleSheetUrl(settings.GoogleSheetUrl);
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(
-            new DesktopSettingsPayload(extensionId, googleClientId, browserId),
+            new DesktopSettingsPayload(extensionId, googleClientId, browserId, googleSheetUrl),
             JsonOptions
         );
         string? directory = Path.GetDirectoryName(_path);
@@ -131,6 +133,20 @@ internal sealed class DesktopSettingsStore
             ?? throw new DesktopSettingsException("invalid-browser-id");
     }
 
+    private static string? NormalizeGoogleSheetUrl(string? value)
+    {
+        if (value is null) return null;
+        try { return GoogleSheetReference.Parse(value).CanonicalUrl; }
+        catch (GoogleSheetReferenceException) { return null; }
+    }
+
+    private static string? NullOrValidatedGoogleSheetUrl(string? value)
+    {
+        if (value is null) return null;
+        return NormalizeGoogleSheetUrl(value)
+            ?? throw new DesktopSettingsException("invalid-google-sheet-url");
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -146,14 +162,16 @@ internal sealed class DesktopSettingsStore
     private sealed record DesktopSettingsPayload(
         [property: JsonPropertyName("extensionId")] string? ExtensionId,
         [property: JsonPropertyName("googleOAuthClientId")] string? GoogleOAuthClientId,
-        [property: JsonPropertyName("browserId")] string? BrowserId
+        [property: JsonPropertyName("browserId")] string? BrowserId,
+        [property: JsonPropertyName("googleSheetUrl")] string? GoogleSheetUrl
     );
 }
 
 internal sealed record DesktopSettings(
     string? ExtensionId,
     string? GoogleOAuthClientId,
-    string? BrowserId = null
+    string? BrowserId = null,
+    string? GoogleSheetUrl = null
 )
 {
     internal static DesktopSettings Empty { get; } = new(null, null);

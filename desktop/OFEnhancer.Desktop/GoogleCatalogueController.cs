@@ -10,6 +10,7 @@ public interface IGoogleCatalogueController : IDisposable
 {
     GoogleCatalogueStatusView getGoogleCatalogueStatus();
     GoogleCatalogueStatusView saveGoogleClientId(string clientId);
+    GoogleCatalogueStatusView saveGoogleSheetTarget(string sheetUrl);
     GoogleCatalogueStatusView startGoogleCatalogueConnection(string? sheetUrl = null);
     GoogleCatalogueStatusView cancelGoogleCatalogueConnection();
     GoogleCatalogueStatusView inspectGoogleWorkbook();
@@ -251,8 +252,26 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
     }
 
+    public GoogleCatalogueStatusView saveGoogleSheetTarget(string sheetUrl)
+    {
+        GoogleSheetReference target;
+        try { target = GoogleSheetReference.Parse(sheetUrl); }
+        catch (GoogleSheetReferenceException exception)
+        { throw new GoogleCatalogueControllerException(exception.Code); }
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            DesktopSettings current = _settings.Load();
+            _settings.Save(current with { GoogleSheetUrl = target.CanonicalUrl });
+            return StatusLocked();
+        }
+    }
+
     public GoogleCatalogueStatusView startGoogleCatalogueConnection(string? sheetUrl = null)
     {
+        if (!string.IsNullOrWhiteSpace(sheetUrl))
+            saveGoogleSheetTarget(sheetUrl);
+        sheetUrl ??= _settings.Load().GoogleSheetUrl;
         GoogleSheetReference? target = null;
         if (!string.IsNullOrWhiteSpace(sheetUrl))
         {
@@ -700,7 +719,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     {
         DesktopSettings settings = _settings.Load();
         if (settings.GoogleOAuthClientId is null)
-            return new("notConfigured");
+            return new("notConfigured", PreferredSheetUrl: settings.GoogleSheetUrl);
         if (_clientStore is not null)
         {
             try
@@ -721,7 +740,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         if (connection?.State == GoogleConnectionState.Error)
             return View("error", errorCode: SafeCode(connection.ErrorCode));
         if (_session is null || _completion is null)
-            return new("disconnected");
+            return new("disconnected", PreferredSheetUrl: settings.GoogleSheetUrl);
         SyncOutboxCounts counts = CurrentCountsLocked();
         if (_inspection is null && !_ready)
             return View("needsInspection", counts);
@@ -762,7 +781,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             _selection?.LastSuccessfulSyncUtc,
             errorCode,
             counts.Attempted,
-            counts.Unresolved
+            counts.Unresolved,
+            _settings.Load().GoogleSheetUrl
         );
     }
 
@@ -929,7 +949,8 @@ public sealed record GoogleCatalogueStatusView(
     DateTimeOffset? LastVerifiedSync = null,
     string? ErrorCode = null,
     int AttemptedCount = 0,
-    int UnresolvedCount = 0
+    int UnresolvedCount = 0,
+    string? PreferredSheetUrl = null
 );
 
 internal sealed class GoogleCatalogueControllerException(string code) : Exception(code)

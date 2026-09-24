@@ -228,7 +228,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.59",
+            productVersion: "0.20.60",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -318,6 +318,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
           [
             "getGoogleCatalogueStatus",
             "saveGoogleClientId",
+            "saveGoogleSheetTarget",
             "importGoogleClientConfiguration",
             "importGoogleCatalogue",
             "startGoogleCatalogueConnection",
@@ -347,6 +348,13 @@ async function installHost(page, initialState = null, googleOptions = {}) {
           }
           if (operation === "saveGoogleClientId") {
             googleStatus = { state: "disconnected" };
+            return structuredClone(googleStatus);
+          }
+          if (operation === "saveGoogleSheetTarget") {
+            googleStatus = {
+              ...googleStatus,
+              preferredSheetUrl: payload.sheetUrl,
+            };
             return structuredClone(googleStatus);
           }
           if (operation === "importGoogleClientConfiguration") {

@@ -59,7 +59,7 @@ public sealed class WebMessageRouterTests
 
         Assert.IsTrue(response.RootElement.GetProperty("ok").GetBoolean());
         Assert.AreEqual(
-            "0.20.59",
+            "0.20.60",
             response.RootElement.GetProperty("result").GetProperty("productVersion").GetString()
         );
     }
@@ -281,6 +281,12 @@ public sealed class WebMessageRouterTests
             "invalid-payload"
         );
         const string sheetUrl = "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=17";
+        AssertOk(router.Handle(Request("saveGoogleSheetTarget", new { sheetUrl })));
+        AssertError(router.Handle(Request("saveGoogleSheetTarget", new { })), "invalid-payload");
+        AssertError(
+            router.Handle(Request("saveGoogleSheetTarget", new { sheetUrl, extra = true })),
+            "invalid-payload"
+        );
         AssertOk(router.Handle(Request("startGoogleCatalogueConnection", new { sheetUrl })));
         AssertError(
             router.Handle(Request("startGoogleCatalogueConnection", new { sheetUrl, extra = true })),
@@ -343,6 +349,7 @@ public sealed class WebMessageRouterTests
         [
             ("getGoogleCatalogueStatus", new { }),
             ("saveGoogleClientId", new { clientId = GoogleClientId }),
+            ("saveGoogleSheetTarget", new { sheetUrl = "https://docs.google.com/spreadsheets/d/workbook/edit" }),
             ("startGoogleCatalogueConnection", new { }),
             ("cancelGoogleCatalogueConnection", new { }),
             ("inspectGoogleWorkbook", new { }),
@@ -432,6 +439,12 @@ public sealed class WebMessageRouterTests
         {
             SavedClientId = clientId;
             return Called("saveGoogleClientId");
+        }
+
+        public GoogleCatalogueStatusView saveGoogleSheetTarget(string sheetUrl)
+        {
+            SheetUrl = sheetUrl;
+            return Called("saveGoogleSheetTarget");
         }
 
         public GoogleCatalogueStatusView startGoogleCatalogueConnection(string? sheetUrl = null)

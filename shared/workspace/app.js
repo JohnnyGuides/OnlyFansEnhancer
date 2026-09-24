@@ -1060,7 +1060,16 @@
         : 0,
       lastVerifiedSync: view?.lastVerifiedSync || null,
       errorCode: typeof view?.errorCode === "string" ? view.errorCode : "",
+      preferredSheetUrl:
+        typeof view?.preferredSheetUrl === "string"
+          ? view.preferredSheetUrl
+          : "",
     };
+    if (
+      googleStatusView.preferredSheetUrl &&
+      document.activeElement !== googleSheetUrl
+    )
+      googleSheetUrl.value = googleStatusView.preferredSheetUrl;
     let codePresentation = googleErrorPresentation(googleStatusView.errorCode);
     const verificationCount =
       googleStatusView.attemptedCount + googleStatusView.unresolvedCount;
@@ -1809,9 +1818,27 @@
     googleSheetUrl.setCustomValidity("");
     googleSheetUrl.setAttribute("aria-invalid", "false");
     googleSheetUrl.value = canonicalUrl;
-    googleSheetUrlStatus.textContent =
-      "Continue in Google and select this same spreadsheet.";
-    await runGoogleAction("connect", { sheetUrl: canonicalUrl });
+    try {
+      const saved = await global.OFEnhancerHost.request(
+        "saveGoogleSheetTarget",
+        { sheetUrl: canonicalUrl },
+      );
+      renderGoogleCatalogue(saved);
+      if (
+        saved.state === "notConfigured" ||
+        saved.errorCode === "google-client-configuration-required"
+      ) {
+        googleSheetUrlStatus.textContent =
+          "Sheet saved on this PC. Finish Google setup, then connect and import it.";
+        return;
+      }
+      googleSheetUrlStatus.textContent =
+        "Sheet saved. Continue in Google and select this same spreadsheet.";
+      await runGoogleAction("connect", { sheetUrl: canonicalUrl });
+    } catch (error) {
+      googleSheetUrlStatus.textContent =
+        error?.message || "Could not save the Sheet URL.";
+    }
   });
   googleSetupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
