@@ -226,33 +226,6 @@
     return profiles;
   }
 
-  function profileAuthorizationSummary(profiles = {}, contentPreset = "") {
-    const fansly = profiles.fanslyPrefill || {};
-    const manyvids = profiles.manyvidsAutofill || {};
-    const preset = profiles.phUploader?.presets?.[contentPreset] || {};
-    const toggleSummary = Object.entries(fansly.toggles || {})
-      .map(([label, enabled]) => `${label}: ${enabled ? "on" : "off"}`)
-      .join(" · ");
-    return {
-      fansly: toggleSummary || "No saved toggle changes",
-      manyvids: [
-        `co-performer ${manyvids.coPerformer || "unset"}`,
-        `price mode ${manyvids.priceModeExpectedLabel || "unset"}`,
-        `$${manyvids.price || "unset"}`,
-        `launch mode ${manyvids.launchModeExpectedLabel || "unset"}`,
-        `time ${manyvids.launchTimeLabel || manyvids.launchTimeValue || "unset"}`,
-        `bundle ${manyvids.membershipExpectedLabel || "unset"}`,
-        `Premium ${manyvids.premiumExpectedLabel || "unset"}`,
-        `tags ${(manyvids.tags || []).join(", ") || "none"}`,
-      ].join(" · "),
-      pornhub: [
-        `orientation ${preset.orientation || "unset"}`,
-        `tags ${(preset.tags || []).join(", ") || "none"}`,
-        `categories ${(preset.categories || []).join(", ") || "none"}`,
-      ].join(" · "),
-    };
-  }
-
   function normalizedSeries(value) {
     return String(value || "")
       .normalize("NFKC")
@@ -779,7 +752,6 @@
         },
       });
     const mainPublishMode = get("#mainPublishMode");
-    const catalogueAssociation = get("#catalogueAssociation");
     const fullInput = get("#uploadFullVideo");
     const teaserInput = get("#uploadTeaser");
     const thumbnailInput = get("#uploadManyvidsThumbnail");
@@ -810,7 +782,6 @@
     const catalogueRow = get("#catalogueRow");
     const catalogueCards = get("#catalogueCards");
     const showMoreCatalogue = get("#showMoreCatalogue");
-    const showAllCatalogue = get("#showAllCatalogue");
     const refreshCatalogue = get("#refreshCatalogue");
     const selectedCatalogueReason = get("#selectedCatalogueReason");
     const pornhubRecommendation = get("#pornhubRecommendation");
@@ -832,7 +803,6 @@
     const uploadButton = get("#uploadButton");
     const uploadError = get("#uploadError");
     const catalogueSelectionStatus = get("#catalogueSelectionStatus");
-    const changeCatalogueEntry = get("#changeCatalogueEntry");
     const runNotice = get("#runNotice");
     const reviewRecovery = get("#reviewRecovery");
     const refreshReadiness = get("#refreshReadiness");
@@ -869,12 +839,13 @@
     let currentSnapshot = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
-    let catalogueCardLimit = 18;
+    let catalogueCardLimit = 4;
     let catalogueCardRevision = 0;
     let cataloguePreviewTimer = null;
     const cataloguePreviewCache = new Map();
     let manualTargets = null;
-    let uploadWithoutSheet = catalogueAssociation?.value === "later";
+    let uploadWithoutSheet = false;
+    let lastPrefilledCatalogueRow = null;
     let activeSession = null;
     let resumable = null;
     let runBusy = false;
@@ -1445,9 +1416,8 @@
     function draft() {
       const value = normalizeDraft({
         workflowMode: workflowMode?.value || "both",
-        publishMode: neutralTestMode
-          ? "manual"
-          : mainPublishMode?.value || "manual",
+        publishMode:
+          !neutralTestMode && mainPublishMode.checked ? "autonomous" : "manual",
         fullFile,
         teaserFile,
         thumbnailFile,
@@ -1805,12 +1775,7 @@
             candidate.episode,
           ].join(" "),
         );
-        if (query && !searchable.includes(query)) return false;
-        return (
-          showAllCatalogue.checked ||
-          engine.inferTargets(candidate, ["onlyfans", "fansly", "manyvids"])
-            .recommended.length > 0
-        );
+        return !query || searchable.includes(query);
       });
       catalogueRow.replaceChildren();
       const prompt = document.createElement("option");
@@ -1818,9 +1783,7 @@
       prompt.textContent = "Choose a catalogue episode";
       catalogueRow.append(prompt);
       const group = document.createElement("optgroup");
-      group.label = showAllCatalogue.checked
-        ? "All catalogue entries"
-        : "Likely matches";
+      group.label = "Likely matches";
       catalogueRow.append(group);
       for (const candidate of visible) {
         const option = document.createElement("option");
@@ -1847,6 +1810,15 @@
       clearTimeout(cataloguePreviewTimer);
       catalogueCards.replaceChildren();
       const cards = visible.slice(0, catalogueCardLimit);
+      if (
+        Number.isInteger(selectedCatalogueRow) &&
+        !cards.some((candidate) => candidate.row === selectedCatalogueRow)
+      ) {
+        const selected = visible.find(
+          (candidate) => candidate.row === selectedCatalogueRow,
+        );
+        if (selected) cards.push(selected);
+      }
       const pendingImages = new Map();
       showMoreCatalogue.hidden = visible.length <= cards.length;
       for (const candidate of cards) {
@@ -1957,16 +1929,20 @@
         renderPicker();
         return;
       }
-      if (candidate.title) title.value = candidate.title;
-      if (candidate.description) description.value = candidate.description;
-      if (!contentPreset.value && candidate.seasonArc && workflowProfiles) {
-        const resolved =
-          globalThis.CreatorToolkitAdapters?.phUploader?.resolvePreset(
-            workflowProfiles.phUploader,
-            candidate.seasonArc,
-            "",
-          );
-        if (resolved) contentPreset.value = resolved.name;
+      const newlySelected = lastPrefilledCatalogueRow !== candidate.row;
+      if (newlySelected) {
+        if (candidate.title) title.value = candidate.title;
+        description.value = candidate.description || "";
+        if (candidate.seasonArc && workflowProfiles) {
+          const resolved =
+            globalThis.CreatorToolkitAdapters?.phUploader?.resolvePreset(
+              workflowProfiles.phUploader,
+              candidate.seasonArc,
+              "",
+            );
+          if (resolved) contentPreset.value = resolved.name;
+        }
+        lastPrefilledCatalogueRow = candidate.row;
       }
       const inferredTargets = [...proposal.targets.executable];
       if (
@@ -1976,7 +1952,7 @@
       ) {
         inferredTargets.push("pornhub");
       }
-      setInferredTargets(inferredTargets);
+      if (newlySelected) setInferredTargets(inferredTargets);
       const executableDates = [
         ...new Set(
           proposal.targets.executable
@@ -1984,7 +1960,11 @@
             .filter(Boolean),
         ),
       ];
-      if (executableDates.length === 1) releaseDate.value = executableDates[0];
+      if (newlySelected)
+        releaseDate.value =
+          executableDates.length === 1
+            ? executableDates[0]
+            : candidate.releaseDate || releaseDate.value;
       refreshReleaseSummary();
       pornhubRecommendation.textContent = proposal.targets.recommended.includes(
         "pornhub",
@@ -2116,37 +2096,7 @@
     }
 
     function renderRunSettings(value = draft()) {
-      const authorization = profileAuthorizationSummary(
-        value.profiles,
-        value.contentPreset,
-      );
-      const settings = get("#platformSettings");
-      settings.replaceChildren();
-      for (const platform of value.targets) {
-        const line = document.createElement("p");
-        const label = document.createElement("strong");
-        label.textContent = PLATFORM_LABELS[platform] + ": ";
-        const detail = {
-          onlyfans:
-            "Full video and description; existing labels are left unchanged.",
-          fansly:
-            "Full video restricted with the first Load Preset entry; a selected teaser becomes Free Preview. " +
-            authorization.fansly,
-          manyvids: authorization.manyvids,
-          pornhub:
-            (value.pornhubMode === "paid"
-              ? `Pay To View on Fancentro at $${Number(value.profiles?.manyvidsAutofill?.price || 0).toFixed(2)}, with 2–7 saved tags.`
-              : authorization.pornhub +
-                ". Free To View with saved categories and optional thumbnail.") +
-            (value.pornhubCertificationsConfirmed
-              ? " Select All and Certify is authorized for this upload."
-              : " Site certifications stay for your review.") +
-            " Final Submit stays manual.",
-        }[platform];
-        line.append(label, document.createTextNode(detail));
-        settings.append(line);
-      }
-      get("#selectedPlatformDetails").hidden = !value.targets.length;
+      get("#publishModeHint").hidden = !mainPublishMode.checked;
       const social = socialDraft();
       const automatic =
         value.targets.some((p) => p !== "pornhub") &&
@@ -2154,7 +2104,7 @@
       runNotice.textContent =
         automatic || (social.enabled && social.mode === "autonomous")
           ? "Upload authorizes publishing or scheduling in the selected automatic modes. Pornhub Submit stays manual."
-          : "Upload prepares unpublished drafts. You review and publish on each site.";
+          : "Upload fills drafts. Save or publish them on each site.";
       if (currentMatch?.status === "upload-only")
         runNotice.textContent += " No sheet data will be read or written.";
       updateMediaRelevance();
@@ -2202,7 +2152,7 @@
     function lockDraft(locked) {
       if (locked) {
         for (const control of document.querySelectorAll(
-          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #catalogueAssociation, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #changeCatalogueEntry, #continueWithoutSheet",
+          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #continueWithoutSheet",
         )) {
           if (!lockedControls.has(control))
             lockedControls.set(control, control.disabled);
@@ -2283,9 +2233,7 @@
             candidate.row +
             " · " +
             candidate.id +
-            " · " +
-            candidate.title;
-      changeCatalogueEntry.hidden = match.status === "upload-only";
+            " · verified post links update this local entry";
       renderRunSettings();
       showCatalogueThumbnailPicker(match);
       void checkReadiness();
@@ -2293,6 +2241,8 @@
 
     function previewWithoutSheet(value) {
       currentMatch = { status: "upload-only", candidate: value };
+      continueWithoutSheet.hidden = true;
+      cataloguePicker.hidden = true;
       matchStatus.textContent =
         "Results will stay local until you associate a catalogue entry.";
       renderMatch(currentMatch);
@@ -2305,7 +2255,7 @@
       currentMatch = null;
       currentProposal = null;
       uploadButton.disabled = true;
-      cataloguePicker.hidden = true;
+      cataloguePicker.hidden = !currentSnapshot || uploadWithoutSheet;
       continueWithoutSheet.hidden = uploadWithoutSheet;
       const value = validate(true);
       if (!value.valid || activeSession) {
@@ -2338,10 +2288,15 @@
           );
         }
         currentSnapshot = await loadCatalogueSnapshot();
-        get("#catalogueConnectionStatus").textContent =
-          "Catalogue loaded. Choose an entry now or associate results later.";
+        get("#catalogueConnectionStatus").textContent = "";
         if (revision !== matchRevision) return;
         if (forceNew) selectedCatalogueRow = "new";
+        renderPicker();
+        if (selectedCatalogueRow === null) {
+          currentProposal = null;
+          matchStatus.textContent = "Choose the matching catalogue entry.";
+          return;
+        }
         const proposal = buildProposal(selectedCatalogueRow);
         if (proposal.status === "needs-selection") {
           currentProposal = proposal;
@@ -3184,7 +3139,6 @@
         activeSession.catalogueDeferred = uploadWithoutSheet;
         lastAttempt = { sessionId, phase: "connecting" };
         if (workflowMode) workflowMode.disabled = true;
-        if (catalogueAssociation) catalogueAssociation.disabled = true;
         fullInput.disabled = true;
         thumbnailInput.disabled = true;
         pornhubInput.disabled = true;
@@ -3553,7 +3507,7 @@
         fansly.checked = targetNames.has("fansly");
         manyvids.checked = targetNames.has("manyvids");
         pornhub.checked = targetNames.has("pornhub");
-        mainPublishMode.value = expected.publishMode;
+        mainPublishMode.checked = expected.publishMode === "autonomous";
         title.value = expected.title;
         description.value = expected.description;
         releaseDate.value = expected.releaseDate;
@@ -3730,9 +3684,9 @@
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
       refreshReleaseSummary();
       workflowMode.value = "main";
-      mainPublishMode.value = "manual";
-      catalogueAssociation.value = "later";
-      uploadWithoutSheet = true;
+      mainPublishMode.checked = false;
+      uploadWithoutSheet = false;
+      lastPrefilledCatalogueRow = null;
       for (const target of [onlyfans, fansly, manyvids, pornhub])
         target.checked = target.defaultChecked;
       socialX.checked = false;
@@ -3741,7 +3695,6 @@
       get('input[name="socialMode"][value="autonomous"]').checked = false;
       lastAttempt = null;
       if (workflowMode) workflowMode.disabled = neutralTestMode;
-      if (catalogueAssociation) catalogueAssociation.disabled = neutralTestMode;
       mainPublishMode.disabled = neutralTestMode;
       contentPreset.disabled = neutralTestMode;
       get("#preparationControls").hidden = true;
@@ -3793,10 +3746,8 @@
       neutralTestMode = true;
       workflowMode.value = "main";
       workflowMode.disabled = true;
-      mainPublishMode.value = "manual";
+      mainPublishMode.checked = false;
       mainPublishMode.disabled = true;
-      catalogueAssociation.value = "later";
-      catalogueAssociation.disabled = true;
       uploadWithoutSheet = true;
       if (
         ![...contentPreset.options].some(
@@ -3824,6 +3775,7 @@
       ])
         input.value = "";
       selectedCatalogueRow = null;
+      lastPrefilledCatalogueRow = null;
       manualTargets = null;
       renderFilePickers();
       for (const control of [onlyfans, fansly, manyvids, pornhub])
@@ -3844,7 +3796,6 @@
       for (const control of [
         workflowMode,
         mainPublishMode,
-        catalogueAssociation,
         contentPreset,
         pornhubVideoType,
       ])
@@ -3889,26 +3840,7 @@
 
     function updateMediaRelevance() {
       const targets = new Set(selectedTargets());
-      const files = [teaserFile, thumbnailFile, pornhubFile];
-      const rows = [...document.querySelectorAll("[data-media-for]")];
-      rows.forEach((row, index) => {
-        const used = row.dataset.mediaFor
-          .split(" ")
-          .some(
-            (target) =>
-              targets.has(target) &&
-              (index !== 1 ||
-                target !== "pornhub" ||
-                pornhubVideoType.value === "free"),
-          );
-        row.hidden = false;
-        row.dataset.inactive = String(!used);
-      });
       get("#uploadMedia").hidden = workflowMode?.value === "teaser";
-      const selected = files.filter(Boolean).length;
-      get("#selectedMediaCount").textContent = selected
-        ? "· " + selected + " selected"
-        : "";
       get("#pornhubPresetFields").hidden = !targets.has("pornhub");
     }
 
@@ -3926,25 +3858,19 @@
           teaserInput,
           teaserFile,
           "teaserFileSummary",
-          fullFile
-            ? "Generated from full video when needed for Fansly or ManyVids"
-            : "Fansly and ManyVids preview",
+          "Generated from full video if empty",
         ],
         [
           thumbnailInput,
           thumbnailFile,
           "manyvidsThumbnailSummary",
-          fullFile
-            ? "Generated from an early frame unless you choose a file or frame"
-            : "Center-cropped to 640 × 360 for ManyVids and Pornhub",
+          "Generated from full video if empty",
         ],
         [
           pornhubInput,
           pornhubFile,
           "pornhubFileSummary",
-          fullFile
-            ? `Using full video: ${fullFile.name}`
-            : "Uses the full video unless replaced",
+          fullFile ? `Uses ${fullFile.name}` : "Uses the full video",
         ],
         [
           socialInput,
@@ -3973,6 +3899,7 @@
         remove.disabled = input.disabled;
       }
       updateMediaRelevance();
+      get("#chooseThumbnailFrame").hidden = !(fullFile instanceof File);
       get("#chooseThumbnailFrame").disabled =
         !(fullFile instanceof File) || runBusy || Boolean(activeSession);
     }
@@ -4085,6 +4012,7 @@
       if (thumbnailFile?.source === "generated") thumbnailFile = null;
       fullFile = fullInput.files?.[0] || null;
       selectedCatalogueRow = null;
+      lastPrefilledCatalogueRow = null;
       manualTargets = null;
       get("#fullFileSummary").textContent = fileSummary(
         fullFile,
@@ -4100,12 +4028,15 @@
     });
     function updateWorkflowVisibility() {
       const teaserOnly = workflowMode?.value === "teaser";
+      if (teaserOnly) uploadWithoutSheet = true;
+      else if (!neutralTestMode && selectedCatalogueRow === null)
+        uploadWithoutSheet = false;
+      get("#findCatalogueEntry").hidden = !teaserOnly;
       get(".draft-card").hidden = teaserOnly;
       get("#mainDestinations").hidden = teaserOnly;
       get("#mainPublishFields").hidden = teaserOnly;
       get(".social-card").hidden = workflowMode?.value === "main";
       fullInput.required = !teaserOnly;
-      if (teaserOnly) showAllCatalogue.checked = true;
       updateMediaRelevance();
     }
     workflowMode?.addEventListener("change", () => {
@@ -4114,8 +4045,9 @@
       scheduleMatch();
     });
     mainPublishMode?.addEventListener("change", scheduleMatch);
-    catalogueAssociation?.addEventListener("change", () => {
-      uploadWithoutSheet = catalogueAssociation.value === "later";
+    get("#findCatalogueEntry").addEventListener("click", () => {
+      uploadWithoutSheet = false;
+      get("#findCatalogueEntry").hidden = true;
       scheduleMatch();
     });
     get("#prepareRedditLinks")?.addEventListener("click", async () => {
@@ -4319,15 +4251,11 @@
     }
     uploadButton.addEventListener("click", () => startUpload());
     catalogueSearch.addEventListener("input", () => {
-      catalogueCardLimit = 18;
-      renderPicker();
-    });
-    showAllCatalogue.addEventListener("change", () => {
-      catalogueCardLimit = 18;
+      catalogueCardLimit = 4;
       renderPicker();
     });
     showMoreCatalogue.addEventListener("click", () => {
-      catalogueCardLimit += 18;
+      catalogueCardLimit += 8;
       renderPicker();
     });
     catalogueRow.addEventListener("change", () => {
@@ -4347,6 +4275,12 @@
       matchStatus.textContent = "Refreshing the catalogue snapshot…";
       try {
         currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        renderPicker();
+        if (selectedCatalogueRow === null) {
+          matchStatus.textContent =
+            "Catalogue refreshed. Choose the matching video.";
+          return;
+        }
         const proposal = buildProposal(selectedCatalogueRow);
         if (proposal.status === "needs-selection") {
           currentProposal = proposal;
@@ -4373,19 +4307,7 @@
       const value = validate(true);
       if (!value.valid) return;
       uploadWithoutSheet = true;
-      if (catalogueAssociation) catalogueAssociation.value = "later";
       previewWithoutSheet(value);
-    });
-    changeCatalogueEntry.addEventListener("click", () => {
-      if (runBusy || activeSession) return;
-      currentMatch = null;
-      readiness = null;
-      ++readinessRevision;
-      updateUploadAction();
-      renderPicker();
-      matchStatus.textContent =
-        "Choose another catalogue episode or a new entry.";
-      catalogueSearch.focus();
     });
     globalThis.addEventListener("beforeunload", (event) => {
       if (
@@ -4452,7 +4374,6 @@
     normalizeThumbnailFile,
     neutralTestProfiles,
     normalizeSocialDraft,
-    profileAuthorizationSummary,
     proposalSignature,
     scheduledIsoForReleaseDate,
     titleFromFilename,

@@ -20,7 +20,7 @@ const hostScript = fs.readFileSync(
 );
 
 for (const desktop of [false, true]) {
-  test(`${desktop ? "desktop" : "Chrome"} uploader exposes only usable bridge setup guidance`, async () => {
+  test(`${desktop ? "desktop" : "Chrome"} uploader omits legacy bridge setup from the upload flow`, async () => {
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage();
@@ -53,16 +53,8 @@ for (const desktop of [false, true]) {
       const chromeSetup = page.locator(
         'a[href="options.html#catalogueBridgeHeading"]',
       );
-      assert.equal(await chromeSetup.count(), desktop ? 0 : 1);
-      if (desktop) {
-        const guidance = page.locator("[data-desktop-only]");
-        assert.equal(await guidance.count(), 1);
-        assert.equal(
-          await guidance.evaluate((element) => element.hidden),
-          false,
-        );
-        assert.match(await guidance.textContent(), /Chrome\s+uploader/);
-      }
+      assert.equal(await chromeSetup.count(), 0);
+      assert.equal(await page.locator("#selectedPlatformDetails").count(), 0);
     } finally {
       await browser.close();
     }

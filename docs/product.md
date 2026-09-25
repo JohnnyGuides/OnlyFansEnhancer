@@ -57,6 +57,18 @@ and uses the shared teaser through **Add Free Preview**. OnlyFans labels remain
 unchanged. Friday scheduling is **15:00 UTC**. Fansly and ManyVids read the timezone displayed by their scheduling UI; OnlyFans uses the approved draft timezone and requires separate live verification of that UI representation. A verified common empty Friday is required when the selected flow
 claims queue verification. Unknown queue availability is not inferred as free.
 
+Upload Hub shows four ranked catalogue matches after a full video is chosen.
+The owner clicks an exact row before Upload is enabled; that choice fills its
+title, description, release date, and inferred missing destinations. Later edits
+remain intact until another row is selected. The run binds the selected row and
+checks its fingerprint again before platform preparation. A verified platform
+result is recorded against that row; a prepared draft alone has no post link to
+record. The only main-video publishing control is an unchecked **Publish
+immediately** checkbox. Unchecked prepares the composers and leaves each final
+Save or publish action to the owner. Checked authorizes the adapters' existing
+automatic final actions at the selected release time; Pornhub Submit remains
+manual.
+
 ManyVids uses the saved normalized profile, including its exact ten tags, price,
 modes, and time. Upload observation can continue beyond 45 minutes; only progress in the owned upload scope can establish a stall. Resume only the proven
 video's editor through the recorded Edit action and its first verified navigation. Its final Save remains a single attempt. Returning to the upload page does not prove acceptance; an unverified Save stays unresolved and cannot be repeated. Source defaults are not

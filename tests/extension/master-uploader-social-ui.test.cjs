@@ -511,9 +511,6 @@ async function mountConsole(page, options = {}) {
         '"]',
     )
     .check();
-  await page
-    .locator("#catalogueAssociation")
-    .selectOption(options.deferCatalogue ? "later" : "now");
   if (options.workflowMode !== "teaser") {
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "Ashley full.mp4",
@@ -523,11 +520,13 @@ async function mountConsole(page, options = {}) {
     await page.locator("#uploadTitle").fill("gooning to Ashley");
   }
   try {
-    if (options.deferCatalogue)
-      await page
-        .locator("#uploadActions")
-        .waitFor({ state: "visible", timeout: 5000 });
-    else await page.getByText(/Catalogue row/i).waitFor({ timeout: 5000 });
+    if (options.deferCatalogue && options.workflowMode !== "teaser") {
+      await page.locator("#continueWithoutSheet").click();
+    } else if (!options.deferCatalogue) {
+      await page.locator(".catalogue-card").first().click();
+      await page.getByText(/Catalogue row/i).waitFor({ timeout: 5000 });
+    }
+    await page.locator("#uploadActions").waitFor({ state: "visible" });
   } catch (error) {
     const status = await page.locator("#matchStatus").textContent();
     const errors = await page.locator("#draftErrors").textContent();
@@ -638,7 +637,7 @@ test("main-only generates missing preview media before autonomous preparation", 
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       /frame 640x360/,
     );
-    assert.equal(prepared.draft.publishMode, "autonomous");
+    assert.equal(prepared.draft.publishMode, "manual");
     assert.equal(prepared.catalogue, null);
     assert.equal(
       messages.some(
@@ -1082,7 +1081,8 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
       buffer: Buffer.from("social"),
     });
     await page.locator("#socialCaption").fill("Caption");
-    await page.locator("#catalogueAssociation").selectOption("now");
+    await page.locator("#findCatalogueEntry").click();
+    await page.locator(".catalogue-find-more summary").click();
     await page.locator("#catalogueRow").waitFor({ state: "visible" });
     await page.locator("#catalogueRow").selectOption("row:125");
     assert.equal(

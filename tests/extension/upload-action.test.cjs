@@ -344,6 +344,7 @@ test("retained publication intent blocks availability without altering the publi
       buffer: Buffer.from("benign"),
     });
     await page.locator("#uploadDescription").fill("Unpublished verification.");
+    await page.locator("#continueWithoutSheet").click();
     await page.waitForFunction(() =>
       document
         .querySelector("#uploadError")
@@ -386,7 +387,7 @@ test("compact UI keeps media visible, with one Upload rail and no overflow at 20
     await fixture.ready("A very long benign filename ".repeat(8) + ".mp4");
     assert.equal(await page.locator("#uploadMedia").isVisible(), true);
     assert.equal(
-      await page.locator('[data-media-for="pornhub"]').isVisible(),
+      await page.locator("#uploadPornhubVideo").locator("..").isVisible(),
       true,
     );
     assert.equal(await page.locator("#pornhubPresetFields").isVisible(), false);
@@ -403,14 +404,8 @@ test("compact UI keeps media visible, with one Upload rail and no overflow at 20
     });
     await page.locator("#targetManyvids").uncheck();
     assert.equal(
-      await page.locator('[data-media-for="manyvids pornhub"]').isVisible(),
+      await page.locator("#uploadManyvidsThumbnail").locator("..").isVisible(),
       true,
-    );
-    assert.equal(
-      await page
-        .locator('[data-media-for="manyvids pornhub"]')
-        .getAttribute("data-inactive"),
-      "true",
     );
     await page.locator('[data-remove-file="uploadManyvidsThumbnail"]').click();
     assert.equal(await page.locator("#uploadMedia").isVisible(), true);
@@ -668,8 +663,8 @@ test("New retires old preparation without deleting its review record", async () 
     );
     assert.equal(await fixture.page.locator("#uploadTitle").inputValue(), "");
     assert.equal(
-      await fixture.page.locator("#mainPublishMode").inputValue(),
-      "manual",
+      await fixture.page.locator("#mainPublishMode").isChecked(),
+      false,
     );
     assert.deepEqual(fixture.errors, []);
   } finally {

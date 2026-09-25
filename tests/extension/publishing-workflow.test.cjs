@@ -123,7 +123,6 @@ async function addUploadConsoleScripts(page, options = {}) {
   for (const relativePath of scripts) {
     await page.addScriptTag({ path: path.join(repositoryRoot, relativePath) });
   }
-  await page.locator("#catalogueAssociation").selectOption("now");
 }
 
 test("Friday scheduling keeps 15:00 UTC across Zurich daylight saving time", () => {
@@ -2595,6 +2594,7 @@ test("upload console performs no platform mutation before the single Upload acti
       buffer: Buffer.from("preview-fixture"),
     });
     await page.locator("#uploadTitle").fill("Episode 42");
+    await page.locator(".catalogue-card").first().click();
     await page.getByText(/Catalogue row/i).waitFor();
 
     assert.deepEqual(
@@ -2614,10 +2614,7 @@ test("upload console performs no platform mutation before the single Upload acti
     );
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
     assert.equal(await page.locator("#targetFansly").isChecked(), true);
-    assert.match(
-      await page.locator("#platformSettings").textContent(),
-      /Fansly:.*Post to FYP: off.*Post to Walls: on.*Lock Replies: off/s,
-    );
+    assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
 
     await page.locator("#uploadButton").click();
     await page
@@ -2734,12 +2731,12 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
       };
     });
     await addUploadConsoleScripts(page);
-    await page.locator("#catalogueAssociation").selectOption("later");
     await page.locator("#uploadFullVideo").setInputFiles({
       name: "neutral-full.mp4",
       mimeType: "video/mp4",
       buffer: Buffer.from("neutral fixture"),
     });
+    await page.locator("#continueWithoutSheet").click();
     await page.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );
@@ -2764,16 +2761,16 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
     );
     assert.equal(await page.locator("#uploadButton").isEnabled(), true);
     assert.equal(await page.locator("#draftErrors").textContent(), "");
-    assert.equal(
-      await page.locator("#catalogueAssociation").inputValue(),
-      "later",
+    assert.match(
+      await page.locator("#catalogueSelectionStatus").textContent(),
+      /deferred/i,
     );
   } finally {
     await browser.close();
   }
 });
 
-test("strong catalogue proposal shows an inline match and Change catalogue entry opens the searchable picker", async () => {
+test("likely catalogue matches require a click and prefill the selected entry", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -2869,6 +2866,9 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
+    await page.locator(".catalogue-card").first().waitFor();
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
+    await page.locator(".catalogue-card").first().click();
     await page.getByText(/Catalogue row/i).waitFor();
 
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
@@ -2894,8 +2894,7 @@ test("strong catalogue proposal shows an inline match and Change catalogue entry
       [],
     );
 
-    await page.locator("#changeCatalogueEntry").click();
-    await page.locator("#cataloguePicker").waitFor();
+    await page.locator(".catalogue-find-more summary").click();
     await page.locator(".catalogue-card img[src^='data:image/png']").waitFor();
     await page.locator("#catalogueSearch").fill("battlefield");
     assert.match(
@@ -3016,6 +3015,7 @@ test("one named thumbnail is selected automatically and new variants restore the
       mimeType: "video/mp4",
       buffer: Buffer.from("test-video"),
     });
+    await page.locator(".catalogue-card").first().click();
     await page
       .locator("#catalogueThumbnailChoices button")
       .waitFor({ state: "attached" });
@@ -3099,6 +3099,7 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
                 ...common,
                 row: 20,
                 id: "claire-a",
+                description: "Episode one description",
                 episode: "1",
                 fingerprint: "a",
               },
@@ -3106,6 +3107,7 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
                 ...common,
                 row: 21,
                 id: "claire-b",
+                description: "Episode two description",
                 episode: "2",
                 fingerprint: "b",
               },
@@ -3153,7 +3155,12 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
       [],
     );
 
+    await page.locator(".catalogue-find-more summary").click();
     await page.locator("#catalogueRow").selectOption("row:20");
+    assert.equal(
+      await page.locator("#uploadDescription").inputValue(),
+      "Episode one description",
+    );
     await page.locator("#targetManyvids").uncheck();
     await page.waitForTimeout(350);
     assert.equal(await page.locator("#catalogueRow").inputValue(), "row:20");
@@ -3162,10 +3169,17 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
 
     await page.locator("#uploadTitle").fill("claire-b");
     await page.waitForTimeout(350);
+    assert.equal(await page.locator("#uploadTitle").inputValue(), "claire-b");
     assert.equal(await page.locator("#catalogueRow").inputValue(), "row:20");
     assert.match(
       await page.locator("#catalogueSelectionStatus").textContent(),
       /row 20/i,
+    );
+    await page.locator("#catalogueRow").selectOption("row:21");
+    assert.equal(await page.locator("#uploadTitle").inputValue(), "Claire VR");
+    assert.equal(
+      await page.locator("#uploadDescription").inputValue(),
+      "Episode two description",
     );
   } finally {
     await browser.close();
@@ -3226,6 +3240,7 @@ test("unverified platform queue keeps Upload disabled and offers explicit upload
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
+    await page.locator(".catalogue-card").first().click();
     await page.getByText(/OnlyFans queue is not verified/i).waitFor();
 
     assert.equal(await page.locator("#uploadButton").isDisabled(), true);
@@ -3324,6 +3339,7 @@ test("Upload rechecks the proposed catalogue row and stops before platform mutat
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
+    await page.locator(".catalogue-card").first().click();
     await page.getByText(/Catalogue row/i).waitFor();
 
     await page.locator("#uploadButton").click();
@@ -3641,7 +3657,6 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
         { failureDelivery, error: failure.result.error },
       );
       await addUploadConsoleScripts(page);
-      await page.locator("#catalogueAssociation").selectOption("later");
       await page.locator("#targetOnlyfans").check();
       await page.locator("#targetFansly").check();
       await page.locator("#targetManyvids").uncheck();
@@ -3656,6 +3671,7 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
         mimeType: "video/mp4",
         buffer: Buffer.from("preview-fixture"),
       });
+      await page.locator("#continueWithoutSheet").click();
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
       );
@@ -3836,12 +3852,8 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       await page.locator("#pornhubCertificationsConfirmed").isChecked(),
       true,
     );
-    assert.equal(await page.locator("#mainPublishMode").inputValue(), "manual");
+    assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
     assert.equal(await page.locator("#mainPublishMode").isDisabled(), true);
-    assert.equal(
-      await page.locator("#catalogueAssociation").inputValue(),
-      "later",
-    );
     assert.equal(
       await page.locator("#contentPreset").inputValue(),
       "Neutral test (manual)",

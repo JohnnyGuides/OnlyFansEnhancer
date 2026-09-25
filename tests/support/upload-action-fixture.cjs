@@ -1,4 +1,5 @@
 "use strict";
+const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require("./browser.cjs");
@@ -269,7 +270,8 @@ async function createUploadFixture({ desktop = false } = {}) {
       await page.locator("#targetManyvids").uncheck();
       await page.locator("#targetPornhub").uncheck();
       await page.locator("#targetOnlyfans").check();
-      await page.locator("#mainPublishMode").selectOption("manual");
+      assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
+      await page.locator("#continueWithoutSheet").click();
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
       );

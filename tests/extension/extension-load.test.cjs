@@ -524,6 +524,7 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     await uploadConsole
       .locator("#uploadDescription")
       .fill("Preview only; never submit.");
+    await uploadConsole.locator("#continueWithoutSheet").click();
     await uploadConsole.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );

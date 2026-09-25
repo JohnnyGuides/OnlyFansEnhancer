@@ -149,11 +149,7 @@
               class="upload-media"
               aria-label="Upload media"
             >
-              <h3>
-                Upload media <span id="selectedMediaCount"></span
-                ><span id="catalogueThumbnailHint"></span>
-              </h3>
-              <div class="file-picker" data-media-for="fansly manyvids">
+              <div class="file-picker">
                 <div class="file-information">
                   <label for="uploadTeaser">Shared teaser</label>
                   <p
@@ -161,7 +157,7 @@
                     class="file-summary"
                     aria-live="polite"
                   >
-                    Fansly and ManyVids preview
+                    Generated from the full video if empty
                   </p>
                   <span id="teaserFileSummarySize" class="file-size"></span>
                 </div>
@@ -192,7 +188,7 @@
                   </button>
                 </div>
               </div>
-              <div class="file-picker" data-media-for="manyvids pornhub">
+              <div class="file-picker">
                 <div class="file-information">
                   <label for="uploadManyvidsThumbnail">Shared thumbnail</label>
                   <p
@@ -200,7 +196,7 @@
                     class="file-summary"
                     aria-live="polite"
                   >
-                    Center-cropped to 640 × 360 for ManyVids and Pornhub
+                    Generated from the full video if empty
                   </p>
                   <span
                     id="manyvidsThumbnailSummarySize"
@@ -217,7 +213,7 @@
                   aria-describedby="manyvidsThumbnailSummary draftErrors"
                 />
                 <div class="file-actions">
-                  <button id="chooseThumbnailFrame" type="button">
+                  <button id="chooseThumbnailFrame" type="button" hidden>
                     Choose frame
                   </button>
                   <button
@@ -244,7 +240,10 @@
                 aria-label="Catalogue thumbnails"
               >
                 <div class="catalogue-thumbnails-heading">
-                  <strong>Catalogue thumbnails</strong>
+                  <strong
+                    >Catalogue thumbnails
+                    <span id="catalogueThumbnailHint"></span
+                  ></strong>
                   <button id="loadCatalogueThumbnails" type="button">
                     Refresh variants
                   </button>
@@ -260,7 +259,7 @@
                   aria-label="Choose one thumbnail variant"
                 ></div>
               </section>
-              <div class="file-picker" data-media-for="pornhub">
+              <div class="file-picker">
                 <div class="file-information">
                   <label for="uploadPornhubVideo">Pornhub video</label>
                   <p
@@ -268,7 +267,7 @@
                     class="file-summary"
                     aria-live="polite"
                   >
-                    Uses the full video unless replaced
+                    Uses the full video
                   </p>
                   <span id="pornhubFileSummarySize" class="file-size"></span>
                 </div>
@@ -466,90 +465,56 @@
               </label>
             </div>
 
-            <details id="selectedPlatformDetails" class="inline-details">
-              <summary>Selected platform settings</summary>
-              <div id="platformSettings"></div>
-            </details>
             <p id="pornhubRecommendation" class="hint" role="status"></p>
 
             <p id="draftErrors" class="error" role="alert"></p>
-            <div class="field-grid run-settings">
-              <div id="mainPublishFields">
-                <label for="mainPublishMode">Main-video publishing</label>
-                <select id="mainPublishMode">
-                  <option value="manual">Prepare, then let me publish</option>
-                  <option value="autonomous" selected>
-                    Publish or schedule on Upload
-                  </option>
-                </select>
-              </div>
-              <div>
-                <label for="catalogueAssociation">Catalogue entry</label>
-                <select id="catalogueAssociation">
-                  <option value="later">
-                    Choose later — keep results locally
-                  </option>
-                  <option value="now">Choose an entry now</option>
-                </select>
-              </div>
-            </div>
+            <label id="mainPublishFields" class="publish-immediately">
+              <input id="mainPublishMode" type="checkbox" />
+              Publish immediately
+            </label>
+            <p id="publishModeHint" class="hint" hidden>
+              Final Save runs on Upload. Sites use the selected release date;
+              Pornhub Submit stays manual.
+            </p>
             <p id="catalogueConnectionStatus" class="hint" role="status"></p>
             <p id="catalogueSelectionStatus" class="status" role="status"></p>
-            <button id="changeCatalogueEntry" type="button" hidden>
-              Change catalogue entry
+            <button id="findCatalogueEntry" type="button" hidden>
+              Match a catalogue entry
             </button>
             <button id="continueWithoutSheet" type="button" hidden>
               Continue without sheet
             </button>
             <div id="cataloguePicker" class="catalogue-picker" hidden>
-              <label for="catalogueSearch">Search catalogue</label>
-              <input
-                id="catalogueSearch"
-                name="catalogueSearch"
-                type="search"
-                autocomplete="off"
-                placeholder="Title, ID, series, or episode…"
-              />
-              <label for="catalogueRow">Catalogue episode</label>
-              <select id="catalogueRow" name="catalogueRow"></select>
+              <div class="catalogue-picker-heading">
+                <strong>Match this video</strong>
+                <span>Select its catalogue entry to fill the details.</span>
+              </div>
               <div
                 id="catalogueCards"
                 class="catalogue-cards"
-                aria-label="Catalogue previews"
+                aria-label="Likely catalogue matches"
               ></div>
-              <button id="showMoreCatalogue" type="button" hidden>
-                Show more episodes
-              </button>
-              <label class="catalogue-picker-toggle">
+              <details class="catalogue-find-more">
+                <summary>Find another video</summary>
+                <label for="catalogueSearch">Search catalogue</label>
                 <input
-                  id="showAllCatalogue"
-                  name="showAllCatalogue"
-                  type="checkbox"
+                  id="catalogueSearch"
+                  name="catalogueSearch"
+                  type="search"
+                  autocomplete="off"
+                  placeholder="Title, ID, series, or episode…"
                 />
-                Show all catalogue entries
-              </label>
-              <button id="refreshCatalogue" type="button">
-                Refresh catalogue
-              </button>
+                <label for="catalogueRow">Catalogue episode</label>
+                <select id="catalogueRow" name="catalogueRow"></select>
+                <button id="showMoreCatalogue" type="button" hidden>
+                  Show more episodes
+                </button>
+                <button id="refreshCatalogue" type="button">
+                  Refresh catalogue
+                </button>
+              </details>
               <p id="selectedCatalogueReason" class="hint" role="status"></p>
             </div>
-            <details class="settings-details">
-              <summary>Advanced: legacy sheet bridge</summary>
-              <p class="hint">
-                <a
-                  data-chrome-only
-                  href="options.html#catalogueBridgeHeading"
-                  target="_blank"
-                  rel="noopener"
-                  >Configure a legacy Apps Script bridge</a
-                >
-                <span data-desktop-only hidden
-                  >Configure the optional Apps Script bridge in the Chrome
-                  uploader</span
-                >
-                for matching and saving post links.
-              </p>
-            </details>
           </section>
 
           <section

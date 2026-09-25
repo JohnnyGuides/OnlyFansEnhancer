@@ -589,6 +589,28 @@ button:disabled {
   padding: 12px 0 0;
   border-top: 1px solid #303744;
 }
+.catalogue-picker-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+.catalogue-picker-heading span {
+  color: #bdcadb;
+  font-size: 0.82rem;
+}
+.catalogue-find-more {
+  font-size: 0.82rem;
+}
+.catalogue-find-more summary {
+  cursor: pointer;
+  color: #bdcadb;
+  padding: 6px 0;
+}
+.catalogue-find-more[open] {
+  display: grid;
+  gap: 8px;
+}
 
 .catalogue-picker[hidden] {
   display: none;
@@ -598,18 +620,9 @@ button:disabled {
   margin: 4px 0 0;
 }
 
-.catalogue-picker-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .catalogue-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px;
-  max-height: 350px;
-  overflow-y: auto;
+  gap: 0;
 }
 
 .catalogue-card {
@@ -617,24 +630,28 @@ button:disabled {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 6px;
-  border: 1px solid #303744;
-  border-radius: 9px;
-  background: #171d27;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid #303744;
+  border-radius: 0;
+  background: transparent;
   color: #f1f5fa;
   text-align: left;
 }
 
 .catalogue-card:hover,
 .catalogue-card[aria-pressed="true"] {
-  border-color: #54c8fb;
   background: #1b2b37;
+}
+.catalogue-card[aria-pressed="true"] {
+  box-shadow: inset 2px 0 #65cfff;
 }
 
 .catalogue-card img {
   flex: none;
-  width: 112px;
-  height: 63px;
+  width: 64px;
+  height: 40px;
   object-fit: cover;
   border-radius: 5px;
   background: #303744;
@@ -783,6 +800,27 @@ button:disabled {
 
   .subreddit-overrides .body-field {
     grid-column: auto;
+  }
+}
+@media (max-width: 480px) {
+  .draft-card > .file-picker,
+  .upload-media > .file-picker {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+  .draft-card > .file-picker .file-information,
+  .upload-media > .file-picker .file-information {
+    flex-basis: auto;
+    min-width: 0;
+  }
+  .draft-card > .file-picker .file-actions,
+  .upload-media > .file-picker .file-actions {
+    margin-left: 0;
+  }
+  .upload-media .file-information {
+    display: block;
   }
 }
 /* Bounded, copyable recovery evidence; captions and media are never rendered. */
@@ -1254,17 +1292,18 @@ html {
   outline: 3px solid #65cfff;
   outline-offset: 2px;
 }
-.run-settings {
-  gap: 12px;
-  margin-top: 4px;
+.publish-immediately {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 4px;
+  cursor: pointer;
 }
-.inline-details,
+.publish-immediately input {
+  accent-color: #65cfff;
+}
 .upload-media {
-  margin-top: 8px;
-}
-.upload-media h3 {
-  margin: 16px 0 4px;
-  font-size: 0.95rem;
+  margin-top: 0;
 }
 .thumbnail-frame-dialog {
   width: min(680px, calc(100vw - 32px));
@@ -1294,17 +1333,6 @@ html {
   justify-content: flex-end;
   margin-top: 16px;
 }
-.inline-details summary {
-  min-height: 36px;
-  padding: 8px 0;
-  color: #bdcadb;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-#selectedMediaCount {
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
 .upload-media .file-information {
   display: grid;
   grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 1fr);
@@ -1319,23 +1347,6 @@ html {
 }
 .upload-media .file-summary {
   font-size: 0.82rem;
-}
-.upload-media [data-inactive="true"] .file-information::after {
-  content: "Not used for these destinations";
-  grid-column: 2;
-  color: #aeb6c3;
-  font-size: 0.75rem;
-}
-#platformSettings p {
-  margin: 8px 0;
-  max-width: 72ch;
-  color: #bdcadb;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-#platformSettings strong {
-  color: #ecf0f6;
 }
 .preparation-controls {
   display: flex;
@@ -1386,9 +1397,6 @@ html {
   color: #c2dfee;
   overflow-wrap: anywhere;
 }
-#selectedPlatformDetails[hidden] {
-  display: none;
-}
 #uploaderPanel .settings-details {
   margin-top: 12px;
   padding-top: 4px;
@@ -1423,8 +1431,7 @@ a {
   .upload-media .file-information {
     grid-template-columns: minmax(0, 1fr);
   }
-  .upload-media .file-size,
-  .upload-media [data-inactive="true"] .file-information::after {
+  .upload-media .file-size {
     grid-column: 1;
   }
   .preparation-controls {
