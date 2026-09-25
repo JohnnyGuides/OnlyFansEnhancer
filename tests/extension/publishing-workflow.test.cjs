@@ -119,7 +119,7 @@ async function addUploadConsoleScripts(page, options = {}) {
   if (options.catalogueClient) {
     scripts.push("workflows/catalogue-client.js");
   }
-  scripts.push("upload-console.js");
+  scripts.push("workflows/media-generator.js", "upload-console.js");
   for (const relativePath of scripts) {
     await page.addScriptTag({ path: path.join(repositoryRoot, relativePath) });
   }
@@ -2589,6 +2589,11 @@ test("upload console performs no platform mutation before the single Upload acti
       mimeType: "video/mp4",
       buffer: Buffer.from("full-video"),
     });
+    await page.locator("#uploadTeaser").setInputFiles({
+      name: "Episode 42 (teaser).mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("preview-fixture"),
+    });
     await page.locator("#uploadTitle").fill("Episode 42");
     await page.getByText(/Catalogue row/i).waitFor();
 
@@ -3435,6 +3440,11 @@ for (const scenario of [
         mimeType: "video/mp4",
         buffer: Buffer.from("full-video"),
       });
+      await page.locator("#uploadTeaser").setInputFiles({
+        name: "Episode 42 (teaser).mp4",
+        mimeType: "video/mp4",
+        buffer: Buffer.from("preview-fixture"),
+      });
       await page.locator("#uploadDescription").fill("My description");
       {
         await page.locator("#continueWithoutSheet").waitFor({ timeout: 3000 });
@@ -3641,6 +3651,11 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
         mimeType: "video/mp4",
         buffer: Buffer.from("inert test media"),
       });
+      await page.locator("#uploadTeaser").setInputFiles({
+        name: "neutral-preview.mp4",
+        mimeType: "video/mp4",
+        buffer: Buffer.from("preview-fixture"),
+      });
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
       );
@@ -3791,6 +3806,11 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       JSON.stringify((await CreatorToolkit.loadSettings()).profiles),
     );
     await page.locator("#loadTemplate").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#neutralTestStatus")
+        .textContent.includes("Template loaded"),
+    );
     assert.equal(
       await page
         .locator("#uploadFullVideo")

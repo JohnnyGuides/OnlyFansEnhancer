@@ -180,6 +180,7 @@
     "workflows/sheer-tags.js": "extensions/personal/workflows/sheer-tags.js",
     "workflows/social-chrome-runtime.js": "extensions/personal/workflows/social-chrome-runtime.js",
     "workflows/social-distribution-contract.js": "extensions/personal/workflows/social-distribution-contract.js",
+    "workflows/media-generator.js": "extensions/personal/workflows/media-generator.js",
     "workflows/social-distribution-orchestrator.js": "extensions/personal/workflows/social-distribution-orchestrator.js",
     "workflows/social-distribution-session-store.js": "extensions/personal/workflows/social-distribution-session-store.js",
     "workflows/social-preparation-adapter.js": "extensions/personal/workflows/social-preparation-adapter.js",

@@ -120,6 +120,7 @@ async function createUploadFixture({ desktop = false } = {}) {
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   const errors = [];
+  const generatedChunks = [];
   page.on("pageerror", (error) => errors.push(error.message));
   let eventPoll;
   if (desktop) {
@@ -138,6 +139,14 @@ async function createUploadFixture({ desktop = false } = {}) {
           globalThis.fixtureCurrentPortId = command.portId;
           return fixtureDesktopRuntime.execute(command);
         }, request.payload);
+      if (request.operation === "stageGeneratedMediaChunk") {
+        generatedChunks.push(request.payload);
+        return { staged: request.payload.final };
+      }
+      if (request.operation === "deliverGeneratedMedia") {
+        generatedChunks.push({ delivered: request.payload });
+        return { delivered: true };
+      }
       if (request.operation === "deliverUploadFile") {
         await worker.evaluate((payload) => {
           const pending = creatorUploadFileRequests.get(payload.requestId);
@@ -244,6 +253,7 @@ async function createUploadFixture({ desktop = false } = {}) {
     page,
     worker,
     errors,
+    generatedChunks,
     context,
     async ready(name = "benign-new-clip.mp4") {
       await page.locator("#uploadFullVideo").setInputFiles({

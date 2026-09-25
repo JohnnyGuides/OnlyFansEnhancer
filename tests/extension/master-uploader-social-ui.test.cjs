@@ -3,6 +3,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const vm = require("node:vm");
 const { chromium } = require("../support/browser.cjs");
@@ -497,6 +499,7 @@ async function mountConsole(page, options = {}) {
     "workflows/catalogue-proposal.js",
     "workflows/social-distribution-contract.js",
     "workflows/subreddit-presets.js",
+    "workflows/media-generator.js",
     "upload-console.js",
   ]) {
     await page.addScriptTag({ path: path.join(repositoryRoot, relative) });
@@ -583,11 +586,36 @@ test("teaser-only prepares without a full video or catalogue entry", async () =>
   }
 });
 
-test("main-only defaults to confirmed autonomous scheduling with no teaser and deferred catalogue", async () => {
+test("main-only generates missing preview media before autonomous preparation", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "ofenhancer-main-media-"));
   try {
     await mountConsole(page, { workflowMode: "main", deferCatalogue: true });
+    const videoPath = path.join(work, "neutral-full.mp4");
+    const ffmpeg = spawnSync(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=640x360:rate=30:duration=3",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        videoPath,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(ffmpeg.status, 0, ffmpeg.stderr);
+    await page.locator("#uploadFullVideo").setInputFiles(videoPath);
     assert.equal(await page.locator(".social-card").isVisible(), false);
     await page.locator("#targetManyvids").check();
     await page.waitForFunction(
@@ -605,7 +633,11 @@ test("main-only defaults to confirmed autonomous scheduling with no teaser and d
     const prepared = messages.find(
       (message) => message.type === "PREPARE_CREATOR_UPLOAD",
     );
-    assert.equal(prepared.draft.hasTeaser, false);
+    assert.equal(prepared.draft.hasTeaser, true);
+    assert.match(
+      await page.locator("#manyvidsThumbnailSummary").textContent(),
+      /frame 640x360/,
+    );
     assert.equal(prepared.draft.publishMode, "autonomous");
     assert.equal(prepared.catalogue, null);
     assert.equal(
@@ -616,6 +648,7 @@ test("main-only defaults to confirmed autonomous scheduling with no teaser and d
     );
   } finally {
     await browser.close();
+    fs.rmSync(work, { recursive: true, force: true });
   }
 });
 

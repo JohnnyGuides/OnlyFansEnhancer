@@ -11,6 +11,49 @@
   let liveExpiry;
   let readiness;
   let observationGeneration = 0;
+  const stagedGeneratedMedia = new Map();
+  async function stageGeneratedMedia(file, sessionId, role) {
+    const key = `${sessionId}/${role}`;
+    if (stagedGeneratedMedia.has(key)) return stagedGeneratedMedia.get(key);
+    const staging = (async () => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const sha256 = [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      const chunkSize = 256 * 1024;
+      for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const part = bytes.subarray(
+          offset,
+          Math.min(offset + chunkSize, bytes.length),
+        );
+        let raw = "";
+        for (let index = 0; index < part.length; index += 8192)
+          raw += String.fromCharCode(...part.subarray(index, index + 8192));
+        const final = offset + part.length === bytes.length;
+        const response = await call("stageGeneratedMediaChunk", {
+          sessionId,
+          role,
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          sha256,
+          offset,
+          final,
+          chunk: btoa(raw),
+        });
+        if (Boolean(response.staged) !== final)
+          throw new Error("Generated media staging did not complete.");
+      }
+    })();
+    stagedGeneratedMedia.set(key, staging);
+    try {
+      await staging;
+    } catch (error) {
+      stagedGeneratedMedia.delete(key);
+      throw error;
+    }
+  }
   function call(operation, payload = {}, files) {
     return new Promise((resolve, reject) => {
       const requestId = crypto.randomUUID();
@@ -26,6 +69,7 @@
         [
           "browserRequest",
           "deliverUploadFile",
+          "deliverGeneratedMedia",
           "deliverDevelopmentFixture",
           "deliverCatalogueThumbnail",
         ].includes(operation)
@@ -68,6 +112,7 @@
         !new Set([
           "browserRequest",
           "deliverUploadFile",
+          "deliverGeneratedMedia",
           "deliverDevelopmentFixture",
           "deliverCatalogueThumbnail",
         ]).has(item.operation)
@@ -265,12 +310,16 @@
     async deliverFile(session, request, file) {
       try {
         await ensureBrowser();
+        if (file.source === "generated")
+          await stageGeneratedMedia(file, request.sessionId, request.role);
         return await call(
           file.source === "catalogue-thumbnail"
             ? "deliverCatalogueThumbnail"
             : file.source === "development-fixture"
               ? "deliverDevelopmentFixture"
-              : "deliverUploadFile",
+              : file.source === "generated"
+                ? "deliverGeneratedMedia"
+                : "deliverUploadFile",
           {
             requestId: request.requestId,
             sessionId: request.sessionId,
@@ -287,7 +336,8 @@
             lastModified: file.lastModified,
           },
           file.source === "development-fixture" ||
-            file.source === "catalogue-thumbnail"
+            file.source === "catalogue-thumbnail" ||
+            file.source === "generated"
             ? undefined
             : [file],
         );
@@ -400,6 +450,7 @@
             [
               "browserRequest",
               "deliverUploadFile",
+              "deliverGeneratedMedia",
               "deliverDevelopmentFixture",
               "deliverCatalogueThumbnail",
             ].includes(item.operation),

@@ -882,7 +882,6 @@
     let readinessRevision = 0;
     const lockedControls = new Map();
     let lastAttempt = null;
-    let optionalSelectionCount = 0;
     let socialPollTimer = null;
     let workflowProfiles = null;
     let profilesLoaded = false;
@@ -1555,8 +1554,7 @@
       const id =
         match?.status === "matched" &&
         workflowMode.value !== "teaser" &&
-        !get("#optionalMedia").hidden &&
-        !thumbnailInput.closest("[data-media-for]").hidden
+        !get("#uploadMedia").hidden
           ? match.candidate?.id
           : null;
       catalogueThumbnails.hidden = !id;
@@ -3066,6 +3064,50 @@
         value = validate(true);
         const blocker = draftBlocker(value, social);
         if (blocker) throw new Error(blocker);
+        const sessionId = randomSessionId();
+        const mediaTargets = pendingTargets(value);
+        if (
+          (mediaTargets.includes("fansly") ||
+            mediaTargets.includes("manyvids")) &&
+          !teaserFile
+        ) {
+          matchStatus.textContent =
+            "Creating the shared teaser from the full video…";
+          teaserFile = await globalThis.CreatorMediaGenerator.teaserFromVideo(
+            fullFile,
+            (message) => {
+              matchStatus.textContent = message;
+            },
+          );
+          teaserFile.source = "generated";
+          renderFilePickers();
+        }
+        if (
+          (mediaTargets.includes("manyvids") ||
+            (mediaTargets.includes("pornhub") &&
+              value.pornhubMode === "free")) &&
+          !thumbnailFile
+        ) {
+          matchStatus.textContent =
+            "Choosing an early frame for the thumbnail…";
+          thumbnailFile =
+            await globalThis.CreatorMediaGenerator.thumbnailFromVideo(fullFile);
+          thumbnailFile.source = "generated";
+          renderFilePickers();
+        }
+        for (const [role, file] of [
+          ["teaser", teaserFile],
+          ["thumbnail", thumbnailFile],
+        ]) {
+          if (file?.source === "generated")
+            await globalThis.CreatorMediaGenerator.saveGeneratedMedia(
+              sessionId,
+              role,
+              fullFile,
+              file,
+            );
+        }
+        value = validate(true);
         value.profileSignature = await creatorRegistry.uploadProfileSignature(
           value.profiles,
         );
@@ -3084,7 +3126,6 @@
           (targets.includes("manyvids") || value.pornhubMode === "free")
         )
           await normalizeThumbnailFile(thumbnailFile);
-        const sessionId = randomSessionId();
         const socialPlan = social.enabled
           ? await buildSocialDistributionPlan({
               id: sessionId,
@@ -3451,6 +3492,31 @@
     get("#resumeUpload")?.addEventListener("click", async () => {
       if (!resumable || activeSession || runBusy) return;
       const expected = resumable.draft;
+      try {
+        if (fullFile instanceof File) {
+          if (expected.hasTeaser && !teaserFile)
+            teaserFile =
+              await globalThis.CreatorMediaGenerator.loadGeneratedMedia(
+                resumable.id,
+                "teaser",
+                fullFile,
+              );
+          if (
+            (expected.manyvidsThumbnail || expected.pornhubThumbnail) &&
+            !thumbnailFile
+          )
+            thumbnailFile =
+              await globalThis.CreatorMediaGenerator.loadGeneratedMedia(
+                resumable.id,
+                "thumbnail",
+                fullFile,
+              );
+          renderFilePickers();
+        }
+      } catch (error) {
+        get("#resumeError").textContent = error.message;
+        return;
+      }
       const selectedPornhub = pornhubFile || fullFile;
       if (
         (expected.fullFilename && fullFile?.name !== expected.fullFilename) ||
@@ -3698,6 +3764,9 @@
       if (!reset.reset)
         throw new Error("The previous upload state could not be retired.");
       newUploadDraft();
+      await globalThis.CreatorMediaGenerator.clearGeneratedMedia().catch(
+        () => {},
+      );
       void loadRecovery();
     }
     for (const id of ["#newUploadDraft", "#newFromResume"])
@@ -3822,7 +3891,6 @@
       const targets = new Set(selectedTargets());
       const files = [teaserFile, thumbnailFile, pornhubFile];
       const rows = [...document.querySelectorAll("[data-media-for]")];
-      let relevant = 0;
       rows.forEach((row, index) => {
         const used = row.dataset.mediaFor
           .split(" ")
@@ -3833,19 +3901,12 @@
                 target !== "pornhub" ||
                 pornhubVideoType.value === "free"),
           );
-        row.hidden = !used && !files[index];
+        row.hidden = false;
         row.dataset.inactive = String(!used);
-        if (!row.hidden) relevant++;
       });
-      get("#optionalMedia").hidden = !relevant;
-      if (!relevant || thumbnailInput.closest("[data-media-for]").hidden) {
-        catalogueThumbnails.hidden = true;
-        catalogueThumbnailHint.textContent = "";
-      }
+      get("#uploadMedia").hidden = workflowMode?.value === "teaser";
       const selected = files.filter(Boolean).length;
-      if (selected > optionalSelectionCount) get("#optionalMedia").open = true;
-      optionalSelectionCount = selected;
-      get("#optionalMediaCount").textContent = selected
+      get("#selectedMediaCount").textContent = selected
         ? "· " + selected + " selected"
         : "";
       get("#pornhubPresetFields").hidden = !targets.has("pornhub");
@@ -3865,19 +3926,25 @@
           teaserInput,
           teaserFile,
           "teaserFileSummary",
-          "Fansly and ManyVids preview",
+          fullFile
+            ? "Generated from full video when needed for Fansly or ManyVids"
+            : "Fansly and ManyVids preview",
         ],
         [
           thumbnailInput,
           thumbnailFile,
           "manyvidsThumbnailSummary",
-          "Center-cropped to 640 × 360 for ManyVids and Pornhub",
+          fullFile
+            ? "Generated from an early frame unless you choose a file or frame"
+            : "Center-cropped to 640 × 360 for ManyVids and Pornhub",
         ],
         [
           pornhubInput,
           pornhubFile,
           "pornhubFileSummary",
-          "Uses the full video unless replaced",
+          fullFile
+            ? `Using full video: ${fullFile.name}`
+            : "Uses the full video unless replaced",
         ],
         [
           socialInput,
@@ -3906,6 +3973,8 @@
         remove.disabled = input.disabled;
       }
       updateMediaRelevance();
+      get("#chooseThumbnailFrame").disabled =
+        !(fullFile instanceof File) || runBusy || Boolean(activeSession);
     }
     for (const button of document.querySelectorAll("[data-choose-file]"))
       button.addEventListener("click", () => {
@@ -3920,6 +3989,83 @@
         input.value = "";
         input.dispatchEvent(new Event("change", { bubbles: true }));
       });
+    const frameDialog = get("#thumbnailFrameDialog");
+    const frameVideo = get("#thumbnailFrameVideo");
+    const frameSlider = get("#thumbnailFrameTime");
+    const framePosition = get("#thumbnailFramePosition");
+    const frameStatus = get("#thumbnailFrameStatus");
+    let frameUrl = null;
+    let frameSource = null;
+    const formatPosition = (seconds) =>
+      `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+    function closeFrameDialog() {
+      frameVideo.pause();
+      frameVideo.removeAttribute("src");
+      frameVideo.load();
+      if (frameUrl) URL.revokeObjectURL(frameUrl);
+      frameUrl = null;
+      frameSource = null;
+      if (frameDialog.open) frameDialog.close();
+    }
+    get("#chooseThumbnailFrame").addEventListener("click", async () => {
+      if (!(fullFile instanceof File) || runBusy || activeSession) return;
+      frameSource = fullFile;
+      frameStatus.textContent = "Loading video timeline…";
+      frameDialog.showModal();
+      frameUrl = URL.createObjectURL(fullFile);
+      frameVideo.src = frameUrl;
+      try {
+        const duration =
+          await globalThis.CreatorMediaGenerator.waitForMetadata(frameVideo);
+        frameSlider.value = String(
+          Math.round((Math.min(3, duration * 0.02) / duration) * 1000),
+        );
+        await globalThis.CreatorMediaGenerator.seek(
+          frameVideo,
+          (Number(frameSlider.value) / 1000) * duration,
+        );
+        framePosition.textContent = formatPosition(frameVideo.currentTime);
+        frameStatus.textContent = "Choose the frame you want to use.";
+      } catch (error) {
+        frameStatus.textContent = error.message;
+      }
+    });
+    frameSlider.addEventListener("input", () => {
+      if (!Number.isFinite(frameVideo.duration)) return;
+      const seconds = (Number(frameSlider.value) / 1000) * frameVideo.duration;
+      frameVideo.currentTime = Math.min(
+        seconds,
+        Math.max(0, frameVideo.duration - 0.05),
+      );
+      framePosition.textContent = formatPosition(seconds);
+    });
+    get("#cancelThumbnailFrame").addEventListener("click", closeFrameDialog);
+    frameDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeFrameDialog();
+    });
+    get("#useThumbnailFrame").addEventListener("click", async () => {
+      if (!frameSource || frameSource !== fullFile) return;
+      const button = get("#useThumbnailFrame");
+      button.disabled = true;
+      frameStatus.textContent = "Creating 640 × 360 thumbnail…";
+      try {
+        thumbnailFile =
+          await globalThis.CreatorMediaGenerator.thumbnailFromVideo(
+            frameSource,
+            frameVideo.currentTime,
+          );
+        thumbnailFile.source = "generated";
+        autoThumbnailAssetId = null;
+        closeFrameDialog();
+        renderFilePickers();
+        scheduleMatch();
+      } catch (error) {
+        frameStatus.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
     const fileControlObserver = new MutationObserver(renderFilePickers);
     for (const input of [
       fullInput,
@@ -3934,6 +4080,9 @@
       });
 
     fullInput.addEventListener("change", () => {
+      if (frameDialog.open) closeFrameDialog();
+      if (teaserFile?.source === "generated") teaserFile = null;
+      if (thumbnailFile?.source === "generated") thumbnailFile = null;
       fullFile = fullInput.files?.[0] || null;
       selectedCatalogueRow = null;
       manualTargets = null;
@@ -3946,6 +4095,7 @@
       if (fullFile && !socialCaption.value.trim()) {
         socialCaption.value = title.value;
       }
+      renderFilePickers();
       scheduleMatch();
     });
     function updateWorkflowVisibility() {

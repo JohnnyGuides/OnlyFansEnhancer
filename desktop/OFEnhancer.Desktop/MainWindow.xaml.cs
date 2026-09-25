@@ -25,6 +25,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly DevelopmentFixtureSource developmentFixtures = new();
     private readonly UploadCatalogueController uploadCatalogue;
     private readonly UploadThumbnailCatalogue uploadThumbnails;
+    private readonly GeneratedUploadMediaStore generatedUploadMedia = new();
     private readonly ChromeIntegration chromeIntegration;
     private readonly bool hasExtensionOverride;
     private bool exiting;
@@ -140,7 +141,7 @@ public partial class MainWindow : Window, IDisposable
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
-        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "deliverCatalogueThumbnail", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try
         {
@@ -226,6 +227,23 @@ public partial class MainWindow : Window, IDisposable
                     lastModified = new DateTimeOffset(delivered.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
                     requestId = payload.GetProperty("requestId").GetString(), sessionId = payload.GetProperty("sessionId").GetString(),
                     platform = payload.GetProperty("platform").GetString(), role = "thumbnail", token = payload.GetProperty("token").GetString()
+                }));
+            }
+            else if (operation == "stageGeneratedMediaChunk")
+            {
+                if (additionalObjects.Count != 0) throw new InvalidOperationException("invalid-payload");
+                result = new { staged = generatedUploadMedia.Append(payload) is not null };
+            }
+            else if (operation == "deliverGeneratedMedia")
+            {
+                if (additionalObjects.Count != 0) throw new InvalidOperationException("invalid-payload");
+                FileInfo delivered = generatedUploadMedia.Resolve(payload);
+                result = await uploads.RequestNativeFileAsync(JsonSerializer.SerializeToElement(new {
+                    kind = "file", filePath = delivered.FullName, name = delivered.Name, size = delivered.Length,
+                    lastModified = new DateTimeOffset(delivered.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+                    requestId = payload.GetProperty("requestId").GetString(), sessionId = payload.GetProperty("sessionId").GetString(),
+                    platform = payload.GetProperty("platform").GetString(), role = payload.GetProperty("role").GetString(),
+                    token = payload.GetProperty("token").GetString()
                 }));
             }
             else if (operation == "deliverUploadFile")

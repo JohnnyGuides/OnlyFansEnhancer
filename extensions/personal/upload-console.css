@@ -1259,37 +1259,68 @@ html {
   margin-top: 4px;
 }
 .inline-details,
-.optional-media {
+.upload-media {
   margin-top: 8px;
 }
-.inline-details summary,
-.optional-media summary {
+.upload-media h3 {
+  margin: 16px 0 4px;
+  font-size: 0.95rem;
+}
+.thumbnail-frame-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 22px;
+  border: 1px solid #4a5f76;
+  border-radius: 12px;
+  background: #151c26;
+  color: #f1f5fa;
+}
+.thumbnail-frame-dialog::backdrop {
+  background: rgb(0 0 0 / 75%);
+}
+.thumbnail-frame-dialog video {
+  display: block;
+  width: 100%;
+  max-height: 55vh;
+  margin: 14px 0;
+  background: #080b10;
+}
+.thumbnail-frame-dialog input[type="range"] {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+}
+.thumbnail-frame-dialog .file-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.inline-details summary {
   min-height: 36px;
   padding: 8px 0;
   color: #bdcadb;
   font-size: 0.82rem;
   cursor: pointer;
 }
-#optionalMediaCount {
+#selectedMediaCount {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
-.optional-media .file-information {
+.upload-media .file-information {
   display: grid;
   grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 1fr);
   column-gap: 12px;
 }
-.optional-media .file-information label {
+.upload-media .file-information label {
   margin: 0;
   align-self: center;
 }
-.optional-media .file-size {
+.upload-media .file-size {
   grid-column: 2;
 }
-.optional-media .file-summary {
+.upload-media .file-summary {
   font-size: 0.82rem;
 }
-.optional-media [data-inactive="true"] .file-information::after {
+.upload-media [data-inactive="true"] .file-information::after {
   content: "Not used for these destinations";
   grid-column: 2;
   color: #aeb6c3;
@@ -1389,11 +1420,11 @@ a {
   #mainDestinations {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .optional-media .file-information {
+  .upload-media .file-information {
     grid-template-columns: minmax(0, 1fr);
   }
-  .optional-media .file-size,
-  .optional-media [data-inactive="true"] .file-information::after {
+  .upload-media .file-size,
+  .upload-media [data-inactive="true"] .file-information::after {
     grid-column: 1;
   }
   .preparation-controls {

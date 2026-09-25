@@ -363,7 +363,7 @@ test("retained publication intent blocks availability without altering the publi
   }
 });
 
-test("compact UI has one in-flow Upload rail, conditional media, no Step 4 and no overflow at 200%", async () => {
+test("compact UI keeps media visible, with one Upload rail and no overflow at 200%", async () => {
   const fixture = await createUploadFixture();
   const page = fixture.page;
   try {
@@ -384,11 +384,14 @@ test("compact UI has one in-flow Upload rail, conditional media, no Step 4 and n
       /Step 4|Yes, upload now|after Yes|same Yes|confirm the plan/i,
     );
     await fixture.ready("A very long benign filename ".repeat(8) + ".mp4");
-    assert.equal(await page.locator("#optionalMedia").isVisible(), false);
+    assert.equal(await page.locator("#uploadMedia").isVisible(), true);
+    assert.equal(
+      await page.locator('[data-media-for="pornhub"]').isVisible(),
+      true,
+    );
     assert.equal(await page.locator("#pornhubPresetFields").isVisible(), false);
     await page.locator("#targetManyvids").check();
-    assert.equal(await page.locator("#optionalMedia").isVisible(), true);
-    await page.locator("#optionalMedia > summary").click();
+    assert.equal(await page.locator("#uploadMedia").isVisible(), true);
     const chooser = page.waitForEvent("filechooser");
     await page.locator('[data-choose-file="uploadManyvidsThumbnail"]').click();
     await (
@@ -410,7 +413,7 @@ test("compact UI has one in-flow Upload rail, conditional media, no Step 4 and n
       "true",
     );
     await page.locator('[data-remove-file="uploadManyvidsThumbnail"]').click();
-    assert.equal(await page.locator("#optionalMedia").isVisible(), false);
+    assert.equal(await page.locator("#uploadMedia").isVisible(), true);
     for (const [width, zoom] of [
       [1280, 1],
       [390, 1],

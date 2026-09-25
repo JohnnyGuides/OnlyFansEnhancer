@@ -144,11 +144,15 @@
                 </button>
               </div>
             </div>
-            <details id="optionalMedia" class="optional-media">
-              <summary>
-                Optional media <span id="optionalMediaCount"></span
+            <section
+              id="uploadMedia"
+              class="upload-media"
+              aria-label="Upload media"
+            >
+              <h3>
+                Upload media <span id="selectedMediaCount"></span
                 ><span id="catalogueThumbnailHint"></span>
-              </summary>
+              </h3>
               <div class="file-picker" data-media-for="fansly manyvids">
                 <div class="file-information">
                   <label for="uploadTeaser">Shared teaser</label>
@@ -213,6 +217,9 @@
                   aria-describedby="manyvidsThumbnailSummary draftErrors"
                 />
                 <div class="file-actions">
+                  <button id="chooseThumbnailFrame" type="button">
+                    Choose frame
+                  </button>
                   <button
                     type="button"
                     data-choose-file="uploadManyvidsThumbnail"
@@ -292,7 +299,40 @@
                   </button>
                 </div>
               </div>
-            </details>
+            </section>
+            <dialog
+              id="thumbnailFrameDialog"
+              class="thumbnail-frame-dialog"
+              aria-labelledby="thumbnailFrameTitle"
+            >
+              <h2 id="thumbnailFrameTitle">Choose a thumbnail frame</h2>
+              <p>
+                Move through the full video, then use this frame as the 640 ×
+                360 thumbnail.
+              </p>
+              <video
+                id="thumbnailFrameVideo"
+                muted
+                playsinline
+                preload="metadata"
+              ></video>
+              <label for="thumbnailFrameTime">Position in video</label>
+              <input
+                id="thumbnailFrameTime"
+                type="range"
+                min="0"
+                max="1000"
+                value="0"
+              />
+              <span id="thumbnailFramePosition">0:00</span>
+              <p id="thumbnailFrameStatus" role="status"></p>
+              <div class="file-actions">
+                <button id="cancelThumbnailFrame" type="button">Cancel</button>
+                <button id="useThumbnailFrame" type="button" class="primary">
+                  Use this frame
+                </button>
+              </div>
+            </dialog>
             <p class="selection-note">
               Selections are cleared when this window closes.
             </p>
@@ -1083,6 +1123,7 @@
     <script src="workflows/subreddit-presets.js"></script>
     <script src="workflows/social-trace-evidence.js"></script>
     <script src="workflows/social-distribution-contract.js"></script>
+    <script src="workflows/media-generator.js"></script>
     <script src="upload-console.js"></script>
   </body>
 </html>

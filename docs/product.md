@@ -62,7 +62,15 @@ modes, and time. Upload observation can continue beyond 45 minutes; only progres
 video's editor through the recorded Edit action and its first verified navigation. Its final Save remains a single attempt. Returning to the upload page does not prove acceptance; an unverified Save stays unresolved and cannot be repeated. Source defaults are not
 an independently maintained product table.
 
-The optional Pornhub video falls back to the full video, never the teaser. The
+The Pornhub video row stays visible and uses the full video when no separate
+file is chosen, never the teaser. Upload Hub also keeps the shared teaser and
+thumbnail rows visible. When a selected destination needs them and no file is
+chosen, Chrome builds an MP4 preview of up to 29 seconds from six sampled scenes and a
+640 × 360 PNG from an early frame. The creator can scrub the full video's
+timeline and choose a different thumbnail frame before Upload. Generated
+media is stored locally for recovery of the latest upload on the same Upload
+Hub surface. The desktop stages generated files in a bounded local cache for
+its existing Chrome file handoff; the original video is not modified. The
 shared PNG/JPEG thumbnail is center-cropped into a temporary 640 × 360 PNG
 before delivery to ManyVids or Pornhub. The adapter verifies Pornhub's acceptance
 before marking the draft prepared. The creator selects one exact content preset.
@@ -147,10 +155,11 @@ neutral: **OFEnhancer needs attention**, not a title, account, path, or caption.
 
 The following intent is retained so it is not mistaken for discarded scope:
 
-- A local media engine with reproducible teaser, `_33` 640×360 and `_4K` badge
-  recipes; an audited LGPL-compatible FFmpeg distribution; validated/hash-checked
-  temporary output and atomic no-overwrite completion. Automated media creation,
-  perceptual matching, and the full cross-platform variant pipeline are not present.
+- A local media engine with reproducible peak-based teaser, `_33` 640×360 and
+  `_4K` badge recipes; an audited LGPL-compatible FFmpeg distribution;
+  validated/hash-checked temporary output and atomic no-overwrite completion.
+  The browser-generated preview and thumbnail above do not implement this full
+  variant pipeline or perceptual matching.
 - Complete Pornhub free/paid and C4S variant automation, edit-existing-thumbnail
   operations, Redgifs/Reddit autonomous publishing, and expired-subscriber outreach
   each require fresh successful traces and their own acceptance. Outreach must
