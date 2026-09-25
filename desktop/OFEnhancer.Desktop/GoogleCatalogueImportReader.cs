@@ -129,6 +129,7 @@ internal static class GoogleCatalogueImportReader
             "release" or "releasedate" or "planneddate" or "publicationdate" => "plannedDate",
             "description" or "videodescription" => "description",
             "seasonarc" or "season" or "arc" or "series" => "series",
+            "category" => "category",
             "episode" or "episodenumber" => "episode",
             "pornhub" or "pornhublink" or "pornhubfree" or "pornhubfreelink" => "pornhubFree",
             "pornhubpaid" or "pornhubpaidlink" => "pornhubPaid",

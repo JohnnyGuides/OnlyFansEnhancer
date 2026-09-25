@@ -145,7 +145,7 @@ test("upload console validates one local video and allow-listed targets", () => 
     thumbnail: null,
   });
 
-  const pornhubFallback = plain(
+  const pornhubFreeWithoutLimitedClip = plain(
     hooks.normalizeDraft({
       fullFile,
       title: "Episode 42",
@@ -154,7 +154,24 @@ test("upload console validates one local video and allow-listed targets", () => 
       contentPreset: "Straight",
     }),
   );
-  assert.deepEqual(pornhubFallback.media.pornhub, {
+  assert.equal(pornhubFreeWithoutLimitedClip.valid, false);
+  assert.deepEqual(pornhubFreeWithoutLimitedClip.media.pornhub, {
+    file: "",
+    source: "pornhub",
+    thumbnail: null,
+  });
+  const pornhubPaid = plain(
+    hooks.normalizeDraft({
+      fullFile,
+      title: "Episode 42",
+      scheduledIso: "2026-08-28T15:00:00.000Z",
+      targets: ["pornhub"],
+      pornhubMode: "paid",
+      contentPreset: "Straight",
+    }),
+  );
+  assert.equal(pornhubPaid.valid, true);
+  assert.deepEqual(pornhubPaid.media.pornhub, {
     file: "episode (full).mp4",
     source: "full",
     thumbnail: null,

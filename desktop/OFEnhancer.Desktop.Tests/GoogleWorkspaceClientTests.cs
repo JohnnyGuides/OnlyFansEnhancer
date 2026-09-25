@@ -22,17 +22,19 @@ public sealed class GoogleWorkspaceClientTests
 
         await client.AppendCatalogueRowAsync("workbook-one", "2026 Video Catalogue", 1,
             new Dictionary<string, int> { ["sourceKey"] = 1, ["plannedDate"] = 2,
-                ["title"] = 3, ["description"] = 4 },
-            "new-video-123", "2026-09-25", "=A1", "Preview\ntext", CancellationToken.None);
+                ["title"] = 3, ["description"] = 4, ["category"] = 5, ["series"] = 6 },
+            "new-video-123", "2026-09-25", "=A1", "Preview\ntext", "GameSync", "Setaria", CancellationToken.None);
 
         Assert.AreEqual(1, handler.Requests.Count);
         Assert.AreEqual(HttpMethod.Post, handler.Requests[0].Method);
         StringAssert.Contains(Uri.UnescapeDataString(handler.Requests[0].Uri.AbsolutePath),
-            "/values/'2026 Video Catalogue'!A2:D:append");
+            "/values/'2026 Video Catalogue'!A2:F:append");
         Assert.AreEqual("RAW", ParseQuery(handler.Requests[0].Uri)["valueInputOption"].Single());
         using JsonDocument body = JsonDocument.Parse(handler.Requests[0].Body);
         Assert.AreEqual("=A1", body.RootElement.GetProperty("values")[0][2].GetString());
         Assert.AreEqual("Preview\ntext", body.RootElement.GetProperty("values")[0][3].GetString());
+        Assert.AreEqual("GameSync", body.RootElement.GetProperty("values")[0][4].GetString());
+        Assert.AreEqual("Setaria", body.RootElement.GetProperty("values")[0][5].GetString());
     }
 
     [TestMethod]

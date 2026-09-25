@@ -112,7 +112,7 @@ async function mount(page) {
   );
 }
 
-test("compact uploader keeps real accessible pickers, three keyboard choices and one descriptor template", async () => {
+test("compact uploader keeps real accessible pickers, two keyboard choices and one descriptor template", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({
@@ -122,9 +122,181 @@ test("compact uploader keeps real accessible pickers, three keyboard choices and
     page.on("pageerror", (error) => errors.push(error.message));
     await mount(page);
     assert.equal(await page.locator("h1").textContent(), "Upload");
+    assert.deepEqual(
+      await page.locator("#uploadCategory option").allTextContents(),
+      [
+        "Select category",
+        "GameSync",
+        "FantasyFuck",
+        "ToyFucking",
+        "Gooning",
+        "JohnnyVerse",
+        "ManualSync",
+        "Review",
+        "Solo",
+        "Specials",
+        "QuickSync",
+        "Boyfriend",
+        "Compilation",
+      ],
+    );
+    assert.deepEqual(
+      (await page.locator("#uploadSeason option").allTextContents()).slice(
+        0,
+        4,
+      ),
+      ["Select season", "Legacy Solo", "Setaria", "Seal of Lutellaria"],
+    );
+    const fullSummary = await page.locator("#fullFileSummary").boundingBox();
+    const teaserSummary = await page
+      .locator("#teaserFileSummary")
+      .boundingBox();
+    const fullAction = await page
+      .locator('[data-choose-file="uploadFullVideo"]')
+      .boundingBox();
+    assert.ok(Math.abs(fullSummary.y - teaserSummary.y) < 3);
+    assert.ok(fullAction.y - (fullSummary.y + fullSummary.height) < 38);
+    const destinations = await page
+      .locator("section.card:has(#mainDestinations)")
+      .boundingBox();
+    const actionPanel = await page.locator("#uploadActions").boundingBox();
+    const actionStatus = await page.locator("#matchStatus").boundingBox();
+    assert.ok(
+      actionPanel.y - (destinations.y + destinations.height) <= 24,
+      JSON.stringify({ destinations, actionPanel }),
+    );
+    assert.ok(actionStatus.x - actionPanel.x >= 12);
+    assert.equal(await page.locator("#runNotice").textContent(), "");
+    assert.notEqual(
+      await page
+        .locator("#uploadActions")
+        .evaluate((element) => getComputedStyle(element).position),
+      "sticky",
+    );
+    await page.locator("#catalogueThumbnails").evaluate((element) => {
+      element.hidden = false;
+    });
+    const pornhubCard = await page.locator(".pornhub-file-card").boundingBox();
+    const thumbnailChoices = await page
+      .locator("#catalogueThumbnails")
+      .boundingBox();
+    assert.ok(
+      thumbnailChoices.y >= pornhubCard.y + pornhubCard.height,
+      "Named thumbnail choices should follow the four media cards",
+    );
+    await page.locator("#catalogueThumbnails").evaluate((element) => {
+      element.hidden = true;
+    });
+    await page.locator("#uploadManyvidsThumbnail").setInputFiles({
+      name: "Sample Chess Session With A Much Longer Thumbnail Name Final.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+    await page.waitForFunction(
+      () => document.querySelector("#selectedThumbnailImage").naturalWidth > 0,
+    );
+    assert.equal(
+      await page.locator("#selectedThumbnailPreview").isVisible(),
+      true,
+    );
+    assert.equal(
+      await page
+        .locator(".thumbnail-file-card .file-name-extension")
+        .textContent(),
+      ".png",
+    );
+    const nameStem = page.locator(".thumbnail-file-card .file-name-stem");
+    assert.equal(
+      await nameStem.evaluate(
+        (element) => element.scrollWidth > element.clientWidth,
+      ),
+      true,
+    );
+    const fileSizeBox = await page
+      .locator("#manyvidsThumbnailSummarySize")
+      .boundingBox();
+    const fileNameBox = await page
+      .locator("#manyvidsThumbnailSummary")
+      .boundingBox();
+    assert.ok(fileSizeBox.x > fileNameBox.x + fileNameBox.width);
+    const previewBox = await page
+      .locator("#selectedThumbnailPreview")
+      .boundingBox();
+    const descriptionBox = await page
+      .locator(".description-field")
+      .boundingBox();
+    assert.ok(Math.abs(previewBox.y - descriptionBox.y) < 2);
+    assert.ok(
+      Math.abs(
+        previewBox.y +
+          previewBox.height -
+          (descriptionBox.y + descriptionBox.height),
+      ) < 2,
+    );
+    const cardWidths = await page
+      .locator(".media-grid .file-picker")
+      .evaluateAll((cards) =>
+        cards.map((card) => card.getBoundingClientRect().width),
+      );
+    assert.ok(Math.max(...cardWidths) - Math.min(...cardWidths) < 2);
+    const actionTops = await Promise.all(
+      [
+        '[data-choose-file="uploadFullVideo"]',
+        '[data-choose-file="uploadTeaser"]',
+        "#chooseThumbnailFrame",
+        '[data-choose-file="uploadPornhubVideo"]',
+      ].map(async (selector) => (await page.locator(selector).boundingBox()).y),
+    );
+    assert.ok(
+      Math.max(...actionTops) - Math.min(...actionTops) < 3,
+      JSON.stringify(actionTops),
+    );
+    await page.setViewportSize({ width: 780, height: 900 });
+    await page.locator("#thumbnailMore summary").click();
+    assert.equal(
+      await page.locator(".thumbnail-primary-choice").isHidden(),
+      true,
+    );
+    assert.equal(
+      await page.locator(".thumbnail-menu-replace").isVisible(),
+      true,
+    );
+    const frameAction = await page
+      .locator("#chooseThumbnailFrame")
+      .boundingBox();
+    const moreAction = await page
+      .locator("#thumbnailMore summary")
+      .boundingBox();
+    assert.ok(Math.abs(frameAction.y - moreAction.y) < 3);
+    await page.locator('[data-remove-file="uploadManyvidsThumbnail"]').click();
+    assert.equal(
+      await page.locator("#selectedThumbnailPreview").isHidden(),
+      true,
+    );
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const freeChoice = page.locator("label:has(#targetPornhub)");
+    const paidChoice = page.locator("label:has(#targetPornhubPaid)");
+    await freeChoice.click();
+    assert.equal(await page.locator("#targetPornhub").isChecked(), true);
+    assert.equal(await page.locator("#pornhubVideoType").inputValue(), "free");
+    assert.equal(await page.locator(".pornhub-file-card").isVisible(), true);
+    await paidChoice.click();
+    assert.equal(await page.locator("#targetPornhub").isChecked(), false);
+    assert.equal(await page.locator("#targetPornhubPaid").isChecked(), true);
+    assert.equal(await page.locator("#pornhubVideoType").inputValue(), "paid");
+    assert.equal(await page.locator(".pornhub-file-card").isVisible(), false);
+    await paidChoice.click();
+    assert.equal(await page.locator("#chooseThumbnailFrame").isVisible(), true);
+    assert.equal(
+      await page.locator("#chooseThumbnailFrame").isDisabled(),
+      true,
+    );
     assert.equal(
       await page.locator('input[name="workflowMode"]:visible').count(),
-      3,
+      2,
     );
     assert.equal(await page.locator("[webkitdirectory]").count(), 0);
     await page.locator('input[name="workflowMode"][value="main"]').focus();
@@ -136,15 +308,14 @@ test("compact uploader keeps real accessible pickers, three keyboard choices and
       true,
     );
     assert.equal(await page.locator(".draft-card").isVisible(), false);
-    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
     assert.equal(
       await page
-        .locator('input[name="workflowMode"][value="both"]')
+        .locator('input[name="workflowMode"][value="main"]')
         .isChecked(),
       true,
     );
     assert.equal(await page.locator(".draft-card").isVisible(), true);
-    assert.equal(await page.locator(".social-card").isVisible(), true);
     await page.locator("#loadTemplate").click();
     await page.waitForFunction(
       () =>
@@ -230,8 +401,11 @@ test("compact uploader keeps real accessible pickers, three keyboard choices and
     );
     await page.locator("#settingsTab").click();
     assert.equal(await page.locator("#settingsPanel").isVisible(), true);
+    assert.equal(await page.locator(".workflow-panel").isVisible(), false);
+    assert.equal(await page.locator("#loadTemplate").isVisible(), false);
     await page.locator("#uploaderTab").click();
     assert.equal(await page.locator("#uploaderPanel").isVisible(), true);
+    assert.equal(await page.locator(".workflow-panel").isVisible(), true);
     assert.equal(
       await page
         .locator("body")
@@ -289,6 +463,27 @@ for (const [name, width, height, scale] of [
         .locator(".file-actions button:visible")
         .all())
         assert.ok((await button.boundingBox()).height >= 32);
+      if (name === "desktop") {
+        const mode = await page.locator("#workflowMode").boundingBox();
+        const uploaderTab = await page.locator("#uploaderTab").boundingBox();
+        assert.ok(mode.x + mode.width < uploaderTab.x);
+        assert.ok(Math.abs(mode.y - uploaderTab.y) < 24);
+        const chooseFrame = await page
+          .locator("#chooseThumbnailFrame")
+          .boundingBox();
+        const custom = await page
+          .locator(".thumbnail-primary-choice")
+          .boundingBox();
+        assert.ok(
+          Math.abs(chooseFrame.y - custom.y) < 3,
+          JSON.stringify({ chooseFrame, custom }),
+        );
+        const heading = await page.locator("#targetsHeading").boundingBox();
+        const publish = await page.locator("#mainPublishFields").boundingBox();
+        assert.ok(
+          publish.x > heading.x && Math.abs(publish.y - heading.y) < 12,
+        );
+      }
       if (process.env.OFENHANCER_REVIEW_DIR) {
         fs.mkdirSync(process.env.OFENHANCER_REVIEW_DIR, { recursive: true });
         await page.screenshot({

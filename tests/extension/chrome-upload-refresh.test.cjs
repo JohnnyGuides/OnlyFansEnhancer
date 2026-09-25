@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const root = require("../support/paths.cjs").repositoryRoot;
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
-test("personal uploader has one development template action and three native workflow radios", () => {
+test("personal uploader has one development template action and two native upload choices", () => {
   const html = read("extensions/personal/upload-console.html");
   assert.equal((html.match(/>\s*Load Template\s*</g) || []).length, 1);
   for (const id of [
@@ -15,7 +15,7 @@ test("personal uploader has one development template action and three native wor
   ])
     assert.ok(!html.includes('id="' + id + '"'));
   assert.ok(!html.includes('select id="workflowMode"'));
-  assert.equal((html.match(/name="workflowMode"/g) || []).length, 3);
+  assert.equal((html.match(/name="workflowMode"/g) || []).length, 2);
   assert.ok(
     !/kept only in this tab/i.test(
       read("extensions/personal/upload-console.js"),

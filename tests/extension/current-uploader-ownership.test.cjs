@@ -187,8 +187,8 @@ test("Fansly alias authorization retains exact composer, frame, document and con
     /binding-changed/,
   );
 });
-for (const optional of [false, true])
-  test(`console file request delivers approved Pornhub role, optional=${optional}`, async () => {
+for (const pornhubMode of ["paid", "free"])
+  test(`console file request delivers approved Pornhub ${pornhubMode} role`, async () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../../extensions/personal/upload-console.js"),
       "utf8",
@@ -233,15 +233,17 @@ for (const optional of [false, true])
       type: "video/mp4",
       lastModified: 1,
     });
-    const pornhubFile = optional
-      ? new File(["optional bytes"], "optional.mp4", {
-          type: "video/mp4",
-          lastModified: 2,
-        })
-      : null;
+    const pornhubFile =
+      pornhubMode === "free"
+        ? new File(["optional bytes"], "optional.mp4", {
+            type: "video/mp4",
+            lastModified: 2,
+          })
+        : null;
     const context = vm.createContext({
       fullFile,
       pornhubFile,
+      value: { pornhubMode },
       teaserFile: new File(["teaser"], "teaser.mp4"),
       thumbnailFile: null,
       socialFile: null,
@@ -269,6 +271,14 @@ for (const optional of [false, true])
     const start = source.indexOf("    function fileIdentity(");
     const end = source.indexOf("    async function retryPlatform", start);
     vm.runInContext(source.slice(start, end), context);
+    const pornhubFileStart = source.indexOf(
+      "    function selectedPornhubFile(",
+    );
+    const pornhubFileEnd = source.indexOf(
+      "    function selectedSocialTargets(",
+      pornhubFileStart,
+    );
+    vm.runInContext(source.slice(pornhubFileStart, pornhubFileEnd), context);
     const filesStart = source.indexOf("const selectedFiles = {");
     const filesEnd = source.indexOf(";", filesStart);
     vm.runInContext(
@@ -290,11 +300,11 @@ for (const optional of [false, true])
     assert.equal(delivered.length, 1);
     assert.equal(
       delivered[0].file.name,
-      optional ? "optional.mp4" : "full.mp4",
+      pornhubMode === "free" ? "optional.mp4" : "full.mp4",
     );
     assert.equal(
       await delivered[0].file.text(),
-      optional ? "optional bytes" : "full bytes",
+      pornhubMode === "free" ? "optional bytes" : "full bytes",
     );
     assert.equal(replies.at(-1).ok, true);
   });

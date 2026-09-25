@@ -68,6 +68,17 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
         source,
         2,
       );
+      const cropped = await CreatorMediaGenerator.thumbnailFromVideo(
+        source,
+        2,
+        {
+          zoom: 1.6,
+          x: 1,
+          y: -1,
+        },
+      );
+      const originalBytes = new Uint8Array(await thumbnail.arrayBuffer());
+      const croppedBytes = new Uint8Array(await cropped.arrayBuffer());
       const bitmap = await createImageBitmap(thumbnail);
       const thumbnailResult = {
         name: thumbnail.name,
@@ -75,6 +86,10 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
         size: thumbnail.size,
         width: bitmap.width,
         height: bitmap.height,
+        cropChanged:
+          originalBytes.length !== croppedBytes.length ||
+          originalBytes.some((byte, index) => byte !== croppedBytes[index]),
+        croppedSize: cropped.size,
       };
       bitmap.close();
       const teaser = await CreatorMediaGenerator.teaserFromVideo(source);
@@ -113,6 +128,11 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
     assert.equal(result.thumbnail.type, "image/png");
     assert.equal(result.thumbnail.width, 640);
     assert.equal(result.thumbnail.height, 360);
+    assert.equal(
+      result.thumbnail.cropChanged,
+      true,
+      JSON.stringify(result.thumbnail),
+    );
     assert.ok(result.thumbnail.size > 0 && result.thumbnail.size < 2_000_000);
     assert.equal(result.teaser.type, "video/mp4");
     assert.ok(result.teaser.size > 0 && result.teaser.size < 50 * 1024 * 1024);
@@ -204,6 +224,16 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
   try {
     const page = fixture.page;
     await page.locator("#uploadFullVideo").setInputFiles(videoPath);
+    assert.equal(await page.locator("#chooseThumbnailFrame").isEnabled(), true);
+    if (process.env.OFENHANCER_REVIEW_DIR) {
+      fs.mkdirSync(process.env.OFENHANCER_REVIEW_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(
+          process.env.OFENHANCER_REVIEW_DIR,
+          "upload-video-selected.png",
+        ),
+      });
+    }
     await page.locator("#chooseThumbnailFrame").click();
     await page.waitForFunction(() =>
       document
@@ -214,6 +244,39 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
       slider.value = "500";
       slider.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    const stripBox = await page.locator("#thumbnailFrameStrip").boundingBox();
+    await page.locator("#thumbnailFrameStrip").click({
+      position: { x: stripBox.width * 0.75, y: stripBox.height / 2 },
+    });
+    assert.ok(
+      Number(await page.locator("#thumbnailFrameTime").inputValue()) > 600,
+    );
+    await page.locator("#thumbnailCropZoom").evaluate((slider) => {
+      slider.value = "160";
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.locator("#thumbnailCropX").evaluate((slider) => {
+      slider.value = "75";
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    assert.equal(
+      await page.locator("#thumbnailCropZoomValue").textContent(),
+      "1.6×",
+    );
+    assert.equal(await page.locator("#useThumbnailFrame").isVisible(), true);
+    assert.ok(
+      (await page.locator("#useThumbnailFrame").boundingBox()).y <
+        page.viewportSize().height,
+    );
+    if (process.env.OFENHANCER_REVIEW_DIR) {
+      fs.mkdirSync(process.env.OFENHANCER_REVIEW_DIR, { recursive: true });
+      await page.screenshot({
+        path: path.join(
+          process.env.OFENHANCER_REVIEW_DIR,
+          "thumbnail-picker.png",
+        ),
+      });
+    }
     await page.locator("#useThumbnailFrame").click();
     await page.waitForFunction(
       () => !document.querySelector("#thumbnailFrameDialog").open,

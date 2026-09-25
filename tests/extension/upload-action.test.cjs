@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createUploadFixture } = require("../support/upload-action-fixture.cjs");
 
-test("close Work matches appear beside the file before title and description", async () => {
+test("four similar Work entries appear below description and search filters them", async () => {
   const fixture = await createUploadFixture();
   try {
     const { page } = fixture;
@@ -48,11 +48,11 @@ test("close Work matches appear beside the file before title and description", a
     );
     assert.equal(
       await page.locator("#catalogueCards .catalogue-card").count(),
-      6,
+      4,
     );
     assert.equal(
       await page.locator("#catalogueMoreLabel").textContent(),
-      "More matches (8)",
+      "More matches (4)",
     );
     await page.locator("#catalogueSearch").fill("lighting");
     assert.equal(
@@ -68,9 +68,15 @@ test("close Work matches appear beside the file before title and description", a
       matches: document
         .querySelector("#cataloguePicker")
         .getBoundingClientRect().top,
-      title: document.querySelector("#uploadTitle").getBoundingClientRect().top,
+      description: document
+        .querySelector(".description-layout")
+        .getBoundingClientRect().bottom,
+      destinations: document
+        .querySelector("#mainDestinations")
+        .getBoundingClientRect().top,
     }));
-    assert.ok(order.matches < order.title);
+    assert.ok(order.matches >= order.description);
+    assert.ok(order.matches < order.destinations);
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();
@@ -261,6 +267,7 @@ for (const desktop of [false, true]) {
             document.documentElement.style.zoom = String(value);
             window.scrollTo(0, 0);
           }, zoom);
+          await page.locator("#uploadActions").scrollIntoViewIfNeeded();
           const recoveryControls = await page.evaluate(() =>
             ["uploadButton", "reviewRecovery", "refreshReadiness"].map((id) => {
               const rect = document.getElementById(id).getBoundingClientRect();
@@ -465,22 +472,19 @@ test("compact UI keeps media visible, with one Upload rail and no overflow at 20
       true,
     );
     assert.equal(await page.locator("#pornhubPresetFields").isVisible(), false);
-    await page.locator("#targetManyvids").check();
+    await page.locator("#targetManyvids").locator("..").click();
     assert.equal(await page.locator("#uploadMedia").isVisible(), true);
-    const chooser = page.waitForEvent("filechooser");
-    await page.locator('[data-choose-file="uploadManyvidsThumbnail"]').click();
-    await (
-      await chooser
-    ).setFiles({
+    await page.locator("#uploadManyvidsThumbnail").setInputFiles({
       name: "benign-thumbnail.png",
       mimeType: "image/png",
       buffer: Buffer.from("fixture"),
     });
-    await page.locator("#targetManyvids").uncheck();
+    await page.locator("#targetManyvids").locator("..").click();
     assert.equal(
       await page.locator("#uploadManyvidsThumbnail").locator("..").isVisible(),
       true,
     );
+    await page.locator("#thumbnailMore summary").click();
     await page.locator('[data-remove-file="uploadManyvidsThumbnail"]').click();
     assert.equal(await page.locator("#uploadMedia").isVisible(), true);
     for (const [width, zoom] of [
@@ -494,6 +498,7 @@ test("compact UI keeps media visible, with one Upload rail and no overflow at 20
         document.documentElement.style.zoom = String(value);
         window.scrollTo(0, 0);
       }, zoom);
+      await page.locator("#uploadActions").scrollIntoViewIfNeeded();
       const bounds = await page.evaluate(() => {
         const button = document
           .querySelector("#uploadButton")
@@ -523,7 +528,7 @@ test("compact UI keeps media visible, with one Upload rail and no overflow at 20
           bounds.bottom <= bounds.height + 1,
         JSON.stringify({ width, zoom, bounds }),
       );
-      assert.equal(bounds.position, "sticky");
+      assert.equal(bounds.position, "static");
       await page.evaluate(() => window.scrollTo(0, 10000000));
       await page.waitForTimeout(40);
       assert.equal(

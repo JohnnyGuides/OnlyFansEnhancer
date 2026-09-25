@@ -421,6 +421,7 @@ internal sealed class GoogleWorkspaceClient
     internal Task AppendCatalogueRowAsync(string workbookId, string sheetTitle,
         int headerRow, IReadOnlyDictionary<string, int> columns,
         string id, string releaseDate, string title, string description,
+        string category, string seasonArc,
         CancellationToken cancellationToken)
     {
         string boundedWorkbook = Required(workbookId, 256, "workbookId");
@@ -439,6 +440,10 @@ internal sealed class GoogleWorkspaceClient
             values[dateColumn - 1] = Required(releaseDate, 10, "releaseDate", allowEmpty: true);
         if (columns.TryGetValue("description", out int descriptionColumn))
             values[descriptionColumn - 1] = Required(description, 10_000, "description", allowEmpty: true, allowLineBreaks: true);
+        if (columns.TryGetValue("category", out int categoryColumn))
+            values[categoryColumn - 1] = Required(category, 200, "category", allowEmpty: true);
+        if (columns.TryGetValue("series", out int seasonColumn))
+            values[seasonColumn - 1] = Required(seasonArc, 200, "seasonArc", allowEmpty: true);
         string escapedSheet = boundedSheet.Replace("'", "''", StringComparison.Ordinal);
         string range = $"'{escapedSheet}'!A{headerRow + 1}:{(char)('A' + lastColumn - 1)}";
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(new { majorDimension = "ROWS", values = new[] { values } });

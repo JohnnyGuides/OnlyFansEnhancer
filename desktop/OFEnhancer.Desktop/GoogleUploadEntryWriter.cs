@@ -9,7 +9,8 @@ namespace OFEnhancer.Desktop;
 internal sealed record GoogleUploadEntryRequest(
     string Mode, string Title, string Description, string ReleaseDate,
     string? FileName = null, long? FileSize = null, long? FileLastModified = null,
-    string? Id = null, string? ExpectedTitle = null, string? ExpectedDescription = null);
+    string? Id = null, string? ExpectedTitle = null, string? ExpectedDescription = null,
+    string Category = "", string SeasonArc = "");
 
 internal sealed record GoogleUploadEntryResult(string Id, int Row, string Status,
     GoogleCatalogueImportPreview Preview);
@@ -28,6 +29,9 @@ internal sealed class GoogleUploadEntryWriter(
         {
             if (!before.Columns.ContainsKey("plannedDate") || !before.Columns.ContainsKey("description"))
                 throw new GoogleCatalogueException("catalogue-layout-changed");
+            if (!string.IsNullOrEmpty(request.Category) && !before.Columns.ContainsKey("category")
+                || !string.IsNullOrEmpty(request.SeasonArc) && !before.Columns.ContainsKey("series"))
+                throw new GoogleCatalogueException("catalogue-layout-changed");
             if (existing is not null)
                 return ExactNew(existing, request)
                     ? new(id, existing.SourceRow, "already-created", before)
@@ -36,7 +40,8 @@ internal sealed class GoogleUploadEntryWriter(
             {
                 await workspace.AppendCatalogueRowAsync(workbookId, before.CatalogueSheetTitle,
                     before.HeaderRow, before.Columns, id, request.ReleaseDate,
-                    request.Title, request.Description, cancellationToken).ConfigureAwait(false);
+                    request.Title, request.Description, request.Category, request.SeasonArc,
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (GoogleMutationUncertainException)
             {
@@ -46,7 +51,11 @@ internal sealed class GoogleUploadEntryWriter(
         else
         {
             if (existing is null) throw new GoogleCatalogueException("catalogue-entry-missing");
-            if (existing.Title == request.Title && existing.Description == request.Description)
+            bool detailsAlreadyMatch = existing.Title == request.Title
+                && existing.Description == request.Description
+                && (existing.Series ?? "") == request.SeasonArc;
+            if (detailsAlreadyMatch && (string.IsNullOrEmpty(request.Category)
+                || await ReadFieldAsync(before, existing, "category", cancellationToken).ConfigureAwait(false) == request.Category))
                 return new(id, existing.SourceRow, "already-updated", before);
             if (existing.Title != request.ExpectedTitle || existing.Description != request.ExpectedDescription)
                 throw new GoogleCatalogueException("catalogue-entry-changed");
@@ -57,6 +66,19 @@ internal sealed class GoogleUploadEntryWriter(
             if (existing.Description != request.Description)
                 updates.Add(await CheckedUpdateAsync(before, existing, "description", request.Description,
                     request.ExpectedDescription!, cancellationToken).ConfigureAwait(false));
+            if ((existing.Series ?? "") != request.SeasonArc)
+                updates.Add(await CheckedUpdateAsync(before, existing, "series", request.SeasonArc,
+                    existing.Series ?? "", cancellationToken).ConfigureAwait(false));
+            if (!string.IsNullOrEmpty(request.Category))
+            {
+                string currentCategory = await ReadFieldAsync(before, existing, "category", cancellationToken)
+                    .ConfigureAwait(false);
+                if (currentCategory != request.Category)
+                    updates.Add(await CheckedUpdateAsync(before, existing, "category", request.Category,
+                        currentCategory, cancellationToken).ConfigureAwait(false));
+            }
+            if (updates.Count == 0)
+                return new(id, existing.SourceRow, "already-updated", before);
             try
             {
                 await workspace.UpdateValuesBatchAsync(new(workbookId, updates), cancellationToken, raw: true)
@@ -71,7 +93,11 @@ internal sealed class GoogleUploadEntryWriter(
         if (!before.HasSameMapping(after)) throw new GoogleCatalogueException("catalogue-layout-changed");
         WorkbookCatalogueItem? written = after.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
         if (written is null || written.Title != request.Title || written.Description != request.Description
+            || written.Series != (string.IsNullOrEmpty(request.SeasonArc) ? null : request.SeasonArc)
             || request.Mode == "new" && written.PlannedDate != request.ReleaseDate)
+            throw new GoogleCatalogueException("google-row-write-unresolved");
+        if (!string.IsNullOrEmpty(request.Category)
+            && await ReadFieldAsync(after, written, "category", cancellationToken).ConfigureAwait(false) != request.Category)
             throw new GoogleCatalogueException("google-row-write-unresolved");
         return new(id, written.SourceRow, request.Mode == "new" ? "created" : "updated", after);
     }
@@ -89,6 +115,19 @@ internal sealed class GoogleUploadEntryWriter(
         if (cell.Range != range || (cell.Value ?? "") != expected)
             throw new GoogleCatalogueException("catalogue-entry-changed");
         return new(range, value);
+    }
+
+    private async Task<string> ReadFieldAsync(GoogleCatalogueImportPreview preview,
+        WorkbookCatalogueItem item, string field, CancellationToken cancellationToken)
+    {
+        if (!preview.Columns.TryGetValue(field, out int column))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        string sheet = preview.CatalogueSheetTitle.Replace("'", "''", StringComparison.Ordinal);
+        string range = $"'{sheet}'!{(char)('A' + column - 1)}{item.SourceRow}";
+        GoogleProjectionCell cell = await workspace.ReadProjectionCellAsync(workbookId, range, cancellationToken)
+            .ConfigureAwait(false);
+        if (cell.Range != range) throw new GoogleCatalogueException("catalogue-entry-changed");
+        return cell.Value ?? "";
     }
 
     private async Task<GoogleCatalogueImportPreview> ReadAsync(CancellationToken cancellationToken)
@@ -119,7 +158,10 @@ internal sealed class GoogleUploadEntryWriter(
         if (request.Mode is not ("new" or "update")
             || request.Title is not { Length: > 0 and <= 300 }
             || request.Description is not { Length: <= 10_000 }
+            || request.Category is not { Length: <= 200 }
+            || request.SeasonArc is not { Length: <= 200 }
             || request.Title.Any(char.IsControl) || request.Description.Any(c => c is '\0' or '\r')
+            || request.Category.Any(char.IsControl) || request.SeasonArc.Any(char.IsControl)
             || !DateOnly.TryParseExact(request.ReleaseDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out _))
             throw new GoogleCatalogueException("invalid-catalogue-entry");

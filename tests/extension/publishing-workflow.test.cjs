@@ -251,6 +251,51 @@ test("draft normalization maps the ManyVids full, teaser, and optional thumbnail
   assert.equal(missingTeaser.hasTeaser, false);
 });
 
+test("Pornhub Free requires a separate clip and can be the sole destination", () => {
+  const context = loadScripts("upload-console.js");
+  const base = {
+    title: "Neutral clip",
+    scheduledIso: "2026-08-28T15:00:00.000Z",
+    targets: ["pornhub"],
+    contentPreset: "Straight",
+  };
+  const limited = { name: "limited.mp4", type: "video/mp4", size: 42 };
+  const full = { name: "full.mp4", type: "video/mp4", size: 84 };
+  const free = plain(
+    context.CreatorUploadConsole.normalizeDraft({
+      ...base,
+      pornhubFile: limited,
+      pornhubMode: "free",
+    }),
+  );
+  assert.equal(free.valid, true);
+  assert.deepEqual(free.media.pornhub, {
+    file: "limited.mp4",
+    source: "pornhub",
+    thumbnail: null,
+  });
+  const missingLimited = plain(
+    context.CreatorUploadConsole.normalizeDraft({
+      ...base,
+      fullFile: full,
+      pornhubMode: "free",
+    }),
+  );
+  assert.equal(missingLimited.valid, false);
+  assert.match(missingLimited.errors.join(" "), /separate limited clip/);
+  const paid = plain(
+    context.CreatorUploadConsole.normalizeDraft({
+      ...base,
+      fullFile: full,
+      pornhubFile: limited,
+      pornhubMode: "paid",
+    }),
+  );
+  assert.equal(paid.valid, true);
+  assert.equal(paid.media.pornhub.file, "full.mp4");
+  assert.equal(paid.media.pornhub.source, "full");
+});
+
 test("proposal preflight identity includes Add New metadata, not only the empty row fingerprint", () => {
   const context = loadScripts("upload-console.js");
   const proposal = {
@@ -2595,7 +2640,11 @@ test("upload console performs no platform mutation before the single Upload acti
     });
     await page.locator("#uploadTitle").fill("Episode 42");
     await page.locator(".catalogue-card").first().click();
-    await page.getByText(/Catalogue row/i).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#catalogueSelectionStatus")
+        ?.textContent.includes("Catalogue row"),
+    );
 
     assert.deepEqual(
       await page.evaluate(() =>
@@ -2639,6 +2688,7 @@ test("upload console performs no platform mutation before the single Upload acti
       .waitFor();
     assert.equal(await page.locator("#uploadButton").isEnabled(), false);
     assert.equal(await page.locator("#cancelPreparation").isVisible(), true);
+    await page.locator("#settingsTab").click();
     await page.locator("#uploadRecovery > summary").click();
     assert.equal(await page.locator("#exportPreparation").isVisible(), true);
     const mutationMessages = await page.evaluate(() =>
@@ -2797,6 +2847,7 @@ test("likely catalogue matches require a click and prefill the selected entry", 
                 releaseDate: "2026-05-08",
                 title: "BATTLEFIELD 6 Angry Sex",
                 description: "Catalogue description",
+                category: "GameSync",
                 seasonArc: "Battlefield",
                 episode: "3",
                 pornhubLink: "",
@@ -2867,9 +2918,37 @@ test("likely catalogue matches require a click and prefill the selected entry", 
       buffer: Buffer.from("full-video"),
     });
     await page.locator(".catalogue-card").first().waitFor();
+    assert.equal(
+      await page
+        .locator(
+          ".description-layout + #catalogueControlsHome + #catalogueControls #cataloguePicker",
+        )
+        .count(),
+      1,
+    );
+    assert.match(
+      await page.locator(".catalogue-card-main small").first().textContent(),
+      /GameSync · Battlefield/,
+    );
+    assert.doesNotMatch(
+      await page.locator(".catalogue-card-main small").first().textContent(),
+      /2026-/,
+    );
     assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     await page.locator(".catalogue-card").first().click();
-    await page.getByText(/Catalogue row/i).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#catalogueSelectionStatus")
+        ?.textContent.includes("Catalogue row"),
+    );
+    assert.equal(
+      await page.locator("#selectedCatalogueReason").isHidden(),
+      true,
+    );
+    assert.equal(
+      await page.locator("#catalogueSelectionStatus").isHidden(),
+      true,
+    );
 
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
     assert.equal(await page.locator("#targetFansly").isChecked(), false);
@@ -2894,9 +2973,30 @@ test("likely catalogue matches require a click and prefill the selected entry", 
       [],
     );
 
-    await page.locator(".catalogue-find-more summary").click();
-    await page.locator(".catalogue-card img[src^='data:image/png']").waitFor();
     await page.locator("#catalogueSearch").fill("battlefield");
+    assert.match(
+      await page.locator(".catalogue-card").textContent(),
+      /BATTLEFIELD 6 Angry Sex/,
+    );
+    await page.locator("#catalogueSearch").fill("");
+    await page.locator("#catalogueBrowseToggle").click();
+    assert.equal(
+      await page
+        .locator("#catalogueBrowseDialog")
+        .evaluate((dialog) => dialog.open),
+      true,
+    );
+    const destinationBefore = await page
+      .locator("section.card:has(#mainDestinations)")
+      .boundingBox();
+    await page.locator("#closeCatalogueBrowse").click();
+    const destinationAfter = await page
+      .locator("section.card:has(#mainDestinations)")
+      .boundingBox();
+    assert.ok(Math.abs(destinationBefore.y - destinationAfter.y) < 2);
+    await page.locator("#catalogueBrowseToggle").click();
+    await page.locator(".catalogue-card img[src^='data:image/png']").waitFor();
+    await page.locator("#catalogueBrowseSearch").fill("battlefield");
     assert.match(
       await page.locator(".catalogue-card").textContent(),
       /BATTLEFIELD 6 Angry Sex/,
@@ -2907,7 +3007,7 @@ test("likely catalogue matches require a click and prefill the selected entry", 
     );
     assert.match(
       await page.locator('#catalogueRow option[value="row:121"]').textContent(),
-      /PH missing.*OF missing.*Fansly yes.*MV yes/i,
+      /GameSync.*Battlefield.*BATTLEFIELD 6 Angry Sex/i,
     );
     await page.locator("#catalogueRow").selectOption("row:121");
     assert.match(
@@ -3019,11 +3119,10 @@ test("one named thumbnail is selected automatically and new variants restore the
     await page
       .locator("#catalogueThumbnailChoices button")
       .waitFor({ state: "attached" });
-    await page.locator("#catalogueThumbnails").waitFor({ state: "visible" });
-    assert.equal(
-      await page.locator("#catalogueThumbnailHint").textContent(),
-      " · 1 named thumbnails",
-    );
+    await page
+      .locator("#selectedThumbnailPreview")
+      .waitFor({ state: "visible" });
+    assert.equal(await page.locator("#catalogueThumbnails").isHidden(), true);
     assert.equal(
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       "catalogue-ep01_v01.png",
@@ -3047,7 +3146,10 @@ test("one named thumbnail is selected automatically and new variants restore the
         lastModified: 123456790,
       }),
     );
-    await page.locator("#loadCatalogueThumbnails").click();
+    await page
+      .locator("#loadCatalogueThumbnails")
+      .evaluate((button) => button.click());
+    await page.locator("#catalogueThumbnails").waitFor({ state: "visible" });
     await page.locator("#catalogueThumbnailChoices button").nth(1).waitFor();
     assert.match(
       await page.locator("#catalogueThumbnailStatus").textContent(),
@@ -3062,6 +3164,9 @@ test("one named thumbnail is selected automatically and new variants restore the
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       "catalogue-ep01_v02.png",
     );
+    await page
+      .locator("#selectedThumbnailPreview")
+      .waitFor({ state: "visible" });
   } finally {
     await browser.close();
   }
@@ -3155,7 +3260,7 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
       [],
     );
 
-    await page.locator(".catalogue-find-more summary").click();
+    await page.locator("#catalogueBrowseToggle").click();
     await page.locator("#catalogueRow").selectOption("row:20");
     assert.equal(
       await page.locator("#uploadDescription").inputValue(),
@@ -3175,6 +3280,7 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
       await page.locator("#catalogueSelectionStatus").textContent(),
       /row 20/i,
     );
+    await page.locator("#catalogueBrowseToggle").click();
     await page.locator("#catalogueRow").selectOption("row:21");
     assert.equal(await page.locator("#uploadTitle").inputValue(), "Claire VR");
     assert.equal(
@@ -3241,11 +3347,19 @@ test("unverified platform queue keeps Upload disabled and offers explicit upload
       buffer: Buffer.from("full-video"),
     });
     await page.locator(".catalogue-card").first().click();
-    await page.getByText(/OnlyFans queue is not verified/i).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#catalogueSelectionStatus")
+        ?.textContent.includes("OnlyFans queue is not verified"),
+    );
 
     assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     await page.locator("#continueWithoutSheet").click();
-    await page.getByText(/Upload without sheet/i).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#catalogueSelectionStatus")
+        ?.textContent.includes("upload without sheet"),
+    );
     await page.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );
@@ -3340,7 +3454,11 @@ test("Upload rechecks the proposed catalogue row and stops before platform mutat
       buffer: Buffer.from("full-video"),
     });
     await page.locator(".catalogue-card").first().click();
-    await page.getByText(/Catalogue row/i).waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#catalogueSelectionStatus")
+        ?.textContent.includes("Catalogue row"),
+    );
 
     await page.locator("#uploadButton").click();
     await page.getByText(/changed.*review.*Upload again/i).waitFor();
@@ -3888,8 +4006,10 @@ test("Load Template fills the actual Upload Console with path descriptors withou
     );
     await page.locator("#uploadButton").click();
     await page.waitForFunction(() => typeof finishNeutralStart === "function");
+    await page.locator("#settingsTab").click();
     await page.locator(".draft-actions summary").click();
     await page.locator("#newUploadDraft").click();
+    await page.locator("#uploaderTab").click();
     assert.match(
       await page.locator("#neutralTestStatus").textContent(),
       /finish connecting|unresolved/,
@@ -3928,7 +4048,9 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       ).length,
       1,
     );
+    await page.locator("#settingsTab").click();
     await page.locator("#newUploadDraft").click();
+    await page.locator("#uploaderTab").click();
     await page.waitForFunction(
       () => !document.querySelector("#uploadFullVideo").disabled,
     );
@@ -3964,7 +4086,9 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       await page.locator("#uploadTitle").inputValue(),
       "Neutral upload verification",
     );
+    await page.locator("#settingsTab").click();
     await page.locator("#newUploadDraft").click();
+    await page.locator("#uploaderTab").click();
     assert.equal(await page.locator("#mainPublishMode").isDisabled(), false);
     assert.equal(await page.locator("#contentPreset").inputValue(), "");
     await page.locator("#targetPornhub").check();

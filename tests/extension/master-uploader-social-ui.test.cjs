@@ -312,6 +312,8 @@ async function mountConsole(page, options = {}) {
       socialPollDelayMs,
       profileLoadFailures,
       profileRetryDelayMs,
+      deferCatalogue,
+      workflowMode,
     }) => {
       let presetRequest = 0;
       globalThis.__socialUiMessages = [];
@@ -428,6 +430,8 @@ async function mountConsole(page, options = {}) {
       };
       globalThis.CreatorCatalogueClient = {
         async loadConfig() {
+          if (deferCatalogue && workflowMode !== "teaser")
+            return { connected: false };
           return {
             endpoint: "https://script.google.com/fixture",
             secret: "set",
@@ -485,6 +489,8 @@ async function mountConsole(page, options = {}) {
       socialPollDelayMs: options.socialPollDelayMs ?? 10,
       profileLoadFailures: options.profileLoadFailures ?? 0,
       profileRetryDelayMs: options.profileRetryDelayMs ?? 10,
+      deferCatalogue: options.deferCatalogue === true,
+      workflowMode: options.workflowMode || "main",
     },
   );
   await require("../support/uploader-mock-admission.cjs").installUploaderMockAdmission(
@@ -507,7 +513,7 @@ async function mountConsole(page, options = {}) {
   await page
     .locator(
       'input[name="workflowMode"][value="' +
-        (options.workflowMode || "both") +
+        (options.workflowMode || "main") +
         '"]',
     )
     .check();
@@ -524,7 +530,11 @@ async function mountConsole(page, options = {}) {
       await page.locator("#continueWithoutSheet").click();
     } else if (!options.deferCatalogue) {
       await page.locator(".catalogue-card").first().click();
-      await page.getByText(/Catalogue row/i).waitFor({ timeout: 5000 });
+      await page.waitForFunction(() =>
+        document
+          .querySelector("#catalogueSelectionStatus")
+          ?.textContent.includes("Catalogue row"),
+      );
     }
     await page.locator("#uploadActions").waitFor({ state: "visible" });
   } catch (error) {
@@ -681,6 +691,8 @@ test("one Upload starts an X-only social run even when paid catalogue links alre
   });
   try {
     await mountConsole(page, {
+      workflowMode: "teaser",
+      deferCatalogue: true,
       runtimeReady: { x: true, redgifs: false, reddit: false },
       traceEvidence: { x: hash("f") },
       catalogueRows: [
@@ -707,6 +719,11 @@ test("one Upload starts an X-only social run even when paid catalogue links alre
       buffer: Buffer.from("social"),
     });
     await page.locator("#socialCaption").fill("Caption");
+    await page.locator("#findCatalogueEntry").click();
+    await page.locator(".catalogue-card").first().click();
+    await page
+      .locator("#socialPaidLink")
+      .selectOption("https://onlyfans.com/1/johnny_guides");
     try {
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
@@ -893,6 +910,8 @@ test("Upload rechecks selected subreddit revisions before any platform mutation"
   });
   try {
     await mountConsole(page, {
+      workflowMode: "teaser",
+      deferCatalogue: true,
       runtimeReady: true,
       traceEvidence: {
         x: hash("a"),
@@ -915,11 +934,6 @@ test("Upload rechecks selected subreddit revisions before any platform mutation"
           },
         ],
       ],
-    });
-    await page.locator("#uploadTeaser").setInputFiles({
-      name: "Ashley paid teaser.mp4",
-      mimeType: "video/mp4",
-      buffer: Buffer.from("paid-teaser"),
     });
     await page.locator("#targetSocialReddit").check();
     await page.locator("#uploadSocialTeaser").setInputFiles({
@@ -965,7 +979,10 @@ for (const viewport of [
     });
     page.on("pageerror", (error) => errors.push(error.message));
     try {
-      await mountConsole(page);
+      await mountConsole(page, {
+        workflowMode: "teaser",
+        deferCatalogue: true,
+      });
       await page.locator("#targetSocialX").check();
       await page.locator("#targetSocialReddit").check();
       await page.locator("#uploadSocialTeaser").setInputFiles({
@@ -1082,7 +1099,7 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
     });
     await page.locator("#socialCaption").fill("Caption");
     await page.locator("#findCatalogueEntry").click();
-    await page.locator(".catalogue-find-more summary").click();
+    await page.locator("#catalogueBrowseToggle").click();
     await page.locator("#catalogueRow").waitFor({ state: "visible" });
     await page.locator("#catalogueRow").selectOption("row:125");
     assert.equal(

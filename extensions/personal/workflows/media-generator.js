@@ -86,17 +86,20 @@ globalThis.CreatorMediaGenerator = (() => {
     });
   }
 
-  function drawCover(context, video, width, height) {
+  function drawCover(context, video, width, height, crop = {}) {
     const ratio = Math.max(
       width / video.videoWidth,
       height / video.videoHeight,
     );
-    const cropWidth = width / ratio;
-    const cropHeight = height / ratio;
+    const zoom = Math.min(2, Math.max(1, Number(crop.zoom) || 1));
+    const cropWidth = width / ratio / zoom;
+    const cropHeight = height / ratio / zoom;
+    const cropX = Math.min(1, Math.max(-1, Number(crop.x) || 0));
+    const cropY = Math.min(1, Math.max(-1, Number(crop.y) || 0));
     context.drawImage(
       video,
-      (video.videoWidth - cropWidth) / 2,
-      (video.videoHeight - cropHeight) / 2,
+      ((video.videoWidth - cropWidth) * (cropX + 1)) / 2,
+      ((video.videoHeight - cropHeight) * (cropY + 1)) / 2,
       cropWidth,
       cropHeight,
       0,
@@ -106,7 +109,27 @@ globalThis.CreatorMediaGenerator = (() => {
     );
   }
 
-  async function thumbnailFromVideo(file, seconds = null) {
+  function drawThumbnailPreview(video, canvas, crop = {}) {
+    const context = canvas.getContext("2d");
+    if (!context || !video.videoWidth) return;
+    drawCover(context, video, canvas.width, canvas.height, crop);
+  }
+
+  function waitForPresentedFrame(video) {
+    return new Promise((resolve) => {
+      if (!video.requestVideoFrameCallback) {
+        requestAnimationFrame(resolve);
+        return;
+      }
+      const timer = setTimeout(resolve, 250);
+      video.requestVideoFrameCallback(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  async function thumbnailFromVideo(file, seconds = null, crop = {}) {
     const { video, dispose } = openVideo(file);
     try {
       const duration = await waitForMetadata(video);
@@ -116,12 +139,13 @@ globalThis.CreatorMediaGenerator = (() => {
           ? Math.min(3, Math.max(0.1, duration * 0.02))
           : seconds,
       );
+      await waitForPresentedFrame(video);
       const canvas = document.createElement("canvas");
       canvas.width = THUMBNAIL_WIDTH;
       canvas.height = THUMBNAIL_HEIGHT;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Thumbnail generation is unavailable.");
-      drawCover(context, video, canvas.width, canvas.height);
+      drawCover(context, video, canvas.width, canvas.height, crop);
       const blob = await new Promise((resolve) =>
         canvas.toBlob(resolve, "image/png"),
       );
@@ -365,6 +389,7 @@ globalThis.CreatorMediaGenerator = (() => {
     waitForMetadata,
     seek,
     thumbnailFromVideo,
+    drawThumbnailPreview,
     teaserFromVideo,
     teaserScenes,
     saveGeneratedMedia,

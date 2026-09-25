@@ -266,10 +266,12 @@ async function createUploadFixture({ desktop = false } = {}) {
       await page
         .locator("#uploadDescription")
         .fill("Unpublished development draft.");
-      await page.locator("#targetFansly").uncheck();
-      await page.locator("#targetManyvids").uncheck();
-      await page.locator("#targetPornhub").uncheck();
-      await page.locator("#targetOnlyfans").check();
+      for (const id of ["targetFansly", "targetManyvids", "targetPornhub"]) {
+        const target = page.locator(`#${id}`);
+        if (await target.isChecked()) await target.locator("..").click();
+      }
+      const onlyfans = page.locator("#targetOnlyfans");
+      if (!(await onlyfans.isChecked())) await onlyfans.locator("..").click();
       assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
       await page.locator("#continueWithoutSheet").click();
       await page.waitForFunction(

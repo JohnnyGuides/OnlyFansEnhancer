@@ -377,6 +377,18 @@
           : ids.length
             ? "Choose the browser to use for uploads."
             : "Open Chrome with the OFEnhancer extension to connect uploads.";
+    const connected =
+      !browserStatus.updateRequired &&
+      (readiness?.state === "connected" ||
+        (!readiness && browserStatus.connected));
+    if (connected) statusView.message.textContent = "Connected";
+    statusView.panel.dataset.connected = String(connected);
+    statusView.panel.setAttribute(
+      "aria-label",
+      connected ? "Chrome connected" : "Chrome connection",
+    );
+    statusView.setup.hidden = connected;
+    statusView.refresh.hidden = connected;
     statusView.select.replaceChildren();
     const placeholder = document.createElement("option");
     placeholder.value = "";
@@ -405,12 +417,17 @@
     const back = document.createElement("a");
     back.href = "index.html";
     back.textContent = "Back to catalogue";
+    back.hidden = true;
     const setup = document.createElement("a");
     setup.href = "index.html?chrome-setup=1";
     setup.textContent = "Check Chrome setup";
     const message = document.createElement("p");
     message.setAttribute("role", "status");
-    message.textContent = "Connecting to your browser…";
+    message.textContent = "Connecting to Chrome…";
+    message.className = "chrome-connection-state";
+    const chromeMark = document.createElement("span");
+    chromeMark.className = "chrome-brand-mark";
+    chromeMark.setAttribute("aria-hidden", "true");
     const label = document.createElement("label");
     label.textContent = "Upload browser";
     label.htmlFor = "desktopUploadBrowser";
@@ -419,12 +436,16 @@
     select.setAttribute("aria-label", "Upload browser");
     const refresh = document.createElement("button");
     refresh.type = "button";
-    refresh.textContent = "Refresh connection";
-    panel.append(back, setup, message, label, select, refresh);
-    const header = document.querySelector(".app-header");
-    if (header) header.after(panel);
+    refresh.textContent = "Check again";
+    refresh.title =
+      "Check which Chrome browser is selected and whether its extension is connected";
+    panel.append(chromeMark, message, label, select, setup, refresh);
+    const header =
+      document.querySelector(".app-heading") ||
+      document.querySelector(".app-header");
+    if (header) header.append(panel);
     else (document.querySelector("main") || document.body).prepend(panel);
-    statusView = { message, label, select };
+    statusView = { panel, message, label, select, setup, refresh };
     const update = () => {
       const generation = ++observationGeneration;
       void Promise.all([refreshBrowsers(), call("getChromeReadiness")])
