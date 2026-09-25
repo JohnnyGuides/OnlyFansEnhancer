@@ -391,7 +391,8 @@ internal sealed class GoogleWorkspaceClient
 
     internal Task UpdateValuesBatchAsync(
         GoogleValuesBatch batch,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool raw = false
     )
     {
         ArgumentNullException.ThrowIfNull(batch);
@@ -402,11 +403,11 @@ internal sealed class GoogleWorkspaceClient
         {
             range = Required(update.Range, 512, "range"),
             majorDimension = "ROWS",
-            values = new[] { new[] { Required(update.Value, MaximumValuesRequestBytes, "value", allowEmpty: true) } },
+            values = new[] { new[] { Required(update.Value, MaximumValuesRequestBytes, "value", allowEmpty: true, allowLineBreaks: raw) } },
         }).ToArray();
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            valueInputOption = "USER_ENTERED",
+            valueInputOption = raw ? "RAW" : "USER_ENTERED",
             data = updates,
         });
         EnsureRequestSize(body, MaximumValuesRequestBytes);
@@ -415,6 +416,37 @@ internal sealed class GoogleWorkspaceClient
             body,
             cancellationToken
         );
+    }
+
+    internal Task AppendCatalogueRowAsync(string workbookId, string sheetTitle,
+        int headerRow, IReadOnlyDictionary<string, int> columns,
+        string id, string releaseDate, string title, string description,
+        CancellationToken cancellationToken)
+    {
+        string boundedWorkbook = Required(workbookId, 256, "workbookId");
+        string boundedSheet = Required(sheetTitle, 200, "sheetTitle");
+        if (headerRow is < 1 or > 20 || columns.Count is < 2 or > 24
+            || !columns.TryGetValue("sourceKey", out int idColumn)
+            || !columns.TryGetValue("title", out int titleColumn)
+            || idColumn is < 1 or > 24 || titleColumn is < 1 or > 24)
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        int lastColumn = columns.Values.Max();
+        if (lastColumn is < 1 or > 24) throw new GoogleCatalogueException("catalogue-layout-changed");
+        string[] values = new string[lastColumn];
+        values[idColumn - 1] = Required(id, 200, "id");
+        values[titleColumn - 1] = Required(title, 300, "title");
+        if (columns.TryGetValue("plannedDate", out int dateColumn))
+            values[dateColumn - 1] = Required(releaseDate, 10, "releaseDate", allowEmpty: true);
+        if (columns.TryGetValue("description", out int descriptionColumn))
+            values[descriptionColumn - 1] = Required(description, 10_000, "description", allowEmpty: true, allowLineBreaks: true);
+        string escapedSheet = boundedSheet.Replace("'", "''", StringComparison.Ordinal);
+        string range = $"'{escapedSheet}'!A{headerRow + 1}:{(char)('A' + lastColumn - 1)}";
+        byte[] body = JsonSerializer.SerializeToUtf8Bytes(new { majorDimension = "ROWS", values = new[] { values } });
+        EnsureRequestSize(body, MaximumValuesRequestBytes);
+        Uri endpoint = BuildUri(
+            $"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(boundedWorkbook)}/values/{Uri.EscapeDataString(range)}:append",
+            [("valueInputOption", "RAW"), ("insertDataOption", "INSERT_ROWS")]);
+        return SendMutationAsync(endpoint, body, cancellationToken);
     }
 
     internal Task UpdateMetadataCellAsync(string workbookId, int metadataId, int column, string value, CancellationToken cancellationToken)
@@ -600,13 +632,15 @@ internal sealed class GoogleWorkspaceClient
         string? value,
         int maximumLength,
         string field,
-        bool allowEmpty = false
+        bool allowEmpty = false,
+        bool allowLineBreaks = false
     )
     {
         string trimmed = value?.Trim() ?? string.Empty;
         if ((!allowEmpty && trimmed.Length == 0)
             || trimmed.Length > maximumLength
-            || trimmed.Any(char.IsControl))
+            || trimmed.Any(character => char.IsControl(character)
+                && !(allowLineBreaks && character == '\n')))
         {
             throw new GoogleCatalogueException($"invalid-{field}");
         }

@@ -3,6 +3,80 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createUploadFixture } = require("../support/upload-action-fixture.cjs");
 
+test("close Work matches appear beside the file before title and description", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const { page } = fixture;
+    await page.evaluate(() => {
+      globalThis.CreatorCatalogueClient = {
+        loadConfig: async () => ({ source: "desktop", connected: true }),
+        getCatalogueSnapshot: async () => ({
+          status: "snapshot",
+          source: "desktop",
+          rows: [
+            "Studio walk-through",
+            "Studio outtakes",
+            "Studio lighting",
+            "Studio camera test",
+            "Studio recap",
+            "Studio setup",
+            "Studio tour ep02",
+            "Studio behind the scenes",
+          ].map((title, index) => ({
+            row: 42 + index,
+            id: `studio-${index}`,
+            title,
+            description: "A calm studio tour.",
+            releaseDate: "2026-09-25",
+            fingerprint: "a".repeat(64),
+            publicationState: {},
+          })),
+        }),
+      };
+    });
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "Studio walk-through.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign fixture"),
+    });
+    await page.waitForFunction(
+      () => !document.querySelector("#cataloguePicker").hidden,
+    );
+    assert.match(
+      await page.locator("#catalogueCards").textContent(),
+      /Studio walk-through/,
+    );
+    assert.equal(
+      await page.locator("#catalogueCards .catalogue-card").count(),
+      6,
+    );
+    assert.equal(
+      await page.locator("#catalogueMoreLabel").textContent(),
+      "More matches (8)",
+    );
+    await page.locator("#catalogueSearch").fill("lighting");
+    assert.equal(
+      await page.locator("#catalogueCards .catalogue-card").count(),
+      1,
+    );
+    assert.match(
+      await page.locator("#catalogueCards").textContent(),
+      /Studio lighting/,
+    );
+    await page.locator("#catalogueSearch").fill("");
+    const order = await page.evaluate(() => ({
+      matches: document
+        .querySelector("#cataloguePicker")
+        .getBoundingClientRect().top,
+      title: document.querySelector("#uploadTitle").getBoundingClientRect().top,
+    }));
+    assert.ok(order.matches < order.title);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
 for (const desktop of [false, true]) {
   const surface = desktop ? "desktop hosted transport" : "extension";
   test(

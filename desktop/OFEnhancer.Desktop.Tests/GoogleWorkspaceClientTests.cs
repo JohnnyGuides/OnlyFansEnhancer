@@ -2,6 +2,7 @@ using OFEnhancer.Protocol;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using OFEnhancer.Desktop;
@@ -11,6 +12,130 @@ namespace OFEnhancer.Desktop.Tests;
 [TestClass]
 public sealed class GoogleWorkspaceClientTests
 {
+    [TestMethod]
+    public async Task UploadRowAppendUsesRawValuesAndDetectedCatalogueColumns()
+    {
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, "{}");
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        await client.AppendCatalogueRowAsync("workbook-one", "2026 Video Catalogue", 1,
+            new Dictionary<string, int> { ["sourceKey"] = 1, ["plannedDate"] = 2,
+                ["title"] = 3, ["description"] = 4 },
+            "new-video-123", "2026-09-25", "=A1", "Preview\ntext", CancellationToken.None);
+
+        Assert.AreEqual(1, handler.Requests.Count);
+        Assert.AreEqual(HttpMethod.Post, handler.Requests[0].Method);
+        StringAssert.Contains(Uri.UnescapeDataString(handler.Requests[0].Uri.AbsolutePath),
+            "/values/'2026 Video Catalogue'!A2:D:append");
+        Assert.AreEqual("RAW", ParseQuery(handler.Requests[0].Uri)["valueInputOption"].Single());
+        using JsonDocument body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.AreEqual("=A1", body.RootElement.GetProperty("values")[0][2].GetString());
+        Assert.AreEqual("Preview\ntext", body.RootElement.GetProperty("values")[0][3].GetString());
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterCreatesOneWorkRowAndVerifiesReadback()
+    {
+        string identity = "clip.mp4|5|123|New video|2026-09-25";
+        string id = "new-video-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
+        JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
+        JsonObject before = UploadWorkbookResponse(null);
+        JsonObject after = UploadWorkbookResponse(id);
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(), before.ToJsonString(), "{}",
+            WorkbookMetadataJson, discovery.ToJsonString(), after.ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(
+            new("new", "New video", "Preview text", "2026-09-25", "clip.mp4", 5, 123),
+            CancellationToken.None);
+
+        Assert.AreEqual("created", result.Status);
+        Assert.AreEqual(id, result.Id);
+        Assert.AreEqual(3, result.Row);
+        Assert.AreEqual(1, handler.Requests.Count(request => request.Method == HttpMethod.Post));
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterReconcilesUncertainAppendWithoutRetrying()
+    {
+        string identity = "clip.mp4|5|123|New video|2026-09-25";
+        string id = "new-video-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
+        JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(),
+            UploadWorkbookResponse(null).ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        handler.Enqueue(_ => throw new TaskCanceledException("The append completed before acknowledgement."));
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(),
+            UploadWorkbookResponse(id).ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(
+            new("new", "New video", "Preview text", "2026-09-25", "clip.mp4", 5, 123),
+            CancellationToken.None);
+
+        Assert.AreEqual("created", result.Status);
+        Assert.AreEqual(id, result.Id);
+        Assert.AreEqual(1, handler.Requests.Count(request => request.Method == HttpMethod.Post));
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterUpdatesOnlyChosenTextCellsAfterExactRead()
+    {
+        JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
+        JsonObject before = UploadWorkbookResponse(null);
+        JsonObject after = UploadWorkbookResponse(null);
+        JsonArray cells = after["sheets"]![0]!["data"]![0]!["rowData"]![1]!["values"]!.AsArray();
+        cells[2]!["formattedValue"] = "Changed video";
+        cells[3]!["formattedValue"] = "Changed description";
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(), before.ToJsonString(),
+            """{"range":"'2026 Video Catalogue'!C2","values":[["Old video"]]}""",
+            """{"range":"'2026 Video Catalogue'!D2","values":[["Old description"]]}""",
+            "{}", WorkbookMetadataJson, discovery.ToJsonString(), after.ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(
+            new("update", "Changed video", "Changed description", "2026-09-18",
+                Id: "old-video", ExpectedTitle: "Old video", ExpectedDescription: "Old description"),
+            CancellationToken.None);
+
+        Assert.AreEqual("updated", result.Status);
+        Assert.AreEqual(2, result.Row);
+        RecordedRequest mutation = handler.Requests.Single(request => request.Method == HttpMethod.Post);
+        Assert.AreEqual("RAW", JsonDocument.Parse(mutation.Body).RootElement.GetProperty("valueInputOption").GetString());
+        Assert.AreEqual(2, JsonDocument.Parse(mutation.Body).RootElement.GetProperty("data").GetArrayLength());
+    }
+
+    private static JsonObject UploadWorkbookResponse(string? addedId, bool includeNotes = false)
+    {
+        JsonObject response = ImportWorkbookResponse(["ID", "Release", "Title", "Description"],
+            includeNotes ? ["Notes"] : null);
+        JsonArray rows = response["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
+        rows.Add(JsonSerializer.SerializeToNode(new { values = new[] {
+            new { formattedValue = "old-video" }, new { formattedValue = "2026-09-18" },
+            new { formattedValue = "Old video" }, new { formattedValue = "Old description" },
+        } }));
+        if (addedId is not null)
+            rows.Add(JsonSerializer.SerializeToNode(new { values = new[] {
+                new { formattedValue = addedId }, new { formattedValue = "2026-09-25" },
+                new { formattedValue = "New video" }, new { formattedValue = "Preview text" },
+            } }));
+        return response;
+    }
+
     [TestMethod]
     public async Task StructuralReaderBoundsRangesToSmallCompanionGrid()
     {

@@ -273,6 +273,7 @@ public sealed partial class WebMessageRouter(
         );
     }
 
+
     private static T DeserializePayload<T>(JsonElement payload)
     {
         try
@@ -321,6 +322,7 @@ public sealed partial class WebMessageRouter(
     private sealed record ScanPayload(string? Root);
 
     private sealed record BindingPayload(string? AssetId, string? ItemId);
+
 
     private sealed record GoogleClientIdPayload(string? ClientId);
 

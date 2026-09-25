@@ -279,16 +279,18 @@
     const operation =
       action === "getCatalogueSnapshot"
         ? "getUploadCatalogueSnapshot"
-        : action === "getSubredditPresetSnapshot"
-          ? "getSubredditPresets"
-          : new Set([
-                "commitPlatformLink",
-                "appendTwitterTeaser",
-                "appendRedditPost",
-                "appendDistributionLedger",
-              ]).has(action)
-            ? "recordUploadResult"
-            : null;
+        : action === "writeUploadCatalogueEntry"
+          ? "writeUploadCatalogueEntry"
+          : action === "getSubredditPresetSnapshot"
+            ? "getSubredditPresets"
+            : new Set([
+                  "commitPlatformLink",
+                  "appendTwitterTeaser",
+                  "appendRedditPost",
+                  "appendDistributionLedger",
+                ]).has(action)
+              ? "recordUploadResult"
+              : null;
     if (!operation)
       throw new Error(
         "Choose an existing catalogue item or continue without matching it.",
@@ -310,7 +312,30 @@
               payload.resultUrl,
             action,
           }
-        : {};
+        : operation === "writeUploadCatalogueEntry"
+          ? {
+              mode: String(payload.mode || ""),
+              title: String(payload.title || ""),
+              description: String(payload.description || ""),
+              releaseDate: String(payload.releaseDate || ""),
+              ...(payload.fileName
+                ? { fileName: String(payload.fileName) }
+                : {}),
+              ...(payload.fileSize
+                ? { fileSize: Number(payload.fileSize) }
+                : {}),
+              ...(payload.fileLastModified
+                ? { fileLastModified: Number(payload.fileLastModified) }
+                : {}),
+              ...(payload.id ? { id: String(payload.id) } : {}),
+              ...(payload.expectedTitle !== undefined
+                ? { expectedTitle: String(payload.expectedTitle) }
+                : {}),
+              ...(payload.expectedDescription !== undefined
+                ? { expectedDescription: String(payload.expectedDescription) }
+                : {}),
+            }
+          : {};
     const installation = /** @type {{status?: string}|undefined} */ (
       (await chrome.storage.local.get("ofenhancerInstallationV1"))
         .ofenhancerInstallationV1
@@ -351,6 +376,15 @@
 
   async function getCatalogueSnapshot(options) {
     return request(await loadConfig(), "getCatalogueSnapshot", {}, options);
+  }
+
+  async function writeUploadCatalogueEntry(payload) {
+    const config = await loadConfig();
+    if (config.source !== "desktop")
+      throw new Error(
+        "Creating or changing Work rows requires the connected OFEnhancer desktop app.",
+      );
+    return desktopRequest("writeUploadCatalogueEntry", payload);
   }
 
   async function getReconciliationSource() {
@@ -437,6 +471,7 @@
     appendTwitterTeaser,
     commitPlatformLink,
     getCatalogueSnapshot,
+    writeUploadCatalogueEntry,
     getSubredditPresetSnapshot,
     loadConfig,
     matchCatalogue,

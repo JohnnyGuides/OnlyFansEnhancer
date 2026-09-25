@@ -781,7 +781,7 @@
     const catalogueSearch = get("#catalogueSearch");
     const catalogueRow = get("#catalogueRow");
     const catalogueCards = get("#catalogueCards");
-    const showMoreCatalogue = get("#showMoreCatalogue");
+    const catalogueMoreLabel = get("#catalogueMoreLabel");
     const refreshCatalogue = get("#refreshCatalogue");
     const selectedCatalogueReason = get("#selectedCatalogueReason");
     const pornhubRecommendation = get("#pornhubRecommendation");
@@ -839,7 +839,6 @@
     let currentSnapshot = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
-    let catalogueCardLimit = 4;
     let catalogueCardRevision = 0;
     let cataloguePreviewTimer = null;
     const cataloguePreviewCache = new Map();
@@ -1775,8 +1774,38 @@
             candidate.episode,
           ].join(" "),
         );
-        return !query || searchable.includes(query);
+        return (
+          !query ||
+          searchable.includes(query) ||
+          globalThis.CreatorCatalogueContract.similarity(query, searchable) >=
+            0.35
+        );
       });
+      if (query) {
+        visible.sort((left, right) => {
+          const searchScore = (candidate) => {
+            const fields = [
+              candidate.title,
+              candidate.id,
+              candidate.seasonArc,
+              candidate.episode,
+            ].map(globalThis.CreatorCatalogueContract.normalizedText);
+            return Math.max(
+              ...fields.map((field) =>
+                field.includes(query)
+                  ? 1 + query.length / Math.max(field.length, 1)
+                  : globalThis.CreatorCatalogueContract.similarity(
+                      query,
+                      field,
+                    ),
+              ),
+            );
+          };
+          return (
+            searchScore(right) - searchScore(left) || right.score - left.score
+          );
+        });
+      }
       catalogueRow.replaceChildren();
       const prompt = document.createElement("option");
       prompt.value = "";
@@ -1809,7 +1838,7 @@
       const revision = ++catalogueCardRevision;
       clearTimeout(cataloguePreviewTimer);
       catalogueCards.replaceChildren();
-      const cards = visible.slice(0, catalogueCardLimit);
+      const cards = visible.slice(0, 6);
       if (
         Number.isInteger(selectedCatalogueRow) &&
         !cards.some((candidate) => candidate.row === selectedCatalogueRow)
@@ -1820,7 +1849,15 @@
         if (selected) cards.push(selected);
       }
       const pendingImages = new Map();
-      showMoreCatalogue.hidden = visible.length <= cards.length;
+      catalogueMoreLabel.textContent = `More matches (${visible.length})`;
+      if (!cards.length) {
+        const empty = document.createElement("p");
+        empty.className = "catalogue-empty";
+        empty.textContent = query
+          ? "No catalogue entries match this search."
+          : "No catalogue entries available. Upload will create a new row in Work.";
+        catalogueCards.append(empty);
+      }
       for (const candidate of cards) {
         const card = document.createElement("button");
         card.type = "button";
@@ -1834,6 +1871,16 @@
         image.width = 112;
         image.height = 63;
         image.loading = "lazy";
+        image.hidden = true;
+        const noImage = document.createElement("span");
+        noImage.className = "catalogue-card-no-image";
+        noImage.textContent = "No image";
+        const useImage = (dataUrl) => {
+          if (!dataUrl) return;
+          image.src = dataUrl;
+          image.hidden = false;
+          noImage.hidden = true;
+        };
         const main = document.createElement("span");
         main.className = "catalogue-card-main";
         const name = document.createElement("strong");
@@ -1843,7 +1890,7 @@
           .filter(Boolean)
           .join(" · ");
         main.append(name, detail);
-        card.append(image, main);
+        card.append(image, noImage, main);
         card.addEventListener("click", () => {
           catalogueRow.value = `row:${candidate.row}`;
           catalogueRow.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1852,11 +1899,10 @@
         const id = candidate.id;
         if (!id || !/^[a-z0-9-]{1,200}$/.test(id)) continue;
         if (cataloguePreviewCache.has(id)) {
-          if (cataloguePreviewCache.get(id))
-            image.src = cataloguePreviewCache.get(id);
+          useImage(cataloguePreviewCache.get(id));
           continue;
         }
-        pendingImages.set(id, image);
+        pendingImages.set(id, useImage);
       }
       if (pendingImages.size)
         cataloguePreviewTimer = setTimeout(() => {
@@ -1874,7 +1920,7 @@
                   const dataUrl = result?.previews?.[id] || null;
                   cataloguePreviewCache.set(id, dataUrl);
                   if (revision === catalogueCardRevision && dataUrl)
-                    pendingImages.get(id).src = dataUrl;
+                    pendingImages.get(id)(dataUrl);
                 }
               })
               .catch(() => {});
@@ -1910,6 +1956,31 @@
             ],
         queueByPlatform: currentQueueEvidence(),
       });
+    }
+
+    function preparePendingNewMatch() {
+      const candidate = {
+        row: 0,
+        id: "pending-new",
+        title: title.value.trim(),
+        description: description.value.trim(),
+        releaseDate: releaseDate.value,
+        fingerprint: "0".repeat(64),
+        publicationState: {},
+      };
+      currentProposal = globalThis.CreatorCatalogueProposal.build({
+        draft: proposalDraft(),
+        snapshot: {
+          ...currentSnapshot,
+          rows: [...currentSnapshot.rows, candidate],
+        },
+        selectedRow: 0,
+        now: new Date(),
+        executablePlatforms: selectedTargets(),
+        queueByPlatform: currentQueueEvidence(),
+      });
+      currentMatch = { status: "new-pending", candidate };
+      renderMatch(currentMatch);
     }
 
     function applyProposal(proposal, catalogueStatus = "matched") {
@@ -2040,7 +2111,8 @@
           profileSignature: value.profileSignature,
         },
         catalogue:
-          currentMatch.status === "upload-only"
+          currentMatch.status === "upload-only" ||
+          currentMatch.status === "new-pending"
             ? null
             : {
                 ...(currentSnapshot?.source === "desktop"
@@ -2227,15 +2299,21 @@
         socialCaption.value = candidate.title;
       renderPaidLinkOptions(candidate);
       catalogueSelectionStatus.textContent =
-        match.status === "upload-only"
-          ? "Catalogue deferred · upload without sheet"
-          : (match.status === "new" ? "New catalogue row " : "Catalogue row ") +
-            candidate.row +
-            " · " +
-            candidate.id +
-            " · verified post links update this local entry";
+        match.status === "new-pending"
+          ? "Upload will create and verify a new Work row before opening the sites."
+          : match.status === "upload-only"
+            ? "Catalogue deferred · upload without sheet"
+            : (match.status === "new"
+                ? "New catalogue row "
+                : "Catalogue row ") +
+              candidate.row +
+              " · " +
+              candidate.id +
+              " · verified post links update this local entry";
       renderRunSettings();
-      showCatalogueThumbnailPicker(match);
+      showCatalogueThumbnailPicker(
+        match.status === "new-pending" ? null : match,
+      );
       void checkReadiness();
     }
 
@@ -2256,17 +2334,24 @@
       currentProposal = null;
       uploadButton.disabled = true;
       cataloguePicker.hidden = !currentSnapshot || uploadWithoutSheet;
-      continueWithoutSheet.hidden = uploadWithoutSheet;
-      const value = validate(true);
-      if (!value.valid || activeSession) {
+      continueWithoutSheet.hidden = true;
+      const value = validate(false);
+      const hasSearch =
+        workflowMode?.value === "teaser"
+          ? Boolean(socialFile || socialCaption.value.trim())
+          : Boolean(fullFile && title.value.trim());
+      if (!hasSearch || activeSession) {
         uploadButton.disabled = true;
-        matchStatus.textContent = value.valid
+        matchStatus.textContent = hasSearch
           ? "An upload session is already active."
-          : "Complete the required fields to enable Upload.";
+          : "Choose a video to see close catalogue matches.";
         return;
       }
       if (uploadWithoutSheet) {
-        previewWithoutSheet(value);
+        if (value.valid) previewWithoutSheet(value);
+        else
+          matchStatus.textContent =
+            "Complete the upload details before continuing without the sheet.";
         return;
       }
       matchStatus.textContent = forceNew
@@ -2292,7 +2377,34 @@
         if (revision !== matchRevision) return;
         if (forceNew) selectedCatalogueRow = "new";
         renderPicker();
+        if (!value.valid) {
+          matchStatus.textContent =
+            "Review the catalogue matches, then complete the upload details.";
+          return;
+        }
+        if (
+          selectedCatalogueRow === "new" &&
+          currentSnapshot.source === "desktop"
+        ) {
+          preparePendingNewMatch();
+          return;
+        }
         if (selectedCatalogueRow === null) {
+          const close = globalThis.CreatorCatalogueProposal.rankRows(
+            proposalDraft(),
+            currentSnapshot.rows,
+          ).some(
+            (candidate) =>
+              candidate.similarity >= 0.45 || candidate.score >= 55,
+          );
+          if (
+            !close &&
+            currentSnapshot.source === "desktop" &&
+            workflowMode?.value !== "teaser"
+          ) {
+            preparePendingNewMatch();
+            return;
+          }
           currentProposal = null;
           matchStatus.textContent = "Choose the matching catalogue entry.";
           return;
@@ -2320,10 +2432,14 @@
       invalidateMatch();
       refreshReleaseSummary();
       renderRunSettings();
-      const value = validate(true);
-      if (!value.valid || activeSession) {
-        matchStatus.textContent =
-          "Complete the required fields to enable Upload.";
+      const hasSearch =
+        workflowMode?.value === "teaser"
+          ? Boolean(socialFile || socialCaption.value.trim())
+          : Boolean(fullFile && title.value.trim());
+      if (!hasSearch || activeSession) {
+        matchStatus.textContent = hasSearch
+          ? "An upload session is already active."
+          : "Choose a video to see close catalogue matches.";
         return;
       }
       matchStatus.textContent = "Waiting for edits to settle…";
@@ -2937,7 +3053,11 @@
           "Workflow profiles changed. Review the updated plan and click Upload again.",
         );
       }
-      if (!currentProposal || currentMatch?.status === "upload-only") return;
+      if (
+        !currentProposal ||
+        ["upload-only", "new-pending"].includes(currentMatch?.status)
+      )
+        return;
       const social = socialDraft(currentMatch.candidate);
       if (
         currentMatch.status === "matched" &&
@@ -2983,6 +3103,106 @@
       };
     }
 
+    function chooseEditedCatalogueAction(candidate) {
+      const dialog = get("#catalogueEditDialog");
+      get("#catalogueEditSummary").textContent =
+        `You changed the title or description from Work row ${candidate.row}. Choose where to save those edits before upload starts.`;
+      return new Promise((resolve) => {
+        const listeners = new AbortController();
+        const finish = (choice) => {
+          listeners.abort();
+          if (dialog.open) dialog.close();
+          resolve(choice);
+        };
+        get("#catalogueEditCancel").addEventListener(
+          "click",
+          () => finish("cancel"),
+          { signal: listeners.signal },
+        );
+        get("#catalogueEditNew").addEventListener(
+          "click",
+          () => finish("new"),
+          { signal: listeners.signal },
+        );
+        get("#catalogueEditUpdate").addEventListener(
+          "click",
+          () => finish("update"),
+          { signal: listeners.signal },
+        );
+        dialog.addEventListener(
+          "cancel",
+          (event) => {
+            event.preventDefault();
+            finish("cancel");
+          },
+          { signal: listeners.signal },
+        );
+        dialog.showModal();
+      });
+    }
+
+    async function writeCatalogueBeforeUpload() {
+      if (
+        currentMatch?.status === "upload-only" ||
+        currentSnapshot?.source !== "desktop"
+      )
+        return;
+      const candidate = currentMatch?.candidate;
+      const edited =
+        candidate &&
+        currentMatch.status === "matched" &&
+        (candidate.title !== title.value.trim() ||
+          candidate.description !== description.value.trim());
+      let mode =
+        currentMatch?.status === "new-pending" || currentMatch?.status === "new"
+          ? "new"
+          : null;
+      if (edited) mode = await chooseEditedCatalogueAction(candidate);
+      if (mode === "cancel")
+        throw new Error("Upload cancelled. Your details are unchanged.");
+      if (!mode) return;
+      matchStatus.textContent =
+        mode === "new"
+          ? "Creating the new row in Work…"
+          : "Updating the selected Work row…";
+      const written =
+        await globalThis.CreatorCatalogueClient.writeUploadCatalogueEntry({
+          mode,
+          title: title.value.trim(),
+          description: description.value.trim(),
+          releaseDate: releaseDate.value,
+          ...(mode === "new"
+            ? {
+                fileName: fullFile?.name,
+                fileSize: fullFile?.size,
+                fileLastModified: fullFile?.lastModified,
+              }
+            : {
+                id: candidate.id,
+                expectedTitle: candidate.title,
+                expectedDescription: candidate.description,
+              }),
+        });
+      currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+      const saved = currentSnapshot.rows.find(
+        (row) => row.id === written.id && row.row === written.row,
+      );
+      if (!saved)
+        throw new Error(
+          "Work saved the row, but the local catalogue has not refreshed. Review Work before retrying Upload.",
+        );
+      selectedCatalogueRow = saved.row;
+      lastPrefilledCatalogueRow = saved.row;
+      currentMatch = { status: "matched", candidate: saved };
+      currentProposal = buildProposal(saved.row);
+      if (currentProposal.status !== "ready")
+        throw new Error(
+          "The Work row was saved, but the upload schedule needs review. Check the selected destinations before retrying Upload.",
+        );
+      renderPicker();
+      catalogueSelectionStatus.textContent = `Work row ${saved.row} ${written.status === "created" ? "created" : "updated"} and verified.`;
+    }
+
     async function startUpload() {
       if (runBusy || activeSession || readiness?.ready !== true) return;
       let prepareDispatched = false;
@@ -3010,6 +3230,7 @@
       lockDraft(true);
       updateUploadAction();
       try {
+        await writeCatalogueBeforeUpload();
         await recheckProposalBeforeUpload();
         social = socialDraft(currentMatch.candidate);
         if (!social.valid) {
@@ -3853,25 +4074,15 @@
           String(thumbnailFile?.assetId === button.dataset.assetId),
         );
       for (const [input, file, summary, empty] of [
-        [fullInput, fullFile, "fullFileSummary", "Choose the main video"],
-        [
-          teaserInput,
-          teaserFile,
-          "teaserFileSummary",
-          "Generated from full video if empty",
-        ],
+        [fullInput, fullFile, "fullFileSummary", "Select video"],
+        [teaserInput, teaserFile, "teaserFileSummary", "Auto from video"],
         [
           thumbnailInput,
           thumbnailFile,
           "manyvidsThumbnailSummary",
-          "Generated from full video if empty",
+          "Auto from video",
         ],
-        [
-          pornhubInput,
-          pornhubFile,
-          "pornhubFileSummary",
-          fullFile ? `Uses ${fullFile.name}` : "Uses the full video",
-        ],
+        [pornhubInput, pornhubFile, "pornhubFileSummary", "Same as full video"],
         [
           socialInput,
           socialFile,
@@ -3893,7 +4104,13 @@
         const remove = document.querySelector(
           '[data-remove-file="' + input.id + '"]',
         );
-        choose.textContent = file ? "Replace" : "Choose file";
+        choose.textContent = file
+          ? "Replace"
+          : input === fullInput
+            ? "Choose file"
+            : input === pornhubInput
+              ? "Use another"
+              : "Use my file";
         choose.disabled = input.disabled;
         remove.hidden = !file;
         remove.disabled = input.disabled;
@@ -4251,11 +4468,6 @@
     }
     uploadButton.addEventListener("click", () => startUpload());
     catalogueSearch.addEventListener("input", () => {
-      catalogueCardLimit = 4;
-      renderPicker();
-    });
-    showMoreCatalogue.addEventListener("click", () => {
-      catalogueCardLimit += 8;
       renderPicker();
     });
     catalogueRow.addEventListener("change", () => {

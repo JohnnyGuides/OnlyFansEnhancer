@@ -627,6 +627,359 @@
     };
   }
 
+  function findThumbnailInput() {
+    return /** @type {HTMLInputElement | null} */ (
+      document.querySelector(
+        'input[type="file"][data-testid="clip-thumbnail_[0]_input_nsfw-custom-uploader"]',
+      )
+    );
+  }
+
+  function openThumbnailUploader() {
+    if (findThumbnailInput()) return;
+    const replace = /** @type {HTMLButtonElement | null} */ (
+      document.querySelector('[data-testid="clip-thumbnail_button_reupload"]')
+    );
+    const upload = Array.from(document.querySelectorAll("button")).find(
+      (button) => button.textContent.trim() === "Upload custom image",
+    );
+    (replace || upload)?.click();
+  }
+
+  function openFourKEditor(lifecycleSignal) {
+    openThumbnailUploader();
+    document.querySelector("[data-ofenhancer-4k-editor]")?.remove();
+    const host = document.createElement("div");
+    host.setAttribute("data-ofenhancer-4k-editor", "");
+    host.style.cssText =
+      "all:initial;position:fixed;inset:0;z-index:2147483647";
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+      <style>
+        :host { all: initial; }
+        *, *::before, *::after { box-sizing: border-box; }
+        [hidden] { display: none !important; }
+        dialog { width: min(1080px, calc(100vw - 32px)); max-height: min(860px, calc(100vh - 32px)); padding: 0; border: 1px solid #4a405a; border-radius: 16px; background: #1b1722; color: #f8f6fb; box-shadow: 0 20px 60px rgba(0,0,0,.55); font: 14px/1.45 system-ui, "Segoe UI", sans-serif; }
+        dialog::backdrop { background: rgba(8,6,12,.78); }
+        .head, .foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; }
+        .head { border-bottom: 1px solid #382f43; }
+        .foot { border-top: 1px solid #382f43; }
+        h2 { margin: 0; font-size: 18px; line-height: 1.25; }
+        p { margin: 4px 0 0; color: #c8c0d2; }
+        .close { flex: 0 0 auto; font-size: 20px; line-height: 1; }
+        .body { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 22px; padding: 20px; overflow: auto; max-height: calc(100vh - 170px); }
+        .preview { min-width: 0; }
+        .preview-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .preview-top strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .stage { display: grid; place-items: center; min-height: 280px; border: 1px dashed #5c506e; border-radius: 12px; background: #110e17; overflow: hidden; }
+        canvas { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; }
+        canvas:active { cursor: grabbing; }
+        canvas:focus-visible, button:focus-visible { outline: 2px solid #c5b3ff; outline-offset: 3px; }
+        .hint { margin-top: 10px; font-size: 12px; }
+        .styles h3 { margin: 0 0 10px; font-size: 13px; color: #ddd5e5; }
+        .style-list { display: grid; gap: 8px; }
+        button { border: 1px solid #625671; border-radius: 9px; padding: 8px 11px; background: #2b2435; color: #fff; font: inherit; cursor: pointer; }
+        button:hover:not(:disabled) { background: #392f47; }
+        button:disabled { opacity: .5; cursor: default; }
+        .style-choice { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; text-align: left; }
+        .style-choice[aria-pressed="true"] { border-color: #ae92ff; background: #352a49; }
+        .sample { display: grid; place-items: center; width: 52px; height: 32px; flex: 0 0 auto; font-size: 16px; font-weight: 900; }
+        .sample.wordmark { color: #fff; text-shadow: -2px -2px #000, 2px 2px #000; }
+        .sample.dark { border-radius: 5px; background: #080808; color: #fff; }
+        .sample.light { border-radius: 5px; background: #fff; color: #111; }
+        .foot .status { margin: 0; min-height: 1em; font-size: 12px; }
+        .set-thumbnail { border-color: #977af0; background: #7452dc; font-weight: 700; }
+        input[type=file] { display: none; }
+        @media (max-width: 720px) { .body { grid-template-columns: 1fr; gap: 16px; } .style-list { grid-template-columns: repeat(3, 1fr); } .style-choice { flex-direction: column; align-items: flex-start; } .stage { min-height: 180px; } }
+      </style>
+      <dialog aria-labelledby="ofenhancer4kTitle">
+        <div class="head"><div><h2 id="ofenhancer4kTitle">4K thumbnail</h2><p>Choose an original image, then drag the 4K mark into place.</p></div><button class="close" type="button" aria-label="Close 4K editor">×</button></div>
+        <div class="body">
+          <div class="preview"><div class="preview-top"><strong class="filename">No image selected</strong><button class="choose" type="button">Choose image</button></div><div class="stage"><span class="empty">Your image will appear here</span><canvas aria-label="Thumbnail preview. Use arrow keys to move the 4K mark." tabindex="0" hidden></canvas></div><p class="hint">Drag the mark on the image. Arrow keys move it in small steps.</p></div>
+          <div class="styles"><h3>4K style</h3><div class="style-list"><button class="style-choice" type="button" data-style="wordmark" aria-pressed="false"><span class="sample wordmark">4K</span><span>Wordmark</span></button><button class="style-choice" type="button" data-style="dark" aria-pressed="true"><span class="sample dark">4K</span><span>Dark badge</span></button><button class="style-choice" type="button" data-style="light" aria-pressed="false"><span class="sample light">4K</span><span>Light badge</span></button></div></div>
+        </div>
+        <div class="foot"><p class="status" role="status">The original image stays unchanged.</p><button class="set-thumbnail" type="button" disabled>Set thumbnail</button></div>
+        <input class="file" type="file" accept="image/png,image/jpeg">
+      </dialog>`;
+    (document.documentElement || document.body).append(host);
+    const dialog = shadow.querySelector("dialog");
+    const canvas = shadow.querySelector("canvas");
+    const context = canvas.getContext("2d");
+    const fileInput = /** @type {HTMLInputElement} */ (
+      shadow.querySelector(".file")
+    );
+    const status = shadow.querySelector(".status");
+    const setThumbnail = /** @type {HTMLButtonElement} */ (
+      shadow.querySelector(".set-thumbnail")
+    );
+    const styleChoices = /** @type {NodeListOf<HTMLButtonElement>} */ (
+      shadow.querySelectorAll(".style-choice")
+    );
+    let bitmap = null;
+    let file = null;
+    let fileKey = null;
+    let style = "dark";
+    let position = { x: 0.88, y: 0.13 };
+    let badge = null;
+    let dragging = false;
+
+    function close() {
+      bitmap?.close();
+      bitmap = null;
+      if (dialog.open) dialog.close();
+      host.remove();
+      lifecycleSignal?.removeEventListener("abort", close);
+    }
+    lifecycleSignal?.addEventListener("abort", close, { once: true });
+    dialog.addEventListener("close", close, { once: true });
+    shadow.querySelector(".close").addEventListener("click", close);
+    shadow
+      .querySelector(".choose")
+      .addEventListener("click", () => fileInput.click());
+
+    function drawBadge(ctx, width, height) {
+      const fontSize = Math.max(24, width * 0.075);
+      ctx.font = `900 ${fontSize}px system-ui, sans-serif`;
+      const textWidth = ctx.measureText("4K").width;
+      const pad = fontSize * 0.23;
+      const badgeWidth = textWidth + pad * 2;
+      const badgeHeight = fontSize * 1.35;
+      const x = Math.max(
+        0,
+        Math.min(width - badgeWidth, position.x * width - badgeWidth / 2),
+      );
+      const y = Math.max(
+        0,
+        Math.min(height - badgeHeight, position.y * height - badgeHeight / 2),
+      );
+      if (style !== "wordmark") {
+        ctx.fillStyle = style === "dark" ? "#090909" : "#fff";
+        ctx.beginPath();
+        ctx.roundRect(
+          x,
+          y,
+          badgeWidth,
+          badgeHeight,
+          Math.max(4, fontSize * 0.13),
+        );
+        ctx.fill();
+      }
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.lineJoin = "round";
+      if (style === "wordmark") {
+        ctx.lineWidth = Math.max(3, fontSize * 0.1);
+        ctx.strokeStyle = "#090909";
+        ctx.strokeText("4K", x + badgeWidth / 2, y + badgeHeight / 2);
+      }
+      ctx.fillStyle = style === "light" ? "#111" : "#fff";
+      ctx.fillText("4K", x + badgeWidth / 2, y + badgeHeight / 2);
+      return { x, y, width: badgeWidth, height: badgeHeight };
+    }
+
+    function render() {
+      if (!bitmap) return;
+      const width = Math.min(bitmap.width, 900);
+      canvas.width = width;
+      canvas.height = Math.round((bitmap.height / bitmap.width) * width);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      badge = drawBadge(context, canvas.width, canvas.height);
+    }
+
+    function savePlacement() {
+      if (!fileKey) return;
+      void chrome.storage.local.set({ [fileKey]: { style, ...position } });
+    }
+
+    fileInput.addEventListener("change", async () => {
+      const selected = fileInput.files?.[0];
+      if (!selected) return;
+      if (
+        !["image/png", "image/jpeg"].includes(selected.type) ||
+        selected.size > 50 * 1024 * 1024
+      ) {
+        status.textContent = "Choose a PNG or JPEG under 50 MB.";
+        return;
+      }
+      try {
+        const next = await createImageBitmap(selected);
+        if (
+          next.width < 1 ||
+          next.height < 1 ||
+          next.width > 10000 ||
+          next.height > 10000
+        ) {
+          next.close();
+          throw new Error("Image dimensions are unsupported.");
+        }
+        bitmap?.close();
+        bitmap = next;
+        file = selected;
+        const digest = await crypto.subtle.digest(
+          "SHA-256",
+          await selected.arrayBuffer(),
+        );
+        fileKey =
+          "c4s-4k-placement-" +
+          Array.from(new Uint8Array(digest), (byte) =>
+            byte.toString(16).padStart(2, "0"),
+          ).join("");
+        const saved = await new Promise((resolve) =>
+          chrome.storage.local.get(fileKey, resolve),
+        );
+        const preset = saved[fileKey];
+        style = ["wordmark", "dark", "light"].includes(preset?.style)
+          ? preset.style
+          : "dark";
+        position =
+          Number.isFinite(preset?.x) && Number.isFinite(preset?.y)
+            ? {
+                x: Math.min(1, Math.max(0, preset.x)),
+                y: Math.min(1, Math.max(0, preset.y)),
+              }
+            : { x: 0.88, y: 0.13 };
+        styleChoices.forEach((button) =>
+          button.setAttribute(
+            "aria-pressed",
+            String(button.dataset.style === style),
+          ),
+        );
+        shadow.querySelector(".filename").textContent = selected.name;
+        /** @type {HTMLElement} */ (shadow.querySelector(".empty")).hidden =
+          true;
+        canvas.hidden = false;
+        setThumbnail.disabled = false;
+        status.textContent = preset
+          ? "Previous 4K placement restored."
+          : "Move the 4K mark, then set the thumbnail.";
+        render();
+      } catch (error) {
+        status.textContent =
+          error?.message || "That image could not be opened.";
+      }
+    });
+
+    styleChoices.forEach((button) =>
+      button.addEventListener("click", () => {
+        style = button.dataset.style;
+        styleChoices.forEach((choice) =>
+          choice.setAttribute("aria-pressed", String(choice === button)),
+        );
+        render();
+        savePlacement();
+      }),
+    );
+
+    function point(event) {
+      const bounds = canvas.getBoundingClientRect();
+      return {
+        x: ((event.clientX - bounds.left) * canvas.width) / bounds.width,
+        y: ((event.clientY - bounds.top) * canvas.height) / bounds.height,
+      };
+    }
+    canvas.addEventListener("pointerdown", (event) => {
+      if (!bitmap || !badge) return;
+      const p = point(event);
+      if (
+        p.x < badge.x ||
+        p.x > badge.x + badge.width ||
+        p.y < badge.y ||
+        p.y > badge.y + badge.height
+      )
+        return;
+      dragging = true;
+      canvas.setPointerCapture(event.pointerId);
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      const p = point(event);
+      position = {
+        x: Math.min(1, Math.max(0, p.x / canvas.width)),
+        y: Math.min(1, Math.max(0, p.y / canvas.height)),
+      };
+      render();
+    });
+    for (const name of ["pointerup", "pointercancel"])
+      canvas.addEventListener(name, () => {
+        if (!dragging) return;
+        dragging = false;
+        savePlacement();
+      });
+    canvas.addEventListener("keydown", (event) => {
+      const delta = {
+        ArrowLeft: [-0.01, 0],
+        ArrowRight: [0.01, 0],
+        ArrowUp: [0, -0.01],
+        ArrowDown: [0, 0.01],
+      }[event.key];
+      if (!delta || !bitmap) return;
+      event.preventDefault();
+      position = {
+        x: Math.min(1, Math.max(0, position.x + delta[0])),
+        y: Math.min(1, Math.max(0, position.y + delta[1])),
+      };
+      render();
+      savePlacement();
+    });
+
+    setThumbnail.addEventListener("click", async () => {
+      if (!bitmap || !file) return;
+      setThumbnail.disabled = true;
+      try {
+        const target = findThumbnailInput();
+        if (!target)
+          throw new Error(
+            "Open the Previews step, then reopen this editor to set the thumbnail.",
+          );
+        const output = document.createElement("canvas");
+        const scale = Math.min(1, 4096 / Math.max(bitmap.width, bitmap.height));
+        output.width = Math.round(bitmap.width * scale);
+        output.height = Math.round(bitmap.height * scale);
+        if (
+          output.width < 877 ||
+          output.height < 493 ||
+          Math.abs(output.width / output.height - 16 / 9) > 0.01
+        )
+          throw new Error(
+            "Clips4Sale requires a 16:9 image at least 877 × 493.",
+          );
+        const outputContext = output.getContext("2d");
+        outputContext.drawImage(bitmap, 0, 0, output.width, output.height);
+        drawBadge(outputContext, output.width, output.height);
+        const encode = (type, quality) =>
+          new Promise((resolve) => output.toBlob(resolve, type, quality));
+        let blob = await encode("image/png");
+        if (blob?.size > 5 * 1024 * 1024)
+          for (const quality of [0.9, 0.8, 0.7]) {
+            blob = await encode("image/jpeg", quality);
+            if (blob?.size <= 5 * 1024 * 1024) break;
+          }
+        if (!blob) throw new Error("The 4K image could not be created.");
+        if (blob.size > 5 * 1024 * 1024)
+          throw new Error("The 4K image exceeds Clips4Sale’s 5 MB limit.");
+        const generated = new File(
+          [blob],
+          file.name.replace(/\.[^.]+$/, "") +
+            (blob.type === "image/jpeg" ? "_4k.jpg" : "_4k.png"),
+          { type: blob.type, lastModified: Date.now() },
+        );
+        const transfer = new DataTransfer();
+        transfer.items.add(generated);
+        target.files = transfer.files;
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+        savePlacement();
+        status.textContent = "4K thumbnail sent to the Clips4Sale uploader.";
+      } catch (error) {
+        status.textContent =
+          error?.message || "The 4K thumbnail could not be set.";
+      } finally {
+        setThumbnail.disabled = false;
+      }
+    });
+    dialog.showModal();
+  }
+
   async function mount({ signal, profile }) {
     let audience = profile.audience;
     let videoType = profile.videoType;
@@ -692,6 +1045,11 @@
       label: "Preview upload plan",
       variant: "primary",
       onClick: preview,
+    });
+    panel.addAction({
+      id: "four-k-thumbnail",
+      label: "4K thumbnail",
+      onClick: () => openFourKEditor(signal),
     });
     panel.addAction({
       id: "stop",

@@ -164,9 +164,10 @@ internal sealed class UploadThumbnailCatalogue(CatalogueStore store)
         return store.GetAssets().Where(asset =>
             asset.SizeBytes is > 0 and <= MaximumInputBytes
             && MimeType(asset.FileName) is not null
-            && (Path.GetFileNameWithoutExtension(asset.FileName) == sourceKey
-                || Path.GetFileNameWithoutExtension(asset.FileName).StartsWith(sourceKey + "_", StringComparison.Ordinal))
-            && (asset.BoundItemId is null || asset.BoundItemId == items[0].ItemId)
+            && (asset.BoundItemId == items[0].ItemId
+                || asset.BoundItemId is null
+                    && (Path.GetFileNameWithoutExtension(asset.FileName) == sourceKey
+                        || Path.GetFileNameWithoutExtension(asset.FileName).StartsWith(sourceKey + "_", StringComparison.Ordinal)))
         ).Take(40).ToArray();
     }
 

@@ -126,7 +126,7 @@ internal static class GoogleCatalogueImportReader
         {
             "id" or "videoid" or "itemid" or "sourcekey" => "sourceKey",
             "title" or "name" or "videotitle" or "videoname" => "title",
-            "releasedate" or "planneddate" or "publicationdate" => "plannedDate",
+            "release" or "releasedate" or "planneddate" or "publicationdate" => "plannedDate",
             "description" or "videodescription" => "description",
             "seasonarc" or "season" or "arc" or "series" => "series",
             "episode" or "episodenumber" => "episode",

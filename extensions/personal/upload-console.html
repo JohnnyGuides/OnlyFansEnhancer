@@ -104,7 +104,7 @@
           <section class="card draft-card" aria-labelledby="draftHeading">
             <div class="section-heading">
               <div>
-                <h2 id="draftHeading">Files &amp; details</h2>
+                <h2 id="draftHeading">Video</h2>
               </div>
             </div>
 
@@ -112,7 +112,7 @@
               <div class="file-information">
                 <label for="uploadFullVideo">Full video</label>
                 <p id="fullFileSummary" class="file-summary" aria-live="polite">
-                  Choose the main video
+                  Select video
                 </p>
                 <span id="fullFileSummarySize" class="file-size"></span>
               </div>
@@ -151,13 +151,13 @@
             >
               <div class="file-picker">
                 <div class="file-information">
-                  <label for="uploadTeaser">Shared teaser</label>
+                  <label for="uploadTeaser">Teaser</label>
                   <p
                     id="teaserFileSummary"
                     class="file-summary"
                     aria-live="polite"
                   >
-                    Generated from the full video if empty
+                    Auto from video
                   </p>
                   <span id="teaserFileSummarySize" class="file-size"></span>
                 </div>
@@ -176,7 +176,7 @@
                     data-choose-file="uploadTeaser"
                     aria-label="Choose shared teaser"
                   >
-                    Choose file
+                    Use my file
                   </button>
                   <button
                     type="button"
@@ -190,13 +190,13 @@
               </div>
               <div class="file-picker">
                 <div class="file-information">
-                  <label for="uploadManyvidsThumbnail">Shared thumbnail</label>
+                  <label for="uploadManyvidsThumbnail">Thumbnail</label>
                   <p
                     id="manyvidsThumbnailSummary"
                     class="file-summary"
                     aria-live="polite"
                   >
-                    Generated from the full video if empty
+                    Auto from video
                   </p>
                   <span
                     id="manyvidsThumbnailSummarySize"
@@ -214,14 +214,14 @@
                 />
                 <div class="file-actions">
                   <button id="chooseThumbnailFrame" type="button" hidden>
-                    Choose frame
+                    Pick frame
                   </button>
                   <button
                     type="button"
                     data-choose-file="uploadManyvidsThumbnail"
                     aria-label="Choose shared thumbnail"
                   >
-                    Choose file
+                    Use my file
                   </button>
                   <button
                     type="button"
@@ -267,7 +267,7 @@
                     class="file-summary"
                     aria-live="polite"
                   >
-                    Uses the full video
+                    Same as full video
                   </p>
                   <span id="pornhubFileSummarySize" class="file-size"></span>
                 </div>
@@ -286,7 +286,7 @@
                     data-choose-file="uploadPornhubVideo"
                     aria-label="Choose pornhub video"
                   >
-                    Choose file
+                    Use another file
                   </button>
                   <button
                     type="button"
@@ -332,9 +332,43 @@
                 </button>
               </div>
             </dialog>
-            <p class="selection-note">
-              Selections are cleared when this window closes.
-            </p>
+            <div id="cataloguePicker" class="catalogue-picker" hidden>
+              <div class="catalogue-picker-heading">
+                <strong>Similar catalogue entries</strong>
+                <label class="catalogue-search-field" for="catalogueSearch">
+                  <input
+                    id="catalogueSearch"
+                    name="catalogueSearch"
+                    type="search"
+                    autocomplete="off"
+                    placeholder="Search catalogue…"
+                    aria-label="Search catalogue"
+                  />
+                </label>
+              </div>
+              <div
+                id="catalogueCards"
+                class="catalogue-cards"
+                aria-label="Likely catalogue matches"
+              ></div>
+              <details id="catalogueFindMore" class="catalogue-find-more">
+                <summary id="catalogueMoreLabel">More matches</summary>
+                <label for="catalogueRow">Catalogue episode</label>
+                <select id="catalogueRow" name="catalogueRow"></select>
+                <button id="refreshCatalogue" type="button">
+                  Refresh catalogue
+                </button>
+              </details>
+              <p id="selectedCatalogueReason" class="hint" role="status"></p>
+            </div>
+            <p id="catalogueConnectionStatus" class="hint" role="status"></p>
+            <p id="catalogueSelectionStatus" class="status" role="status"></p>
+            <button id="findCatalogueEntry" type="button" hidden>
+              Match a catalogue entry
+            </button>
+            <button id="continueWithoutSheet" type="button" hidden>
+              Continue without sheet
+            </button>
             <div class="field-grid">
               <div>
                 <label for="uploadTitle">Title</label>
@@ -476,45 +510,6 @@
               Final Save runs on Upload. Sites use the selected release date;
               Pornhub Submit stays manual.
             </p>
-            <p id="catalogueConnectionStatus" class="hint" role="status"></p>
-            <p id="catalogueSelectionStatus" class="status" role="status"></p>
-            <button id="findCatalogueEntry" type="button" hidden>
-              Match a catalogue entry
-            </button>
-            <button id="continueWithoutSheet" type="button" hidden>
-              Continue without sheet
-            </button>
-            <div id="cataloguePicker" class="catalogue-picker" hidden>
-              <div class="catalogue-picker-heading">
-                <strong>Match this video</strong>
-                <span>Select its catalogue entry to fill the details.</span>
-              </div>
-              <div
-                id="catalogueCards"
-                class="catalogue-cards"
-                aria-label="Likely catalogue matches"
-              ></div>
-              <details class="catalogue-find-more">
-                <summary>Find another video</summary>
-                <label for="catalogueSearch">Search catalogue</label>
-                <input
-                  id="catalogueSearch"
-                  name="catalogueSearch"
-                  type="search"
-                  autocomplete="off"
-                  placeholder="Title, ID, series, or episode…"
-                />
-                <label for="catalogueRow">Catalogue episode</label>
-                <select id="catalogueRow" name="catalogueRow"></select>
-                <button id="showMoreCatalogue" type="button" hidden>
-                  Show more episodes
-                </button>
-                <button id="refreshCatalogue" type="button">
-                  Refresh catalogue
-                </button>
-              </details>
-              <p id="selectedCatalogueReason" class="hint" role="status"></p>
-            </div>
           </section>
 
           <section
@@ -1077,6 +1072,21 @@
         </form>
       </section>
     </main>
+    <dialog
+      id="catalogueEditDialog"
+      class="catalogue-edit-dialog"
+      aria-labelledby="catalogueEditHeading"
+    >
+      <h2 id="catalogueEditHeading">Save catalogue changes</h2>
+      <p id="catalogueEditSummary"></p>
+      <div class="catalogue-edit-actions">
+        <button id="catalogueEditCancel" type="button">Cancel upload</button>
+        <button id="catalogueEditNew" type="button">Create new row</button>
+        <button id="catalogueEditUpdate" type="button" class="primary">
+          Update this row
+        </button>
+      </div>
+    </dialog>
     <script src="app/upload-host.js"></script>
     <script src="workflows/registry.js"></script>
     <script src="workflows/common.js"></script>

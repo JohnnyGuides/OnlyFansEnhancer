@@ -127,6 +127,11 @@ public partial class MainWindow : Window, IDisposable
                 return AgentResponse.SuccessResult(request, new { filePath = file.FullName, name = file.Name,
                     size = file.Length, lastModified = new DateTimeOffset(file.LastWriteTimeUtc).ToUnixTimeMilliseconds() });
             }
+            if (request.Operation == "writeUploadCatalogueEntry")
+            {
+                object written = await dispatcher.EnqueueAsync(() => googleCatalogue.WriteUploadEntry(WithoutTransportMetadata(payload)));
+                return AgentResponse.SuccessResult(request, written);
+            }
             object result = await dispatcher.EnqueueAsync(() => uploadCatalogue.Handle(request.Operation, WithoutTransportMetadata(payload)));
             return AgentResponse.SuccessResult(request, result);
         }

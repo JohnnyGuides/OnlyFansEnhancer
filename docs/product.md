@@ -57,10 +57,14 @@ and uses the shared teaser through **Add Free Preview**. OnlyFans labels remain
 unchanged. Friday scheduling is **15:00 UTC**. Fansly and ManyVids read the timezone displayed by their scheduling UI; OnlyFans uses the approved draft timezone and requires separate live verification of that UI representation. A verified common empty Friday is required when the selected flow
 claims queue verification. Unknown queue availability is not inferred as free.
 
-Upload Hub shows four ranked catalogue matches after a full video is chosen.
-The owner clicks an exact row before Upload is enabled; that choice fills its
+Upload Hub shows six filename-ranked catalogue matches after a full video is
+chosen. Search covers the full catalogue, and More matches opens the complete
+list. The owner clicks an exact row when a plausible match exists; that choice fills its
 title, description, release date, and inferred missing destinations. Later edits
-remain intact until another row is selected. The run binds the selected row and
+remain intact until another row is selected. If there is no close match, clicking
+Upload creates and verifies a new Work row before preparing platform drafts.
+If the owner changes a selected row's title or description, Upload asks whether
+to update that row or create a new one. The run binds the resulting row and
 checks its fingerprint again before platform preparation. A verified platform
 result is recorded against that row; a prepared draft alone has no post link to
 record. The only main-video publishing control is an unchecked **Publish
@@ -91,6 +95,7 @@ that entry's ID (for example `episode-id_v01.png`). The creator chooses one vari
 no favourite is inferred. The desktop checks the scanned inventory and file hash,
 then performs the same conversion and bound file handoff. Refresh variants rescans
 the configured thumbnail folder; a manually chosen file remains available.
+Bound local images remain selectable after their filenames change.
 Only a creator-confirmed exact
 Season/Arc mapping may preselect it; never infer orientation from performers,
 titles, filenames, descriptions, or tags. Existing metadata is preserved while

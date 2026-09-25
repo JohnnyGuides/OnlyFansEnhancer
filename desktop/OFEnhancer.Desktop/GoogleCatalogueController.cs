@@ -37,6 +37,9 @@ internal interface IGoogleCatalogueSession : IDisposable
         CancellationToken cancellationToken
     );
     Task<GoogleSyncSummary> SyncAsync(string sheetId, CancellationToken cancellationToken);
+    Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+        CancellationToken cancellationToken) =>
+        throw new GoogleCatalogueException("google-upload-write-unavailable");
 }
 
 internal sealed class GoogleCatalogueController : IGoogleCatalogueController
@@ -413,6 +416,45 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 _store.ImportWorkbookProjection(preview.Projection, updateGoogleBindings: false);
                 return new(StatusLocked(), preview.CatalogueSheetTitle, preview.Projection.Items.Count, preview.Issues ?? []);
             }
+        }
+        catch (Exception exception) { throw SafeException(exception); }
+        finally { ExitCatalogueOperation(); }
+    }
+
+    internal object WriteUploadEntry(JsonElement payload)
+    {
+        GoogleUploadEntryRequest request;
+        try
+        {
+            request = payload.Deserialize<GoogleUploadEntryRequest>(new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = false,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+            }) ?? throw new JsonException();
+        }
+        catch (JsonException) { throw new GoogleCatalogueControllerException("invalid-catalogue-entry"); }
+        IGoogleCatalogueSession session;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            session = _session ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+            if (_ready && request.Mode == "new")
+                throw new GoogleCatalogueControllerException("google-sync-new-row-unavailable");
+            EnterCatalogueOperationLocked();
+        }
+        try
+        {
+            GoogleUploadEntryResult result = session.WriteUploadEntryAsync(request, _lifetime.Token)
+                .GetAwaiter().GetResult();
+            lock (_gate)
+            {
+                ThrowIfDisposed();
+                if (!ReferenceEquals(session, _session))
+                    throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                _store.ImportWorkbookProjection(result.Preview.Projection, updateGoogleBindings: false);
+            }
+            return new { id = result.Id, row = result.Row, status = result.Status };
         }
         catch (Exception exception) { throw SafeException(exception); }
         finally { ExitCatalogueOperation(); }
@@ -1027,6 +1069,11 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
 
     public Task<GoogleSyncSummary> SyncAsync(string sheetId, CancellationToken cancellationToken) =>
         _syncWorker.RunOnceAsync(_workbookId, sheetId, cancellationToken);
+
+    public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+        CancellationToken cancellationToken) =>
+        new GoogleUploadEntryWriter(_workbookId, _preferredSheetId, _workspace)
+            .WriteAsync(request, cancellationToken);
 
     public void Dispose() => _authorization?.Dispose();
 }

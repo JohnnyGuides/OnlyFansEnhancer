@@ -742,3 +742,147 @@ test("C4S never confuses Assign with Unassign and Reddit censor cleans up immedi
     await browser.close();
   }
 });
+
+test("C4S 4K editor moves a badge, remembers its style, and sets the uploader thumbnail", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const c4s = await preparePage(browser, {
+      url: "https://workspace.clips4sale.com/upload",
+      html: '<main>Clips4Sale upload fixture<button data-testid="clip-thumbnail_button_reupload">Replace</button><input id="video" type="file" accept="video/mp4"></main>',
+      settings: rawSettings("c4sUpload"),
+      scripts: ["c4s-upload.js"],
+    });
+    await waitForPanel(c4s.page, "c4sUpload");
+    await c4s.page.evaluate(() => {
+      document
+        .querySelector('[data-testid="clip-thumbnail_button_reupload"]')
+        .addEventListener("click", () => {
+          document.body.dataset.pickerOpened = "yes";
+          if (document.querySelector("#thumbnail")) return;
+          const input = document.createElement("input");
+          input.id = "thumbnail";
+          input.type = "file";
+          input.accept = ".jpeg,.jpg,.png";
+          input.dataset.testid =
+            "clip-thumbnail_[0]_input_nsfw-custom-uploader";
+          input.addEventListener("change", () => {
+            globalThis.__submittedThumbnail = input.files[0];
+            document.body.dataset.thumbnailChanged = "yes";
+            input.value = "";
+          });
+          document.body.append(input);
+          const folder = document.createElement("input");
+          folder.type = "file";
+          folder.webkitdirectory = true;
+          folder.dataset.testid =
+            "clip-thumbnail_[1]_input_nsfw-custom-uploader";
+          document.body.append(folder);
+        });
+    });
+    await c4s.page.getByRole("button", { name: "4K thumbnail" }).click();
+    assert.equal(
+      await c4s.page.evaluate(() => document.body.dataset.pickerOpened),
+      "yes",
+    );
+    const dialog = c4s.page.getByRole("dialog", { name: "4K thumbnail" });
+    await dialog.waitFor();
+    const base64 = await c4s.page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+      const drawing = canvas.getContext("2d");
+      drawing.fillStyle = "#8094ac";
+      drawing.fillRect(0, 0, 800, 450);
+      return canvas.toDataURL("image/png").split(",")[1];
+    });
+    const fixture = {
+      name: "cover.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(base64, "base64"),
+    };
+    await dialog.locator('input[type="file"]').setInputFiles(fixture);
+    await dialog
+      .getByText("Move the 4K mark, then set the thumbnail.")
+      .waitFor();
+    await dialog.getByRole("button", { name: "Light badge" }).click();
+    const canvas = dialog.locator("canvas");
+    const bounds = await canvas.boundingBox();
+    await c4s.page.mouse.move(
+      bounds.x + bounds.width * 0.88,
+      bounds.y + bounds.height * 0.13,
+    );
+    await c4s.page.mouse.down();
+    await c4s.page.mouse.move(
+      bounds.x + bounds.width * 0.2,
+      bounds.y + bounds.height * 0.8,
+    );
+    await c4s.page.mouse.up();
+    const placement = await c4s.page.evaluate(
+      () =>
+        Object.entries(__toolkitTestStorage).find(([key]) =>
+          key.startsWith("c4s-4k-placement-"),
+        )?.[1],
+    );
+    assert.equal(placement.style, "light");
+    assert.ok(placement.x < 0.3 && placement.y > 0.7);
+
+    await dialog.getByRole("button", { name: "Set thumbnail" }).click();
+    await dialog
+      .getByText("4K thumbnail sent to the Clips4Sale uploader.")
+      .waitFor();
+    const result = await c4s.page.evaluate(async () => ({
+      name: globalThis.__submittedThumbnail?.name,
+      bytes: Array.from(
+        new Uint8Array(await globalThis.__submittedThumbnail.arrayBuffer()),
+      ),
+      changed: document.body.dataset.thumbnailChanged,
+      videoCount: document.querySelector("#video").files.length,
+    }));
+    assert.equal(result.name, "cover_4k.png");
+    assert.equal(result.changed, "yes");
+    assert.equal(result.videoCount, 0);
+    const bytes = Buffer.from(result.bytes);
+    assert.equal(bytes.readUInt32BE(16), 1280);
+    assert.equal(bytes.readUInt32BE(20), 720);
+    await dialog.getByRole("button", { name: "Close 4K editor" }).click();
+    await c4s.page.getByRole("button", { name: "4K thumbnail" }).click();
+    const reopened = c4s.page.getByRole("dialog", { name: "4K thumbnail" });
+    await reopened.locator('input[type="file"]').setInputFiles(fixture);
+    await reopened.getByText("Previous 4K placement restored.").waitFor();
+    assert.equal(
+      await reopened
+        .getByRole("button", { name: "Light badge" })
+        .getAttribute("aria-pressed"),
+      "true",
+    );
+    const small = await c4s.page.evaluate(() => {
+      const image = document.createElement("canvas");
+      image.width = 800;
+      image.height = 450;
+      return image.toDataURL("image/png").split(",")[1];
+    });
+    await reopened.locator('input[type="file"]').setInputFiles({
+      name: "small.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(small, "base64"),
+    });
+    await reopened.getByRole("button", { name: "Set thumbnail" }).click();
+    await reopened
+      .getByText("Clips4Sale requires a 16:9 image at least 877 × 493.")
+      .waitFor();
+    await reopened.locator('input[type="file"]').setInputFiles(fixture);
+    await c4s.page.locator("#thumbnail").evaluate((input) => input.remove());
+    await c4s.page
+      .locator('[data-testid="clip-thumbnail_button_reupload"]')
+      .evaluate((button) => button.remove());
+    await reopened.getByRole("button", { name: "Set thumbnail" }).click();
+    await reopened
+      .getByText(
+        "Open the Previews step, then reopen this editor to set the thumbnail.",
+      )
+      .waitFor();
+    await c4s.context.close();
+  } finally {
+    await browser.close();
+  }
+});

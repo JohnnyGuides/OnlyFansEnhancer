@@ -24,6 +24,8 @@ public sealed class UploadThumbnailCatalogueTests
                 image.Save(Path.Combine(root, "episode-one_v01.png"), ImageFormat.Png);
                 drawing.Clear(Color.Red);
                 image.Save(Path.Combine(root, "episode-two.png"), ImageFormat.Png);
+                drawing.Clear(Color.Green);
+                image.Save(Path.Combine(root, "Renamed Episode Cover.png"), ImageFormat.Png);
             }
             using CatalogueStore store = CatalogueStore.Open(Path.Combine(temporary, "catalogue.db"));
             store.ImportSnapshot(JsonSerializer.Serialize(new
@@ -37,12 +39,18 @@ public sealed class UploadThumbnailCatalogueTests
                 }),
             }));
             store.ScanThumbnails(root);
+            store.ConfirmAssetBinding(
+                store.GetAssets().Single(asset => asset.FileName == "Renamed Episode Cover.png").AssetId,
+                store.GetItems().Single(item => item.SourceKey == "episode-one").ItemId);
             UploadThumbnailCatalogue catalogue = new(store);
             JsonElement listed = JsonSerializer.SerializeToElement(catalogue.List(JsonSerializer.SerializeToElement(new
             {
                 catalogueId = "episode-one",
             })));
-            JsonElement choice = listed.GetProperty("choices").EnumerateArray().Single();
+            Assert.IsTrue(listed.GetProperty("choices").EnumerateArray().Any(asset =>
+                asset.GetProperty("name").GetString() == "Renamed Episode Cover.png"));
+            JsonElement choice = listed.GetProperty("choices").EnumerateArray().Single(asset =>
+                asset.GetProperty("name").GetString() == "episode-one_v01.png");
             Assert.AreEqual("episode-one_v01.png", choice.GetProperty("name").GetString());
             string assetId = choice.GetProperty("assetId").GetString()!;
             JsonElement request = JsonSerializer.SerializeToElement(new
