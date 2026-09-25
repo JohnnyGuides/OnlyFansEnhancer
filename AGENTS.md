@@ -62,6 +62,15 @@ installed extension/native integration outside the task's existing authority.
 
 # Release delivery
 
+For user-facing UI changes, implement and render the proposed interface from the
+actual source before building a versioned installer or installing an update.
+Send the owner a screenshot or image preview of the affected screen in the task
+conversation and allow them to review it before release packaging. Prefer a
+working local browser/app preview over a conceptual mockup; label any mockup
+clearly. If a desktop build is needed to render the screen, a development build
+is fine, but defer the installer and normal update until after the preview.
+Apply requested visual revisions to the preview before packaging. This checkpoint
+is for UI changes; nonvisual fixes can follow the normal release flow.
 
 For completed product changes delivered as a release, increment the appropriate
 product version and build a matching Windows installer. Include a direct,
