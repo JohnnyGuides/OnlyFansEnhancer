@@ -14,7 +14,7 @@ public sealed record UploadCatalogueSnapshot(string Status, string Source, IRead
 public sealed record UploadResultMetadata(string Id, string? ReleaseDate = null, string? Title = null, string? Description = null);
 public sealed record UploadResultRequest(int Row, string Fingerprint, string Platform, string PostUrl,
     UploadResultMetadata? Metadata = null, string? ItemId = null, string? Id = null, string? Action=null,
-    string? StatusUrl=null,string? RedditUrl=null);
+    string? StatusUrl=null,string? RedditUrl=null,bool RepeatUploadConfirmed=false);
 public sealed record UploadResult(string Status, string? Fingerprint = null, bool GoogleSynced = false, string? PostUrl = null);
 public sealed record DistributionLedgerRequest(string EventId,string RunId,string JobId,string Platform,
     int CatalogueRow,string CatalogueId,string ResultId,string ResultUrl,string Status,long RecordedAt,
@@ -103,7 +103,7 @@ public sealed partial class CatalogueStore
         if (knownUrls.Contains(canonical, StringComparer.Ordinal)) return new("idempotent", current.Fingerprint, PostUrl: canonical);
         if (!string.Equals(current.Fingerprint, request.Fingerprint, StringComparison.OrdinalIgnoreCase)) return new("stale", current.Fingerprint);
         bool append=request.Action is "appendTwitterTeaser" or "appendRedditPost";
-        if (state == "published" && !append) return new("conflict", current.Fingerprint);
+        if (state == "published" && !append && !request.RepeatUploadConfirmed) return new("conflict", current.Fingerprint);
         if (knownUrls.Count >= 100) throw new WorkbookProjectionException("upload-result-limit", "This item has reached the publication link limit.");
 
         using SqliteCommand command = connection.CreateCommand();
@@ -113,7 +113,7 @@ public sealed partial class CatalogueStore
         command.Parameters.AddWithValue("$id", item.ItemId);
         command.ExecuteNonQuery();
         command.CommandText="INSERT INTO audit_events(occurred_utc,kind,item_id,details_json) VALUES ($utc,'upload-result',$id,$details)";
-        command.Parameters.AddWithValue("$details",JsonSerializer.Serialize(new RecordedPublication(platform,canonical)));
+        command.Parameters.AddWithValue("$details",JsonSerializer.Serialize(new RecordedPublication(platform,canonical,request.RepeatUploadConfirmed ? knownUrls.ToArray() : null)));
         command.ExecuteNonQuery();
         transaction.Commit();
         return new("recorded-local", ToUploadRow(GetItems().Single(value=>value.ItemId==item.ItemId)).Fingerprint, PostUrl: canonical);
@@ -148,11 +148,14 @@ public sealed partial class CatalogueStore
                 if(source is not null) urls.AddRange(source.Urls);
                 string[] distinct=urls.Distinct(StringComparer.Ordinal).ToArray();
                 bool social=platform is "x" or "reddit";
-                bool conflict=source?.IssueCode is not null || !social && distinct.Length>1;
+                var confirmed=group.SelectMany(record=>record.ConfirmedExistingUrls ?? []).Concat(group.Select(record=>record.PostUrl)).ToHashSet(StringComparer.Ordinal);
+                bool confirmedRepeat=group.Any(record=>record.ConfirmedExistingUrls is {Length:>0}) && distinct.All(confirmed.Contains);
+                bool conflict=source?.IssueCode is not null || !social && distinct.Length>1 && !confirmedRepeat;
                 if(distinct.Length==1 && !conflict) links[platform]=distinct[0];
                 else
                 {
-                    links.Remove(platform);
+                    if(confirmedRepeat && !conflict) links[platform]=existing ?? group.First().ConfirmedExistingUrls?.FirstOrDefault() ?? distinct[0];
+                    else links.Remove(platform);
                     cells[platform]=new(source?.Text ?? existing ?? "",source?.Hyperlink,distinct,
                         source?.IssueCode ?? (conflict ? "local-link-conflict" : null));
                 }
@@ -163,7 +166,7 @@ public sealed partial class CatalogueStore
         }).ToArray();
     }
 
-    private sealed record RecordedPublication(string Platform,string PostUrl);
+    private sealed record RecordedPublication(string Platform,string PostUrl,string[]? ConfirmedExistingUrls=null);
 
     private static UploadCatalogueRow ToUploadRow(CatalogueItemSummary item)
     {

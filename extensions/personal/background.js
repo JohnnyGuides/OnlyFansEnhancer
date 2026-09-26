@@ -2739,7 +2739,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.75"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.76"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -3217,6 +3217,15 @@ async function validateCreatorUploadRequest(message) {
   const catalogue = {
     source: message.catalogue?.source === "desktop" ? "desktop" : "legacy",
     itemId: creatorUploadClean(message.catalogue?.itemId, 200),
+    repeatPlatforms:
+      message.catalogue?.source === "desktop" &&
+      Array.isArray(message.catalogue?.repeatPlatforms)
+        ? [...new Set(message.catalogue.repeatPlatforms)].filter(
+            (platform) =>
+              targets.includes(platform) &&
+              ["onlyfans", "fansly", "manyvids", "pornhub"].includes(platform),
+          )
+        : [],
     publicationState: Object.fromEntries(
       ["pornhub", "onlyfans", "fansly", "manyvids"].map((platform) => [
         platform,
@@ -3258,6 +3267,12 @@ async function validateCreatorUploadRequest(message) {
   ) {
     throw new Error("Invalid catalogue upload preview.");
   }
+  if (
+    catalogue.repeatPlatforms.length &&
+    message.type !== "CHECK_CREATOR_UPLOAD_AVAILABILITY" &&
+    message.catalogue?.repeatUploadConfirmed !== true
+  )
+    throw new Error("Confirm uploading another copy before continuing.");
   for (const platform of ["pornhub", "onlyfans", "fansly", "manyvids"]) {
     if (
       targets.includes(platform) &&
@@ -3275,7 +3290,11 @@ async function validateCreatorUploadRequest(message) {
       throw new Error(`Invalid ${platform} catalogue link.`);
     }
     catalogue[field] = canonical;
-    if (targets.includes(platform) && canonical) {
+    if (
+      targets.includes(platform) &&
+      canonical &&
+      !catalogue.repeatPlatforms.includes(platform)
+    ) {
       const label = {
         pornhub: "Pornhub",
         onlyfans: "OnlyFans",
@@ -4156,7 +4175,13 @@ async function checkCreatorUploadPreflight(message, launcher = "extension") {
         "The connected catalogue changed. Review the item again before uploading.",
       );
     for (const platform of request.targets)
-      if (current.publicationState?.[platform] !== "empty")
+      if (
+        current.publicationState?.[platform] !== "empty" &&
+        !(
+          current.publicationState?.[platform] === "published" &&
+          request.catalogue.repeatPlatforms.includes(platform)
+        )
+      )
         throw new Error(
           `The catalogue already contains a ${platform} result or a link requiring review.`,
         );
@@ -4431,7 +4456,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.75"
+      "upload-hub-0.20.76"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4562,6 +4587,9 @@ async function commitCreatorUploadResult(session, platform, postUrl) {
     .then(async () => {
       const result = await CREATOR_CATALOGUE_CLIENT.commitPlatformLink({
         row: session.catalogue.row,
+        repeatUploadConfirmed:
+          session.catalogue.source === "desktop" &&
+          session.catalogue.repeatPlatforms?.includes(platform) === true,
         fingerprint: session.catalogue.fingerprint,
         platform,
         postUrl,

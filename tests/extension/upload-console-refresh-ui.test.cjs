@@ -173,20 +173,28 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
         .evaluate((element) => getComputedStyle(element).position),
       "sticky",
     );
-    await page.locator("#catalogueThumbnails").evaluate((element) => {
+    await page.locator("#selectedThumbnailPreview").evaluate((element) => {
       element.hidden = false;
     });
-    const pornhubCard = await page.locator(".pornhub-file-card").boundingBox();
-    const thumbnailChoices = await page
-      .locator("#catalogueThumbnails")
-      .boundingBox();
-    assert.ok(
-      thumbnailChoices.y >= pornhubCard.y + pornhubCard.height,
-      "Named thumbnail choices should follow the four media cards",
-    );
+    const beforePicker = await page.locator(".pornhub-file-card").boundingBox();
     await page.locator("#catalogueThumbnails").evaluate((element) => {
-      element.hidden = true;
+      element.hidden = false;
+      element.showPopover();
     });
+    assert.equal(await page.locator("#catalogueThumbnails").isVisible(), true);
+    assert.equal(
+      await page
+        .locator("#catalogueThumbnails")
+        .evaluate((element) => getComputedStyle(element).position),
+      "fixed",
+    );
+    assert.deepEqual(
+      await page.locator(".pornhub-file-card").boundingBox(),
+      beforePicker,
+    );
+    await page.keyboard.press("Escape");
+    await page.locator("#catalogueThumbnails").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#catalogueThumbnails").isVisible(), false);
     await page.locator("#uploadManyvidsThumbnail").setInputFiles({
       name: "Sample Chess Session With A Much Longer Thumbnail Name Final.png",
       mimeType: "image/png",

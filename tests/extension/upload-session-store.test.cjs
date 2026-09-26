@@ -488,7 +488,13 @@ test("upload session storage round-trips only bounded allow-listed metadata", as
       profiles: { fanslyPrefill: { message: "#tags" } },
       cookie: "forbidden",
     },
-    catalogue: { row: 42, id: "episode", fingerprint: "1234abcd" },
+    catalogue: {
+      row: 42,
+      id: "episode",
+      fingerprint: "1234abcd",
+      source: "desktop",
+      repeatPlatforms: ["onlyfans", "unknown"],
+    },
     platforms: {
       onlyfans: {
         platform: "onlyfans",
@@ -514,6 +520,9 @@ test("upload session storage round-trips only bounded allow-listed metadata", as
   assert.equal(restored.draft.description, "Caption");
   assert.equal(restored.draft.profiles.fanslyPrefill.message, "#tags");
   assert.equal(restored.catalogue.row, 42);
+  assert.deepEqual(Array.from(restored.catalogue.repeatPlatforms), [
+    "onlyfans",
+  ]);
   assert.equal(restored.platforms.onlyfans.tabId, 7);
   assert.equal(restored.platforms.onlyfans.submitAttempted, true);
   assert.equal(Object.hasOwn(restored, "cookie"), false);

@@ -816,6 +816,7 @@
     const selectedThumbnailPreview = get("#selectedThumbnailPreview");
     const selectedThumbnailImage = get("#selectedThumbnailImage");
     const catalogueThumbnails = get("#catalogueThumbnails");
+    const thumbnailPickerToggle = get("#thumbnailPickerToggle");
     const loadCatalogueThumbnails = get("#loadCatalogueThumbnails");
     const catalogueThumbnailStatus = get("#catalogueThumbnailStatus");
     const catalogueThumbnailChoices = get("#catalogueThumbnailChoices");
@@ -916,6 +917,7 @@
     let currentSnapshot = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
+    let repeatUploadConfirmed = false;
     const cataloguePreviewCache = new Map();
     const cataloguePreviewPending = new Set();
     let manualTargets = null;
@@ -1487,12 +1489,24 @@
       return String(candidate?.[`${platform}Link`] || "").trim();
     }
 
+    function repeatedTargets(
+      value = draft(),
+      candidate = currentMatch?.candidate,
+    ) {
+      return value.targets.filter(
+        (platform) =>
+          catalogueLink(candidate, platform) ||
+          candidate?.publicationState?.[platform] === "published",
+      );
+    }
+
     function pendingTargets(value, match = currentMatch) {
       return value.targets.filter(
         (platform) =>
-          !catalogueLink(match?.candidate, platform) &&
           match?.candidate?.publicationState?.[platform] !== "review" &&
-          match?.candidate?.publicationState?.[platform] !== "published",
+          (currentSnapshot?.source === "desktop" ||
+            (!catalogueLink(match?.candidate, platform) &&
+              match?.candidate?.publicationState?.[platform] !== "published")),
       );
     }
 
@@ -1624,6 +1638,49 @@
       element.replaceChildren(stem, extension);
     }
 
+    catalogueThumbnails.addEventListener("beforetoggle", (event) => {
+      if (event.newState !== "open") return;
+      const anchor = selectedThumbnailPreview.getBoundingClientRect();
+      const width = Math.min(336, window.innerWidth - 24);
+      catalogueThumbnails.style.width = `${width}px`;
+      catalogueThumbnails.style.left = `${Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12))}px`;
+      catalogueThumbnails.style.top =
+        anchor.top < 180 ? `${anchor.bottom + 8}px` : "auto";
+      catalogueThumbnails.style.bottom =
+        anchor.top >= 180 ? `${window.innerHeight - anchor.top + 8}px` : "auto";
+    });
+    catalogueThumbnails.addEventListener("toggle", (event) => {
+      thumbnailPickerToggle.setAttribute(
+        "aria-expanded",
+        String(event.newState === "open"),
+      );
+    });
+    catalogueThumbnailChoices.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      const buttons = [...catalogueThumbnailChoices.querySelectorAll("button")];
+      const index = buttons.indexOf(document.activeElement);
+      const next = buttons[index + (event.key === "ArrowRight" ? 1 : -1)];
+      if (next) {
+        event.preventDefault();
+        next.focus();
+        next.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+    catalogueThumbnailChoices.addEventListener(
+      "wheel",
+      (event) => {
+        if (
+          catalogueThumbnailChoices.scrollWidth <=
+            catalogueThumbnailChoices.clientWidth ||
+          !event.deltaY
+        )
+          return;
+        event.preventDefault();
+        catalogueThumbnailChoices.scrollLeft += event.deltaY;
+      },
+      { passive: false },
+    );
+
     function showCatalogueThumbnailPicker(match) {
       const id =
         match?.status === "matched" &&
@@ -1631,7 +1688,12 @@
         !get("#uploadMedia").hidden
           ? match.candidate?.id
           : null;
-      catalogueThumbnails.hidden = true;
+      if (!id || thumbnailCatalogueId !== id) {
+        if (catalogueThumbnails.matches(":popover-open"))
+          catalogueThumbnails.hidePopover();
+        catalogueThumbnails.hidden = true;
+        thumbnailPickerToggle.hidden = true;
+      }
       if (!id) {
         catalogueThumbnailHint.textContent = "";
         return;
@@ -1639,8 +1701,9 @@
       if (thumbnailCatalogueId === id) {
         catalogueThumbnails.hidden =
           (thumbnailChoices?.length || 0) > 1 ? false : true;
+        thumbnailPickerToggle.hidden = catalogueThumbnails.hidden;
         catalogueThumbnailHint.textContent = thumbnailChoices?.length
-          ? ` · ${thumbnailChoices.length} named thumbnails`
+          ? ` · ${thumbnailChoices.length}`
           : "";
         return;
       }
@@ -1677,10 +1740,12 @@
         thumbnailChoices = result.choices || [];
         catalogueThumbnails.hidden =
           !result.configured || thumbnailChoices.length <= 1;
+        thumbnailPickerToggle.hidden = catalogueThumbnails.hidden;
         if (
           autoThumbnailAssetId &&
-          (thumbnailChoices.length !== 1 ||
-            thumbnailChoices[0].assetId !== autoThumbnailAssetId)
+          !thumbnailChoices.some(
+            (choice) => choice.assetId === autoThumbnailAssetId,
+          )
         ) {
           if (thumbnailFile?.assetId === autoThumbnailAssetId) {
             thumbnailFile = null;
@@ -1689,7 +1754,7 @@
           autoThumbnailAssetId = null;
         }
         catalogueThumbnailHint.textContent = thumbnailChoices.length
-          ? ` · ${thumbnailChoices.length} named thumbnails`
+          ? ` · ${thumbnailChoices.length}`
           : "";
         catalogueThumbnailChoices.replaceChildren();
         if (!result.configured) {
@@ -1703,7 +1768,7 @@
           return;
         }
         if (
-          thumbnailChoices.length === 1 &&
+          thumbnailChoices.length > 0 &&
           !thumbnailFile &&
           !activeSession &&
           !runBusy
@@ -1740,7 +1805,9 @@
           preview.alt = "";
           preview.loading = "lazy";
           const label = document.createElement("span");
-          label.textContent = choice.name;
+          label.textContent = `Option ${thumbnailChoices.indexOf(choice) + 1}`;
+          button.title = choice.name;
+          button.setAttribute("aria-label", choice.name);
           button.append(preview, label);
           button.addEventListener("click", () => {
             if (activeSession || runBusy) return;
@@ -1756,6 +1823,9 @@
             };
             thumbnailInput.value = "";
             catalogueThumbnailStatus.textContent = `Selected ${choice.name} for ${id}.`;
+            if (catalogueThumbnails.matches(":popover-open"))
+              catalogueThumbnails.hidePopover();
+            thumbnailPickerToggle.focus();
             renderFilePickers();
             scheduleMatch();
           });
@@ -1786,6 +1856,7 @@
           thumbnailCatalogueId === id
         ) {
           catalogueThumbnails.hidden = true;
+          thumbnailPickerToggle.hidden = true;
           catalogueThumbnailStatus.textContent = `Named thumbnails could not load: ${error.message}`;
         }
       } finally {
@@ -1795,6 +1866,7 @@
     }
 
     function invalidateMatch() {
+      repeatUploadConfirmed = false;
       readiness = null;
       ++readinessRevision;
       uploadError.textContent = "";
@@ -2072,6 +2144,8 @@
       return globalThis.CreatorCatalogueProposal.build({
         draft: proposalDraft(),
         snapshot: currentSnapshot,
+        repeatPlatforms:
+          currentSnapshot?.source === "desktop" ? selectedTargets() : [],
         selectedRow,
         now: new Date(),
         executablePlatforms: manualTargets
@@ -2260,6 +2334,11 @@
                         currentMatch.candidate.id,
                     }
                   : {}),
+                repeatPlatforms:
+                  currentSnapshot?.source === "desktop"
+                    ? repeatedTargets(value)
+                    : [],
+                repeatUploadConfirmed,
                 publicationState: currentMatch.candidate.publicationState,
                 row: currentMatch.candidate.row,
                 id: currentMatch.candidate.id,
@@ -2320,10 +2399,23 @@
           : "";
       if (currentMatch?.status === "upload-only")
         runNotice.textContent += `${runNotice.textContent ? " " : ""}Catalogue unavailable. Upload results will be saved locally.`;
+      const repeated = repeatedTargets(value);
+      const notice = get("#duplicateUploadNotice");
+      notice.hidden = repeated.length === 0;
+      notice.textContent = repeated.length
+        ? `${repeated.map((platform) => ({ onlyfans: "OnlyFans", fansly: "Fansly", manyvids: "ManyVids", pornhub: "Pornhub" })[platform]).join(", ")} already has a post. You’ll be asked before uploading another copy.`
+        : "";
       updateMediaRelevance();
     }
 
     function updateUploadAction() {
+      uploadButton.textContent =
+        workflowMode?.value === "teaser" ||
+        currentMatch?.status === "upload-only"
+          ? "Upload"
+          : currentMatch?.status === "matched"
+            ? "Update & upload"
+            : "Create & upload";
       uploadButton.disabled =
         runBusy ||
         Boolean(activeSession) ||
@@ -2415,7 +2507,12 @@
         readiness = { ready: true };
         matchStatus.textContent = uploadError.textContent
           ? "Ready to retry. Review the error before continuing."
-          : "Ready. Upload starts this run.";
+          : currentMatch?.status === "matched" &&
+              workflowMode?.value !== "teaser"
+            ? "Saves catalogue edits, then starts a new upload."
+            : currentMatch?.status === "new-pending"
+              ? "Creates a catalogue entry, then starts the upload."
+              : "Ready. Upload starts this run.";
         reviewRecovery.hidden = true;
         refreshReadiness.hidden = true;
       } catch (error) {
@@ -2534,11 +2631,45 @@
           return;
         }
         if (selectedCatalogueRow === null) {
-          const exactTitle = currentSnapshot.rows.some(
-            (candidate) => candidate.title?.trim() === title.value.trim(),
+          const enteredTitle = title.value.trim();
+          const enteredDescription = description.value.trim();
+          const titleMatches = currentSnapshot.rows.filter(
+            (candidate) =>
+              candidate.title?.trim() === enteredTitle && enteredTitle,
           );
+          const exactMatches = titleMatches.length
+            ? titleMatches
+            : currentSnapshot.rows.filter(
+                (candidate) =>
+                  enteredDescription &&
+                  candidate.description?.trim() === enteredDescription,
+              );
           if (
-            !exactTitle &&
+            exactMatches.length === 1 &&
+            currentSnapshot.source === "desktop" &&
+            workflowMode?.value !== "teaser"
+          ) {
+            // Resolve identity without copying catalogue text over the user's edits.
+            if (
+              lastPrefilledCatalogueRow !== exactMatches[0].row &&
+              !uploadSeason.value &&
+              exactMatches[0].seasonArc
+            ) {
+              const season = exactMatches[0].seasonArc;
+              if (
+                ![...uploadSeason.options].some(
+                  (option) => option.value === season,
+                )
+              )
+                uploadSeason.add(new Option(season, season));
+              uploadSeason.value = season;
+            }
+            lastPrefilledCatalogueRow = exactMatches[0].row;
+            applyProposal(buildProposal(exactMatches[0].row));
+            return;
+          }
+          if (
+            !exactMatches.length &&
             currentSnapshot.source === "desktop" &&
             workflowMode?.value !== "teaser"
           ) {
@@ -2546,9 +2677,10 @@
             return;
           }
           currentProposal = null;
-          matchStatus.textContent = exactTitle
-            ? "An entry with this title already exists. Choose it below to review it; automatic updates to existing posts are not available yet."
-            : "Choose the matching catalogue entry.";
+          matchStatus.textContent =
+            exactMatches.length > 1
+              ? "Several entries have these details. Choose the entry to update."
+              : "Choose the matching catalogue entry.";
           return;
         }
         const proposal = buildProposal(selectedCatalogueRow);
@@ -3246,7 +3378,11 @@
       selectedCatalogueRow = selectedRow;
       const refreshed = buildProposal(selectedRow);
       if (
-        refreshed.status !== "ready" ||
+        (refreshed.status !== "ready" &&
+          !(
+            refreshed.status === "needs-queue-evidence" &&
+            !mainPublishMode.checked
+          )) ||
         proposalSignature(refreshed) !== previousSignature
       ) {
         applyProposal(refreshed, selectedRow === "new" ? "new" : "matched");
@@ -3261,41 +3397,39 @@
       };
     }
 
-    function chooseEditedCatalogueAction(candidate) {
-      const dialog = get("#catalogueEditDialog");
-      get("#catalogueEditSummary").textContent =
-        `You changed the title or description from Work row ${candidate.row}. Choose where to save those edits before upload starts.`;
+    function confirmRepeatUpload() {
+      const repeated = repeatedTargets();
+      if (!repeated.length) return Promise.resolve(true);
+      const dialog = get("#repeatUploadDialog");
+      get("#repeatUploadSummary").textContent =
+        `${repeated.map((platform) => ({ onlyfans: "OnlyFans", fansly: "Fansly", manyvids: "ManyVids", pornhub: "Pornhub" })[platform]).join(", ")} already has a post for this entry. This starts another upload and keeps the existing post. Catalogue edits will be saved; existing platform posts will not be edited.`;
       return new Promise((resolve) => {
         const listeners = new AbortController();
-        const finish = (choice) => {
+        const finish = (confirmed) => {
           listeners.abort();
-          if (dialog.open) dialog.close();
-          resolve(choice);
+          dialog.close();
+          resolve(confirmed);
         };
-        get("#catalogueEditCancel").addEventListener(
+        get("#repeatUploadCancel").addEventListener(
           "click",
-          () => finish("cancel"),
+          () => finish(false),
           { signal: listeners.signal },
         );
-        get("#catalogueEditNew").addEventListener(
+        get("#repeatUploadConfirm").addEventListener(
           "click",
-          () => finish("new"),
-          { signal: listeners.signal },
-        );
-        get("#catalogueEditUpdate").addEventListener(
-          "click",
-          () => finish("update"),
+          () => finish(true),
           { signal: listeners.signal },
         );
         dialog.addEventListener(
           "cancel",
           (event) => {
             event.preventDefault();
-            finish("cancel");
+            finish(false);
           },
           { signal: listeners.signal },
         );
         dialog.showModal();
+        get("#repeatUploadCancel").focus();
       });
     }
 
@@ -3306,21 +3440,7 @@
       )
         return;
       const candidate = currentMatch?.candidate;
-      const edited =
-        candidate &&
-        currentMatch.status === "matched" &&
-        (candidate.title !== title.value.trim() ||
-          candidate.description !== description.value.trim() ||
-          (candidate.seasonArc || "") !== uploadSeason.value ||
-          !!uploadCategory.value);
-      let mode =
-        currentMatch?.status === "new-pending" || currentMatch?.status === "new"
-          ? "new"
-          : null;
-      if (edited) mode = await chooseEditedCatalogueAction(candidate);
-      if (mode === "cancel")
-        throw new Error("Upload cancelled. Your details are unchanged.");
-      if (!mode) return;
+      const mode = currentMatch?.status === "matched" ? "update" : "new";
       matchStatus.textContent =
         mode === "new"
           ? "Creating the new row in Work…"
@@ -3398,6 +3518,9 @@
       lockDraft(true);
       updateUploadAction();
       try {
+        if (!(await confirmRepeatUpload())) return;
+        repeatUploadConfirmed = repeatedTargets().length > 0;
+        await recheckProposalBeforeUpload();
         await writeCatalogueBeforeUpload();
         await recheckProposalBeforeUpload();
         social = socialDraft(currentMatch.candidate);
@@ -3540,7 +3663,7 @@
           const postUrl = catalogueLink(currentMatch.candidate, platform);
           platformStates.set(
             platform,
-            postUrl
+            postUrl && !targets.includes(platform)
               ? { status: "already-linked", postUrl }
               : { status: "preparing" },
           );
@@ -4260,6 +4383,18 @@
         );
     }
 
+    function showThumbnailPreview(source) {
+      if (selectedThumbnailImage.getAttribute("src") !== source) {
+        selectedThumbnailImage.src = source;
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+          selectedThumbnailImage.animate([{ opacity: 0.35 }, { opacity: 1 }], {
+            duration: 160,
+            easing: "ease-out",
+          });
+      }
+      selectedThumbnailPreview.hidden = false;
+    }
+
     function renderSelectedThumbnailPreview() {
       const file = thumbnailFile;
       const revision = ++previewRevision;
@@ -4269,27 +4404,30 @@
           previewObjectUrl = URL.createObjectURL(file);
           previewFile = file;
         }
-        selectedThumbnailImage.src = previewObjectUrl;
-        selectedThumbnailPreview.hidden = false;
+        showThumbnailPreview(previewObjectUrl);
         return;
       }
       if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
       previewObjectUrl = null;
       previewFile = null;
-      selectedThumbnailPreview.hidden = true;
-      selectedThumbnailImage.removeAttribute("src");
       if (
         file?.source !== "catalogue-thumbnail" ||
         !file.catalogueId ||
         !file.assetId
-      )
+      ) {
+        selectedThumbnailPreview.hidden = true;
+        selectedThumbnailImage.removeAttribute("src");
         return;
+      }
       const key = `${file.catalogueId}/${file.assetId}`;
       const show = (dataUrl) => {
-        if (!dataUrl || revision !== previewRevision || thumbnailFile !== file)
+        if (revision !== previewRevision || thumbnailFile !== file) return;
+        if (!dataUrl) {
+          selectedThumbnailPreview.hidden = true;
+          selectedThumbnailImage.removeAttribute("src");
           return;
-        selectedThumbnailImage.src = dataUrl;
-        selectedThumbnailPreview.hidden = false;
+        }
+        showThumbnailPreview(dataUrl);
       };
       if (thumbnailPreviewCache.has(key)) {
         show(thumbnailPreviewCache.get(key));

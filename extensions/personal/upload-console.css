@@ -1173,13 +1173,36 @@ button:disabled {
   border-color: transparent;
 }
 .catalogue-thumbnails {
-  margin: 10px 0 18px;
+  position: fixed;
+  inset: auto;
+  margin: 0;
   padding: 12px;
-  border: 1px solid #303744;
+  box-sizing: border-box;
+  color: #f1f5fa;
+  border: 1px solid #3d4859;
   border-radius: 12px;
-  background: #151b24;
+  background: #202a36;
+  box-shadow: 0 12px 32px #0008;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    display 160ms allow-discrete,
+    overlay 160ms allow-discrete;
 }
-.catalogue-thumbnails[hidden] {
+.catalogue-thumbnails:popover-open {
+  opacity: 1;
+  transform: translateY(0);
+}
+@starting-style {
+  .catalogue-thumbnails:popover-open {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.catalogue-thumbnails[hidden],
+.thumbnail-picker-toggle[hidden] {
   display: none;
 }
 .catalogue-thumbnails-heading {
@@ -1187,24 +1210,39 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  font-size: 13px;
 }
-.catalogue-thumbnails-heading button {
-  min-height: 36px;
+.thumbnail-picker-tools {
+  display: flex;
+  gap: 4px;
+}
+.thumbnail-picker-tools button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 4px;
+  background: transparent;
 }
 .catalogue-thumbnail-choices {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
+  display: flex;
+  gap: 8px;
   margin-top: 10px;
+  padding: 2px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
 }
 .catalogue-thumbnail-choice {
+  flex: 0 0 132px;
   min-width: 0;
-  padding: 6px;
-  border: 1px solid #3d4859;
-  border-radius: 9px;
-  background: #1b2430;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #151c25;
   color: #f1f5fa;
   text-align: left;
+  scroll-snap-align: start;
 }
 .catalogue-thumbnail-choice[aria-pressed="true"] {
   border-color: #54c8fb;
@@ -1220,9 +1258,57 @@ button:disabled {
 }
 .catalogue-thumbnail-choice span {
   display: block;
-  margin-top: 6px;
-  overflow-wrap: anywhere;
+  margin-top: 5px;
   font-size: 0.75rem;
+}
+.thumbnail-picker-toggle {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-height: 30px;
+  padding: 5px;
+  border: 1px solid #ffffff45;
+  border-radius: 8px;
+  background: #0d1729e8;
+  color: #e4f5ff;
+}
+button {
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+.catalogue-card {
+  animation: content-reveal 160ms ease-out;
+}
+dialog[open] {
+  animation: content-reveal 180ms ease-out;
+}
+@keyframes content-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .catalogue-thumbnails,
+  button {
+    transition: none;
+  }
+  .catalogue-thumbnails {
+    transform: none;
+  }
+  .catalogue-card,
+  dialog[open] {
+    animation: none;
+  }
 }
 input.file-input-native,
 .visually-hidden {
@@ -1945,7 +2031,7 @@ a {
 .selected-thumbnail-preview[hidden] {
   display: none;
 }
-.selected-thumbnail-preview img {
+.selected-thumbnail-preview > img {
   display: block;
   position: absolute;
   inset: 0;
@@ -2163,4 +2249,35 @@ a {
   .upload-metadata-row {
     grid-template-columns: 1fr;
   }
+}
+
+.duplicate-upload-notice {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #342b1c;
+  color: #efd29a;
+  font-size: 13px;
+}
+#repeatUploadDialog {
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid #3d4859;
+  border-radius: 14px;
+  background: #18212b;
+  color: #eef5fc;
+}
+#repeatUploadDialog p {
+  line-height: 1.5;
+  color: #bed0df;
+}
+#repeatUploadDialog::backdrop {
+  background: #0009;
+}
+#repeatUploadDialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
 }

@@ -444,3 +444,21 @@ test("fully linked rows produce no pending target", () => {
   assert.equal(result.status, "nothing-pending");
   assert.deepEqual(result.targets.recommended, []);
 });
+
+test("explicit repeat targets retain their links and still require queue evidence", () => {
+  const linked = row({
+    onlyfansLink: "https://onlyfans.com/123456789/creator",
+  });
+  const result = plain(
+    loadProposal().build({
+      selectedRow: linked.row,
+      snapshot: { status: "snapshot", rows: [linked] },
+      now: new Date("2026-08-30T10:00:00Z"),
+      executablePlatforms: ["onlyfans"],
+      repeatPlatforms: ["onlyfans"],
+    }),
+  );
+  assert.deepEqual(result.targets.executable, ["onlyfans"]);
+  assert.equal(result.candidate.onlyfansLink, linked.onlyfansLink);
+  assert.equal(result.status, "needs-queue-evidence");
+});

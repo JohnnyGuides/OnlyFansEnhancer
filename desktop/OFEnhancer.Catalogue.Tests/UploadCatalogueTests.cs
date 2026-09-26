@@ -4,6 +4,24 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class UploadCatalogueTests
 {
     [TestMethod]
+    public void ConfirmedRepeatPreservesOriginalAndNewLinksWithoutHidingFutureConflicts()
+    {
+        using TestStore test = new();
+        test.Import(new Dictionary<string,string>{["fansly"]="https://fansly.com/post/111111111"});
+        var row=test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request=new UploadResultRequest(row.Row,row.Fingerprint,"fansly","https://fansly.com/post/222222222",Id:row.Id);
+        Assert.AreEqual("conflict",test.Store.RecordUploadResult(request).Status);
+        Assert.AreEqual("recorded-local",test.Store.RecordUploadResult(request with {RepeatUploadConfirmed=true}).Status);
+        var updated=test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("published",updated.PublicationState["fansly"]);
+        Assert.AreEqual("https://fansly.com/post/111111111",updated.FanslyLink);
+        Assert.AreEqual(2,test.Store.GetItems().Single().SourceLinkCells!["fansly"].Urls.Count);
+        Assert.AreEqual("idempotent",test.Store.RecordUploadResult(request with {RepeatUploadConfirmed=true}).Status);
+        test.Import(new Dictionary<string,string>{["fansly"]="https://fansly.com/post/333333333"});
+        Assert.AreEqual("review",test.Store.GetUploadCatalogueSnapshot().Rows.Single().PublicationState["fansly"]);
+    }
+
+    [TestMethod]
     public void SourceConflictIsReviewAndCannotBeOverwrittenByResult()
     {
         using TestStore test = new();

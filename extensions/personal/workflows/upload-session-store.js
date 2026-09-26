@@ -644,6 +644,10 @@
       if (Object.hasOwn(value, field))
         output[field] = clean(value[field], maximum);
     }
+    if (output.source === "desktop" && Array.isArray(value.repeatPlatforms))
+      output.repeatPlatforms = [...new Set(value.repeatPlatforms)].filter(
+        (platform) => PLATFORMS.has(platform),
+      );
     return output;
   }
 

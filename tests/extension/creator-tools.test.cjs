@@ -46,7 +46,7 @@ test("personal manifest keeps every integrated creator helper active", () => {
     require("../../packaging/extensions.json").personal,
   );
   assert.equal(manifest.name, "Creator Workflow Toolkit");
-  assert.equal(manifest.version, "0.20.75");
+  assert.equal(manifest.version, "0.20.76");
   assert.ok(manifest.permissions.includes("debugger"));
   assert.ok(manifest.permissions.includes("nativeMessaging"));
   assert.equal(

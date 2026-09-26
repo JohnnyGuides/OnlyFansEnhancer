@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.75",
+          productVersion: "0.20.76",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -582,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.75",
+    productVersion: "0.20.76",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -602,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.75");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.76");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -768,6 +768,38 @@ function send(message) {
   assert.equal(
     validatedUpload.catalogue.pornhubLink,
     "https://www.pornhub.com/view_video.php?viewkey=episode42",
+  );
+  context.repeatRequest = {
+    ...validatedUpload,
+    type: "PREPARE_CREATOR_UPLOAD",
+    targets: ["fansly"],
+    catalogue: {
+      ...validatedUpload.catalogue,
+      source: "desktop",
+      itemId: "episode-42",
+      fanslyLink: "https://fansly.com/post/777777777",
+      repeatPlatforms: ["fansly"],
+      publicationState: { fansly: "published" },
+    },
+  };
+  await assert.rejects(
+    vm.runInContext("validateCreatorUploadRequest(repeatRequest)", context),
+    /Confirm uploading another copy/,
+  );
+  context.repeatRequest.catalogue.repeatUploadConfirmed = true;
+  const repeatAccepted = await vm.runInContext(
+    "validateCreatorUploadRequest(repeatRequest)",
+    context,
+  );
+  assert.equal(
+    repeatAccepted.catalogue.fanslyLink,
+    "https://fansly.com/post/777777777",
+  );
+  assert.equal(repeatAccepted.catalogue.repeatPlatforms[0], "fansly");
+  context.repeatRequest.catalogue.publicationState.fansly = "review";
+  await assert.rejects(
+    vm.runInContext("validateCreatorUploadRequest(repeatRequest)", context),
+    /Review the existing fansly/,
   );
   context.boundedCatalogueContext = {
     ...validatedUpload,

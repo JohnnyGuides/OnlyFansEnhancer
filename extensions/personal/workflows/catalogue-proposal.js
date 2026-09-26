@@ -102,10 +102,11 @@
       );
   }
 
-  function inferTargets(row, executablePlatforms = []) {
+  function inferTargets(row, executablePlatforms = [], repeatPlatforms = []) {
     const recommended = PLATFORM_ORDER.filter(
       (platform) =>
-        !clean(row?.[LINK_FIELDS[platform]]) &&
+        (!clean(row?.[LINK_FIELDS[platform]]) ||
+          repeatPlatforms.includes(platform)) &&
         row?.publicationState?.[platform] !== "review",
     );
     const pending = new Set(recommended);
@@ -305,6 +306,7 @@
     now = new Date(),
     executablePlatforms = [],
     queueByPlatform = {},
+    repeatPlatforms = [],
   } = {}) {
     if (snapshot?.status !== "snapshot") {
       throw new Error("Catalogue snapshot is unavailable.");
@@ -338,7 +340,11 @@
     }
     if (!candidate) return emptyResult("needs-selection", ranked);
 
-    const targets = inferTargets(candidate, executablePlatforms);
+    const targets = inferTargets(
+      candidate,
+      executablePlatforms,
+      repeatPlatforms,
+    );
     const predecessor = findPredecessor(candidate, snapshot.rows);
     const schedules = Object.fromEntries(
       targets.recommended.map((platform) => [

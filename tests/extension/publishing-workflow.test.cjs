@@ -3074,7 +3074,7 @@ test("likely catalogue matches require a click and prefill the selected entry", 
   }
 });
 
-test("one named thumbnail is selected automatically and new variants restore the choice", async () => {
+test("thumbnail variants preserve selection and open an anchored, dismissible picker", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -3193,17 +3193,24 @@ test("one named thumbnail is selected automatically and new variants restore the
     await page
       .locator("#loadCatalogueThumbnails")
       .evaluate((button) => button.click());
+    await page.locator("#thumbnailPickerToggle").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#catalogueThumbnails").isVisible(), false);
+    await page.locator("#thumbnailPickerToggle").click();
     await page.locator("#catalogueThumbnails").waitFor({ state: "visible" });
     await page.locator("#catalogueThumbnailChoices button").nth(1).waitFor();
     assert.match(
       await page.locator("#catalogueThumbnailStatus").textContent(),
-      /Choose one of 2/,
+      /Automatically selected/,
     );
-    assert.notEqual(
+    assert.equal(
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       "catalogue-ep01_v01.png",
     );
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#catalogueThumbnails").isVisible(), false);
+    await page.locator("#thumbnailPickerToggle").click();
     await page.locator("#catalogueThumbnailChoices button").nth(1).click();
+    assert.equal(await page.locator("#catalogueThumbnails").isVisible(), false);
     assert.equal(
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       "catalogue-ep01_v02.png",

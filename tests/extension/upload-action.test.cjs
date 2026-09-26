@@ -89,12 +89,22 @@ test("four similar Work entries appear below description and search filters them
     );
     assert.equal(await page.locator("#catalogueRow").inputValue(), "");
     await page.locator("#uploadTitle").fill("Studio walk-through");
-    await page.waitForFunction(() =>
-      document
-        .querySelector("#matchStatus")
-        .textContent.includes("already exists"),
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#uploadButton").textContent ===
+        "Update & upload",
     );
-    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
+    assert.equal(
+      await page.locator("#uploadDescription").inputValue(),
+      "A new studio tour.",
+    );
+    await page.locator("#uploadTitle").fill("Another new title");
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("#uploadButton").disabled &&
+        document.querySelector("#uploadButton").textContent ===
+          "Create & upload",
+    );
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();
@@ -813,6 +823,84 @@ test("desktop opening offers New for older browser runs and retires both upload 
     assert.ok(records.every((record) => record.supersededAt > 0));
     await fixture.ready();
     assert.equal(await fixture.page.locator("#uploadButton").isEnabled(), true);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("linked destination requires confirmation before any catalogue write", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const { page } = fixture;
+    await page.evaluate(() => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = (message, callback) =>
+        message.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY"
+          ? callback({ ok: true, availability: { ready: true } })
+          : send(message, callback);
+      globalThis.catalogueWrites = [];
+      globalThis.CreatorCatalogueClient = {
+        loadConfig: async () => ({ source: "desktop", connected: true }),
+        getCatalogueSnapshot: async () => ({
+          status: "snapshot",
+          source: "desktop",
+          rows: [
+            {
+              row: 42,
+              id: "studio",
+              itemId: "studio",
+              title: "Studio tour",
+              description: "Original description",
+              releaseDate: "2026-09-25",
+              fingerprint: "a".repeat(64),
+              onlyfansLink: "https://onlyfans.com/123456789/creator",
+              publicationState: { onlyfans: "published", fansly: "empty" },
+            },
+          ],
+        }),
+        writeUploadCatalogueEntry: async (value) => {
+          catalogueWrites.push(value);
+          throw new Error("Fixture stops before external writes");
+        },
+      };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot: () =>
+          Object.fromEntries(
+            ["onlyfans", "fansly", "manyvids"].map((p) => [
+              p,
+              { verified: true, scheduled: [], occupiedFridays: [] },
+            ]),
+          ),
+      };
+    });
+    await fixture.ready();
+    await page.locator("#uploadTitle").fill("Studio tour");
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("#uploadButton").disabled &&
+        document.querySelector("#uploadButton").textContent ===
+          "Update & upload",
+    );
+    assert.match(
+      await page.locator("#duplicateUploadNotice").textContent(),
+      /OnlyFans already has a post/,
+    );
+    await page.locator("#uploadButton").click();
+    await page.locator("#repeatUploadDialog").waitFor({ state: "visible" });
+    assert.equal(await page.evaluate(() => catalogueWrites.length), 0);
+    await page.locator("#repeatUploadCancel").click();
+    assert.equal(await page.evaluate(() => catalogueWrites.length), 0);
+    assert.equal(await page.locator("#uploadTitle").isEnabled(), true);
+    assert.deepEqual(await fixture.commands(), []);
+    await page.locator("#uploadButton").click();
+    await page.locator("#repeatUploadConfirm").click();
+    await page.waitForFunction(() => catalogueWrites.length === 1);
+    const write = await page.evaluate(() => catalogueWrites[0]);
+    assert.equal(write.mode, "update");
+    assert.equal(write.id, "studio");
+    assert.equal(write.description, "Unpublished development draft.");
+    assert.deepEqual(await fixture.commands(), []);
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();
