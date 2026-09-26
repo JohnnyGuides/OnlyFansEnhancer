@@ -527,7 +527,6 @@ async function mountConsole(page, options = {}) {
   }
   try {
     if (options.deferCatalogue && options.workflowMode !== "teaser") {
-      await page.locator("#continueWithoutSheet").click();
     } else if (!options.deferCatalogue) {
       await page.locator(".catalogue-card").first().click();
       await page.waitForFunction(() =>

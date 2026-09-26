@@ -524,7 +524,6 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     await uploadConsole
       .locator("#uploadDescription")
       .fill("Preview only; never submit.");
-    await uploadConsole.locator("#continueWithoutSheet").click();
     await uploadConsole.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );
@@ -534,7 +533,7 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
     );
     assert.match(
       await uploadConsole.locator("#catalogueSelectionStatus").textContent(),
-      /without sheet/i,
+      /saved locally/i,
     );
     assert.equal(
       await uploadConsole.locator("#continueWithoutSheet").isHidden(),

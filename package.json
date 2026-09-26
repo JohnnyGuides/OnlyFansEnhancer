@@ -1,6 +1,6 @@
 {
   "name": "creator-workflow-toolkit",
-  "version": "0.20.73",
+  "version": "0.20.75",
   "private": true,
   "description": "Development checks for the personal Creator Workflow Toolkit and store-safe Fan Identity Mask edition.",
   "scripts": {

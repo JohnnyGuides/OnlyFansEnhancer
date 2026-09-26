@@ -2076,6 +2076,51 @@ test("Twitter teaser bridge writes column O only and verifies the updated row", 
   );
 });
 
+test("desktop-hosted catalogue client delegates identity without requesting protected installation storage", async () => {
+  const context = loadScripts("workflows/catalogue-client.js");
+  const requests = [];
+  context.chrome = {
+    storage: {
+      local: {
+        get: async (key) => {
+          assert.equal(key, "creatorUploadSheetBridgeV1");
+          return {};
+        },
+      },
+    },
+    runtime: {
+      sendMessage(message, callback) {
+        requests.push(plain(message));
+        callback({
+          ok: true,
+          result:
+            message.operation === "getUploadCatalogueSnapshot"
+              ? {
+                  status: "snapshot",
+                  source: "desktop",
+                  rows: [{ row: 2, title: "Studio tour" }],
+                }
+              : { id: "new-entry", row: 3, status: "created" },
+        });
+      },
+    },
+  };
+  const snapshot = await context.CreatorCatalogueClient.getCatalogueSnapshot();
+  assert.equal(snapshot.rows[0].title, "Studio tour");
+  await context.CreatorCatalogueClient.writeUploadCatalogueEntry({
+    mode: "new",
+    title: "Studio tour two",
+    description: "New tour",
+    releaseDate: "2026-10-02",
+    category: "Studio",
+    seasonArc: "Autumn",
+  });
+  assert.equal(requests[1].payload.category, "Studio");
+  assert.equal(requests[1].payload.seasonArc, "Autumn");
+  assert.equal("installation" in requests[0].payload, false);
+  assert.equal("extensionVersion" in requests[0].payload, false);
+});
+
 test("catalogue client sends bounded metadata only in a no-referrer POST body", async () => {
   const context = loadScripts("workflows/catalogue-client.js");
   const client = context.CreatorCatalogueClient;
@@ -2786,7 +2831,6 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
       mimeType: "video/mp4",
       buffer: Buffer.from("neutral fixture"),
     });
-    await page.locator("#continueWithoutSheet").click();
     await page.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );
@@ -2813,7 +2857,7 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
     assert.equal(await page.locator("#draftErrors").textContent(), "");
     assert.match(
       await page.locator("#catalogueSelectionStatus").textContent(),
-      /deferred/i,
+      /saved locally/i,
     );
   } finally {
     await browser.close();
@@ -3292,7 +3336,7 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
   }
 });
 
-test("unverified platform queue keeps Upload disabled and offers explicit upload without the sheet", async () => {
+test("unverified platform queue allows manual drafts but blocks automatic publishing", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -3353,17 +3397,17 @@ test("unverified platform queue keeps Upload disabled and offers explicit upload
         ?.textContent.includes("OnlyFans queue is not verified"),
     );
 
-    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
-    await page.locator("#continueWithoutSheet").click();
-    await page.waitForFunction(() =>
-      document
-        .querySelector("#catalogueSelectionStatus")
-        ?.textContent.includes("upload without sheet"),
-    );
     await page.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );
     assert.equal(await page.locator("#uploadButton").isEnabled(), true);
+    await page.locator("#mainPublishMode").check();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#matchStatus")
+        .textContent.includes("Verify the selected platform queues"),
+    );
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     assert.deepEqual(
       await page.evaluate(() =>
         globalThis.consoleMessages.filter(
@@ -3498,7 +3542,7 @@ for (const scenario of [
     requests: 1,
   },
 ]) {
-  test(`upload console can upload with an ${scenario.name} sheet bridge after an explicit upload-only choice`, async () => {
+  test(`upload console can upload with an ${scenario.name} sheet bridge without an extra catalogue choice`, async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     try {
@@ -3580,15 +3624,6 @@ for (const scenario of [
         buffer: Buffer.from("preview-fixture"),
       });
       await page.locator("#uploadDescription").fill("My description");
-      {
-        await page.locator("#continueWithoutSheet").waitFor({ timeout: 3000 });
-        assert.equal(await page.locator("#uploadButton").isEnabled(), false);
-        assert.match(
-          await page.locator("#matchStatus").textContent(),
-          /invalid|Apps Script|HTTP 503|not connected/i,
-        );
-        await page.locator("#continueWithoutSheet").click();
-      }
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
         null,
@@ -3596,11 +3631,11 @@ for (const scenario of [
       );
       assert.match(
         await page.locator("#catalogueSelectionStatus").textContent(),
-        /without sheet/i,
+        /saved locally/i,
       );
       assert.match(
         await page.locator("#runNotice").textContent(),
-        /no sheet data will be read or written/i,
+        /Catalogue unavailable.*saved locally/i,
       );
       assert.equal(
         await page.locator("#uploadDescription").inputValue(),
@@ -3620,7 +3655,7 @@ for (const scenario of [
         "Required creator-site access must not prompt during an upload.",
       );
 
-      // Editing must keep the explicit upload-only choice and invalidate the old preview.
+      // Editing retries catalogue availability while preserving the local upload fallback.
       await page.locator("#uploadDescription").fill("My final description");
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
@@ -3629,7 +3664,7 @@ for (const scenario of [
       );
       assert.equal(
         await page.evaluate(() => globalThis.catalogueRequests),
-        scenario.requests,
+        scenario.requests * 2,
       );
       await page.locator("#uploadButton").click();
       await page
@@ -3789,7 +3824,6 @@ for (const failureDelivery of ["prepare", "platform-result"]) {
         mimeType: "video/mp4",
         buffer: Buffer.from("preview-fixture"),
       });
-      await page.locator("#continueWithoutSheet").click();
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
       );

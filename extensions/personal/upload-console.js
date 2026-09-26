@@ -845,7 +845,6 @@
     const pornhubPaid = get("#targetPornhubPaid");
     const errors = get("#draftErrors");
     const matchStatus = get("#matchStatus");
-    const continueWithoutSheet = get("#continueWithoutSheet");
     const cataloguePicker = get("#cataloguePicker");
     const catalogueSearch = get("#catalogueSearch");
     const catalogueRow = get("#catalogueRow");
@@ -921,6 +920,7 @@
     const cataloguePreviewPending = new Set();
     let manualTargets = null;
     let uploadWithoutSheet = false;
+    let catalogueFallback = false;
     let lastPrefilledCatalogueRow = null;
     let activeSession = null;
     let resumable = null;
@@ -1808,7 +1808,6 @@
       showCatalogueThumbnailPicker(null);
       pornhubRecommendation.textContent = "";
       selectedCatalogueReason.textContent = "";
-      continueWithoutSheet.hidden = true;
       matchRevision += 1;
     }
 
@@ -1842,10 +1841,16 @@
       const client = globalThis.CreatorCatalogueClient;
       if (!client?.getCatalogueSnapshot) {
         throw new Error(
-          "Catalogue snapshot client is unavailable. Reload the extension or continue without the sheet.",
+          "Catalogue unavailable. Reload OFEnhancer and try again.",
         );
       }
-      snapshotPromise ||= client.getCatalogueSnapshot();
+      if (!snapshotPromise) {
+        const pending = client.getCatalogueSnapshot();
+        snapshotPromise = pending;
+        void pending.catch(() => {
+          if (snapshotPromise === pending) snapshotPromise = null;
+        });
+      }
       return snapshotPromise;
     }
 
@@ -2108,8 +2113,9 @@
     }
 
     function applyProposal(proposal, catalogueStatus = "matched") {
+      uploadWithoutSheet = false;
+      catalogueFallback = false;
       currentProposal = proposal;
-      continueWithoutSheet.hidden = proposal.status !== "needs-queue-evidence";
       const candidate = proposal.candidate;
       if (workflowMode?.value === "teaser" && candidate) {
         currentMatch = { status: "matched", candidate };
@@ -2288,10 +2294,14 @@
         currentProposal &&
         workflowMode.value !== "teaser" &&
         currentProposal.status !== "ready" &&
+        !(
+          currentProposal.status === "needs-queue-evidence" &&
+          value.publishMode === "manual"
+        ) &&
         !(currentProposal.status === "nothing-pending" && social.enabled)
       )
         return currentProposal.status === "needs-queue-evidence"
-          ? "Verify the selected platform queues, or explicitly continue without the sheet."
+          ? "Verify the selected platform queues before automatic publishing, or turn off Publish immediately to prepare drafts."
           : "Resolve the catalogue recommendation before uploading. Choose an executable destination.";
       if (!pendingTargets(value, currentMatch).length && !social.enabled)
         return "Every selected platform already has a catalogue link. Nothing will be uploaded.";
@@ -2309,7 +2319,7 @@
           ? "Upload authorizes publishing or scheduling in the selected automatic modes. Pornhub Submit stays manual."
           : "";
       if (currentMatch?.status === "upload-only")
-        runNotice.textContent += `${runNotice.textContent ? " " : ""}No sheet data will be read or written.`;
+        runNotice.textContent += `${runNotice.textContent ? " " : ""}Catalogue unavailable. Upload results will be saved locally.`;
       updateMediaRelevance();
     }
 
@@ -2355,7 +2365,7 @@
     function lockDraft(locked) {
       if (locked) {
         for (const control of document.querySelectorAll(
-          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #continueWithoutSheet",
+          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry",
         )) {
           if (control.closest("#uploadRecovery")) continue;
           if (!lockedControls.has(control))
@@ -2434,7 +2444,7 @@
         match.status === "new-pending"
           ? "Upload will create and verify a new Work row before opening the sites."
           : match.status === "upload-only"
-            ? "Catalogue deferred · upload without sheet"
+            ? "Upload results will be saved locally"
             : (match.status === "new"
                 ? "New catalogue row "
                 : "Catalogue row ") +
@@ -2451,8 +2461,7 @@
 
     function previewWithoutSheet(value) {
       currentMatch = { status: "upload-only", candidate: value };
-      continueWithoutSheet.hidden = true;
-      cataloguePicker.hidden = true;
+      cataloguePicker.hidden = !currentSnapshot;
       matchStatus.textContent =
         "Results will stay local until you associate a catalogue entry.";
       renderMatch(currentMatch);
@@ -2460,13 +2469,16 @@
 
     async function matchCatalogue(forceNew = false) {
       if (runBusy || activeSession) return;
+      if (catalogueFallback) {
+        uploadWithoutSheet = false;
+        catalogueFallback = false;
+      }
       clearTimeout(matchTimer);
       const revision = ++matchRevision;
       currentMatch = null;
       currentProposal = null;
       uploadButton.disabled = true;
       cataloguePicker.hidden = !currentSnapshot || uploadWithoutSheet;
-      continueWithoutSheet.hidden = true;
       const value = validate(false);
       const hasSearch =
         workflowMode?.value === "teaser"
@@ -2485,8 +2497,7 @@
       if (uploadWithoutSheet) {
         if (value.valid) previewWithoutSheet(value);
         else
-          matchStatus.textContent =
-            "Complete the upload details before continuing without the sheet.";
+          matchStatus.textContent = "Complete the upload details to continue.";
         return;
       }
       matchStatus.textContent = forceNew
@@ -2497,15 +2508,13 @@
         const client = globalThis.CreatorCatalogueClient;
         if (!client?.loadConfig || !globalThis.CreatorCatalogueProposal) {
           throw new Error(
-            "Catalogue proposal tools are unavailable. Reload the extension or continue without the sheet.",
+            "Catalogue unavailable. Reload OFEnhancer and try again.",
           );
         }
         const config = await client.loadConfig();
         if (revision !== matchRevision) return;
         if (!config.connected && !config.endpoint && !config.secret) {
-          throw new Error(
-            "Catalogue matching is not connected. Restore the catalogue connection, or explicitly choose Continue without sheet.",
-          );
+          throw new Error("Catalogue matching is not connected.");
         }
         currentSnapshot = await loadCatalogueSnapshot();
         get("#catalogueConnectionStatus").textContent = "";
@@ -2525,15 +2534,11 @@
           return;
         }
         if (selectedCatalogueRow === null) {
-          const close = globalThis.CreatorCatalogueProposal.rankRows(
-            proposalDraft(),
-            currentSnapshot.rows,
-          ).some(
-            (candidate) =>
-              candidate.similarity >= 0.45 || candidate.score >= 55,
+          const exactTitle = currentSnapshot.rows.some(
+            (candidate) => candidate.title?.trim() === title.value.trim(),
           );
           if (
-            !close &&
+            !exactTitle &&
             currentSnapshot.source === "desktop" &&
             workflowMode?.value !== "teaser"
           ) {
@@ -2541,7 +2546,9 @@
             return;
           }
           currentProposal = null;
-          matchStatus.textContent = "Choose the matching catalogue entry.";
+          matchStatus.textContent = exactTitle
+            ? "An entry with this title already exists. Choose it below to review it; automatic updates to existing posts are not available yet."
+            : "Choose the matching catalogue entry.";
           return;
         }
         const proposal = buildProposal(selectedCatalogueRow);
@@ -2555,9 +2562,16 @@
         applyProposal(proposal, forceNew ? "new" : "matched");
       } catch (error) {
         if (revision !== matchRevision) return;
-        currentMatch = null;
-        matchStatus.textContent = error.message;
-        continueWithoutSheet.hidden = false;
+        if (value.valid && selectedCatalogueRow === null) {
+          uploadWithoutSheet = true;
+          catalogueFallback = true;
+          currentProposal = null;
+          previewWithoutSheet(value);
+        } else {
+          currentMatch = null;
+          matchStatus.textContent =
+            "Catalogue unavailable. Check the catalogue connection in Settings and try again.";
+        }
       }
     }
 
@@ -3343,7 +3357,13 @@
       lastPrefilledCatalogueRow = saved.row;
       currentMatch = { status: "matched", candidate: saved };
       currentProposal = buildProposal(saved.row);
-      if (currentProposal.status !== "ready")
+      if (
+        currentProposal.status !== "ready" &&
+        !(
+          currentProposal.status === "needs-queue-evidence" &&
+          !mainPublishMode.checked
+        )
+      )
         throw new Error(
           "The Work row was saved, but the upload schedule needs review. Check the selected destinations before retrying Upload.",
         );
@@ -4836,15 +4856,6 @@
       } finally {
         refreshCatalogue.disabled = false;
       }
-    });
-    continueWithoutSheet.addEventListener("click", () => {
-      if (activeSession) return;
-      clearTimeout(matchTimer);
-      invalidateMatch();
-      const value = validate(true);
-      if (!value.valid) return;
-      uploadWithoutSheet = true;
-      previewWithoutSheet(value);
     });
     globalThis.addEventListener("beforeunload", (event) => {
       if (

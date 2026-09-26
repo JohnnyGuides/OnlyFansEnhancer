@@ -273,7 +273,6 @@ async function createUploadFixture({ desktop = false } = {}) {
       const onlyfans = page.locator("#targetOnlyfans");
       if (!(await onlyfans.isChecked())) await onlyfans.locator("..").click();
       assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
-      await page.locator("#continueWithoutSheet").click();
       await page.waitForFunction(
         () => !document.querySelector("#uploadButton").disabled,
       );

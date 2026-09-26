@@ -1410,8 +1410,7 @@ html {
 .action-secondary button,
 .draft-actions button,
 .preparation-controls button,
-#changeCatalogueEntry,
-#continueWithoutSheet {
+#changeCatalogueEntry {
   min-height: 36px;
   padding: 7px 10px;
   font-size: 0.8rem;

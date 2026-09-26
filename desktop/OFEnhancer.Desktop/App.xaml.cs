@@ -18,6 +18,11 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs eventArgs)
     {
         base.OnStartup(eventArgs);
+        if (ThumbnailMaintenance.TryRun(eventArgs.Args, out int thumbnailExit))
+        {
+            Shutdown(thumbnailExit);
+            return;
+        }
         if (FreshReinstallMaintenance.TryRun(eventArgs.Args, out int maintenanceExit))
         {
             Shutdown(maintenanceExit);

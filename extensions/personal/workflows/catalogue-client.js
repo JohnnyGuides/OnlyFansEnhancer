@@ -318,6 +318,8 @@
               title: String(payload.title || ""),
               description: String(payload.description || ""),
               releaseDate: String(payload.releaseDate || ""),
+              category: String(payload.category || ""),
+              seasonArc: String(payload.seasonArc || ""),
               ...(payload.fileName
                 ? { fileName: String(payload.fileName) }
                 : {}),
@@ -336,12 +338,17 @@
                 : {}),
             }
           : {};
-    const installation = /** @type {{status?: string}|undefined} */ (
-      (await chrome.storage.local.get("ofenhancerInstallationV1"))
-        .ofenhancerInstallationV1
-    );
-    value.extensionVersion = chrome.runtime.getManifest().version;
-    value.installation = installation?.status === "ready" ? installation : null;
+    // The desktop-hosted console delegates identity to the extension background.
+    // Its storage bridge deliberately cannot read or change installation receipts.
+    if (chrome.runtime.sendNativeMessage) {
+      const installation = /** @type {{status?: string}|undefined} */ (
+        (await chrome.storage.local.get("ofenhancerInstallationV1"))
+          .ofenhancerInstallationV1
+      );
+      value.extensionVersion = chrome.runtime.getManifest().version;
+      value.installation =
+        installation?.status === "ready" ? installation : null;
+    }
     return new Promise((resolve, reject) => {
       const requestId = crypto.randomUUID();
       const done = (response) => {

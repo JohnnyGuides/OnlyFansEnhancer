@@ -77,6 +77,24 @@ test("four similar Work entries appear below description and search filters them
     }));
     assert.ok(order.matches >= order.description);
     assert.ok(order.matches < order.destinations);
+    await page.locator("#uploadTitle").fill("Studio walk-through part two");
+    await page.locator("#uploadDescription").fill("A new studio tour.");
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.equal(await page.locator("#continueWithoutSheet").count(), 0);
+    assert.equal(
+      await page.locator("#catalogueCards .catalogue-card").count(),
+      4,
+    );
+    assert.equal(await page.locator("#catalogueRow").inputValue(), "");
+    await page.locator("#uploadTitle").fill("Studio walk-through");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#matchStatus")
+        .textContent.includes("already exists"),
+    );
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();
@@ -425,7 +443,6 @@ test("retained publication intent blocks availability without altering the publi
       buffer: Buffer.from("benign"),
     });
     await page.locator("#uploadDescription").fill("Unpublished verification.");
-    await page.locator("#continueWithoutSheet").click();
     await page.waitForFunction(() =>
       document
         .querySelector("#uploadError")

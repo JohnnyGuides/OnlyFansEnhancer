@@ -4,10 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const source = fs.readFileSync(
-  path.resolve(__dirname, "../../extensions/personal/background.js"),
-  "utf8",
-);
+const source = fs
+  .readFileSync(
+    path.resolve(__dirname, "../../extensions/personal/background.js"),
+    "utf8",
+  )
+  .replace(/\r\n/g, "\n");
 const start = source.indexOf(
   '        if (\n          message.actionId === "open-editor"',
 );

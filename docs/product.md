@@ -57,12 +57,17 @@ and uses the shared teaser through **Add Free Preview**. OnlyFans labels remain
 unchanged. Friday scheduling is **15:00 UTC**. Fansly and ManyVids read the timezone displayed by their scheduling UI; OnlyFans uses the approved draft timezone and requires separate live verification of that UI representation. A verified common empty Friday is required when the selected flow
 claims queue verification. Unknown queue availability is not inferred as free.
 
-Upload Hub shows six filename-ranked catalogue matches after a full video is
-chosen. Search covers the full catalogue, and More matches opens the complete
-list. The owner clicks an exact row when a plausible match exists; that choice fills its
+Upload Hub shows four filename-ranked catalogue suggestions below Description.
+Search updates those suggestions from the full catalogue; the plus button opens
+the complete list. Selecting an entry fills its
 title, description, release date, and inferred missing destinations. Later edits
-remain intact until another row is selected. If there is no close match, clicking
-Upload creates and verifies a new Work row before preparing platform drafts.
+remain intact until another row is selected. A new title requires no suggestion
+selection: Upload creates and verifies a new Work row before preparing drafts.
+An exact existing title requires review rather than silently creating a duplicate.
+If the catalogue is unavailable, Upload keeps results local without requiring a
+separate continuation button. Manual draft preparation does not claim verified
+queue availability; automatic publishing still requires that verification.
+Automatically updating an existing title across its platform posts is deferred.
 If the owner changes a selected row's title or description, Upload asks whether
 to update that row or create a new one. The run binds the resulting row and
 checks its fingerprint again before platform preparation. A verified platform
