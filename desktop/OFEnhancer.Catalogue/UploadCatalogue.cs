@@ -10,7 +10,7 @@ public sealed record UploadCatalogueRow(int Row, string Id, string ItemId, strin
     string Description, string SeasonArc, string Episode, string PornhubLink, string OnlyfansLink,
     string FanslyLink, string ManyvidsLink, string TwitterTeasers, string RedditPosts, int RedditPostCount,
     string Fingerprint, IReadOnlyDictionary<string,string> PublicationState);
-public sealed record UploadCatalogueSnapshot(string Status, string Source, IReadOnlyList<UploadCatalogueRow> Rows, object? EmptyRow = null);
+public sealed record UploadCatalogueSnapshot(string Status, string Source, IReadOnlyList<UploadCatalogueRow> Rows, object? EmptyRow = null, IReadOnlyDictionary<string,string>? SeasonAliases = null);
 public sealed record UploadResultMetadata(string Id, string? ReleaseDate = null, string? Title = null, string? Description = null);
 public sealed record UploadResultRequest(int Row, string Fingerprint, string Platform, string PostUrl,
     UploadResultMetadata? Metadata = null, string? ItemId = null, string? Id = null, string? Action=null,
@@ -25,7 +25,7 @@ public sealed partial class CatalogueStore
     private static readonly string[] UploadPlatforms = ["pornhub", "onlyfans", "fansly", "manyvids", "x", "reddit", "redgifs", "clips4sale"];
 
     public UploadCatalogueSnapshot GetUploadCatalogueSnapshot() => new("snapshot", "desktop",
-        GetItems().Select(ToUploadRow).ToArray());
+        GetItems().Select(ToUploadRow).ToArray(), SeasonAliases: GetUploadSeasonAliases());
 
     public UploadResult RecordDistributionLedger(DistributionLedgerRequest request)
     {

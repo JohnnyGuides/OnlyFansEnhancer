@@ -1956,7 +1956,11 @@
             catalogueSearch.value,
           )
         : "";
-      const ranked = engine.rankRows(proposalDraft(), currentSnapshot.rows);
+      const ranked = engine.rankRows(
+        proposalDraft(),
+        currentSnapshot.rows,
+        currentSnapshot.seasonAliases,
+      );
       const visible = ranked.filter((candidate) => {
         const searchable = globalThis.CreatorCatalogueContract.normalizedText(
           [

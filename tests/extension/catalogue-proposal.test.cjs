@@ -462,3 +462,63 @@ test("explicit repeat targets retain their links and still require queue evidenc
   assert.equal(result.candidate.onlyfansLink, linked.onlyfansLink);
   assert.equal(result.status, "needs-queue-evidence");
 });
+
+for (const code of ["S5E11", "s05ep011", "S5 E11", "S5-E11", "_S5E11_full"]) {
+  test(`${code} prioritizes the verified series episode over similar words`, () => {
+    const rows = [
+      row({
+        row: 1,
+        id: "other-10",
+        seasonArc: "Other",
+        episode: "10",
+        title: "Beating the final boss",
+      }),
+      row({
+        row: 2,
+        id: "other-11",
+        seasonArc: "Other",
+        episode: "11",
+        title: "Beating the final boss",
+      }),
+      row({
+        row: 3,
+        id: "tower-3",
+        seasonArc: "Tower",
+        episode: "3",
+        title: "Beating the first boss",
+      }),
+      row({
+        row: 4,
+        id: "tower-11",
+        seasonArc: "Tower",
+        episode: "11",
+        title: "The last adventure",
+      }),
+    ];
+    const ranked = plain(
+      loadProposal().rankRows(
+        { filename: `${code} - Beating the final boss (full).mp4` },
+        rows,
+        { 5: "Tower" },
+      ),
+    );
+    assert.equal(ranked[0].id, "tower-11");
+    assert.equal(ranked[0].identityRank, 3);
+  });
+}
+test("unknown and conflicting season hints do not establish a verified series", () => {
+  const rows = [
+    row({ id: "tower-11", seasonArc: "Tower", episode: "11" }),
+    row({ id: "other-11", seasonArc: "Other", episode: "11" }),
+  ];
+  const unknown = plain(
+    loadProposal().rankRows({ filename: "S9E11.mp4" }, rows, { 5: "Tower" }),
+  );
+  assert.ok(unknown.every((value) => value.identityRank === 2));
+  const conflicting = plain(
+    loadProposal().rankRows({ filename: "S5E11.mp4", title: "S5E12" }, rows, {
+      5: "Tower",
+    }),
+  );
+  assert.ok(conflicting.every((value) => value.identityRank === 0));
+});

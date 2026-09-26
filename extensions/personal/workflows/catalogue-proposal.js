@@ -37,15 +37,37 @@
     return /^\d+$/.test(text) && Number(text) > 0 ? Number(text) : null;
   }
 
-  function hintedEpisode(draft) {
-    const text = contract.normalizedText(
-      `${clean(draft.filename)} ${clean(draft.title)}`,
+  function episodeHint(draft) {
+    const text = `${clean(draft.filename)} ${clean(draft.title)}`.replace(
+      /[_-]/g,
+      " ",
     );
-    const match = text.match(/\b(?:ep|episode)\s*0*(\d+)\b/);
-    return match && Number(match[1]) > 0 ? Number(match[1]) : null;
+    const hints = [
+      ...text.matchAll(
+        /\bs\s*0*(\d+)\s*[-_. ]*e(?:p(?:isode)?)?\s*0*(\d+)\b/gi,
+      ),
+    ].map((match) => ({ season: Number(match[1]), episode: Number(match[2]) }));
+    if (hints.length) {
+      const first = hints[0];
+      return first.episode > 0 &&
+        hints.every(
+          (hint) =>
+            hint.season === first.season && hint.episode === first.episode,
+        )
+        ? first
+        : null;
+    }
+    const episodes = [...text.matchAll(/\b(?:ep|episode)\s*0*(\d+)\b/gi)].map(
+      (match) => Number(match[1]),
+    );
+    return episodes.length &&
+      episodes[0] > 0 &&
+      episodes.every((episode) => episode === episodes[0])
+      ? { season: null, episode: episodes[0] }
+      : null;
   }
 
-  function rowMetrics(draft, row) {
+  function rowMetrics(draft, row, seasonAliases = {}) {
     const draftValues = [draft.filename, draft.title].filter(clean);
     const rowValues = [row.title, row.id].filter(clean);
     let similarity = 0;
@@ -66,7 +88,27 @@
       row.description,
     );
     const episode = positiveEpisode(row.episode);
-    const episodeMatch = episode !== null && hintedEpisode(draft) === episode;
+    const hint = episodeHint(draft);
+    const episodeMatch = episode !== null && hint?.episode === episode;
+    const selectedArc = clean(draft.seasonArc);
+    const knownArc =
+      selectedArc ||
+      (hint?.season > 0 ? clean(seasonAliases?.[String(hint.season)]) : "");
+    const matchingArc =
+      knownArc &&
+      contract.normalizedText(knownArc) ===
+        contract.normalizedText(row.seasonArc);
+    // Explicit identity is a ranking hint, never permission to update a row.
+    const identityRank =
+      hint && knownArc
+        ? matchingArc
+          ? episodeMatch
+            ? 3
+            : 1
+          : -1
+        : episodeMatch
+          ? 2
+          : 0;
     const arc = contract.normalizedText(row.seasonArc);
     const draftText = contract.normalizedText(
       `${clean(draft.filename)} ${clean(draft.title)}`,
@@ -87,15 +129,21 @@
     else if (similarity > 0) reasons.push("Filename/title words overlap");
     if (episodeMatch) reasons.push(`Episode ${episode}`);
     if (arcMatch) reasons.push(`Series ${clean(row.seasonArc)}`);
-    return { score, similarity, reasons };
+    if (matchingArc && episodeMatch)
+      reasons.unshift("Verified series and episode");
+    return { score, similarity, reasons, identityRank };
   }
 
-  function rankRows(draft, rows) {
+  function rankRows(draft, rows, seasonAliases = {}) {
     return (Array.isArray(rows) ? rows : [])
       .filter((row) => clean(row.title) || clean(row.id))
-      .map((row) => ({ ...row, ...rowMetrics(draft || {}, row) }))
+      .map((row) => ({
+        ...row,
+        ...rowMetrics(draft || {}, row, seasonAliases),
+      }))
       .sort(
         (left, right) =>
+          right.identityRank - left.identityRank ||
           right.score - left.score ||
           right.similarity - left.similarity ||
           Number(right.row) - Number(left.row),
@@ -311,7 +359,7 @@
     if (snapshot?.status !== "snapshot") {
       throw new Error("Catalogue snapshot is unavailable.");
     }
-    const ranked = rankRows(draft, snapshot.rows);
+    const ranked = rankRows(draft, snapshot.rows, snapshot.seasonAliases);
     let candidate;
     if (selectedRow === "new") {
       candidate = buildNewCandidate(draft, snapshot);

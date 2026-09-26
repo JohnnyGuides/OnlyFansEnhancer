@@ -4,6 +4,21 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class UploadCatalogueTests
 {
     [TestMethod]
+    public void VerifiedSeasonAliasesSurviveReopeningWithoutChangingCatalogueRows()
+    {
+        using TestStore test=new();
+        test.Store.ImportWorkbookProjection(new("work","1",true,[new(2,"tower-11","Different title","Description","2026-09-11","Tower","11",0,0,new Dictionary<string,string>(),null)]),false);
+        var before=test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        test.Store.SetUploadSeasonAlias(5,"Tower");
+        Assert.AreEqual("Tower",test.Store.GetUploadCatalogueSnapshot().SeasonAliases!["5"]);
+        Assert.AreEqual(before.Fingerprint,test.Store.GetUploadCatalogueSnapshot().Rows.Single().Fingerprint);
+        Assert.ThrowsException<ArgumentException>(()=>test.Store.SetUploadSeasonAlias(0,"Tower"));
+        Assert.ThrowsException<ArgumentException>(()=>test.Store.SetUploadSeasonAlias(6,"Missing"));
+        using var reopened=CatalogueStore.Open(test.Store.DatabasePath);
+        Assert.AreEqual("Tower",reopened.GetUploadSeasonAliases()["5"]);
+    }
+
+    [TestMethod]
     public void ConfirmedRepeatPreservesOriginalAndNewLinksWithoutHidingFutureConflicts()
     {
         using TestStore test = new();
