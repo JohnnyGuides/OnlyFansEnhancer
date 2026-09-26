@@ -3518,7 +3518,11 @@
       lockDraft(true);
       updateUploadAction();
       try {
-        if (!(await confirmRepeatUpload())) return;
+        if (!(await confirmRepeatUpload())) {
+          matchStatus.textContent =
+            "Upload cancelled. Your draft is unchanged.";
+          return;
+        }
         repeatUploadConfirmed = repeatedTargets().length > 0;
         await recheckProposalBeforeUpload();
         await writeCatalogueBeforeUpload();
