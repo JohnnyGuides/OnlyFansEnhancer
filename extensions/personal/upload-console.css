@@ -2067,6 +2067,93 @@ a {
 .upload-metadata-row > div {
   min-width: 0;
 }
+.metadata-combobox {
+  position: relative;
+  min-width: 0;
+}
+.metadata-combobox-trigger {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #343b48;
+  border-radius: 7px;
+  background: #0f141c;
+  color: #f1f5f9;
+  text-align: left;
+}
+.metadata-combobox-trigger:hover,
+.metadata-combobox-trigger[aria-expanded="true"] {
+  border-color: #5db9e2;
+}
+.metadata-combobox-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.metadata-combobox-trigger svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.metadata-combobox-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 30;
+  width: max(100%, 220px);
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid #405166;
+  border-radius: 10px;
+  background: #17212c;
+  box-shadow: 0 14px 32px #0009;
+}
+.metadata-combobox-menu[hidden],
+.metadata-combobox-add[hidden] {
+  display: none;
+}
+#seasonMenu {
+  left: auto;
+  right: 0;
+}
+.metadata-combobox-menu input {
+  width: 100%;
+  min-height: 34px;
+  margin: 0 0 4px;
+}
+.metadata-combobox-options {
+  max-height: 216px;
+  overflow-y: auto;
+}
+.metadata-combobox-options button,
+.metadata-combobox-add {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e5edf6;
+  text-align: left;
+}
+.metadata-combobox-options button:hover,
+.metadata-combobox-options button[aria-selected="true"],
+.metadata-combobox-add:hover {
+  background: #233e50;
+}
+.metadata-combobox-add {
+  color: #78cefa;
+  border-top: 1px solid #344252;
+  border-radius: 0;
+}
 .description-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

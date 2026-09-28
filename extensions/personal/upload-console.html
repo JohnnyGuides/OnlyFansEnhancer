@@ -476,16 +476,102 @@
                 <p id="releaseTimeSummary" class="hint"></p>
               </div>
               <div class="metadata-category">
-                <label for="uploadCategory">Category</label>
-                <select id="uploadCategory" name="category">
-                  <option value="">Select category</option>
-                </select>
+                <label for="categoryTrigger">Category</label>
+                <div class="metadata-combobox">
+                  <button
+                    id="categoryTrigger"
+                    type="button"
+                    class="metadata-combobox-trigger"
+                    aria-label="Category"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="categoryMenu"
+                  >
+                    <span id="categoryValue">Select category</span
+                    ><svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                  <div id="categoryMenu" class="metadata-combobox-menu" hidden>
+                    <input
+                      id="categorySearch"
+                      type="search"
+                      autocomplete="off"
+                      placeholder="Search categories"
+                      aria-label="Search categories"
+                    />
+                    <div
+                      id="categoryOptions"
+                      class="metadata-combobox-options"
+                      role="listbox"
+                      aria-label="Categories"
+                    ></div>
+                    <button
+                      id="categoryAdd"
+                      type="button"
+                      class="metadata-combobox-add"
+                      hidden
+                    ></button>
+                  </div>
+                  <select
+                    id="uploadCategory"
+                    name="category"
+                    hidden
+                    tabindex="-1"
+                    aria-hidden="true"
+                  >
+                    <option value="">Select category</option>
+                  </select>
+                </div>
               </div>
               <div class="metadata-season">
-                <label for="uploadSeason">Season / Arc</label>
-                <select id="uploadSeason" name="seasonArc">
-                  <option value="">Select season</option>
-                </select>
+                <label for="seasonTrigger">Season / Arc</label>
+                <div class="metadata-combobox">
+                  <button
+                    id="seasonTrigger"
+                    type="button"
+                    class="metadata-combobox-trigger"
+                    aria-label="Season / Arc"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="seasonMenu"
+                  >
+                    <span id="seasonValue">Select season</span
+                    ><svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                  <div id="seasonMenu" class="metadata-combobox-menu" hidden>
+                    <input
+                      id="seasonSearch"
+                      type="search"
+                      autocomplete="off"
+                      placeholder="Search seasons"
+                      aria-label="Search seasons"
+                    />
+                    <div
+                      id="seasonOptions"
+                      class="metadata-combobox-options"
+                      role="listbox"
+                      aria-label="Seasons"
+                    ></div>
+                    <button
+                      id="seasonAdd"
+                      type="button"
+                      class="metadata-combobox-add"
+                      hidden
+                    ></button>
+                  </div>
+                  <select
+                    id="uploadSeason"
+                    name="seasonArc"
+                    hidden
+                    tabindex="-1"
+                    aria-hidden="true"
+                  >
+                    <option value="">Select season</option>
+                  </select>
+                </div>
               </div>
             </div>
 

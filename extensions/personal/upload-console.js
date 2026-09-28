@@ -879,12 +879,69 @@
     const releaseDate = get("#releaseDate");
     const uploadCategory = get("#uploadCategory");
     const uploadSeason = get("#uploadSeason");
+    const metadataStorageKey = "ofenhancer.upload.metadata-options.v1";
+    const metadataControls = [
+      {
+        select: uploadCategory,
+        key: "categories",
+        trigger: get("#categoryTrigger"),
+        value: get("#categoryValue"),
+        menu: get("#categoryMenu"),
+        search: get("#categorySearch"),
+        options: get("#categoryOptions"),
+        add: get("#categoryAdd"),
+        label: "category",
+      },
+      {
+        select: uploadSeason,
+        key: "seasons",
+        trigger: get("#seasonTrigger"),
+        value: get("#seasonValue"),
+        menu: get("#seasonMenu"),
+        search: get("#seasonSearch"),
+        options: get("#seasonOptions"),
+        add: get("#seasonAdd"),
+        label: "season",
+      },
+    ];
+    let customMetadata = { categories: [], seasons: [] };
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(metadataStorageKey) || "{}",
+      );
+      for (const { key } of metadataControls)
+        if (Array.isArray(saved[key]))
+          customMetadata[key] = saved[key]
+            .filter(
+              (value) =>
+                typeof value === "string" &&
+                value.length <= 200 &&
+                value.trim() === value &&
+                value.length > 0 &&
+                !/[\x00-\x1f]/.test(value),
+            )
+            .slice(0, 100);
+    } catch {
+      /* Storage is optional; the selected value still works this session. */
+    }
+    function ensureMetadataOption(select, value) {
+      const existing = [...select.options].find(
+        (option) =>
+          option.value.toLocaleLowerCase() === value.toLocaleLowerCase(),
+      );
+      if (existing) return existing.value;
+      select.add(new Option(value, value));
+      return value;
+    }
     for (const [select, presets] of [
       [uploadCategory, CATEGORY_PRESETS],
       [uploadSeason, SEASON_PRESETS],
     ]) {
-      for (const preset of presets) select.add(new Option(preset, preset));
+      for (const preset of presets) ensureMetadataOption(select, preset);
     }
+    for (const { select, key } of metadataControls)
+      for (const value of customMetadata[key])
+        ensureMetadataOption(select, value);
     const releaseSummary = get("#releaseTimeSummary");
     const onlyfans = get("#targetOnlyfans");
     const fansly = get("#targetFansly");
@@ -2287,11 +2344,13 @@
         description.value = candidate.description || "";
         uploadSeason.value = candidate.seasonArc || "";
         if (candidate.seasonArc && !uploadSeason.value)
-          uploadSeason.add(
-            new Option(candidate.seasonArc, candidate.seasonArc),
-          );
+          ensureMetadataOption(uploadSeason, candidate.seasonArc);
         if (candidate.seasonArc) uploadSeason.value = candidate.seasonArc;
+        if (candidate.category)
+          ensureMetadataOption(uploadCategory, candidate.category);
         uploadCategory.value = candidate.category || "";
+        for (const metadata of metadataControls)
+          renderMetadataSelection(metadata);
         if (candidate.seasonArc && workflowProfiles) {
           const resolved =
             globalThis.CreatorToolkitAdapters?.phUploader?.resolvePreset(
@@ -2753,8 +2812,9 @@
                   (option) => option.value === season,
                 )
               )
-                uploadSeason.add(new Option(season, season));
+                ensureMetadataOption(uploadSeason, season);
               uploadSeason.value = season;
+              renderMetadataSelection(metadataControls[1]);
             }
             lastPrefilledCatalogueRow = exactMatches[0].row;
             applyProposal(buildProposal(exactMatches[0].row));
@@ -4385,6 +4445,9 @@
       description.value = "";
       uploadCategory.value = "";
       uploadSeason.value = "";
+      closeMetadataMenu();
+      for (const metadata of metadataControls)
+        renderMetadataSelection(metadata);
       pornhubVideoType.value = "free";
       pornhubCertificationsConfirmed.checked = true;
       socialCaption.value = "";
@@ -4472,6 +4535,9 @@
       description.value = "Neutral upload verification. Unpublished test.";
       uploadCategory.value = "";
       uploadSeason.value = "";
+      closeMetadataMenu();
+      for (const metadata of metadataControls)
+        renderMetadataSelection(metadata);
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
       fullFile = neutralTestFiles.fullFile;
       additionalMedia = [];
@@ -5515,14 +5581,137 @@
       title,
       description,
       releaseDate,
-      uploadCategory,
-      uploadSeason,
       contentPreset,
       pornhubVideoType,
       pornhubCertificationsConfirmed,
     ]) {
       control.addEventListener("input", scheduleMatch);
     }
+    let openMetadata = null;
+    function renderMetadataSelection(metadata) {
+      metadata.value.textContent =
+        metadata.select.value || `Select ${metadata.label}`;
+    }
+    function closeMetadataMenu({ focus = false } = {}) {
+      if (!openMetadata) return;
+      const metadata = openMetadata;
+      metadata.menu.hidden = true;
+      metadata.trigger.setAttribute("aria-expanded", "false");
+      openMetadata = null;
+      if (focus) metadata.trigger.focus();
+    }
+    function chooseMetadata(metadata, value) {
+      metadata.select.value = value;
+      renderMetadataSelection(metadata);
+      closeMetadataMenu({ focus: true });
+      scheduleMatch();
+    }
+    function addMetadata(metadata) {
+      const name = metadata.search.value.trim().replace(/\s+/g, " ");
+      if (!name || name.length > 200 || /[\x00-\x1f]/.test(name)) return;
+      const value = ensureMetadataOption(metadata.select, name);
+      if (
+        !customMetadata[metadata.key].some(
+          (entry) => entry.toLocaleLowerCase() === value.toLocaleLowerCase(),
+        )
+      ) {
+        customMetadata[metadata.key].push(value);
+        try {
+          localStorage.setItem(
+            metadataStorageKey,
+            JSON.stringify(customMetadata),
+          );
+        } catch {
+          /* The value still works for this upload. */
+        }
+      }
+      chooseMetadata(metadata, value);
+    }
+    function renderMetadataMenu(metadata) {
+      const query = metadata.search.value.trim();
+      const options = [...metadata.select.options].filter(
+        (option) => option.value,
+      );
+      const matches = options.filter((option) =>
+        option.value.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+      );
+      metadata.options.replaceChildren();
+      for (const option of matches) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.role = "option";
+        button.setAttribute(
+          "aria-selected",
+          String(option.value === metadata.select.value),
+        );
+        button.textContent = option.textContent;
+        button.addEventListener("click", () =>
+          chooseMetadata(metadata, option.value),
+        );
+        metadata.options.append(button);
+      }
+      metadata.add.hidden =
+        !query ||
+        query.length > 200 ||
+        options.some(
+          (option) =>
+            option.value.toLocaleLowerCase() === query.toLocaleLowerCase(),
+        );
+      if (!metadata.add.hidden) metadata.add.textContent = `Add “${query}”`;
+    }
+    for (const metadata of metadataControls) {
+      renderMetadataSelection(metadata);
+      metadata.select.addEventListener("change", () => {
+        renderMetadataSelection(metadata);
+        scheduleMatch();
+      });
+      metadata.trigger.addEventListener("click", () => {
+        if (openMetadata === metadata) {
+          closeMetadataMenu();
+          return;
+        }
+        closeMetadataMenu();
+        openMetadata = metadata;
+        metadata.menu.hidden = false;
+        metadata.trigger.setAttribute("aria-expanded", "true");
+        metadata.search.value = "";
+        renderMetadataMenu(metadata);
+        metadata.search.focus();
+      });
+      metadata.search.addEventListener("input", () =>
+        renderMetadataMenu(metadata),
+      );
+      metadata.search.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeMetadataMenu({ focus: true });
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const first = metadata.options.querySelector("button");
+          if (!metadata.add.hidden) addMetadata(metadata);
+          else if (first) first.click();
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          metadata.options.querySelector("button")?.focus();
+        }
+      });
+      metadata.options.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeMetadataMenu({ focus: true });
+        }
+      });
+      metadata.add.addEventListener("click", () => addMetadata(metadata));
+    }
+    document.addEventListener("pointerdown", (event) => {
+      if (
+        openMetadata &&
+        !openMetadata.menu.parentElement.contains(event.target)
+      )
+        closeMetadataMenu();
+    });
     pornhubVideoType.addEventListener("change", () => {
       scheduleMatch();
     });

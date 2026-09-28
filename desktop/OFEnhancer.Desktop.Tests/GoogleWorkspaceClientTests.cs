@@ -1,8 +1,8 @@
 using OFEnhancer.Protocol;
+using OFEnhancer.Catalogue;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using OFEnhancer.Desktop;
@@ -12,6 +12,30 @@ namespace OFEnhancer.Desktop.Tests;
 [TestClass]
 public sealed class GoogleWorkspaceClientTests
 {
+    [TestMethod]
+    public void NewCatalogueIdsFollowExistingSeriesAndUseReadableCollisionNumbers()
+    {
+        static WorkbookCatalogueItem Item(string id, string title, string series, int row) =>
+            new(row, id, title, "Other description", "2026-08-01", series, null, 0, 0,
+                new Dictionary<string, string>(), null);
+        WorkbookCatalogueItem[] existing = [
+            Item("toy-reviews-cheap-chinese-toy-01", "Review one", "Toy Reviews", 1),
+            Item("toy-reviews-fake-ass-creampie", "Review two", "Toy Reviews", 2),
+            Item("setaria-ep20", "Episode 20", "Setaria", 3),
+            Item("setaria-ep21", "Episode 21", "Setaria", 4),
+        ];
+        Assert.AreEqual("toy-reviews-pair-of-legs", GoogleUploadEntryWriter.NewId(
+            new("new", "fucking a pair of legs", "Description", "2026-09-25",
+                "clip.mp4", 5, 123, Category: "Review", SeasonArc: "Toy Reviews"), existing));
+        Assert.AreEqual("setaria-ep22", GoogleUploadEntryWriter.NewId(
+            new("new", "Final battle", "Description", "2026-09-25",
+                "S5E22 - final.mp4", 5, 123, Category: "GameSync", SeasonArc: "Setaria"), existing));
+        Assert.AreEqual("toy-reviews-pair-of-legs-2", GoogleUploadEntryWriter.NewId(
+            new("new", "fucking a pair of legs", "Description", "2026-09-26",
+                "clip2.mp4", 5, 123, Category: "Review", SeasonArc: "Toy Reviews"),
+            [.. existing, Item("toy-reviews-pair-of-legs", "Different review", "Toy Reviews", 5)]));
+    }
+
     [TestMethod]
     public async Task UploadRowAppendUsesRawValuesAndDetectedCatalogueColumns()
     {
@@ -40,8 +64,7 @@ public sealed class GoogleWorkspaceClientTests
     [TestMethod]
     public async Task UploadEntryWriterCreatesOneWorkRowAndVerifiesReadback()
     {
-        string identity = "clip.mp4|5|123|New video|2026-09-25";
-        string id = "new-video-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
+        string id = "new-video";
         JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
         JsonObject before = UploadWorkbookResponse(null);
         JsonObject after = UploadWorkbookResponse(id);
@@ -66,8 +89,7 @@ public sealed class GoogleWorkspaceClientTests
     [TestMethod]
     public async Task UploadEntryWriterUsesMatchingPredatedRowWithoutMovingItsDate()
     {
-        string identity = "clip.mp4|5|123|New video|2026-09-25";
-        string id = "new-video-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
+        string id = "new-video";
         JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
         JsonObject before = UploadWorkbookResponse(null);
         JsonObject after = UploadWorkbookResponse(null);
@@ -103,8 +125,7 @@ public sealed class GoogleWorkspaceClientTests
     [TestMethod]
     public async Task UploadEntryWriterReconcilesUncertainAppendWithoutRetrying()
     {
-        string identity = "clip.mp4|5|123|New video|2026-09-25";
-        string id = "new-video-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
+        string id = "new-video";
         JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
         RecordingHandler handler = new();
         foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(),

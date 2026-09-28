@@ -147,6 +147,27 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
       ),
       ["Select season", "Legacy Solo", "Setaria", "Seal of Lutellaria"],
     );
+    const metadataBefore = await page
+      .locator(".description-layout")
+      .boundingBox();
+    await page.locator("#categoryTrigger").click();
+    await page.locator("#categorySearch").fill("New Category");
+    await page.locator("#categoryAdd").click();
+    assert.equal(
+      await page.locator("#uploadCategory").inputValue(),
+      "New Category",
+    );
+    await page.locator("#seasonTrigger").click();
+    await page.locator("#seasonSearch").fill("New Season");
+    await page.locator("#seasonSearch").press("Enter");
+    assert.equal(
+      await page.locator("#uploadSeason").inputValue(),
+      "New Season",
+    );
+    assert.deepEqual(
+      await page.locator(".description-layout").boundingBox(),
+      metadataBefore,
+    );
     const fullSummary = await page.locator("#fullFileSummary").boundingBox();
     const teaserSummary = await page
       .locator("#teaserFileSummary")
@@ -421,6 +442,32 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
       false,
     );
     assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("new metadata remains in the picker after reopening the upload screen", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await mount(page);
+    await page.locator("#categoryTrigger").click();
+    await page.locator("#categorySearch").fill("Custom Category");
+    await page.locator("#categorySearch").press("Escape");
+    assert.equal(await page.locator("#uploadCategory").inputValue(), "");
+    await page.locator("#categoryTrigger").click();
+    await page.locator("#categorySearch").fill("Custom Category");
+    await page.locator("#categoryAdd").click();
+    await page.reload();
+    await page.waitForFunction(() => globalThis.CreatorUploadConsole);
+    await page.locator("#categoryTrigger").click();
+    await page.locator("#categorySearch").fill("Custom Category");
+    await page.locator("#categoryOptions button").first().click();
+    assert.equal(
+      await page.locator("#uploadCategory").inputValue(),
+      "Custom Category",
+    );
   } finally {
     await browser.close();
   }

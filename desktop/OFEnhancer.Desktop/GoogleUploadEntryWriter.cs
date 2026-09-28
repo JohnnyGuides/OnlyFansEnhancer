@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using OFEnhancer.Catalogue;
@@ -25,7 +24,7 @@ internal sealed class GoogleUploadEntryWriter(
         GoogleWorkbookSnapshot workbook = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken)
             .ConfigureAwait(false);
         GoogleCatalogueImportPreview before = GoogleCatalogueImportReader.Read(workbook, preferredSheetId);
-        string id = request.Mode == "new" ? NewId(request) : request.Id!;
+        string id = request.Mode == "new" ? NewId(request, before.Projection.Items) : request.Id!;
         WorkbookCatalogueItem? existing = before.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
         if (request.Mode == "new")
         {
@@ -169,18 +168,46 @@ internal sealed class GoogleUploadEntryWriter(
 
     private static bool ExactNew(WorkbookCatalogueItem item, GoogleUploadEntryRequest request) =>
         item.Title == request.Title && item.Description == request.Description
-        && item.PlannedDate == request.ReleaseDate;
+        && item.PlannedDate == request.ReleaseDate && (item.Series ?? "") == request.SeasonArc;
 
-    private static string NewId(GoogleUploadEntryRequest request)
+    internal static string NewId(GoogleUploadEntryRequest request, IReadOnlyList<WorkbookCatalogueItem> items)
     {
-        string slug = Regex.Replace(request.Title.ToLowerInvariant().Normalize(NormalizationForm.FormKD),
+        static string Slug(string value) => Regex.Replace(value.ToLowerInvariant().Normalize(NormalizationForm.FormKD),
             "[^a-z0-9]+", "-").Trim('-');
-        if (slug.Length == 0) slug = "video";
-        if (slug.Length > 70) slug = slug[..70].TrimEnd('-');
-        string identity = string.Join("|", request.FileName, request.FileSize!.Value.ToString(CultureInfo.InvariantCulture),
-            request.FileLastModified!.Value.ToString(CultureInfo.InvariantCulture), request.Title, request.ReleaseDate);
-        string suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
-        return slug + "-" + suffix;
+        string title = Slug(request.Title);
+        string series = Slug(request.SeasonArc);
+        if (series.Length > 0)
+        {
+            string[][] siblingIds = items.Where(item => item.Series == request.SeasonArc)
+                .Select(item => item.SourceKey.Split('-', StringSplitOptions.RemoveEmptyEntries)).ToArray();
+            if (siblingIds.Length >= 2)
+            {
+                string[] common = siblingIds[0].Take(4).TakeWhile((part, index) =>
+                    siblingIds.All(parts => parts.Length > index && parts[index] == part)).ToArray();
+                if (common.Length > 0) series = string.Join('-', common);
+            }
+        }
+        Match episode = Regex.Match(request.FileName ?? "", @"(?:^|[^a-z0-9])(?:s\d{1,2}e|ep(?:isode)?[\s._-]*)(\d{1,3})(?:[^a-z0-9]|$)", RegexOptions.IgnoreCase);
+        if (!episode.Success)
+            episode = Regex.Match(request.Title, @"\b(?:s\d{1,2}e|ep(?:isode)?[\s._-]*)(\d{1,3})\b", RegexOptions.IgnoreCase);
+        if (series.Length > 0 && episode.Success && int.TryParse(episode.Groups[1].Value, out int number) && number > 0)
+            title = $"ep{number:00}";
+        else if (series.Length > 0)
+            title = Regex.Replace(title, @"^(?:fucking|reviewing|testing|trying|using)-(?:a-|an-|the-|my-)?", "");
+        if (title.StartsWith(series + "-", StringComparison.Ordinal)) title = title[(series.Length + 1)..];
+        if (title.Length == 0) title = "video";
+        string basis = series.Length == 0 ? title : series + "-" + title;
+        if (basis.Length > 80) basis = basis[..80].TrimEnd('-');
+        string candidate = basis;
+        for (int suffix = 2; items.FirstOrDefault(item => item.SourceKey == candidate) is { } collision; suffix++)
+        {
+            if (ExactNew(collision, request)) return candidate;
+            if (collision.Title == request.Title && collision.PlannedDate == request.ReleaseDate)
+                throw new GoogleCatalogueException("catalogue-new-entry-conflict");
+            string ending = "-" + suffix.ToString(CultureInfo.InvariantCulture);
+            candidate = basis[..Math.Min(basis.Length, 80 - ending.Length)].TrimEnd('-') + ending;
+        }
+        return candidate;
     }
 
     private static void Validate(GoogleUploadEntryRequest request)
