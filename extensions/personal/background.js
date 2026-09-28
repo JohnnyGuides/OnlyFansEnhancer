@@ -2739,7 +2739,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.79"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.80"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -2989,7 +2989,13 @@ async function getCreatorUploadSession(sessionId) {
 
 function creatorUploadSessionProofMatches(session, proof) {
   if (!session?.draft || !proof || typeof proof !== "object") return false;
-  for (const role of ["full", "teaser", "thumbnail", "pornhub"]) {
+  for (const role of [
+    "full",
+    "teaser",
+    "thumbnail",
+    "pornhub",
+    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
+  ]) {
     const expected = session.draft.fileProof?.[role];
     if (!expected) continue;
     const actual = proof.fileProof?.[role];
@@ -3003,6 +3009,8 @@ function creatorUploadSessionProofMatches(session, proof) {
       return false;
   }
   return (
+    JSON.stringify(proof.mediaFiles || []) ===
+      JSON.stringify(session.draft.mediaFiles || []) &&
     creatorUploadClean(proof.fullFilename, 500) ===
       session.draft.fullFilename &&
     creatorUploadClean(proof.pornhubFilename, 500) ===
@@ -3030,7 +3038,13 @@ function creatorUploadResumeFileProof(value) {
   if (typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid upload file proof.");
   const proof = {};
-  for (const role of ["full", "teaser", "thumbnail", "pornhub"]) {
+  for (const role of [
+    "full",
+    "teaser",
+    "thumbnail",
+    "pornhub",
+    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
+  ]) {
     const item = value[role];
     if (item == null) continue;
     const name = creatorUploadClean(item.name, 500);
@@ -3079,7 +3093,17 @@ async function validateCreatorUploadRequest(message) {
     title: creatorUploadClean(message.draft?.title, 500),
     description: creatorUploadClean(message.draft?.description, 10_000),
     fullFilename: creatorUploadClean(message.draft?.fullFilename, 500),
+    mediaFiles: Array.isArray(message.draft?.mediaFiles)
+      ? message.draft.mediaFiles.map((item) => ({
+          role: creatorUploadClean(item?.role, 10),
+          name: creatorUploadClean(item?.name, 500),
+          kind: creatorUploadClean(item?.kind, 10),
+        }))
+      : [],
     releaseDate: creatorUploadClean(message.draft?.releaseDate, 10),
+    scheduleIntent: ["none", "now"].includes(message.draft?.scheduleIntent)
+      ? message.draft.scheduleIntent
+      : "friday",
     scheduledIso: creatorUploadClean(message.draft?.scheduledIso, 40),
     timeZone: creatorUploadClean(message.draft?.timeZone, 100),
     fanslyPreset: creatorUploadClean(message.draft?.fanslyPreset, 100),
@@ -3163,18 +3187,49 @@ async function validateCreatorUploadRequest(message) {
     (draft.fileProof.teaser && !draft.hasTeaser)
   )
     throw new Error("Upload file proof does not match the selected draft.");
+  if (
+    draft.mediaFiles.length > 8 ||
+    draft.mediaFiles.some(
+      (item, index) =>
+        item.role !== `media${index + 1}` ||
+        !item.name ||
+        !["video", "image"].includes(item.kind) ||
+        draft.fileProof[item.role]?.name !== item.name ||
+        (item.kind === "image"
+          ? !/\.(png|jpe?g)$/i.test(item.name)
+          : !/\.(mp4|m4v|mov|mkv|avi|webm)$/i.test(item.name)),
+    ) ||
+    (draft.mediaFiles.length &&
+      !targets.some((target) => ["onlyfans", "fansly"].includes(target))) ||
+    (!draft.fullFilename &&
+      !draft.mediaFiles.length &&
+      targets.some((target) => ["onlyfans", "fansly"].includes(target)))
+  )
+    throw new Error(
+      "Additional upload media does not match the selected files.",
+    );
   const scheduled = new Date(draft.scheduledIso);
+  const releaseInstant = new Date(`${draft.releaseDate}T15:00:00.000Z`);
+  const validReleaseDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.releaseDate) &&
+    !Number.isNaN(releaseInstant.getTime()) &&
+    releaseInstant.toISOString().slice(0, 10) === draft.releaseDate;
   if (
     !draft.title ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(draft.releaseDate) ||
-    Number.isNaN(scheduled.getTime()) ||
-    scheduled.toISOString().slice(0, 10) !== draft.releaseDate ||
-    scheduled.getUTCDay() !== 5 ||
-    scheduled.getUTCHours() !== 15 ||
-    scheduled.getUTCMinutes() !== 0 ||
-    scheduled.getUTCSeconds() !== 0
+    !validReleaseDate ||
+    (["none", "now"].includes(draft.scheduleIntent)
+      ? draft.publishMode !==
+          (draft.scheduleIntent === "now" ? "autonomous" : "manual") ||
+        Boolean(draft.scheduledIso) ||
+        releaseInstant.getTime() >= Date.now()
+      : Number.isNaN(scheduled.getTime()) ||
+        scheduled.toISOString().slice(0, 10) !== draft.releaseDate ||
+        scheduled.getUTCDay() !== 5 ||
+        scheduled.getUTCHours() !== 15 ||
+        scheduled.getUTCMinutes() !== 0 ||
+        scheduled.getUTCSeconds() !== 0)
   ) {
-    throw new Error("Creator uploads must target Friday at 15:00 UTC.");
+    throw new Error("Invalid release date or site schedule.");
   }
   if (
     targets.includes("fansly") &&
@@ -3900,6 +3955,14 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
         }
       : {
           full: creatorUploadRandomToken(),
+          ...(platform === "onlyfans" || platform === "fansly"
+            ? Object.fromEntries(
+                (session.draft.mediaFiles || []).map((item) => [
+                  item.role,
+                  creatorUploadRandomToken(),
+                ]),
+              )
+            : {}),
           ...(["fansly", "manyvids"].includes(platform) &&
           session.draft.hasTeaser !== false
             ? { teaser: creatorUploadRandomToken() }
@@ -3928,7 +3991,19 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
             : {}),
         }
       : platform === "onlyfans"
-        ? { full: { selector: "#file_upload_input", token: tokens.full } }
+        ? {
+            full: { selector: "#file_upload_input", token: tokens.full },
+            ...Object.fromEntries(
+              (session.draft.mediaFiles || []).map((item) => [
+                item.role,
+                {
+                  selector: "#file_upload_input",
+                  token: tokens[item.role],
+                  kind: item.kind,
+                },
+              ]),
+            ),
+          }
         : platform === "fansly"
           ? {
               full: {
@@ -3939,6 +4014,16 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
                 selector: "input[data-creator-fansly-file]",
                 token: tokens.teaser,
               },
+              ...Object.fromEntries(
+                (session.draft.mediaFiles || []).map((item) => [
+                  item.role,
+                  {
+                    selector: "input[data-creator-fansly-file]",
+                    token: tokens[item.role],
+                    kind: item.kind,
+                  },
+                ]),
+              ),
             }
           : {
               full: {
@@ -4480,7 +4565,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.79"
+      "upload-hub-0.20.80"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -4964,10 +5049,24 @@ async function runCreatorUploadPlatform(session, platform) {
     }
     const selectors =
       platform === "onlyfans"
-        ? { full: "#file_upload_input" }
+        ? {
+            full: "#file_upload_input",
+            ...Object.fromEntries(
+              (session.draft.mediaFiles || []).map((item) => [
+                item.role,
+                "#file_upload_input",
+              ]),
+            ),
+          }
         : {
             full: "input[data-creator-fansly-file]",
             teaser: "input[data-creator-fansly-file]",
+            ...Object.fromEntries(
+              (session.draft.mediaFiles || []).map((item) => [
+                item.role,
+                "input[data-creator-fansly-file]",
+              ]),
+            ),
           };
     const execution = await chrome.scripting.executeScript({
       target: { tabId: target.tabId, documentIds: [target.documentId] },
@@ -6321,7 +6420,8 @@ async function attachBoundUploadFile(command) {
     tabId: pending.tabId,
     selector: target.result.selector,
     pickerSelector:
-      pending.platform === "onlyfans" && pending.role === "full"
+      pending.platform === "onlyfans" &&
+      (pending.role === "full" || /^media[1-8]$/.test(pending.role))
         ? "#attach_file_photo[aria-label='Add media']"
         : pending.platform === "pornhub" && pending.role === "pornhub"
           ? pickerSelector

@@ -447,28 +447,32 @@
       return failedResult(outcomes);
     }
 
-    if (
-      !(await step("Launch mode", () =>
-        selectRadioIfSafe(plan.launchMode, signal, budget),
-      ))
-    ) {
-      return failedResult(outcomes);
+    if (!plan.skipLaunchMode) {
+      if (
+        !(await step("Launch mode", () =>
+          selectRadioIfSafe(plan.launchMode, signal, budget),
+        ))
+      ) {
+        return failedResult(outcomes);
+      }
     }
-    const time = toolkit.queryUnique(SELECTORS.launchTime, plan.form, {
-      description: "launch-time select",
-    });
-    if (
-      !(await step("Launch time", () =>
-        selectExactOption(
-          time,
-          plan.profile.launchTimeLabel,
-          plan.profile.launchTimeValue,
-          signal,
-          budget,
-        ),
-      ))
-    ) {
-      return failedResult(outcomes);
+    if (!plan.skipLaunchTime) {
+      const time = toolkit.queryUnique(SELECTORS.launchTime, plan.form, {
+        description: "launch-time select",
+      });
+      if (
+        !(await step("Launch time", () =>
+          selectExactOption(
+            time,
+            plan.profile.launchTimeLabel,
+            plan.profile.launchTimeValue,
+            signal,
+            budget,
+          ),
+        ))
+      ) {
+        return failedResult(outcomes);
+      }
     }
 
     if (

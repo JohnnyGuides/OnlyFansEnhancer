@@ -96,7 +96,7 @@
           <section class="card draft-card" aria-labelledby="draftHeading">
             <div class="section-heading">
               <div>
-                <h2 id="draftHeading">Video</h2>
+                <h2 id="draftHeading">Media</h2>
               </div>
             </div>
 
@@ -295,6 +295,26 @@
                   </div>
                 </div>
               </section>
+            </div>
+            <div id="additionalMediaRow" class="additional-media-row">
+              <input
+                id="uploadAdditionalMedia"
+                type="file"
+                class="file-input-native"
+                tabindex="-1"
+                accept="video/*,image/jpeg,image/png,.mkv,.avi,.jpg,.jpeg,.png"
+                multiple
+                aria-describedby="additionalMediaScope draftErrors"
+              />
+              <button type="button" data-choose-file="uploadAdditionalMedia">
+                Add media
+              </button>
+              <span id="additionalMediaScope">OnlyFans · Fansly</span>
+              <div
+                id="additionalMediaList"
+                class="additional-media-list"
+                aria-live="polite"
+              ></div>
             </div>
             <dialog
               id="thumbnailFrameDialog"

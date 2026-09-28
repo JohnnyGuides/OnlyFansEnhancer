@@ -242,6 +242,7 @@ for (const pornhubMode of ["paid", "free"])
         : null;
     const context = vm.createContext({
       fullFile,
+      additionalMedia: [],
       pornhubFile,
       value: { pornhubMode },
       teaserFile: new File(["teaser"], "teaser.mp4"),

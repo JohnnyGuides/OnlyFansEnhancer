@@ -1942,6 +1942,57 @@ a {
 .media-grid > .upload-media[hidden] {
   display: none;
 }
+.additional-media-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -6px 0 18px;
+}
+.additional-media-row[hidden] {
+  display: none;
+}
+.additional-media-row > button,
+.additional-media-list button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #425166;
+  background: #1b2530;
+  color: #e9f5fc;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+.additional-media-row > span {
+  color: #a9c5d7;
+  font-size: 0.78rem;
+}
+.additional-media-list {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.additional-media-list:empty {
+  display: none;
+}
+.additional-media-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(100%, 260px);
+  min-width: 0;
+  border-radius: 9px;
+  text-align: left;
+}
+.additional-media-list .additional-media-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.additional-media-list .additional-media-remove {
+  flex: none;
+  color: #a9c5d7;
+}
 .upload-media {
   gap: 10px;
   margin: 10px 0 18px;

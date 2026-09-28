@@ -63,9 +63,12 @@
     /** @type {Array<[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]>} */
     const roleEntries = Object.entries(roles).map(([role, definition]) => {
       if (
-        !new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
+        (!new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
           role,
-        ) ||
+        ) &&
+          !/^media[1-8]$/.test(role)) ||
+        (/^media[1-8]$/.test(role) &&
+          !["onlyfans", "fansly"].includes(platform)) ||
         (platform === "pornhub"
           ? !["pornhub", "thumbnail"].includes(role)
           : role === "pornhub") ||

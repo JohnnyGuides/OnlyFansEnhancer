@@ -1149,3 +1149,33 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
     await browser.close();
   }
 });
+
+test("destination changes keep the catalogue suggestions mounted and in place", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await mountConsole(page);
+    const before = await page.evaluate(() => {
+      const row = document.querySelector("#cataloguePicker");
+      const card = document.querySelector(".catalogue-card");
+      globalThis.__firstCatalogueCard = card;
+      return { top: row.getBoundingClientRect().top, hidden: row.hidden };
+    });
+    assert.equal(before.hidden, false);
+    await page.locator("#targetManyvids").check();
+    await page.waitForTimeout(250);
+    const after = await page.evaluate(() => {
+      const row = document.querySelector("#cataloguePicker");
+      return {
+        top: row.getBoundingClientRect().top,
+        hidden: row.hidden,
+        sameCard:
+          document.querySelector(".catalogue-card") ===
+          globalThis.__firstCatalogueCard,
+      };
+    });
+    assert.deepEqual(after, { top: before.top, hidden: false, sameCard: true });
+  } finally {
+    await browser.close();
+  }
+});

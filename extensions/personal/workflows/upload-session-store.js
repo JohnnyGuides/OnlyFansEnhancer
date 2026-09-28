@@ -517,6 +517,7 @@
     pornhubFilename: 500,
     releaseDate: 10,
     scheduledIso: 40,
+    scheduleIntent: 10,
     timeZone: 100,
     fanslyPreset: 100,
     fanslyCaption: 15_000,
@@ -590,6 +591,12 @@
       if (Object.hasOwn(value, field))
         output[field] = clean(value[field], maximum);
     }
+    if (Array.isArray(value.mediaFiles))
+      output.mediaFiles = value.mediaFiles.slice(0, 8).map((item, index) => ({
+        role: `media${index + 1}`,
+        name: clean(item?.name, 500),
+        kind: item?.kind === "image" ? "image" : "video",
+      }));
     if (Object.hasOwn(value, "manyvidsThumbnail")) {
       output.manyvidsThumbnail = value.manyvidsThumbnail === true;
     }
@@ -606,7 +613,13 @@
       if (!value.fileProof || typeof value.fileProof !== "object")
         throw new Error("Invalid saved upload file proof.");
       output.fileProof = {};
-      for (const role of ["full", "teaser", "thumbnail", "pornhub"]) {
+      for (const role of [
+        "full",
+        "teaser",
+        "thumbnail",
+        "pornhub",
+        ...(output.mediaFiles || []).map((item) => item.role),
+      ]) {
         const item = value.fileProof[role];
         if (item == null) continue;
         const name = clean(item.name, 500);
@@ -651,6 +664,11 @@
     if (!["manual", "autonomous"].includes(value.publishMode ?? "manual"))
       throw new Error("Invalid publishing mode.");
     output.publishMode = value.publishMode ?? "manual";
+    if (
+      output.scheduleIntent &&
+      !["friday", "none", "now"].includes(output.scheduleIntent)
+    )
+      throw new Error("Invalid saved schedule intent.");
     for (const field of ["profiles"]) {
       if (!Object.hasOwn(value, field)) continue;
       const safe = safeJson(value[field]);

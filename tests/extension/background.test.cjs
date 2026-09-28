@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.79",
+          productVersion: "0.20.80",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -582,7 +582,7 @@ function send(message) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.79",
+    productVersion: "0.20.80",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -602,7 +602,7 @@ function send(message) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.79");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.80");
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",
@@ -1340,6 +1340,7 @@ function send(message) {
         draft: {
           title: "Episode 42",
           description: "Description",
+          fullFilename: "episode-full.mp4",
           releaseDate: "2026-08-28",
           scheduledIso: "2026-08-28T15:00:00.000Z",
           timeZone: "Europe/Zurich",
@@ -1369,6 +1370,7 @@ function send(message) {
         draft: {
           title: "Episode 42",
           description: "Description",
+          fullFilename: "episode-full.mp4",
           releaseDate: "2026-08-27",
           scheduledIso: "2026-08-27T15:00:00.000Z",
           timeZone: "Europe/Zurich",
@@ -1378,7 +1380,7 @@ function send(message) {
       }))`,
       context,
     ),
-    /Friday|defaulT/,
+    /release date|schedule|defaulT/,
   );
   const coordinator = JSON.parse(
     await vm.runInContext(

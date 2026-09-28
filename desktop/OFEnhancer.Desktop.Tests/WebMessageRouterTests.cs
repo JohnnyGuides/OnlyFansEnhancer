@@ -59,7 +59,7 @@ public sealed class WebMessageRouterTests
 
         Assert.IsTrue(response.RootElement.GetProperty("ok").GetBoolean());
         Assert.AreEqual(
-            "0.20.79",
+            "0.20.80",
             response.RootElement.GetProperty("result").GetProperty("productVersion").GetString()
         );
     }

@@ -301,12 +301,15 @@
     workflowMode = "main",
     publishMode = "manual",
     fullFile,
+    additionalMedia = [],
     teaserFile = null,
     thumbnailFile = null,
     pornhubFile = null,
     title,
     description,
     scheduledIso,
+    releaseDate = "",
+    scheduleIntent = "friday",
     targets,
     contentPreset = "",
     pornhubMode = "free",
@@ -327,9 +330,32 @@
       selectedTargets[0] === "pornhub" &&
       pornhubMode === "free" &&
       isVideoFile(pornhubFile);
-    if (mainEnabled && !separatePornhubFileIsEnough && !isVideoFile(fullFile)) {
+    const extraMedia = Array.isArray(additionalMedia) ? additionalMedia : [];
+    if (
+      mainEnabled &&
+      (extraMedia.length > 8 ||
+        extraMedia.some((file) => !isVideoFile(file) && !isImageFile(file)))
+    )
+      errors.push("Choose up to eight additional videos or PNG/JPEG images.");
+    const additionalOnly =
+      extraMedia.length > 0 &&
+      selectedTargets.every((target) =>
+        ["onlyfans", "fansly"].includes(target),
+      );
+    if (
+      mainEnabled &&
+      !separatePornhubFileIsEnough &&
+      !additionalOnly &&
+      !isVideoFile(fullFile)
+    ) {
       errors.push("Choose a non-empty full video.");
     }
+    if (
+      mainEnabled &&
+      extraMedia.length &&
+      !selectedTargets.some((target) => ["onlyfans", "fansly"].includes(target))
+    )
+      errors.push("Additional media needs OnlyFans or Fansly.");
     if (mainEnabled && teaserFile && !isVideoFile(teaserFile)) {
       errors.push("Choose a non-empty teaser video or leave it blank.");
     }
@@ -349,7 +375,22 @@
     const cleanTitle = String(title || "").trim();
     if (mainEnabled && !cleanTitle) errors.push("Enter a catalogue title.");
     const scheduled = new Date(scheduledIso);
-    if (
+    const historical = scheduleIntent === "none" || scheduleIntent === "now";
+    if (mainEnabled && historical) {
+      const pastDate = new Date(`${releaseDate}T15:00:00.000Z`);
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate) ||
+        Number.isNaN(pastDate.getTime()) ||
+        pastDate.toISOString().slice(0, 10) !== releaseDate ||
+        pastDate.getTime() >= Date.now()
+      )
+        errors.push("Choose a valid past release date.");
+      if (
+        (scheduleIntent === "none" && publishMode !== "manual") ||
+        (scheduleIntent === "now" && publishMode !== "autonomous")
+      )
+        errors.push("Review the publishing mode for this past release.");
+    } else if (
       mainEnabled &&
       (!String(scheduledIso || "").trim() ||
         Number.isNaN(scheduled.getTime()) ||
@@ -383,12 +424,16 @@
       hasTeaser: mainEnabled && isVideoFile(teaserFile),
       title: cleanTitle,
       description: String(description || "").trim(),
-      scheduledIso: Number.isNaN(scheduled.getTime())
-        ? ""
-        : scheduled.toISOString(),
-      releaseDate: Number.isNaN(scheduled.getTime())
-        ? ""
-        : scheduled.toISOString().slice(0, 10),
+      scheduleIntent: historical ? scheduleIntent : "friday",
+      scheduledIso:
+        historical || Number.isNaN(scheduled.getTime())
+          ? ""
+          : scheduled.toISOString(),
+      releaseDate: historical
+        ? releaseDate
+        : Number.isNaN(scheduled.getTime())
+          ? ""
+          : scheduled.toISOString().slice(0, 10),
       targets: selectedTargets,
       contentPreset: cleanPreset,
       pornhubMode,
@@ -811,6 +856,8 @@
       });
     const mainPublishMode = get("#mainPublishMode");
     const fullInput = get("#uploadFullVideo");
+    const additionalInput = get("#uploadAdditionalMedia");
+    const additionalMediaList = get("#additionalMediaList");
     const teaserInput = get("#uploadTeaser");
     const thumbnailInput = get("#uploadManyvidsThumbnail");
     const selectedThumbnailPreview = get("#selectedThumbnailPreview");
@@ -897,6 +944,7 @@
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const initialSchedule = nextFridayUtc(new Date(), timeZone);
     let fullFile = null;
+    let additionalMedia = [];
     let openingFrame = null;
     let teaserFile = null;
     let thumbnailFile = null;
@@ -1512,11 +1560,16 @@
     }
 
     function draft() {
+      const releaseInstant = new Date(`${releaseDate.value}T15:00:00.000Z`);
+      const historicalRelease =
+        !Number.isNaN(releaseInstant.getTime()) &&
+        releaseInstant.getTime() < Date.now();
       const value = normalizeDraft({
         workflowMode: workflowMode?.value || "both",
         publishMode:
           !neutralTestMode && mainPublishMode.checked ? "autonomous" : "manual",
         fullFile,
+        additionalMedia,
         teaserFile,
         thumbnailFile,
         pornhubFile: pornhubVideoType.value === "free" ? pornhubFile : null,
@@ -1526,7 +1579,15 @@
               titleFromFilename(socialFile?.name || "Social teaser")
             : title.value,
         description: description.value,
-        scheduledIso: scheduledIsoForReleaseDate(releaseDate.value),
+        releaseDate: releaseDate.value,
+        scheduleIntent: historicalRelease
+          ? mainPublishMode.checked
+            ? "now"
+            : "none"
+          : "friday",
+        scheduledIso: historicalRelease
+          ? ""
+          : scheduledIsoForReleaseDate(releaseDate.value),
         targets: selectedTargets(),
         contentPreset: contentPreset.value,
         pornhubMode: pornhubVideoType.value,
@@ -1601,6 +1662,16 @@
     }
 
     function refreshReleaseSummary() {
+      const releaseInstant = new Date(`${releaseDate.value}T15:00:00.000Z`);
+      if (
+        !Number.isNaN(releaseInstant.getTime()) &&
+        releaseInstant.getTime() < Date.now()
+      ) {
+        releaseSummary.textContent = mainPublishMode.checked
+          ? "Catalogue date · publish now"
+          : "Catalogue date · no site schedule";
+        return;
+      }
       const iso = scheduledIsoForReleaseDate(releaseDate.value);
       if (!iso) {
         releaseSummary.textContent =
@@ -1892,7 +1963,8 @@
 
     function proposalDraft() {
       return {
-        filename: fullFile?.name || pornhubFile?.name || "",
+        filename:
+          fullFile?.name || additionalMedia[0]?.name || pornhubFile?.name || "",
         title: title.value.trim(),
         description: description.value.trim(),
         releaseDate: releaseDate.value,
@@ -2297,7 +2369,13 @@
           publishMode: value.publishMode,
           description: value.description,
           fullFilename: fullFile?.name || "",
+          mediaFiles: additionalMedia.map((file, index) => ({
+            role: `media${index + 1}`,
+            name: file.name,
+            kind: isImageFile(file) ? "image" : "video",
+          })),
           releaseDate: value.releaseDate,
+          scheduleIntent: value.scheduleIntent,
           scheduledIso: value.scheduledIso,
           timeZone,
           fanslyPreset: "defaulT",
@@ -2311,6 +2389,12 @@
           pornhubFilename: selectedPornhubFile(value.pornhubMode)?.name || "",
           fileProof: {
             full: fileResumeProof(fullFile),
+            ...Object.fromEntries(
+              additionalMedia.map((file, index) => [
+                `media${index + 1}`,
+                fileResumeProof(file),
+              ]),
+            ),
             teaser: fileResumeProof(teaserFile),
             thumbnail:
               targets.includes("manyvids") ||
@@ -2381,7 +2465,7 @@
         currentProposal.status !== "ready" &&
         !(
           currentProposal.status === "needs-queue-evidence" &&
-          value.publishMode === "manual"
+          (value.publishMode === "manual" || value.scheduleIntent === "now")
         ) &&
         !(currentProposal.status === "nothing-pending" && social.enabled)
       )
@@ -2587,7 +2671,9 @@
         workflowMode?.value === "teaser"
           ? Boolean(socialFile || socialCaption.value.trim())
           : Boolean(
-              (fullFile || (pornhub.checked && pornhubFile)) &&
+              (fullFile ||
+                additionalMedia.length ||
+                (pornhub.checked && pornhubFile)) &&
               title.value.trim(),
             );
       if (!hasSearch || activeSession) {
@@ -2729,7 +2815,9 @@
         workflowMode?.value === "teaser"
           ? Boolean(socialFile || socialCaption.value.trim())
           : Boolean(
-              (fullFile || (pornhub.checked && pornhubFile)) &&
+              (fullFile ||
+                additionalMedia.length ||
+                (pornhub.checked && pornhubFile)) &&
               title.value.trim(),
             );
       if (!hasSearch || activeSession) {
@@ -2740,6 +2828,24 @@
       }
       matchStatus.textContent = "Waiting for edits to settle…";
       matchTimer = setTimeout(() => matchCatalogue(false), 180);
+    }
+
+    function refreshDestinationSelection() {
+      if (runBusy || activeSession) return;
+      repeatUploadConfirmed = false;
+      readiness = null;
+      ++readinessRevision;
+      uploadError.textContent = "";
+      reviewRecovery.hidden = true;
+      refreshReadiness.hidden = true;
+      manualTargets = new Set(selectedTargets());
+      if (currentMatch?.status === "matched" && currentSnapshot) {
+        currentProposal = buildProposal(currentMatch.candidate.row);
+      } else if (currentMatch?.status === "new-pending" && currentSnapshot) {
+        preparePendingNewMatch();
+      }
+      renderRunSettings();
+      void checkReadiness();
     }
 
     function statusLabel(status) {
@@ -3562,7 +3668,8 @@
         if (
           (mediaTargets.includes("fansly") ||
             mediaTargets.includes("manyvids")) &&
-          !teaserFile
+          !teaserFile &&
+          fullFile
         ) {
           matchStatus.textContent =
             "Creating the shared teaser from the full video…";
@@ -3645,6 +3752,9 @@
           : null;
         const selectedFiles = {
           full: fullFile,
+          ...Object.fromEntries(
+            additionalMedia.map((file, index) => [`media${index + 1}`, file]),
+          ),
           teaser: teaserFile,
           thumbnail: thumbnailFile,
           pornhub: selectedPornhubFile(value.pornhubMode),
@@ -3656,6 +3766,11 @@
           socialSessionId: socialPlan?.id || "",
           proof: {
             fullFilename: fullFile?.name || "",
+            mediaFiles: additionalMedia.map((file, index) => ({
+              role: `media${index + 1}`,
+              name: file.name,
+              kind: isImageFile(file) ? "image" : "video",
+            })),
             pornhubFilename: selectedPornhubFile(value.pornhubMode)?.name || "",
             manyvidsThumbnail:
               targets.includes("manyvids") && Boolean(thumbnailFile),
@@ -3667,6 +3782,12 @@
             profileSignature: value.profileSignature,
             fileProof: {
               full: fileResumeProof(fullFile),
+              ...Object.fromEntries(
+                additionalMedia.map((file, index) => [
+                  `media${index + 1}`,
+                  fileResumeProof(file),
+                ]),
+              ),
               teaser: fileResumeProof(teaserFile),
               thumbnail:
                 targets.includes("manyvids") ||
@@ -3959,6 +4080,9 @@
                 [
                   resumable.draft.fullFilename,
                   resumable.draft.pornhubFilename,
+                  ...(resumable.draft.mediaFiles || []).map(
+                    (item) => item.name,
+                  ),
                 ].filter(Boolean),
               ),
             ]
@@ -4026,6 +4150,16 @@
         (expected.hasTeaser && !teaserFile) ||
         (expected.manyvidsThumbnail && !thumbnailFile) ||
         (expected.pornhubThumbnail && !thumbnailFile) ||
+        (expected.mediaFiles || []).length !== additionalMedia.length ||
+        (expected.mediaFiles || []).some(
+          (item, index) =>
+            item.role !== `media${index + 1}` ||
+            item.name !== additionalMedia[index]?.name ||
+            !matchesResumeFile(
+              expected.fileProof?.[item.role],
+              additionalMedia[index],
+            ),
+        ) ||
         !matchesResumeFile(expected.fileProof?.full, fullFile) ||
         !matchesResumeFile(expected.fileProof?.teaser, teaserFile) ||
         !matchesResumeFile(expected.fileProof?.thumbnail, thumbnailFile) ||
@@ -4090,12 +4224,16 @@
           openingFrameToken,
           files: {
             full: fullFile,
+            ...Object.fromEntries(
+              additionalMedia.map((file, index) => [`media${index + 1}`, file]),
+            ),
             teaser: teaserFile,
             thumbnail: thumbnailFile,
             pornhub: selectedPornhub,
           },
           proof: {
             fullFilename: expected.fullFilename,
+            mediaFiles: expected.mediaFiles || [],
             pornhubFilename: expected.pornhubFilename,
             manyvidsThumbnail: expected.manyvidsThumbnail,
             pornhubThumbnail: expected.pornhubThumbnail,
@@ -4103,6 +4241,12 @@
             profileSignature: expected.profileSignature,
             fileProof: {
               full: fileResumeProof(fullFile),
+              ...Object.fromEntries(
+                additionalMedia.map((file, index) => [
+                  `media${index + 1}`,
+                  fileResumeProof(file),
+                ]),
+              ),
               teaser: fileResumeProof(teaserFile),
               thumbnail: fileResumeProof(thumbnailFile),
               pornhub: fileResumeProof(selectedPornhub),
@@ -4224,8 +4368,10 @@
       clearTimeout(matchTimer);
       platformStates.clear();
       renderPlatformStates();
+      additionalMedia = [];
       for (const input of [
         fullInput,
+        additionalInput,
         teaserInput,
         thumbnailInput,
         pornhubInput,
@@ -4328,6 +4474,7 @@
       uploadSeason.value = "";
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
       fullFile = neutralTestFiles.fullFile;
+      additionalMedia = [];
       teaserFile = neutralTestFiles.teaserFile;
       thumbnailFile = neutralTestFiles.thumbnailFile;
       pornhubFile = neutralTestFiles.teaserFile;
@@ -4406,11 +4553,22 @@
     function updateMediaRelevance() {
       const targets = new Set(selectedTargets());
       get("#uploadMedia").hidden = workflowMode?.value === "teaser";
+      get("#additionalMediaRow").hidden =
+        workflowMode?.value === "teaser" ||
+        (!additionalMedia.length &&
+          !targets.has("onlyfans") &&
+          !targets.has("fansly"));
       get("#pornhubPresetFields").hidden = !targets.has("pornhub");
       get(".pornhub-file-card").hidden =
         pornhubPaid.checked && !pornhub.checked;
       fullInput.required =
         workflowMode?.value !== "teaser" &&
+        !(
+          additionalMedia.length &&
+          [...targets].every((target) =>
+            ["onlyfans", "fansly"].includes(target),
+          )
+        ) &&
         !(
           pornhub.checked &&
           !pornhubPaid.checked &&
@@ -4490,6 +4648,33 @@
     }
 
     function renderFilePickers() {
+      additionalMediaList.replaceChildren();
+      for (const [index, file] of additionalMedia.entries()) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.disabled =
+          additionalInput.disabled || runBusy || Boolean(activeSession);
+        chip.setAttribute("aria-label", `Remove ${file.name}`);
+        const name = document.createElement("span");
+        name.className = "additional-media-name";
+        name.textContent = file.name;
+        const remove = document.createElement("span");
+        remove.className = "additional-media-remove";
+        remove.textContent = "×";
+        remove.setAttribute("aria-hidden", "true");
+        chip.append(name, remove);
+        chip.addEventListener("click", () => {
+          additionalMedia.splice(index, 1);
+          renderFilePickers();
+          scheduleMatch();
+        });
+        additionalMediaList.append(chip);
+      }
+      get('[data-choose-file="uploadAdditionalMedia"]').disabled =
+        additionalInput.disabled ||
+        runBusy ||
+        Boolean(activeSession) ||
+        additionalMedia.length >= 8;
       for (const button of catalogueThumbnailChoices.querySelectorAll(
         "[data-asset-id]",
       ))
@@ -5074,6 +5259,7 @@
     const fileControlObserver = new MutationObserver(renderFilePickers);
     for (const input of [
       fullInput,
+      additionalInput,
       teaserInput,
       thumbnailInput,
       pornhubInput,
@@ -5102,6 +5288,20 @@
       if (fullFile && !socialCaption.value.trim()) {
         socialCaption.value = title.value;
       }
+      renderFilePickers();
+      scheduleMatch();
+    });
+    additionalInput.addEventListener("change", () => {
+      const files = [...(additionalInput.files || [])];
+      additionalInput.value = "";
+      if (activeSession || !files.length) return;
+      if (additionalMedia.length + files.length > 8) {
+        errors.textContent = "Choose up to eight additional files.";
+        return;
+      }
+      additionalMedia = [...additionalMedia, ...files];
+      if (!title.value.trim())
+        title.value = titleFromFilename(additionalMedia[0].name);
       renderFilePickers();
       scheduleMatch();
     });
@@ -5332,10 +5532,7 @@
         if (control === pornhubPaid && pornhubPaid.checked)
           pornhub.checked = false;
         pornhubVideoType.value = pornhubPaid.checked ? "paid" : "free";
-        if (selectedCatalogueRow !== null) {
-          manualTargets = new Set(selectedTargets());
-        }
-        scheduleMatch();
+        refreshDestinationSelection();
       });
     }
     uploadButton.addEventListener("click", () => startUpload());

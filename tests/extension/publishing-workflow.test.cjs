@@ -195,6 +195,7 @@ test("draft normalization maps full and teaser files without requiring a teaser"
     hasTeaser: false,
     title: "Episode 42",
     description: "description",
+    scheduleIntent: "friday",
     scheduledIso: "2026-08-28T15:00:00.000Z",
     releaseDate: "2026-08-28",
     targets: ["onlyfans", "fansly"],
@@ -249,6 +250,67 @@ test("draft normalization maps the ManyVids full, teaser, and optional thumbnail
   );
   assert.equal(missingTeaser.valid, true);
   assert.equal(missingTeaser.hasTeaser, false);
+});
+
+test("additional photos and videos can accompany the primary ManyVids video", () => {
+  const context = loadScripts("upload-console.js");
+  const input = {
+    fullFile: { name: "primary.mp4", type: "video/mp4", size: 42 },
+    additionalMedia: [
+      { name: "second.mp4", type: "video/mp4", size: 42 },
+      { name: "photo.jpg", type: "image/jpeg", size: 42 },
+    ],
+    title: "Episode 42",
+    scheduledIso: "2026-10-02T15:00:00.000Z",
+    targets: ["onlyfans", "fansly", "manyvids"],
+  };
+  const normalized = plain(context.CreatorUploadConsole.normalizeDraft(input));
+  assert.equal(normalized.valid, true);
+  assert.equal(normalized.media.manyvids.full, "primary.mp4");
+  assert.equal(normalized.media.onlyfans.full, "primary.mp4");
+  assert.equal(normalized.media.fansly.full, "primary.mp4");
+  const photoOnly = plain(
+    context.CreatorUploadConsole.normalizeDraft({
+      ...input,
+      fullFile: null,
+      targets: ["onlyfans", "fansly"],
+    }),
+  );
+  assert.equal(photoOnly.valid, true);
+  const withoutManyVidsPrimary = plain(
+    context.CreatorUploadConsole.normalizeDraft({
+      ...input,
+      fullFile: null,
+    }),
+  );
+  assert.equal(withoutManyVidsPrimary.valid, false);
+});
+
+test("past release dates keep catalogue date separate from site scheduling", () => {
+  const context = loadScripts("upload-console.js");
+  const base = {
+    fullFile: { name: "primary.mp4", type: "video/mp4", size: 42 },
+    title: "Episode 42",
+    releaseDate: "2025-03-03",
+    scheduledIso: "",
+    targets: ["onlyfans", "fansly", "manyvids"],
+  };
+  for (const [scheduleIntent, publishMode] of [
+    ["none", "manual"],
+    ["now", "autonomous"],
+  ]) {
+    const normalized = plain(
+      context.CreatorUploadConsole.normalizeDraft({
+        ...base,
+        scheduleIntent,
+        publishMode,
+      }),
+    );
+    assert.equal(normalized.valid, true);
+    assert.equal(normalized.releaseDate, "2025-03-03");
+    assert.equal(normalized.scheduledIso, "");
+    assert.equal(normalized.scheduleIntent, scheduleIntent);
+  }
 });
 
 test("Pornhub Free requires a separate clip and can be the sole destination", () => {
@@ -782,8 +844,10 @@ test("ManyVids upload adapter clicks only the completed file card edit control",
 for (const scenario of [
   { hasTeaser: true, publishMode: "autonomous" },
   { hasTeaser: false, publishMode: "manual" },
+  { hasTeaser: false, publishMode: "manual", scheduleIntent: "none" },
+  { hasTeaser: false, publishMode: "autonomous", scheduleIntent: "now" },
 ]) {
-  test(`manyvids adapter: preview=${scenario.hasTeaser}, publish=${scenario.publishMode}`, async () => {
+  test(`manyvids adapter: preview=${scenario.hasTeaser}, publish=${scenario.publishMode}, intent=${scenario.scheduleIntent || "friday"}`, async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     try {
@@ -819,6 +883,7 @@ for (const scenario of [
         <input id="free_vid_0" name="free_vid" type="radio"><label for="free_vid_0">Set Your Price</label>
         <input id="appendedPrependedInput" name="video_cost" type="text">
         <input id="launchCustom" name="launchOption" type="radio"><label for="launchCustom">Select a launch date according to your timezone (Europe/Amsterdam)</label>
+        <input id="launchNow" name="launchOption" type="radio"><label for="launchNow">Launch Now</label>
         <input id="dp1" name="available_date" readonly value="2026-08-01" onclick="document.querySelector('.datepicker-dropdown').hidden=false">
         <div class="datepicker-dropdown" hidden><div class="datepicker-days"><table><thead><tr><th class="datepicker-switch">August 2026</th></tr></thead><tbody><tr><td class="day" onclick="document.querySelector('#dp1').value='2026-08-28';document.querySelector('.datepicker-dropdown').hidden=true">28</td></tr></tbody></table></div></div>
         <select id="available_time" name="available_time"><option value="15:00">03:00 PM</option><option value="17:00">05:00 PM</option></select>
@@ -903,8 +968,12 @@ for (const scenario of [
               ...scenario,
               title: "Episode 42",
               description: "Description",
-              releaseDate: "2026-08-28",
-              scheduledIso: "2026-08-28T15:00:00.000Z",
+              releaseDate: scenario.scheduleIntent
+                ? "2025-08-28"
+                : "2026-08-28",
+              scheduledIso: scenario.scheduleIntent
+                ? ""
+                : "2026-08-28T15:00:00.000Z",
               manyvidsId: "7783271",
               manyvidsThumbnail: true,
               profiles: {
@@ -946,6 +1015,7 @@ for (const scenario of [
             coPerformer: document.querySelector("#co-performer").value,
             priceMode: document.querySelector("#free_vid_0").checked,
             launchMode: document.querySelector("#launchCustom").checked,
+            launchNow: document.querySelector("#launchNow").checked,
             membership: document.querySelector("#membership3").checked,
             premium: document.querySelector("#premium2").checked,
             saveClicks: manyvidsSaveClicks,
@@ -973,7 +1043,8 @@ for (const scenario of [
       assert.equal(state.price, "19.99");
       assert.equal(state.coPerformer, "NO");
       assert.equal(state.priceMode, true);
-      assert.equal(state.launchMode, true);
+      assert.equal(state.launchMode, !scenario.scheduleIntent);
+      assert.equal(state.launchNow, scenario.scheduleIntent === "now");
       assert.equal(state.membership, true);
       assert.equal(state.premium, true);
       assert.equal(state.thumbSaveClicks, 1);
@@ -994,8 +1065,19 @@ for (const scenario of [
   });
 }
 
-for (const onlyfansMode of ["manual", "autonomous"]) {
-  test(`OnlyFans ${onlyfansMode} adapter uploads full media, fills description, schedules, and leaves labels untouched`, async () => {
+for (const scenario of [
+  { publishMode: "manual" },
+  { publishMode: "autonomous" },
+  {
+    publishMode: "autonomous",
+    scheduleIntent: "now",
+    mediaFiles: [
+      { role: "media1", name: "detail.mp4", kind: "video" },
+      { role: "media2", name: "photo.jpg", kind: "image" },
+    ],
+  },
+]) {
+  test(`OnlyFans ${scenario.publishMode} adapter uploads media, intent=${scenario.scheduleIntent || "friday"}`, async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     try {
@@ -1063,7 +1145,7 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
           "upload-platform-adapters.js",
         ),
       });
-      const result = await page.evaluate(async (onlyfansMode) => {
+      const result = await page.evaluate(async (scenario) => {
         const labelsBefore = Array.from(
           document.querySelectorAll('[id^="post-label-"]'),
         ).map((input) => input.checked);
@@ -1071,7 +1153,9 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
         const result = await CreatorUploadPlatformAdapters.runOnlyFans({
           draft: {
             title: "Catalogue title must not be posted",
-            publishMode: onlyfansMode,
+            publishMode: scenario.publishMode,
+            scheduleIntent: scenario.scheduleIntent,
+            mediaFiles: scenario.mediaFiles || [],
             description: "Only the episode description",
             scheduledIso: "2026-08-28T15:00:00.000Z",
             timeZone: "Europe/Zurich",
@@ -1080,7 +1164,11 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
             const input = document.querySelector(selector);
             const transfer = new DataTransfer();
             transfer.items.add(
-              new File(["full"], "episode-full.mp4", { type: "video/mp4" }),
+              new File(
+                [role],
+                role === "media2" ? "photo.jpg" : "episode-full.mp4",
+                { type: role === "media2" ? "image/jpeg" : "video/mp4" },
+              ),
             );
             input.files = transfer.files;
             input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1110,31 +1198,57 @@ for (const onlyfansMode of ["manual", "autonomous"]) {
           selectedMinute: document.querySelector(
             '[data-part="minute"] [data-selected="true"]',
           )?.textContent,
+          attachmentCount: document.querySelectorAll(
+            ".b-dropzone__preview:not(.m-schedule)",
+          ).length,
           saveClicks: globalThis.onlyfansSaveClicks,
           progress,
           commitEvents: onlyfansCommitEvents,
         };
-      }, onlyfansMode);
+      }, scenario);
 
       assert.deepEqual(result.result, {
         platform: "onlyfans",
         status:
-          onlyfansMode === "autonomous"
+          scenario.publishMode === "autonomous"
             ? "submitted"
             : "manual-submit-required",
       });
       assert.deepEqual(result.labelsAfter, result.labelsBefore);
       assert.equal(result.caption, "Only the episode description");
       assert.doesNotMatch(result.caption, /Catalogue title/);
-      assert.equal(result.selectedDate, "true");
-      assert.equal(result.selectedHour, "17");
-      assert.equal(result.selectedMinute, "00");
-      assert.equal(result.saveClicks, onlyfansMode === "autonomous" ? 1 : 0);
+      assert.equal(
+        result.selectedDate,
+        scenario.scheduleIntent ? undefined : "true",
+      );
+      assert.equal(
+        result.selectedHour,
+        scenario.scheduleIntent ? undefined : "17",
+      );
+      assert.equal(
+        result.selectedMinute,
+        scenario.scheduleIntent ? undefined : "00",
+      );
+      assert.equal(
+        result.attachmentCount,
+        1 + (scenario.mediaFiles || []).length,
+      );
+      assert.deepEqual(
+        result.progress.filter((item) => item.startsWith("attached:")),
+        [
+          "attached:full",
+          ...(scenario.mediaFiles || []).map((item) => `attached:${item.role}`),
+        ],
+      );
+      assert.equal(
+        result.saveClicks,
+        scenario.publishMode === "autonomous" ? 1 : 0,
+      );
       assert.equal(
         result.commitEvents.includes("checkpoint:onlyfans"),
-        onlyfansMode === "autonomous",
+        scenario.publishMode === "autonomous",
       );
-      if (onlyfansMode === "autonomous")
+      if (scenario.publishMode === "autonomous")
         assert.equal(
           result.commitEvents.indexOf("checkpoint:onlyfans") <
             result.commitEvents.indexOf("click:save"),
@@ -1155,6 +1269,11 @@ for (const scenario of [
   { hasTeaser: false, publishMode: "manual" },
   { hasTeaser: false },
   { hasTeaser: true, publishMode: "manual", mediaModal: true },
+  {
+    hasTeaser: false,
+    publishMode: "manual",
+    mediaFiles: [{ role: "media1", name: "photo.jpg", kind: "image" }],
+  },
 ]) {
   test(`fansly adapter: preview=${scenario.hasTeaser}, publish=${scenario.publishMode}`, async () => {
     const browser = await chromium.launch({ headless: true });
@@ -1217,10 +1336,10 @@ for (const scenario of [
         });
         globalThis.setFanslyUploadRole = (role) => uploadRole = role;
         document.querySelectorAll("#preset-menu .dropdown-item").forEach((option) => option.addEventListener("click", (event) => {
-          const full = document.querySelector('[data-role="full"]');
-          full.dataset.locked = "true";
-          full.dataset.preset = event.target.textContent;
-          full.querySelector(".locked-text-container").textContent = event.target.textContent;
+          const card = [...document.querySelectorAll('app-account-media-template')].at(-1);
+          card.dataset.locked = "true";
+          card.dataset.preset = event.target.textContent;
+          card.querySelector(".locked-text-container").textContent = event.target.textContent;
           document.querySelector("#preset-menu").hidden = true;
         }));
         document.querySelector("#preview-menu .dropdown-item").addEventListener("click", () => {
@@ -1355,9 +1474,15 @@ for (const scenario of [
       assert.deepEqual(result.events, [
         "uploaded:full:episode-full.mp4",
         ...(scenario.hasTeaser ? ["preview:episode-teaser.mp4"] : []),
+        ...(scenario.mediaFiles || []).map(
+          (item) => `uploaded:${item.role}:episode-${item.role}.mp4`,
+        ),
         ...(scenario.publishMode !== "autonomous" ? [] : ["checkpoint:fansly"]),
       ]);
-      assert.equal(result.mediaCardCount, 1);
+      assert.equal(
+        result.mediaCardCount,
+        1 + (scenario.mediaFiles || []).length,
+      );
       assert.equal(result.full.locked, "true");
       assert.equal(result.full.preset, "defaulT");
       assert.equal(

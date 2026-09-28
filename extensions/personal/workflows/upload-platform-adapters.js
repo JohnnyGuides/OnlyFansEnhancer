@@ -879,7 +879,14 @@
       );
     const currentForm = finalTitle.closest("form.video-details-form");
     if (currentForm) {
-      await configurePornhubSchedule(currentForm, draft.scheduledIso, signal);
+      if (!draft.scheduleIntent || draft.scheduleIntent === "friday")
+        await configurePornhubSchedule(currentForm, draft.scheduledIso, signal);
+      else if (
+        currentForm.querySelector('input[name="scheduleDatePaid"]')?.value
+      )
+        throw new Error(
+          "Pornhub has an existing schedule; inspect this draft.",
+        );
       if (mode === "free" && draft.pornhubThumbnail) {
         const owner = currentForm.closest("v-upload-video-details[form-id]");
         const ownerId = owner?.getAttribute("form-id");
@@ -946,7 +953,10 @@
               `Unavailable categories omitted: ${unavailableCategories.join(", ")}`,
             ]
           : []),
-        ...(!currentForm ? ["schedule"] : []),
+        ...(!currentForm &&
+        (!draft.scheduleIntent || draft.scheduleIntent === "friday")
+          ? ["schedule"]
+          : []),
         ...(mode === "free" && !draft.pornhubThumbnail
           ? ["custom thumbnail (optional)"]
           : []),
@@ -1645,17 +1655,42 @@
     if (!sharedManyVids || !sharedManyVidsProfile) {
       throw new Error("ManyVids shared metadata recipe is unavailable.");
     }
-    await runSharedRecipe(
-      sharedManyVids,
-      sharedManyVids.inspectForm(form, sharedManyVidsProfile),
-      signal,
-      40,
-    );
+    const historical = ["none", "now"].includes(draft.scheduleIntent);
+    let effectiveProfile = sharedManyVidsProfile;
+    if (draft.scheduleIntent === "now") {
+      const immediate = [
+        ...form.querySelectorAll('input[type="radio"][name="launchOption"]'),
+      ].filter((control) => {
+        const labels = [...(control.labels || [])].filter(visible);
+        return (
+          labels.length === 1 &&
+          /^(?:launch now|available now|available on mv now|launch immediately)$/i.test(
+            labels[0].textContent.trim(),
+          )
+        );
+      });
+      if (immediate.length !== 1 || !immediate[0].id)
+        throw new Error(
+          "ManyVids publish-now option could not be verified. Review the upload in ManyVids.",
+        );
+      effectiveProfile = {
+        ...sharedManyVidsProfile,
+        launchModeSelector: `#${CSS.escape(immediate[0].id)}`,
+        launchModeExpectedLabel: immediate[0].labels[0].textContent.trim(),
+      };
+    }
+    const sharedPlan = sharedManyVids.inspectForm(form, effectiveProfile);
+    sharedPlan.skipLaunchMode = draft.scheduleIntent === "none";
+    sharedPlan.skipLaunchTime = historical;
+    await runSharedRecipe(sharedManyVids, sharedPlan, signal, 40);
 
     one("select#co-performer", "ManyVids co-performer control", form);
 
     let scheduleProof = null;
-    if (sharedManyVidsProfile.launchModeSelector === "#launchCustom") {
+    if (
+      !historical &&
+      sharedManyVidsProfile.launchModeSelector === "#launchCustom"
+    ) {
       scheduleProof = await configureManyVidsSchedule(form, draft, signal);
     }
     if (
@@ -1671,16 +1706,13 @@
       "ManyVids final Save control",
       form,
     );
-    const verifiedRecipe = sharedManyVids.inspectForm(
-      form,
-      sharedManyVidsProfile,
-    );
+    const verifiedRecipe = sharedManyVids.inspectForm(form, effectiveProfile);
     verifyNoBlockingErrors(form, "ManyVids");
     if (
       verifiedRecipe.tagsToAdd.length ||
       [
         verifiedRecipe.priceMode,
-        verifiedRecipe.launchMode,
+        ...(draft.scheduleIntent === "none" ? [] : [verifiedRecipe.launchMode]),
         verifiedRecipe.membership,
         verifiedRecipe.premium,
       ].some(
@@ -1709,6 +1741,8 @@
       !save.isConnected ||
       title.value !== String(draft.title || "") ||
       description.value !== String(draft.description || "") ||
+      (draft.scheduleIntent === "now" &&
+        !form.querySelector(effectiveProfile.launchModeSelector)?.checked) ||
       (scheduleProof &&
         (form.querySelector("#dp1")?.value !== scheduleProof.date ||
           form.querySelector("#available_time")?.value !== scheduleProof.time ||
@@ -2260,16 +2294,30 @@
       [...composer.querySelectorAll(".b-dropzone__preview__delete")].filter(
         (control) => visible(control) && !control.closest(".m-schedule"),
       );
+    const mediaRoles = [
+      ...(draft.fullFilename !== "" ? ["full"] : []),
+      ...(draft.mediaFiles || []).map((item) => item.role),
+    ];
+    if (!mediaRoles.length)
+      throw new Error("OnlyFans needs at least one selected media file.");
     const mediaReady = () => {
       const previews = mediaPreviews();
       const media = previews[0]?.closest(".b-dropzone__preview");
       return (
-        previews.length === 1 &&
+        previews.length === mediaRoles.length &&
         media &&
-        !/\b(processing|uploading|verifying)\b/i.test(media.textContent) &&
-        ![
-          ...media.querySelectorAll("[aria-busy='true'], [role='progressbar']"),
-        ].some(visible)
+        previews.every((preview) => {
+          const item = preview.closest(".b-dropzone__preview");
+          return (
+            item &&
+            !/\b(processing|uploading|verifying)\b/i.test(item.textContent) &&
+            ![
+              ...item.querySelectorAll(
+                "[aria-busy='true'], [role='progressbar']",
+              ),
+            ].some(visible)
+          );
+        })
       );
     };
     if (mediaPreviews().length)
@@ -2296,20 +2344,20 @@
         signal,
       );
     await context.progress?.("uploading-full");
-    await context.attachFile("full", "#file_upload_input");
-    await waitFor(
-      () => {
-        const previews = mediaPreviews();
-        if (previews.length > 1)
-          throw new Error(
-            "OnlyFans selected attachment association is ambiguous.",
-          );
-        return previews.length === 1;
-      },
-      "OnlyFans recognized full attachment",
-      DEFAULT_DOM_TIMEOUT,
-      signal,
-    );
+    for (const [index, role] of mediaRoles.entries()) {
+      await context.attachFile(role, "#file_upload_input");
+      await waitFor(
+        () => {
+          const previews = mediaPreviews();
+          if (previews.length > index + 1)
+            throw new Error("OnlyFans attachment association is ambiguous.");
+          return previews.length === index + 1;
+        },
+        `OnlyFans recognized ${role} attachment`,
+        DEFAULT_DOM_TIMEOUT,
+        signal,
+      );
+    }
     await context.progress?.("configuring");
 
     revalidate();
@@ -2320,6 +2368,45 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
+
+    if (["none", "now"].includes(draft.scheduleIntent)) {
+      if (composer.querySelector(".b-dropzone__preview.m-schedule"))
+        throw new Error("OnlyFans already has a schedule; inspect this draft.");
+      if (!mediaReady() || labels().length !== labelsBefore.length)
+        throw new Error("OnlyFans media or labels changed during preparation.");
+      if (draft.scheduleIntent === "none")
+        return { platform: "onlyfans", status: "manual-submit-required" };
+      const post = await waitFor(
+        () => {
+          const controls = [...composer.querySelectorAll("button")].filter(
+            (button) =>
+              visible(button) &&
+              enabled(button) &&
+              !button.closest("[role='dialog']") &&
+              ["post", "save"].includes(
+                button.textContent.trim().toLowerCase(),
+              ),
+          );
+          return controls.length === 1 ? controls[0] : null;
+        },
+        "OnlyFans publish-now control",
+        UPLOAD_TIMEOUT,
+        signal,
+      );
+      await beforeCommit(context, "OnlyFans");
+      if (
+        !post.isConnected ||
+        !enabled(post) ||
+        !mediaReady() ||
+        composer.querySelector(".b-dropzone__preview.m-schedule")
+      )
+        throw new Error(
+          "OnlyFans publish-now state changed before submission.",
+        );
+      click(post, "OnlyFans publish-now control");
+      await context.progress?.("submitted");
+      return { platform: "onlyfans", status: "submitted" };
+    }
 
     const parts = zonedParts(
       draft.scheduledIso,
@@ -2902,9 +2989,15 @@
     throw new Error("Fansly date exceeds supported calendar navigation range.");
   }
 
-  async function prepareCurrentFanslyMedia(context, composer, modal, fullCard) {
+  async function prepareCurrentFanslyMedia(
+    context,
+    composer,
+    modal,
+    fullCard,
+    { preview = true } = {},
+  ) {
     const { draft, signal } = context;
-    if (draft.hasTeaser !== false) {
+    if (preview && draft.hasTeaser !== false) {
       await context.progress?.("waiting-for-teaser");
       const input = await preparationBoundary(
         "Fansly",
@@ -2994,11 +3087,18 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    if (draft.hasTeaser !== false && !fullCard.querySelector(".preview-image"))
+    if (
+      preview &&
+      draft.hasTeaser !== false &&
+      !fullCard.querySelector(".preview-image")
+    )
       throw new Error(
         "Fansly free preview disappeared after applying permissions.",
       );
     const commandId = context.checkpointStep ? crypto.randomUUID() : "";
+    const existingCards = new Set(
+      composer.querySelectorAll("app-account-media-template"),
+    );
     await context.checkpointStep?.("attach-media", commandId, "intent");
     click(
       exactText(".btn", "Upload", "Fansly parent media Upload", modal),
@@ -3008,7 +3108,7 @@
       () => {
         const cards = [
           ...composer.querySelectorAll("app-account-media-template"),
-        ];
+        ].filter((card) => !existingCards.has(card));
         if (cards.length > 1)
           throw new Error("Fansly composer attachment is ambiguous.");
         return (
@@ -3026,16 +3126,32 @@
       UPLOAD_TIMEOUT,
       signal,
     );
+    const attachedCard = [
+      ...composer.querySelectorAll("app-account-media-template"),
+    ].filter((card) => !existingCards.has(card));
+    if (attachedCard.length !== 1)
+      throw new Error("Fansly attached-media identity is ambiguous.");
     // Reopen the existing attachment; the composer itself omits preview/access details.
-    click(
-      exactText(
-        "xd-localization-string",
-        "Edit Permissions",
-        "Fansly attached-media permissions",
-        composer,
-      ),
-      "Fansly attached-media permissions",
+    const editControls = [
+      ...composer.querySelectorAll("xd-localization-string"),
+    ].filter(
+      (control) =>
+        visible(control) &&
+        normalizedText(control.textContent) === "edit permissions",
     );
+    const scopedEdit = editControls.filter((control) =>
+      attachedCard[0].contains(control),
+    );
+    const edit =
+      scopedEdit.length === 1
+        ? scopedEdit[0]
+        : composer.querySelectorAll("app-account-media-template").length ===
+              1 && editControls.length === 1
+          ? editControls[0]
+          : null;
+    if (!edit)
+      throw new Error("Fansly attached-media permissions are ambiguous.");
+    click(edit, "Fansly attached-media permissions");
     const review = await waitFor(
       () => document.querySelector("app-account-media-upload.active-modal"),
       "Fansly attachment review",
@@ -3049,7 +3165,9 @@
     );
     if (
       fanslyPermissionState(review) !== permissions ||
-      (draft.hasTeaser !== false && !reviewCard.querySelector(".preview-image"))
+      (preview &&
+        draft.hasTeaser !== false &&
+        !reviewCard.querySelector(".preview-image"))
     )
       throw new Error(
         "Fansly attachment permissions or free preview did not persist.",
@@ -3067,6 +3185,75 @@
       () => !review.isConnected,
       "Fansly closed media review",
       DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    await context.checkpointStep?.("attach-media", commandId, "observed");
+  }
+
+  async function prepareLegacyFanslyExtra(context, composer, card) {
+    const { draft, signal } = context;
+    const existingCards = new Set(
+      composer.querySelectorAll("app-account-media-template"),
+    );
+    const modal = card.closest(
+      "[role='dialog'], app-media-upload-modal, .media-upload-modal",
+    );
+    click(card, "Fansly additional media card");
+    click(
+      one(".locked-text-container", "Fansly additional media access", card),
+      "Fansly additional media access",
+    );
+    const load = [
+      ...document.querySelectorAll("button, [role='button'], .btn"),
+    ].filter(
+      (node) => visible(node) && node.textContent.trim() === "Load Preset",
+    );
+    if (load.length > 1)
+      throw new Error("Fansly access preset control is ambiguous.");
+    if (load.length === 1) click(load[0], "Fansly additional media preset");
+    click(
+      exactText(
+        ".dropdown-item, [role='option'], button",
+        draft.fanslyPreset || "defaulT",
+        "Fansly additional media access preset",
+        document,
+        { caseSensitive: true },
+      ),
+      "Fansly additional media access preset",
+    );
+    await waitFor(
+      () =>
+        card.dataset.locked !== "false" &&
+        (card.dataset.preset === draft.fanslyPreset ||
+          card.querySelector(".locked-text-container")?.textContent.trim() ===
+            draft.fanslyPreset),
+      "Fansly additional media access readback",
+      DEFAULT_DOM_TIMEOUT,
+      signal,
+    );
+    if (!modal) return;
+    const commandId = context.checkpointStep ? crypto.randomUUID() : "";
+    await context.checkpointStep?.("attach-media", commandId, "intent");
+    click(
+      exactText(
+        "button, [role='button'], .btn",
+        "Upload",
+        "Fansly media Upload",
+        modal,
+      ),
+      "Fansly media Upload",
+    );
+    await waitFor(
+      () => {
+        const added = [
+          ...composer.querySelectorAll("app-account-media-template"),
+        ].filter((item) => !existingCards.has(item) && !modal.contains(item));
+        if (added.length > 1)
+          throw new Error("Fansly additional composer media is ambiguous.");
+        return added.length === 1 && added[0].dataset.locked !== "false";
+      },
+      "Fansly additional composer media",
+      UPLOAD_TIMEOUT,
       signal,
     );
     await context.checkpointStep?.("attach-media", commandId, "observed");
@@ -3096,7 +3283,13 @@
         "Fansly existing media requires association review before attachment.",
       );
     await context.progress?.("uploading-full");
-    const fullCard = await attachFanslyMedia(context, composer, "full");
+    const mediaRoles = [
+      ...(draft.fullFilename !== "" ? ["full"] : []),
+      ...(draft.mediaFiles || []).map((item) => item.role),
+    ];
+    if (!mediaRoles.length)
+      throw new Error("Fansly needs at least one selected media file.");
+    const fullCard = await attachFanslyMedia(context, composer, mediaRoles[0]);
     const currentMediaModal = fullCard.closest("app-account-media-upload");
     if (currentMediaModal) {
       await prepareCurrentFanslyMedia(
@@ -3193,6 +3386,16 @@
       }
     }
 
+    for (const role of mediaRoles.slice(1)) {
+      const card = await attachFanslyMedia(context, composer, role);
+      const modal = card.closest("app-account-media-upload.active-modal");
+      if (modal)
+        await prepareCurrentFanslyMedia(context, composer, modal, card, {
+          preview: false,
+        });
+      else await prepareLegacyFanslyExtra(context, composer, card);
+    }
+
     const sharedFansly = globalThis.CreatorToolkitAdapters?.fanslyPrefill;
     const sharedFanslyProfile = draft.profiles?.fanslyPrefill;
     if (!sharedFansly || !sharedFanslyProfile) {
@@ -3217,6 +3420,28 @@
       signal,
       10,
     );
+    if (["none", "now"].includes(draft.scheduleIntent)) {
+      const post = one(".new-post-btn", "Fansly publish-now control", composer);
+      if (
+        !post ||
+        !enabled(post) ||
+        post.textContent.trim().toLowerCase() !== "post" ||
+        composer.querySelector("app-post-schedule-modal:not([hidden])")
+      )
+        throw new Error("Fansly unscheduled post state is ambiguous.");
+      if (draft.scheduleIntent === "none")
+        return { platform: "fansly", status: "manual-submit-required" };
+      await beforeCommit(context, "Fansly");
+      if (
+        !post.isConnected ||
+        !enabled(post) ||
+        post.textContent.trim().toLowerCase() !== "post"
+      )
+        throw new Error("Fansly publish-now state changed before submission.");
+      click(post, "Fansly publish-now control");
+      await context.progress?.("submitted");
+      return { platform: "fansly", status: "submitted" };
+    }
     const calendarIcons = [
       ...composer.querySelectorAll(".icon-stack:has(.fa-clock) .fa-calendar"),
     ].filter(visible);
@@ -3377,7 +3602,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.79",
+    revision: "upload-hub-0.20.80",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>
