@@ -2739,7 +2739,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.78"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.79"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -3094,6 +3094,30 @@ async function validateCreatorUploadRequest(message) {
     publishMode: message.draft?.publishMode ?? "manual",
     pornhubFilename: creatorUploadClean(message.draft?.pornhubFilename, 500),
     fileProof: creatorUploadResumeFileProof(message.draft?.fileProof),
+    openingFrame: (() => {
+      const frame = message.draft?.openingFrame;
+      if (frame == null) return null;
+      const seconds = Number(frame.seconds);
+      const zoom = Number(frame.crop?.zoom);
+      const x = Number(frame.crop?.x);
+      const y = Number(frame.crop?.y);
+      if (
+        !Number.isFinite(seconds) ||
+        seconds < 0 ||
+        seconds > 86400 ||
+        !Number.isFinite(zoom) ||
+        zoom < 1 ||
+        zoom > 2 ||
+        !Number.isFinite(x) ||
+        x < -1 ||
+        x > 1 ||
+        !Number.isFinite(y) ||
+        y < -1 ||
+        y > 1
+      )
+        throw new Error("Invalid opening frame selection.");
+      return { seconds, crop: { zoom, x, y } };
+    })(),
     contentPreset: creatorUploadClean(message.draft?.contentPreset, 100),
     fanslyCaption: creatorUploadClean(message.draft?.fanslyCaption, 15_000),
   };
@@ -4456,7 +4480,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.78"
+      "upload-hub-0.20.79"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",

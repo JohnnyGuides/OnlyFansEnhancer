@@ -26,6 +26,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly UploadCatalogueController uploadCatalogue;
     private readonly UploadThumbnailCatalogue uploadThumbnails;
     private readonly GeneratedUploadMediaStore generatedUploadMedia = new();
+    private VideoOpeningFrameStore? openingFrames;
     private readonly ChromeIntegration chromeIntegration;
     private readonly bool hasExtensionOverride;
     private bool exiting;
@@ -146,7 +147,7 @@ public partial class MainWindow : Window, IDisposable
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
-        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "prepareOpeningFrame", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try
         {
@@ -262,12 +263,25 @@ public partial class MainWindow : Window, IDisposable
                 var command = payload.EnumerateObject().ToDictionary(item => item.Name, item => (object)item.Value.Clone());
                 FileInfo delivered = payload.GetProperty("role").GetString() == "thumbnail"
                     ? UploadThumbnailConverter.Convert(info) : info;
+                if (payload.TryGetProperty("openingFrameToken", out JsonElement openingToken))
+                {
+                    if (payload.GetProperty("role").GetString() != "full") throw new InvalidOperationException("invalid-payload");
+                    delivered = (openingFrames ??= new VideoOpeningFrameStore()).Resolve(
+                        openingToken.GetString() ?? "", info, payload.GetProperty("platform").GetString() ?? "");
+                }
                 command["kind"] = "file";
                 command["filePath"] = delivered.FullName;
                 command["name"] = delivered.Name;
                 command["size"] = delivered.Length;
                 command["lastModified"] = new DateTimeOffset(delivered.LastWriteTimeUtc).ToUnixTimeMilliseconds();
                 result = await uploads.RequestNativeFileAsync(JsonSerializer.SerializeToElement(command));
+            }
+            else if (operation == "prepareOpeningFrame")
+            {
+                if (additionalObjects.Count != 1 || additionalObjects[0] is not CoreWebView2File file)
+                    throw new InvalidOperationException("Choose the video again in this window.");
+                string token = await (openingFrames ??= new VideoOpeningFrameStore()).PrepareAsync(new FileInfo(file.Path), payload);
+                result = new { token };
             }
             else result = await uploads.RequestAsync(payload);
             return JsonSerializer.Serialize(new { requestId, ok = true, result }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });

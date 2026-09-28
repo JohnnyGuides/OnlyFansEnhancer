@@ -622,6 +622,30 @@
         };
       }
     }
+    if (value.openingFrame != null) {
+      const frame = value.openingFrame;
+      const { seconds, crop } = frame;
+      if (
+        !Number.isFinite(seconds) ||
+        seconds < 0 ||
+        seconds > 86400 ||
+        !crop ||
+        !Number.isFinite(crop.zoom) ||
+        crop.zoom < 1 ||
+        crop.zoom > 2 ||
+        !Number.isFinite(crop.x) ||
+        crop.x < -1 ||
+        crop.x > 1 ||
+        !Number.isFinite(crop.y) ||
+        crop.y < -1 ||
+        crop.y > 1
+      )
+        throw new Error("Invalid saved opening frame.");
+      output.openingFrame = {
+        seconds,
+        crop: { zoom: crop.zoom, x: crop.x, y: crop.y },
+      };
+    }
     if (value.fanslyPresetSelection === "first")
       output.fanslyPresetSelection = "first";
     if (!["manual", "autonomous"].includes(value.publishMode ?? "manual"))

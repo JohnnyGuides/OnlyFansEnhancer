@@ -1626,6 +1626,26 @@ html {
   justify-content: flex-end;
   margin: 0;
 }
+.thumbnail-frame-dialog .opening-frame-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  color: #d4e0ec;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.thumbnail-frame-dialog .opening-frame-choice[hidden] {
+  display: none;
+}
+.thumbnail-frame-dialog .opening-frame-choice input {
+  margin: 0;
+  accent-color: #65c5f4;
+}
+.thumbnail-frame-dialog .opening-frame-choice small {
+  color: #9fb6ca;
+  font-size: 0.76rem;
+}
 .upload-media .file-information {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2516,6 +2536,13 @@ a {
   }
   .thumbnail-frame-timeline {
     margin: 16px 16px 12px;
+  }
+  .thumbnail-frame-dialog .file-actions {
+    flex-wrap: wrap;
+  }
+  .thumbnail-frame-dialog .opening-frame-choice {
+    flex-basis: 100%;
+    margin-bottom: 8px;
   }
 }
 @media (max-width: 650px) {

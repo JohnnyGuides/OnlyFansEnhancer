@@ -254,6 +254,16 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
       Number(await page.locator("#thumbnailFrameTime").inputValue()) > 600,
     );
     const stripBox = await page.locator("#thumbnailFrameStrip").boundingBox();
+    const stripResolution = await page
+      .locator("#thumbnailFrameStrip")
+      .evaluate((canvas) => ({
+        width: canvas.width,
+        height: canvas.height,
+        displayWidth: canvas.clientWidth,
+        displayHeight: canvas.clientHeight,
+      }));
+    assert.ok(stripResolution.width >= stripResolution.displayWidth);
+    assert.ok(stripResolution.height >= stripResolution.displayHeight);
     await page.mouse.move(
       stripBox.x + stripBox.width * 0.25,
       stripBox.y + stripBox.height / 2,

@@ -485,6 +485,7 @@ test("upload session storage round-trips only bounded allow-listed metadata", as
       title: `Episode${"x".repeat(1000)}`,
       description: "Caption",
       fullFilename: "episode.mp4",
+      openingFrame: { seconds: 12.5, crop: { zoom: 1.2, x: 0.1, y: -0.2 } },
       profiles: { fanslyPrefill: { message: "#tags" } },
       cookie: "forbidden",
     },
@@ -519,6 +520,10 @@ test("upload session storage round-trips only bounded allow-listed metadata", as
   assert.equal(restored.draft.title.length, 500);
   assert.equal(restored.draft.description, "Caption");
   assert.equal(restored.draft.profiles.fanslyPrefill.message, "#tags");
+  assert.deepEqual(restored.draft.openingFrame, {
+    seconds: 12.5,
+    crop: { zoom: 1.2, x: 0.1, y: -0.2 },
+  });
   assert.equal(restored.catalogue.row, 42);
   assert.deepEqual(Array.from(restored.catalogue.repeatPlatforms), [
     "onlyfans",

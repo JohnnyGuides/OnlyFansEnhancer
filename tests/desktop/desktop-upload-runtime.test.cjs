@@ -424,3 +424,47 @@ test("host delivers virtual port progress and files through the actual desktop r
   );
   extensionFixture.runtime.stop();
 });
+
+test("opening frame preparation is bound to the selected file and routed only to OnlyFans or Fansly", async () => {
+  const ui = host((request) =>
+    request.operation === "prepareOpeningFrame"
+      ? { token: "prepared-intro" }
+      : { delivered: true },
+  );
+  ui.context.File = class File {
+    constructor() {
+      this.name = "neutral.mp4";
+      this.size = 100;
+      this.lastModified = 42;
+    }
+  };
+  const file = new ui.context.File();
+  const token = await ui.context.OFEnhancerDesktopUpload.prepareOpeningFrame(
+    file,
+    {
+      seconds: 1.5,
+      crop: { zoom: 1, x: 0, y: 0 },
+    },
+  );
+  assert.equal(token, "prepared-intro");
+  assert.equal(ui.requests.at(-1).operation, "prepareOpeningFrame");
+  assert.equal(ui.requests.at(-1).payload.name, "neutral.mp4");
+  for (const platform of ["onlyfans", "fansly", "manyvids", "pornhub"]) {
+    await ui.context.OFEnhancerDesktopUpload.deliverFile(
+      { openingFrameToken: token, port: { postMessage() {} } },
+      {
+        requestId: platform,
+        sessionId: "run",
+        platform,
+        role: "full",
+        token: "file-token",
+      },
+      file,
+    );
+    const payload = ui.requests.at(-1).payload;
+    assert.equal(
+      payload.openingFrameToken,
+      ["onlyfans", "fansly"].includes(platform) ? token : undefined,
+    );
+  }
+});

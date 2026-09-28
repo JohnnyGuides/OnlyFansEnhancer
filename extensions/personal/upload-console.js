@@ -897,6 +897,7 @@
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const initialSchedule = nextFridayUtc(new Date(), timeZone);
     let fullFile = null;
+    let openingFrame = null;
     let teaserFile = null;
     let thumbnailFile = null;
     let thumbnailCatalogueId = null;
@@ -2318,6 +2319,7 @@
                 : null,
             pornhub: fileResumeProof(selectedPornhubFile(value.pornhubMode)),
           },
+          openingFrame: openingFrame || null,
           contentPreset: value.contentPreset,
           pornhubMode: value.pornhubMode,
           pornhubCertificationsConfirmed: value.pornhubCertificationsConfirmed,
@@ -3208,6 +3210,7 @@
         whenBound: bound.finally(() => clearTimeout(bindingTimer)),
         id: sessionId,
         files: { ...confirmed.files },
+        openingFrameToken: confirmed.openingFrameToken || null,
         fileProof: Object.fromEntries(
           Object.entries(confirmed.files).map(([role, file]) => [
             role,
@@ -3529,6 +3532,21 @@
         }
         repeatUploadConfirmed = repeatedTargets().length > 0;
         await recheckProposalBeforeUpload();
+        let openingFrameToken = null;
+        if (
+          openingFrame &&
+          globalThis.OFEnhancerDesktopUpload &&
+          pendingTargets(value).some((target) =>
+            ["onlyfans", "fansly"].includes(target),
+          )
+        ) {
+          matchStatus.textContent = "Preparing opening frame…";
+          openingFrameToken =
+            await globalThis.OFEnhancerDesktopUpload.prepareOpeningFrame(
+              fullFile,
+              openingFrame,
+            );
+        }
         await writeCatalogueBeforeUpload();
         await recheckProposalBeforeUpload();
         social = socialDraft(currentMatch.candidate);
@@ -3634,6 +3652,7 @@
         };
         activeSession = connectSession(sessionId, {
           files: selectedFiles,
+          openingFrameToken,
           socialSessionId: socialPlan?.id || "",
           proof: {
             fullFilename: fullFile?.name || "",
@@ -4030,6 +4049,15 @@
         const targetNames = new Set(
           resumable.platforms.map((target) => target.platform),
         );
+        const openingFrameToken =
+          expected.openingFrame &&
+          globalThis.OFEnhancerDesktopUpload &&
+          (targetNames.has("onlyfans") || targetNames.has("fansly"))
+            ? await globalThis.OFEnhancerDesktopUpload.prepareOpeningFrame(
+                fullFile,
+                expected.openingFrame,
+              )
+            : null;
         workflowMode.value = "main";
         onlyfans.checked = targetNames.has("onlyfans");
         fansly.checked = targetNames.has("fansly");
@@ -4059,6 +4087,7 @@
         ++readinessRevision;
         activeSession = connectSession(resumable.id, {
           existing: true,
+          openingFrameToken,
           files: {
             full: fullFile,
             teaser: teaserFile,
@@ -4547,6 +4576,7 @@
     const frameNavigator = get("#thumbnailFrameNavigator");
     const frameRuler = get("#thumbnailFrameRuler");
     const frameStatus = get("#thumbnailFrameStatus");
+    const openingFrameChoice = get("#useOpeningFrame");
     const frameStrip = get("#thumbnailFrameStrip");
     const stripVideo = document.createElement("video");
     stripVideo.muted = true;
@@ -4877,7 +4907,12 @@
     async function drawFrameStrip(revision) {
       const context = frameStrip.getContext("2d");
       if (!context) return;
-      const count = 10;
+      const pixelRatio = Math.min(2, globalThis.devicePixelRatio || 1);
+      frameStrip.width = Math.round(frameStrip.clientWidth * pixelRatio);
+      frameStrip.height = Math.round(frameStrip.clientHeight * pixelRatio);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      const count = 8;
       const width = frameStrip.width / count;
       for (let index = 0; index < count; index++) {
         if (!frameDialog.open || revision !== stripRevision) return;
@@ -4889,8 +4924,24 @@
           ),
         );
         if (revision !== stripRevision) return;
+        const sourceWidth = stripVideo.videoWidth;
+        const sourceHeight = stripVideo.videoHeight;
+        const sourceAspect = sourceWidth / sourceHeight;
+        const targetAspect = width / frameStrip.height;
+        const cropWidth =
+          sourceAspect > targetAspect
+            ? sourceHeight * targetAspect
+            : sourceWidth;
+        const cropHeight =
+          sourceAspect > targetAspect
+            ? sourceHeight
+            : sourceWidth / targetAspect;
         context.drawImage(
           stripVideo,
+          (sourceWidth - cropWidth) / 2,
+          (sourceHeight - cropHeight) / 2,
+          cropWidth,
+          cropHeight,
           index * width,
           0,
           width,
@@ -4945,6 +4996,7 @@
     get("#chooseThumbnailFrame").addEventListener("click", async () => {
       if (!(fullFile instanceof File) || runBusy || activeSession) return;
       frameSource = fullFile;
+      openingFrameChoice.checked = Boolean(openingFrame);
       frameStatus.textContent = "Loading video timeline…";
       cropArea.hidden = true;
       frameRuler.replaceChildren();
@@ -5006,6 +5058,9 @@
             selectedCrop(),
           );
         thumbnailFile.source = "generated";
+        openingFrame = openingFrameChoice.checked
+          ? { seconds: frameVideo.currentTime, crop: selectedCrop() }
+          : null;
         autoThumbnailAssetId = null;
         closeFrameDialog();
         renderFilePickers();
@@ -5033,6 +5088,7 @@
       if (frameDialog.open) closeFrameDialog();
       if (teaserFile?.source === "generated") teaserFile = null;
       if (thumbnailFile?.source === "generated") thumbnailFile = null;
+      openingFrame = null;
       fullFile = fullInput.files?.[0] || null;
       selectedCatalogueRow = null;
       lastPrefilledCatalogueRow = null;

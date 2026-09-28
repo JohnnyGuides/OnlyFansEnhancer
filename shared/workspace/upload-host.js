@@ -72,6 +72,7 @@
           "deliverGeneratedMedia",
           "deliverDevelopmentFixture",
           "deliverCatalogueThumbnail",
+          "prepareOpeningFrame",
         ].includes(operation)
           ? 2 * 60 * 60_000
           : 30_000,
@@ -307,6 +308,22 @@
   globalThis.OFEnhancerDesktopUpload = Object.freeze({
     refreshBrowsers,
     loadDevelopmentFixtures: () => call("loadDevelopmentFixtures"),
+    async prepareOpeningFrame(file, selection) {
+      if (!(file instanceof File))
+        throw new Error("Choose the main video again.");
+      const result = await call(
+        "prepareOpeningFrame",
+        {
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          seconds: selection.seconds,
+          crop: selection.crop,
+        },
+        [file],
+      );
+      return result.token;
+    },
     async deliverFile(session, request, file) {
       try {
         await ensureBrowser();
@@ -326,6 +343,11 @@
             platform: request.platform,
             role: request.role,
             token: request.token,
+            ...(request.role === "full" &&
+            ["onlyfans", "fansly"].includes(request.platform) &&
+            session.openingFrameToken
+              ? { openingFrameToken: session.openingFrameToken }
+              : {}),
             ...(file.source === "catalogue-thumbnail"
               ? { catalogueId: file.catalogueId, assetId: file.assetId }
               : file.source === "development-fixture"
