@@ -64,6 +64,43 @@ public sealed class GoogleWorkspaceClientTests
     }
 
     [TestMethod]
+    public async Task UploadEntryWriterUsesMatchingPredatedRowWithoutMovingItsDate()
+    {
+        string identity = "clip.mp4|5|123|New video|2026-09-25";
+        string id = "new-video-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..12].ToLowerInvariant();
+        JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
+        JsonObject before = UploadWorkbookResponse(null);
+        JsonObject after = UploadWorkbookResponse(null);
+        before["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray().Add(JsonSerializer.SerializeToNode(new {
+            values = new[] { new { formattedValue = "" }, new { formattedValue = "2026-09-25" } }
+        }));
+        after["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray().Add(JsonSerializer.SerializeToNode(new {
+            values = new[] { new { formattedValue = id }, new { formattedValue = "2026-09-25" },
+                new { formattedValue = "New video" }, new { formattedValue = "Preview text" } }
+        }));
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(), before.ToJsonString(), "{}",
+            WorkbookMetadataJson, discovery.ToJsonString(), after.ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(
+            new("new", "New video", "Preview text", "2026-09-25", "clip.mp4", 5, 123),
+            CancellationToken.None);
+
+        Assert.AreEqual(3, result.Row);
+        RecordedRequest mutation = handler.Requests.Single(request => request.Method == HttpMethod.Post);
+        StringAssert.Contains(mutation.Uri.AbsolutePath, "values:batchUpdate");
+        using JsonDocument body = JsonDocument.Parse(mutation.Body);
+        string[] ranges = body.RootElement.GetProperty("data").EnumerateArray()
+            .Select(update => update.GetProperty("range").GetString()!).ToArray();
+        CollectionAssert.AreEquivalent(new[] { "'2026 Video Catalogue'!A3", "'2026 Video Catalogue'!C3",
+            "'2026 Video Catalogue'!D3" }, ranges);
+    }
+
+    [TestMethod]
     public async Task UploadEntryWriterReconcilesUncertainAppendWithoutRetrying()
     {
         string identity = "clip.mp4|5|123|New video|2026-09-25";

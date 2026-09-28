@@ -22,7 +22,9 @@ internal sealed class GoogleUploadEntryWriter(
         GoogleUploadEntryRequest request, CancellationToken cancellationToken)
     {
         Validate(request);
-        GoogleCatalogueImportPreview before = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        GoogleWorkbookSnapshot workbook = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken)
+            .ConfigureAwait(false);
+        GoogleCatalogueImportPreview before = GoogleCatalogueImportReader.Read(workbook, preferredSheetId);
         string id = request.Mode == "new" ? NewId(request) : request.Id!;
         WorkbookCatalogueItem? existing = before.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
         if (request.Mode == "new")
@@ -38,10 +40,16 @@ internal sealed class GoogleUploadEntryWriter(
                     : throw new GoogleCatalogueException("catalogue-new-entry-conflict");
             try
             {
-                await workspace.AppendCatalogueRowAsync(workbookId, before.CatalogueSheetTitle,
-                    before.HeaderRow, before.Columns, id, request.ReleaseDate,
-                    request.Title, request.Description, request.Category, request.SeasonArc,
-                    cancellationToken).ConfigureAwait(false);
+                int? reservedRow = FindReservedDateRow(workbook, before, request.ReleaseDate);
+                if (reservedRow is int row)
+                    await workspace.WriteCatalogueRowAtAsync(workbookId, before.CatalogueSheetTitle,
+                        before.Columns, row, id, request.Title, request.Description,
+                        request.Category, request.SeasonArc, cancellationToken).ConfigureAwait(false);
+                else
+                    await workspace.AppendCatalogueRowAsync(workbookId, before.CatalogueSheetTitle,
+                        before.HeaderRow, before.Columns, id, request.ReleaseDate,
+                        request.Title, request.Description, request.Category, request.SeasonArc,
+                        cancellationToken).ConfigureAwait(false);
             }
             catch (GoogleMutationUncertainException)
             {
@@ -135,6 +143,28 @@ internal sealed class GoogleUploadEntryWriter(
         GoogleWorkbookSnapshot snapshot = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken)
             .ConfigureAwait(false);
         return GoogleCatalogueImportReader.Read(snapshot, preferredSheetId);
+    }
+
+    private static int? FindReservedDateRow(GoogleWorkbookSnapshot workbook,
+        GoogleCatalogueImportPreview preview, string releaseDate)
+    {
+        if (!preview.Columns.TryGetValue("plannedDate", out int dateColumn)
+            || !preview.Columns.TryGetValue("sourceKey", out int idColumn)) return null;
+        GoogleSheetSnapshot sheet = workbook.Sheets.Single(s => s.SheetId == preview.CatalogueSheetId);
+        int? selected = null;
+        foreach (GoogleWorkbookRowSnapshot row in sheet.Rows.Where(r => r.RowNumber > preview.HeaderRow))
+        {
+            string? date = row.Cells.ElementAtOrDefault(dateColumn - 1)?.Value;
+            if (date != releaseDate) continue;
+            // A date alone reserves a slot; any other content means it belongs to another entry.
+            bool occupied = Enumerable.Range(0, Math.Min(12, row.Cells.Count))
+                .Where(index => index != dateColumn - 1)
+                .Any(index => !string.IsNullOrWhiteSpace(row.Cells[index].Value));
+            if (occupied) continue;
+            if (!string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(idColumn - 1)?.Value)) continue;
+            selected ??= row.RowNumber;
+        }
+        return selected;
     }
 
     private static bool ExactNew(WorkbookCatalogueItem item, GoogleUploadEntryRequest request) =>

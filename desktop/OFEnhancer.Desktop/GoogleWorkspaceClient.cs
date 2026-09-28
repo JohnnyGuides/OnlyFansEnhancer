@@ -454,6 +454,28 @@ internal sealed class GoogleWorkspaceClient
         return SendMutationAsync(endpoint, body, cancellationToken);
     }
 
+    internal Task WriteCatalogueRowAtAsync(string workbookId, string sheetTitle,
+        IReadOnlyDictionary<string, int> columns, int row, string id, string title,
+        string description, string category, string seasonArc, CancellationToken cancellationToken)
+    {
+        if (row < 2 || row > 5002) throw new GoogleCatalogueException("catalogue-layout-changed");
+        string escapedSheet = Required(sheetTitle, 200, "sheetTitle").Replace("'", "''", StringComparison.Ordinal);
+        List<GoogleValueUpdate> updates = [];
+        foreach ((string field, string value) in new[] {
+            ("sourceKey", id), ("title", title), ("description", description),
+            ("category", category), ("series", seasonArc) })
+        {
+            if (!columns.TryGetValue(field, out int column))
+            {
+                if (value.Length == 0 && field is "category" or "series") continue;
+                throw new GoogleCatalogueException("catalogue-layout-changed");
+            }
+            if (column is < 1 or > 24) throw new GoogleCatalogueException("catalogue-layout-changed");
+            updates.Add(new($"'{escapedSheet}'!{(char)('A' + column - 1)}{row}", value));
+        }
+        return UpdateValuesBatchAsync(new(workbookId, updates), cancellationToken, raw: true);
+    }
+
     internal Task UpdateMetadataCellAsync(string workbookId, int metadataId, int column, string value, CancellationToken cancellationToken)
     {
         if (metadataId < 0 || column is < 1 or > 24) throw new GoogleCatalogueException("invalid-google-batch");
