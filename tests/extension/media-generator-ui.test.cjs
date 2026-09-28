@@ -223,6 +223,7 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
   const fixture = await createUploadFixture();
   try {
     const page = fixture.page;
+    await page.setViewportSize({ width: 1200, height: 850 });
     await page.locator("#uploadFullVideo").setInputFiles(videoPath);
     assert.equal(await page.locator("#chooseThumbnailFrame").isEnabled(), true);
     if (process.env.OFENHANCER_REVIEW_DIR) {
@@ -235,33 +236,94 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
       });
     }
     await page.locator("#chooseThumbnailFrame").click();
-    await page.waitForFunction(() =>
-      document
-        .querySelector("#thumbnailFrameStatus")
-        .textContent.includes("Choose the frame"),
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#thumbnailFrameDuration").textContent !==
+          "0:00" &&
+        !document.querySelector("#thumbnailFrameStatus").textContent,
     );
     await page.locator("#thumbnailFrameTime").evaluate((slider) => {
       slider.value = "500";
       slider.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    const stripBox = await page.locator("#thumbnailFrameStrip").boundingBox();
-    await page.locator("#thumbnailFrameStrip").click({
-      position: { x: stripBox.width * 0.75, y: stripBox.height / 2 },
+    await page.locator("#thumbnailFrameTime").evaluate((slider) => {
+      slider.value = "750";
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
     });
     assert.ok(
       Number(await page.locator("#thumbnailFrameTime").inputValue()) > 600,
     );
-    await page.locator("#thumbnailCropZoom").evaluate((slider) => {
-      slider.value = "160";
+    const stripBox = await page.locator("#thumbnailFrameStrip").boundingBox();
+    await page.mouse.move(
+      stripBox.x + stripBox.width * 0.25,
+      stripBox.y + stripBox.height / 2,
+    );
+    await page.mouse.wheel(0, -300);
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#thumbnailFrameRuler span")?.textContent !==
+        "0:00",
+    );
+    assert.equal(await page.locator("#thumbnailFrameWindow").isVisible(), true);
+    assert.equal(await page.locator("#thumbnailFrameRuler span").count(), 5);
+    assert.match(
+      await page.locator("#thumbnailFrameRuler span").first().textContent(),
+      /^0:00\.7/,
+    );
+    await page.locator("#thumbnailFrameTime").evaluate((slider) => {
+      slider.value = "750";
       slider.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await page.locator("#thumbnailCropX").evaluate((slider) => {
-      slider.value = "75";
-      slider.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    assert.ok(
+      (await page.locator("#thumbnailFramePosition").textContent()).includes(
+        ".",
+      ),
+    );
+    const beforePan = await page
+      .locator("#thumbnailFrameRuler span")
+      .first()
+      .textContent();
+    const navigatorBox = await page
+      .locator("#thumbnailFrameNavigator")
+      .boundingBox();
+    await page
+      .locator("#thumbnailFrameNavigator")
+      .click({ position: { x: navigatorBox.width - 20, y: 5 } });
+    assert.notEqual(
+      await page.locator("#thumbnailFrameRuler span").first().textContent(),
+      beforePan,
+    );
     assert.equal(
-      await page.locator("#thumbnailCropZoomValue").textContent(),
-      "1.6×",
+      await page.locator(".thumbnail-frame-dialog input[type=range]").count(),
+      1,
+    );
+    const originalCrop = await page.locator("#thumbnailCropArea").boundingBox();
+    const handle = await page
+      .locator('.thumbnail-crop-handle[data-corner="se"]')
+      .boundingBox();
+    await page.mouse.move(
+      handle.x + handle.width / 2,
+      handle.y + handle.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(handle.x - 90, handle.y - 45, { steps: 5 });
+    await page.mouse.up();
+    const resizedCrop = await page.locator("#thumbnailCropArea").boundingBox();
+    assert.ok(resizedCrop.width < originalCrop.width);
+    await page.mouse.move(
+      resizedCrop.x + resizedCrop.width / 2,
+      resizedCrop.y + resizedCrop.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      resizedCrop.x + resizedCrop.width / 2 + 25,
+      resizedCrop.y + resizedCrop.height / 2,
+      { steps: 5 },
+    );
+    await page.mouse.up();
+    assert.ok(
+      (await page.locator("#thumbnailCropArea").boundingBox()).x >
+        resizedCrop.x,
     );
     assert.equal(await page.locator("#useThumbnailFrame").isVisible(), true);
     assert.ok(

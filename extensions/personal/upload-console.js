@@ -4541,44 +4541,356 @@
     const frameVideo = get("#thumbnailFrameVideo");
     const frameSlider = get("#thumbnailFrameTime");
     const framePosition = get("#thumbnailFramePosition");
+    const frameDuration = get("#thumbnailFrameDuration");
+    const framePlayhead = get("#thumbnailFramePlayhead");
+    const frameWindow = get("#thumbnailFrameWindow");
+    const frameNavigator = get("#thumbnailFrameNavigator");
+    const frameRuler = get("#thumbnailFrameRuler");
     const frameStatus = get("#thumbnailFrameStatus");
     const frameStrip = get("#thumbnailFrameStrip");
+    const stripVideo = document.createElement("video");
+    stripVideo.muted = true;
+    stripVideo.preload = "metadata";
     const cropPreview = get("#thumbnailCropPreview");
-    const cropZoom = get("#thumbnailCropZoom");
-    const cropX = get("#thumbnailCropX");
-    const cropY = get("#thumbnailCropY");
+    const cropArea = get("#thumbnailCropArea");
     let frameUrl = null;
     let frameSource = null;
-    const selectedCrop = () => ({
-      zoom: Number(cropZoom.value) / 100,
-      x: Number(cropX.value) / 100,
-      y: Number(cropY.value) / 100,
-    });
-    function renderCropPreview() {
-      globalThis.CreatorMediaGenerator.drawThumbnailPreview(
-        frameVideo,
-        cropPreview,
-        selectedCrop(),
-      );
-      get("#thumbnailCropZoomValue").value =
-        `${(Number(cropZoom.value) / 100).toFixed(1)}×`;
+    let timelineZoom = 1;
+    let timelineStart = 0;
+    let stripRevision = 0;
+    let stripRendering = false;
+    let stripRenderTimer = null;
+    let crop = { zoom: 1, x: 0, y: 0 };
+    const selectedCrop = () => ({ ...crop });
+    const clampCrop = (value, min, max) => Math.min(max, Math.max(min, value));
+    function cropMetrics() {
+      const width = frameVideo.videoWidth;
+      const height = frameVideo.videoHeight;
+      if (!width || !height) return null;
+      const baseWidth = Math.min(width, (height * 16) / 9);
+      const baseHeight = (baseWidth * 9) / 16;
+      const cropWidth = baseWidth / crop.zoom;
+      const cropHeight = baseHeight / crop.zoom;
+      return {
+        width,
+        height,
+        baseWidth,
+        cropWidth,
+        cropHeight,
+        left: ((width - cropWidth) * (crop.x + 1)) / 2,
+        top: ((height - cropHeight) * (crop.y + 1)) / 2,
+      };
     }
-    for (const input of [cropZoom, cropX, cropY])
-      input.addEventListener("input", renderCropPreview);
+    function setCropRect(left, top, width) {
+      const metrics = cropMetrics();
+      if (!metrics) return;
+      const cropWidth = clampCrop(
+        width,
+        metrics.baseWidth / 2,
+        metrics.baseWidth,
+      );
+      const cropHeight = (cropWidth * 9) / 16;
+      crop = {
+        zoom: metrics.baseWidth / cropWidth,
+        x:
+          metrics.width === cropWidth
+            ? 0
+            : (clampCrop(left, 0, metrics.width - cropWidth) /
+                (metrics.width - cropWidth)) *
+                2 -
+              1,
+        y:
+          metrics.height === cropHeight
+            ? 0
+            : (clampCrop(top, 0, metrics.height - cropHeight) /
+                (metrics.height - cropHeight)) *
+                2 -
+              1,
+      };
+      renderCropPreview();
+    }
+    function timelineSpan() {
+      return frameVideo.duration / timelineZoom;
+    }
+    function centerTimelineAt(seconds) {
+      const span = timelineSpan();
+      timelineStart = clampCrop(
+        seconds - span / 2,
+        0,
+        frameVideo.duration - span,
+      );
+    }
+    function renderTimeline(seconds) {
+      if (!Number.isFinite(frameVideo.duration) || !frameVideo.duration) return;
+      const duration = frameVideo.duration;
+      const span = timelineSpan();
+      const precise = timelineZoom > 1;
+      framePosition.textContent = formatPosition(seconds, precise);
+      frameSlider.value = String(
+        Math.round(clampCrop((seconds - timelineStart) / span, 0, 1) * 1000),
+      );
+      framePlayhead.style.setProperty(
+        "--playhead",
+        `${((seconds - timelineStart) / span) * 100}%`,
+      );
+      framePlayhead.hidden =
+        seconds < timelineStart || seconds > timelineStart + span;
+      frameWindow.style.setProperty(
+        "--window-left",
+        `${(timelineStart / duration) * 100}%`,
+      );
+      frameWindow.style.setProperty(
+        "--window-width",
+        `${(span / duration) * 100}%`,
+      );
+      frameWindow.classList.toggle(
+        "is-narrow",
+        (span / duration) * frameNavigator.clientWidth < 34,
+      );
+      frameRuler.replaceChildren(
+        ...Array.from({ length: 5 }, (_, index) => {
+          const tick = document.createElement("span");
+          tick.style.setProperty("--tick-left", `${index * 25}%`);
+          tick.textContent = formatPosition(
+            timelineStart + (span * index) / 4,
+            precise,
+          );
+          return tick;
+        }),
+      );
+    }
+    function seekToFrame(seconds) {
+      const selected = clampCrop(
+        seconds,
+        0,
+        Math.max(0, frameVideo.duration - 0.05),
+      );
+      frameVideo.currentTime = selected;
+      renderTimeline(selected);
+    }
+    function zoomTimelineAt(next, ratio) {
+      if (!Number.isFinite(frameVideo.duration) || !frameVideo.duration) return;
+      const duration = frameVideo.duration;
+      const anchor = timelineStart + ratio * timelineSpan();
+      timelineZoom = clampCrop(next, 1, Math.max(1, duration));
+      const span = timelineSpan();
+      timelineStart = clampCrop(anchor - ratio * span, 0, duration - span);
+      renderTimeline(frameVideo.currentTime);
+      clearTimeout(stripRenderTimer);
+      stripRenderTimer = setTimeout(requestStripRender, 100);
+    }
+    for (const target of [frameRuler, frameStrip.parentElement, frameNavigator])
+      target.addEventListener(
+        "wheel",
+        (event) => {
+          if (!frameDialog.open || frameSlider.disabled) return;
+          event.preventDefault();
+          const bounds = frameStrip.getBoundingClientRect();
+          const ratio = clampCrop(
+            (event.clientX - bounds.left) / bounds.width,
+            0,
+            1,
+          );
+          const delta =
+            event.deltaMode === WheelEvent.DOM_DELTA_LINE
+              ? event.deltaY * 16
+              : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+                ? event.deltaY * bounds.width
+                : event.deltaY;
+          zoomTimelineAt(timelineZoom * Math.exp(-delta * 0.006), ratio);
+        },
+        { passive: false },
+      );
+    frameSlider.addEventListener("keydown", (event) => {
+      if (!["+", "=", "-", "_"].includes(event.key)) return;
+      event.preventDefault();
+      zoomTimelineAt(
+        timelineZoom * (["+", "="].includes(event.key) ? 1.5 : 1 / 1.5),
+        Number(frameSlider.value) / 1000,
+      );
+    });
+    let navigatorDrag = null;
+    frameNavigator.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !frameVideo.duration) return;
+      const bounds = frameNavigator.getBoundingClientRect();
+      const edge = event.target.dataset.edge;
+      if (!frameWindow.contains(event.target)) {
+        centerTimelineAt(
+          clampCrop((event.clientX - bounds.left) / bounds.width, 0, 1) *
+            frameVideo.duration,
+        );
+        renderTimeline(frameVideo.currentTime);
+        requestStripRender();
+        return;
+      }
+      navigatorDrag = {
+        pointerId: event.pointerId,
+        mode: edge || "pan",
+        x: event.clientX,
+        start: timelineStart,
+        end: timelineStart + timelineSpan(),
+        width: bounds.width,
+      };
+      frameNavigator.setPointerCapture(event.pointerId);
+      frameWindow.classList.add("is-dragging");
+      event.preventDefault();
+    });
+    frameNavigator.addEventListener("pointermove", (event) => {
+      if (navigatorDrag?.pointerId !== event.pointerId) return;
+      const duration = frameVideo.duration;
+      const delta =
+        ((event.clientX - navigatorDrag.x) / navigatorDrag.width) * duration;
+      const minimum = Math.min(1, duration);
+      let start = navigatorDrag.start;
+      let end = navigatorDrag.end;
+      if (navigatorDrag.mode === "start")
+        start = clampCrop(start + delta, 0, end - minimum);
+      else if (navigatorDrag.mode === "end")
+        end = clampCrop(end + delta, start + minimum, duration);
+      else {
+        start = clampCrop(start + delta, 0, duration - (end - start));
+        end = start + (navigatorDrag.end - navigatorDrag.start);
+      }
+      timelineStart = start;
+      timelineZoom = duration / (end - start);
+      renderTimeline(frameVideo.currentTime);
+    });
+    function finishNavigatorDrag(event) {
+      if (navigatorDrag?.pointerId !== event.pointerId) return;
+      navigatorDrag = null;
+      frameWindow.classList.remove("is-dragging");
+      requestStripRender();
+    }
+    frameNavigator.addEventListener("pointerup", finishNavigatorDrag);
+    frameNavigator.addEventListener("pointercancel", finishNavigatorDrag);
+    function renderCropPreview() {
+      const metrics = cropMetrics();
+      if (!metrics) return;
+      const context = cropPreview.getContext("2d");
+      context?.drawImage(
+        frameVideo,
+        0,
+        0,
+        cropPreview.width,
+        cropPreview.height,
+      );
+      cropArea.style.left = `${(metrics.left / metrics.width) * 100}%`;
+      cropArea.style.top = `${(metrics.top / metrics.height) * 100}%`;
+      cropArea.style.width = `${(metrics.cropWidth / metrics.width) * 100}%`;
+      cropArea.style.height = `${(metrics.cropHeight / metrics.height) * 100}%`;
+      cropArea.hidden = false;
+    }
+    get("#resetThumbnailCrop").addEventListener("click", () => {
+      crop = { zoom: 1, x: 0, y: 0 };
+      renderCropPreview();
+    });
+    let cropDrag = null;
+    cropArea.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const metrics = cropMetrics();
+      if (!metrics) return;
+      cropDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        metrics,
+        corner: event.target.dataset.corner || null,
+      };
+      cropArea.setPointerCapture(event.pointerId);
+      cropArea.classList.add("is-dragging");
+      event.preventDefault();
+    });
+    cropArea.addEventListener("pointermove", (event) => {
+      if (!cropDrag || event.pointerId !== cropDrag.pointerId) return;
+      const scale =
+        cropDrag.metrics.width / cropPreview.getBoundingClientRect().width;
+      const dx = (event.clientX - cropDrag.startX) * scale;
+      const dy = (event.clientY - cropDrag.startY) * scale;
+      const start = cropDrag.metrics;
+      if (cropDrag.corner) {
+        const { corner } = cropDrag;
+        const resizeDelta =
+          Math.abs(dx) > Math.abs((dy * 16) / 9)
+            ? dx * (corner.includes("w") ? -1 : 1)
+            : ((dy * 16) / 9) * (corner.includes("n") ? -1 : 1);
+        const maxWidth = Math.min(
+          start.baseWidth,
+          corner.includes("w")
+            ? start.left + start.cropWidth
+            : start.width - start.left,
+          corner.includes("n")
+            ? ((start.top + start.cropHeight) * 16) / 9
+            : ((start.height - start.top) * 16) / 9,
+        );
+        const width = clampCrop(
+          start.cropWidth + resizeDelta,
+          start.baseWidth / 2,
+          maxWidth,
+        );
+        const left = corner.includes("w")
+          ? start.left + start.cropWidth - width
+          : start.left;
+        const top = corner.includes("n")
+          ? start.top + start.cropHeight - (width * 9) / 16
+          : start.top;
+        setCropRect(left, top, width);
+      } else {
+        setCropRect(start.left + dx, start.top + dy, start.cropWidth);
+      }
+    });
+    function finishCropDrag(event) {
+      if (cropDrag?.pointerId !== event.pointerId) return;
+      cropDrag = null;
+      cropArea.classList.remove("is-dragging");
+    }
+    cropArea.addEventListener("pointerup", finishCropDrag);
+    cropArea.addEventListener("pointercancel", finishCropDrag);
+    cropArea.addEventListener("keydown", (event) => {
+      const metrics = cropMetrics();
+      if (!metrics) return;
+      const step = event.shiftKey ? 0.05 : 0.01;
+      const moves = {
+        ArrowLeft: [-metrics.width * step, 0],
+        ArrowRight: [metrics.width * step, 0],
+        ArrowUp: [0, -metrics.height * step],
+        ArrowDown: [0, metrics.height * step],
+      };
+      if (moves[event.key]) {
+        const [dx, dy] = moves[event.key];
+        setCropRect(metrics.left + dx, metrics.top + dy, metrics.cropWidth);
+      } else if (["+", "=", "-", "_"].includes(event.key)) {
+        const zoom = clampCrop(
+          crop.zoom + (["+", "="].includes(event.key) ? 0.1 : -0.1),
+          1,
+          2,
+        );
+        const width = metrics.baseWidth / zoom;
+        setCropRect(
+          metrics.left + (metrics.cropWidth - width) / 2,
+          metrics.top + (metrics.cropHeight - (width * 9) / 16) / 2,
+          width,
+        );
+      } else return;
+      event.preventDefault();
+    });
     frameVideo.addEventListener("seeked", renderCropPreview);
-    async function drawFrameStrip(duration) {
+    async function drawFrameStrip(revision) {
       const context = frameStrip.getContext("2d");
       if (!context) return;
-      const count = 8;
+      const count = 10;
       const width = frameStrip.width / count;
       for (let index = 0; index < count; index++) {
-        if (!frameDialog.open) return;
+        if (!frameDialog.open || revision !== stripRevision) return;
         await globalThis.CreatorMediaGenerator.seek(
-          frameVideo,
-          Math.min(duration - 0.05, ((index + 0.5) / count) * duration),
+          stripVideo,
+          Math.min(
+            frameVideo.duration - 0.05,
+            timelineStart + ((index + 0.5) / count) * timelineSpan(),
+          ),
         );
+        if (revision !== stripRevision) return;
         context.drawImage(
-          frameVideo,
+          stripVideo,
           index * width,
           0,
           width,
@@ -4586,9 +4898,42 @@
         );
       }
     }
-    const formatPosition = (seconds) =>
-      `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+    function requestStripRender() {
+      stripRevision++;
+      if (stripRendering || !frameDialog.open || !stripVideo.videoWidth) return;
+      stripRendering = true;
+      (async () => {
+        try {
+          let revision;
+          do {
+            revision = stripRevision;
+            await drawFrameStrip(revision);
+          } while (frameDialog.open && revision !== stripRevision);
+        } finally {
+          stripRendering = false;
+        }
+      })().catch((error) => {
+        frameStatus.textContent = error.message;
+      });
+    }
+    const formatPosition = (seconds, precise = false) => {
+      const whole = Math.floor(seconds);
+      const hours = Math.floor(whole / 3600);
+      const minutes = Math.floor((whole % 3600) / 60);
+      const prefix = hours
+        ? `${hours}:${String(minutes).padStart(2, "0")}`
+        : String(minutes);
+      const base = `${prefix}:${String(whole % 60).padStart(2, "0")}`;
+      return precise
+        ? `${base}.${String(Math.floor((seconds % 1) * 100)).padStart(2, "0")}`
+        : base;
+    };
     function closeFrameDialog() {
+      clearTimeout(stripRenderTimer);
+      stripRevision++;
+      stripVideo.pause();
+      stripVideo.removeAttribute("src");
+      stripVideo.load();
       frameVideo.pause();
       frameVideo.removeAttribute("src");
       frameVideo.load();
@@ -4601,53 +4946,49 @@
       if (!(fullFile instanceof File) || runBusy || activeSession) return;
       frameSource = fullFile;
       frameStatus.textContent = "Loading video timeline…";
+      cropArea.hidden = true;
+      frameRuler.replaceChildren();
+      frameDuration.textContent = "0:00";
+      framePosition.textContent = "0:00";
+      frameSlider.disabled = true;
+      get("#useThumbnailFrame").disabled = true;
       frameDialog.showModal();
       frameUrl = URL.createObjectURL(fullFile);
       frameVideo.src = frameUrl;
+      stripVideo.src = frameUrl;
       try {
         const duration =
           await globalThis.CreatorMediaGenerator.waitForMetadata(frameVideo);
-        cropZoom.value = "100";
-        cropX.value = "0";
-        cropY.value = "0";
-        await drawFrameStrip(duration);
-        frameSlider.value = String(
-          Math.round((Math.min(3, duration * 0.02) / duration) * 1000),
+        frameDuration.textContent = formatPosition(duration);
+        timelineZoom = 1;
+        timelineStart = 0;
+        crop = { zoom: 1, x: 0, y: 0 };
+        const previewWidth = Math.min(960, frameVideo.videoWidth);
+        cropPreview.width = previewWidth;
+        cropPreview.height = Math.round(
+          (previewWidth * frameVideo.videoHeight) / frameVideo.videoWidth,
         );
-        await globalThis.CreatorMediaGenerator.seek(
-          frameVideo,
-          (Number(frameSlider.value) / 1000) * duration,
-        );
-        framePosition.textContent = formatPosition(frameVideo.currentTime);
+        await globalThis.CreatorMediaGenerator.waitForMetadata(stripVideo);
+        await drawFrameStrip(++stripRevision);
+        const initialTime = Math.min(3, duration * 0.02);
+        await globalThis.CreatorMediaGenerator.seek(frameVideo, initialTime);
+        renderTimeline(frameVideo.currentTime);
         renderCropPreview();
-        frameStatus.textContent = "Choose the frame you want to use.";
+        frameStatus.textContent = "";
+        frameSlider.disabled = false;
+        get("#useThumbnailFrame").disabled = false;
       } catch (error) {
         frameStatus.textContent = error.message;
       }
     });
     frameSlider.addEventListener("input", () => {
       if (!Number.isFinite(frameVideo.duration)) return;
-      const seconds = (Number(frameSlider.value) / 1000) * frameVideo.duration;
-      frameVideo.currentTime = Math.min(
-        seconds,
-        Math.max(0, frameVideo.duration - 0.05),
+      seekToFrame(
+        timelineStart + (Number(frameSlider.value) / 1000) * timelineSpan(),
       );
-      framePosition.textContent = formatPosition(seconds);
-    });
-    frameStrip.addEventListener("click", (event) => {
-      const bounds = frameStrip.getBoundingClientRect();
-      if (!bounds.width) return;
-      frameSlider.value = String(
-        Math.round(
-          Math.min(
-            1,
-            Math.max(0, (event.clientX - bounds.left) / bounds.width),
-          ) * 1000,
-        ),
-      );
-      frameSlider.dispatchEvent(new Event("input", { bubbles: true }));
     });
     get("#cancelThumbnailFrame").addEventListener("click", closeFrameDialog);
+    get("#closeThumbnailFrame").addEventListener("click", closeFrameDialog);
     frameDialog.addEventListener("cancel", (event) => {
       event.preventDefault();
       closeFrameDialog();
