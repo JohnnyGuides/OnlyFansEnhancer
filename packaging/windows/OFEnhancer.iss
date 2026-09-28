@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.82
+AppVersion=0.20.83
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.82
+OutputBaseFilename=OFEnhancer-Setup-0.20.83
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -68,6 +68,8 @@ var
   OriginalNextLeft: Integer;
   OriginalNextWidth: Integer;
   OriginalBackLeft: Integer;
+  InstallerCreatedPauseMarker: Boolean;
+  UpdateGuardFile: String;
 
 function ExistingInstall(): Boolean;
 begin
@@ -120,7 +122,7 @@ begin
   ErrorFile := ExpandConstant('{tmp}\ofenhancer-maintenance-error.txt');
   DeleteFile(ErrorFile);
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
-  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.82 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
+  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.83 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
   if LoadStringFromFile(ErrorFile, ErrorText) then MaintenanceError := UTF8Decode(ErrorText);
   if not Result then MaintenanceError := SysErrorMessage(ExitCode);
@@ -226,6 +228,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ExitCode: Integer;
+  PauseMarker: String;
 begin
   Result := '';
   if MaintenanceStatus = 3 then
@@ -233,7 +236,33 @@ begin
     Result := 'The saved installation checkpoint could not be read. ' + MaintenanceError;
     Exit;
   end;
-  if not IsFreshReset() then Exit;
+  if not IsFreshReset() then
+  begin
+    PauseMarker := ExpandConstant('{localappdata}\OFEnhancer\data\agent-paused');
+    if not FileExists(PauseMarker) then
+    begin
+      if not ForceDirectories(ExtractFileDir(PauseMarker)) or
+        not SaveStringToFile(PauseMarker, 'installing', False) then
+      begin
+        Result := 'Setup could not pause the Chrome connection for the update.';
+        Exit;
+      end;
+      InstallerCreatedPauseMarker := True;
+    end;
+    if not ExtractFreshMaintenance() or
+      not RunFreshHelper('--update-stop-applications', ExitCode) or (ExitCode <> 0) then
+    begin
+      Result := 'OFEnhancer could not stop for the update. ' + MaintenanceError;
+      Exit;
+    end;
+    UpdateGuardFile := ExpandConstant('{tmp}\ofenhancer-update-guard');
+    if not SaveStringToFile(UpdateGuardFile, 'running', False) or
+      not Exec(ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe'),
+        '--update-guard --install-root "' + WizardDirValue + '" --guard-file "' + UpdateGuardFile + '"',
+        '', SW_HIDE, ewNoWait, ExitCode) then
+      Result := 'Setup could not protect the native bridge while updating.';
+    Exit;
+  end;
   { Validate registry paths before creating any reset obligation. Missing files
     are handled separately after the helper verifies the product manifest. }
   if ExistingInstall() and not ValidExistingUninstaller() then
@@ -275,13 +304,20 @@ begin
     Result := 'Windows cleanup paused; completed steps will not repeat. ' + MaintenanceError;
 end;
 
+procedure DeinitializeSetup();
+begin
+  if UpdateGuardFile <> '' then DeleteFile(UpdateGuardFile);
+  if InstallerCreatedPauseMarker then
+    DeleteFile(ExpandConstant('{localappdata}\OFEnhancer\data\agent-paused'));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ExitCode: Integer;
 begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.82',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.83',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
       RaiseException('The Windows package was copied, but verification or durable Chrome handoff failed. Run this installer again to resume.');
 end;

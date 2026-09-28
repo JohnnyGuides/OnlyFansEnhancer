@@ -9,6 +9,9 @@ namespace OFEnhancer.Desktop;
 
 public partial class App : System.Windows.Application
 {
+    private static readonly string AgentPauseMarker = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "OFEnhancer", "data", "agent-paused");
     private Mutex? instanceLock;
     private DesktopAgent? agent;
     private NotifyIcon? tray;
@@ -47,6 +50,12 @@ public partial class App : System.Windows.Application
             System.Windows.MessageBox.Show(freshMessage, "Finish OFEnhancer setup", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown(3);
             return;
+        }
+        if (!eventArgs.Args.Contains("--background", StringComparer.Ordinal))
+        {
+            try { File.Delete(AgentPauseMarker); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
@@ -101,7 +110,15 @@ public partial class App : System.Windows.Application
         agent = new DesktopAgent(DesktopAgent.DefaultPipeName(userKey), window.HandleAgentRequest);
         agent.Start();
         MainWindow = window;
+        bool backgroundStart = eventArgs.Args.Contains("--background", StringComparer.Ordinal);
+        if (backgroundStart)
+        {
+            window.ShowActivated = false;
+            window.ShowInTaskbar = false;
+            window.WindowState = WindowState.Minimized;
+        }
         window.Show();
+        if (backgroundStart) window.Hide();
         if (eventArgs.Args.Contains("--chrome-setup", StringComparer.Ordinal)) window.OpenChromeSetup();
 
         tray = new NotifyIcon
@@ -135,12 +152,20 @@ public partial class App : System.Windows.Application
         if (window is null)
             return;
         window.Show();
+        window.ShowInTaskbar = true;
         window.WindowState = WindowState.Normal;
         window.Activate();
     }
 
     private async void ExitApp()
     {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(AgentPauseMarker)!);
+            File.WriteAllText(AgentPauseMarker, "paused");
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
         if (window is not null)
             await window.ExitAsync();
         Shutdown();

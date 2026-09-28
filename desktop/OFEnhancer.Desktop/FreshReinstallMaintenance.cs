@@ -38,6 +38,25 @@ internal static class FreshReinstallMaintenance
                     InstalledApplicationShutdown.Stop(transaction.InstallRoot);
                 return true;
             }
+            if (args.Contains("--update-stop-applications", StringComparer.Ordinal))
+            {
+                string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
+                VerifyPreviousPackage(installRoot);
+                InstalledApplicationShutdown.Stop(installRoot);
+                return true;
+            }
+            if (args.Contains("--update-guard", StringComparer.Ordinal))
+            {
+                string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
+                VerifyPreviousPackage(installRoot);
+                string guardFile = Path.GetFullPath(Argument(args, "--guard-file"));
+                while (File.Exists(guardFile))
+                {
+                    InstalledApplicationShutdown.StopNativeBridges(installRoot);
+                    Thread.Sleep(100);
+                }
+                return true;
+            }
             if (args.Contains("--fresh-reinstall-plan", StringComparer.Ordinal))
             {
                 Plan(args);

@@ -8,6 +8,26 @@ namespace OFEnhancer.Desktop;
 // must release the old runtime first, including an application hidden in the tray.
 internal static class InstalledApplicationShutdown
 {
+    internal static void StopNativeBridges(string installRoot)
+    {
+        string expected = Path.Combine(Path.GetFullPath(installRoot), "native", "OFEnhancerNativeBridge.exe");
+        using Process current = Process.GetCurrentProcess();
+        foreach (Process process in Process.GetProcessesByName("OFEnhancerNativeBridge"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId == current.SessionId &&
+                        string.Equals(process.MainModule?.FileName, expected, StringComparison.OrdinalIgnoreCase))
+                        process.Kill();
+                }
+                catch (InvalidOperationException) { /* Already exited. */ }
+                catch (System.ComponentModel.Win32Exception) { /* Retry on the next pass. */ }
+            }
+        }
+    }
+
     internal static void Stop(string installRoot)
     {
         string root = Path.GetFullPath(installRoot);
@@ -34,6 +54,13 @@ internal static class InstalledApplicationShutdown
             if (owned.Count == 0) return;
             foreach (Process process in owned)
             {
+                if (process.HasExited) continue;
+                if (string.Equals(process.ProcessName, "OFEnhancerNativeBridge", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Chrome keeps this headless transport open; it has no window to close.
+                    process.Kill();
+                    continue;
+                }
                 List<nint> windows = [];
                 EnumWindows((window, _) =>
                 {

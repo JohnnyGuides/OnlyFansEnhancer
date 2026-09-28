@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -46,7 +47,7 @@ static async Task<int> RunAsync(string[] args)
                 payload["bridgeExtensionId"] = args.Length > 0 ? args[0]["chrome-extension://".Length..].TrimEnd('/') : "";
                 framedRequest = framedRequest with { Payload = JsonSerializer.SerializeToElement(payload) };
                 requestId = framedRequest.RequestId.ToString();
-                AgentResponse framedResponse = await ForwardAsync(pipeName, framedRequest);
+                AgentResponse framedResponse = await ForwardAsync(pipeName, framedRequest, allowDesktopStart: true);
                 await WriteAsync(framedResponse, framed: true);
             }
         }
@@ -57,7 +58,7 @@ static async Task<int> RunAsync(string[] args)
 
         AgentRequest request = AgentRequest.Parse(input);
         requestId = request.RequestId.ToString();
-        AgentResponse response = await ForwardAsync(pipeName, request);
+        AgentResponse response = await ForwardAsync(pipeName, request, allowDesktopStart: false);
         await WriteAsync(response, framedOutput);
         return response.Ok ? 0 : ExitFailure;
     }
@@ -87,14 +88,52 @@ static bool IsChromeInvocation(string[] arguments)
         && (IntPtr.Size == 8 || value <= uint.MaxValue);
 }
 
-static async Task<AgentResponse> ForwardAsync(string pipeName, AgentRequest request)
+static async Task<AgentResponse> ForwardAsync(string pipeName, AgentRequest request, bool allowDesktopStart)
 {
-    using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(request.Operation switch
-    { "getStatus" or "browserExchange" => 2, "getSubredditPresets" => 60, _ => 35 }));
+    if (allowDesktopStart && File.Exists(DesktopPauseMarker()))
+        return AgentResponse.Failure(request.RequestId.ToString(), "desktop-unavailable");
+    TimeSpan duration = TimeSpan.FromSeconds(request.Operation switch
+    { "getStatus" or "browserExchange" => 2, "getSubredditPresets" => 60, _ => 35 });
+    // Chrome can establish its connection before the desktop UI has been opened.
+    // The explicit tray Exit writes a marker so this reconnect loop respects it.
+    if (allowDesktopStart)
+        TryStartDesktop();
+    using CancellationTokenSource timeout = new(allowDesktopStart
+        ? TimeSpan.FromSeconds(Math.Max(8, duration.TotalSeconds)) : duration);
     try { return await new AgentPipeClient(pipeName).SendAsync(request, timeout.Token); }
     catch (Exception error) when (error is IOException or OperationCanceledException or TimeoutException)
     { return AgentResponse.Failure(request.RequestId.ToString(), "desktop-unavailable"); }
 }
+
+static void TryStartDesktop()
+{
+    try
+    {
+        if (File.Exists(DesktopPauseMarker())) return;
+        string userKey = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        string mutexName = $"Local\\OFEnhancer.Desktop.{userKey}";
+        if (Mutex.TryOpenExisting(mutexName, out Mutex? existing))
+        {
+            existing.Dispose();
+            return;
+        }
+        string executable = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "desktop", "OFEnhancer.Desktop.exe"));
+        if (!File.Exists(executable)) return;
+        using Process? process = Process.Start(new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            Arguments = "--background"
+        });
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+    { /* ForwardAsync will report desktop-unavailable if startup failed. */ }
+}
+
+static string DesktopPauseMarker() => Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "OFEnhancer", "data", "agent-paused");
 
 static async Task WriteAsync(AgentResponse response, bool framed)
 {
