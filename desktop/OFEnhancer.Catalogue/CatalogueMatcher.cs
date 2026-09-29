@@ -13,6 +13,12 @@ internal static partial class CatalogueMatcher
         List<CatalogueItemSummary> items = [.. store.GetItems()];
         Dictionary<string, string> primaryAssets = ReadPrimaryAssets(store.Connection);
         MediaAssetSummary[] assets = [.. store.GetAssets()];
+        (MediaAssetSummary Asset, string Stem)[] unboundStems =
+        [
+            .. assets
+                .Where(asset => asset.BoundItemId is null)
+                .Select(asset => (asset, Path.GetFileNameWithoutExtension(asset.FileName))),
+        ];
         for (int index = 0; index < items.Count; index++)
         {
             CatalogueItemSummary item = items[index];
@@ -20,12 +26,13 @@ internal static partial class CatalogueMatcher
                 items[index] = item with { ThumbnailAssetId = assetId, ThumbnailStatus = "bound" };
             else
             {
-                MediaAssetSummary? preview = assets
-                    .Where(asset => asset.BoundItemId is null
-                        && (Path.GetFileNameWithoutExtension(asset.FileName) == item.SourceKey
-                            || Path.GetFileNameWithoutExtension(asset.FileName).StartsWith(item.SourceKey + "_", StringComparison.Ordinal)))
-                    .OrderBy(asset => Path.GetFileNameWithoutExtension(asset.FileName) == item.SourceKey ? 0 : 1)
-                    .ThenBy(asset => asset.FileName, StringComparer.Ordinal)
+                string prefix = item.SourceKey + "_";
+                MediaAssetSummary? preview = unboundStems
+                    .Where(entry => entry.Stem == item.SourceKey
+                        || entry.Stem.StartsWith(prefix, StringComparison.Ordinal))
+                    .OrderBy(entry => entry.Stem == item.SourceKey ? 0 : 1)
+                    .ThenBy(entry => entry.Asset.FileName, StringComparer.Ordinal)
+                    .Select(entry => entry.Asset)
                     .FirstOrDefault();
                 items[index] = item with
                 {
@@ -36,29 +43,32 @@ internal static partial class CatalogueMatcher
         }
 
         List<UnmatchedAssetSummary> unmatched = [];
-        foreach (MediaAssetSummary asset in store.GetAssets().Where(asset => asset.BoundItemId is null))
+        ItemFeatures[] features = BuildFeatures(items);
+        foreach ((MediaAssetSummary asset, _) in unboundStems)
         {
-            IReadOnlyList<CatalogueCandidate> candidates = Rank(asset.FileName, items);
+            IReadOnlyList<CatalogueCandidate> candidates = Rank(asset.FileName, features);
             unmatched.Add(new UnmatchedAssetSummary(asset.AssetId, asset.FileName, asset.Role, candidates));
         }
 
         string status = store.ConfiguredThumbnailRoot is null
             ? "not-scanned"
-            : store.GetAssets().Count == 0
+            : assets.Length == 0
                 ? "empty"
                 : "ready";
-        return new CatalogueView(items, unmatched, store.GetAssets().Count, status);
+        return new CatalogueView(items, unmatched, assets.Length, status);
     }
 
     internal static IReadOnlyList<CatalogueCandidate> Rank(
         string fileName,
         IReadOnlyList<CatalogueItemSummary> items
-    )
+    ) => Rank(fileName, BuildFeatures(items));
+
+    private static IReadOnlyList<CatalogueCandidate> Rank(string fileName, ItemFeatures[] items)
     {
         HashSet<string> fileTokens = Tokens(Path.GetFileNameWithoutExtension(fileName));
         DateOnly? fileDate = ExtractDate(fileName);
         return items
-            .Select(item => new { Item = item, Score = Score(fileTokens, fileDate, item) })
+            .Select(features => new { Item = features.Item, Score = Score(fileTokens, fileDate, features) })
             .Where(result => result.Score > 0)
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Item.ItemId, StringComparer.Ordinal)
@@ -78,40 +88,70 @@ internal static partial class CatalogueMatcher
     private static int Score(
         HashSet<string> fileTokens,
         DateOnly? fileDate,
-        CatalogueItemSummary item
+        ItemFeatures features
     )
     {
         int score = 0;
-        HashSet<string> sourceTokens = Tokens(item.SourceKey);
-        if (sourceTokens.Count > 0 && sourceTokens.All(fileTokens.Contains))
+        if (features.SourceTokens.Count > 0 && features.SourceTokens.All(fileTokens.Contains))
             score += 100;
-        score += Tokens(item.Title).Count(fileTokens.Contains) * 12;
-        score += Tokens(item.Series).Count(fileTokens.Contains) * 10;
-        HashSet<string> episodeTokens = Tokens(item.Episode);
-        if (episodeTokens.Count > 0 && episodeTokens.All(fileTokens.Contains))
+        score += features.TitleTokens.Count(fileTokens.Contains) * 12;
+        score += features.SeriesTokens.Count(fileTokens.Contains) * 10;
+        if (features.EpisodeTokens.Count > 0 && features.EpisodeTokens.All(fileTokens.Contains))
             score += 30;
-        if (item.PlannedDate is not null)
+        if (features.Item.PlannedDate is not null)
         {
-            string compactDate = item.PlannedDate.Replace("-", "", StringComparison.Ordinal);
-            if (fileTokens.Contains(item.PlannedDate) || fileTokens.Contains(compactDate))
+            if (fileTokens.Contains(features.Item.PlannedDate) || fileTokens.Contains(features.CompactDate!))
                 score += 10;
-            if (
-                fileDate is not null
-                && DateOnly.TryParseExact(
-                    item.PlannedDate,
-                    "yyyy-MM-dd",
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None,
-                    out DateOnly plannedDate
-                )
-            )
+            if (fileDate is not null && features.PlannedDay is not null)
             {
-                int distance = Math.Abs(plannedDate.DayNumber - fileDate.Value.DayNumber);
+                int distance = Math.Abs(features.PlannedDay.Value.DayNumber - fileDate.Value.DayNumber);
                 score += Math.Max(0, 30 - distance);
             }
         }
         return score;
     }
+
+    private static ItemFeatures[] BuildFeatures(IReadOnlyList<CatalogueItemSummary> items)
+    {
+        ItemFeatures[] result = new ItemFeatures[items.Count];
+        for (int index = 0; index < items.Count; index++)
+        {
+            CatalogueItemSummary item = items[index];
+            string? compactDate = item.PlannedDate?.Replace("-", "", StringComparison.Ordinal);
+            DateOnly? plannedDay = null;
+            if (
+                item.PlannedDate is not null
+                && DateOnly.TryParseExact(
+                    item.PlannedDate,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out DateOnly parsed
+                )
+            )
+                plannedDay = parsed;
+            result[index] = new ItemFeatures(
+                item,
+                Tokens(item.SourceKey),
+                Tokens(item.Title),
+                Tokens(item.Series),
+                Tokens(item.Episode),
+                compactDate,
+                plannedDay
+            );
+        }
+        return result;
+    }
+
+    private sealed record ItemFeatures(
+        CatalogueItemSummary Item,
+        HashSet<string> SourceTokens,
+        HashSet<string> TitleTokens,
+        HashSet<string> SeriesTokens,
+        HashSet<string> EpisodeTokens,
+        string? CompactDate,
+        DateOnly? PlannedDay
+    );
 
     private static DateOnly? ExtractDate(string fileName)
     {

@@ -107,8 +107,9 @@ internal static class ThumbnailInventory
             transaction,
             "SELECT count(*) FROM media_assets WHERE available = 0"
         );
+        int uniqueAssets = files.Select(file => file.Sha256).Distinct(StringComparer.Ordinal).Count();
         string details = JsonSerializer.Serialize(
-            new { availableAssets = files.Count, newAssets, unavailableAssets = unavailable }
+            new { availableAssets = uniqueAssets, newAssets, unavailableAssets = unavailable }
         );
         Execute(
             connection,
@@ -118,7 +119,7 @@ internal static class ThumbnailInventory
             ("$details", details)
         );
         transaction.Commit();
-        return new ThumbnailScanSummary(files.Count, newAssets, unavailable);
+        return new ThumbnailScanSummary(uniqueAssets, newAssets, unavailable);
     }
 
     internal static bool IsContainedPath(string root, string candidate)
