@@ -1,0 +1,11 @@
+# Production draft handoff
+
+CreatorWorkflow sends only explicitly selected final files to OFEnhancer's separate current-user named pipe. The pipe name is `ofenhancer-production-v1-<Windows SID with non-alphanumeric characters except hyphens removed>`. It uses a four-byte little-endian UTF-8 frame length and a 1 MiB frame limit. It is independent of the existing browser/native agent pipe.
+
+The version-1 operations are `PrepareProductionDraft` and `GetProductionHandoffStatus`. A prepare request includes `protocolVersion`, a fresh `requestId`, stable `handoffId`, `episodeId`, `editId`, `episodeCode`, `editNumber`, and one to eight `files`. Each file carries `artifactId`, final role, canonical local path, byte size, and SHA-256. Exactly one selected file has the `final-render` role. A status request carries only protocol, request, operation, and handoff IDs. Responses correlate the request ID and return the handoff's state and file identities, or a bounded error code.
+
+OFEnhancer independently checks role and extension, local canonical path, reparse traversal, size, modification stability, and SHA-256 before saving a draft. The durable `production_handoffs` catalogue table stores a request fingerprint and the file claims. Retrying the same handoff ID and claims returns the saved draft. Reusing the ID with different claims fails. File changes produce `changed-source`; no file is copied or published by this channel.
+
+The native review window lists the files and requires the user to select an OFEnhancer catalogue item before **Bind files**. **Later** leaves the draft awaiting review; **Reject** records rejection. The tray menu can reopen pending drafts after restart. Binding is an OFEnhancer catalogue record, not an upload, browser authorization, publication, or remote synchronization. Public WebView messages have no operation that accepts these local file paths.
+
+The normal installed desktop currently needs a versioned update before this channel is physically available. The development build's protocol, pipe, catalogue migration, file validation, and window layout have local tests and a source-rendered preview; a live CWT-to-installed-OFEnhancer handoff remains an acceptance gate.

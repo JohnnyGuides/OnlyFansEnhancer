@@ -600,3 +600,10 @@ coverage rejects expanding those match patterns to physical paths.
   launches only the remaining Chrome setup step after installation.
 - Desktop startup safely retires any legacy `ChromeSetupPending` transaction,
   preventing old successful Fresh reinstalls from affecting future installers.
+
+## CreatorWorkflow production draft — development check, 29 September 2026
+
+- The native production handoff uses its own current-user named pipe. It does not extend the browser agent's allowlist or permit public WebView file-path requests.
+- The catalogue and desktop suites passed 59/59 and 343/343 after adding version-4 draft persistence, local file hashing and path validation, idempotent retries, changed-source detection, refusal to bind a changed file, and a pipe round trip.
+- The review window was rendered from the development build with illustrative data and shown to the owner before a versioned installer. Binding requires an explicit catalogue item and does not upload or publish.
+- The installed desktop is still the prior build. A real CWT-to-installed-OFEnhancer request, review, recovery after restart, installed upgrade, and browser-authorized attachment remain unverified.

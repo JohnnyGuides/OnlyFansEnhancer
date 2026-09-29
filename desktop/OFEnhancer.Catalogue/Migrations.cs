@@ -104,5 +104,25 @@ internal static class Migrations
         "ALTER TABLE catalogue_items ADD COLUMN source_link_cells_json TEXT NOT NULL DEFAULT '{}';"
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree];
+    internal static readonly MigrationStep VersionFour = new(
+        4,
+        """
+        CREATE TABLE production_handoffs (
+            handoff_id TEXT PRIMARY KEY NOT NULL,
+            episode_id TEXT NOT NULL,
+            edit_id TEXT NOT NULL,
+            episode_code TEXT NOT NULL,
+            edit_number INTEGER NOT NULL CHECK (edit_number > 0),
+            files_json TEXT NOT NULL,
+            request_fingerprint TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('awaiting_review', 'bound', 'rejected', 'changed_source')),
+            catalogue_item_id TEXT REFERENCES catalogue_items(item_id) ON DELETE RESTRICT,
+            created_utc TEXT NOT NULL,
+            reviewed_utc TEXT
+        );
+        CREATE INDEX production_handoffs_state ON production_handoffs(state, created_utc);
+        """
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour];
 }

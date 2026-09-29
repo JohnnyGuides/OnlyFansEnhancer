@@ -32,7 +32,7 @@ public sealed class CatalogueStoreTests
         Assert.AreEqual("kept-id", item.ItemId);
         Assert.AreEqual("Kept title", item.Title);
         Assert.AreEqual(0, item.SourceLinkCells!.Count);
-        Assert.AreEqual(3, store.SchemaVersion);
+        Assert.AreEqual(4, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v2-*.sqlite").Length);
     }
 
@@ -44,7 +44,7 @@ public sealed class CatalogueStoreTests
 
         using CatalogueStore store = CatalogueStore.Open(databasePath);
 
-        Assert.AreEqual(3, store.SchemaVersion);
+        Assert.AreEqual(4, store.SchemaVersion);
         CollectionAssert.AreEqual(
             new[]
             {
@@ -53,6 +53,7 @@ public sealed class CatalogueStoreTests
                 "catalogue_items",
                 "google_row_bindings",
                 "media_assets",
+                "production_handoffs",
                 "settings",
                 "sync_outbox",
             },
@@ -74,7 +75,7 @@ public sealed class CatalogueStoreTests
         }
 
         using CatalogueStore migrated = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(3, ReadVersion(databasePath));
+        Assert.AreEqual(4, ReadVersion(databasePath));
         Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
         Assert.AreEqual("ok", ReadIntegrity(databasePath));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);

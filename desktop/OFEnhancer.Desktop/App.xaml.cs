@@ -14,6 +14,7 @@ public partial class App : System.Windows.Application
         "OFEnhancer", "data", "agent-paused");
     private Mutex? instanceLock;
     private DesktopAgent? agent;
+    private ProductionHandoffAgent? productionAgent;
     private NotifyIcon? tray;
     private MainWindow? window;
     private CatalogueStore? catalogue;
@@ -109,6 +110,10 @@ public partial class App : System.Windows.Application
         window = new MainWindow(extensionId, catalogue, eventArgs.Args.Contains("--extension-id", StringComparer.Ordinal));
         agent = new DesktopAgent(DesktopAgent.DefaultPipeName(userKey), window.HandleAgentRequest);
         agent.Start();
+        productionAgent = new ProductionHandoffAgent(
+            ProductionHandoffPipeServer.DefaultPipeName(userKey),
+            window.HandleProductionHandoffAsync);
+        productionAgent.Start();
         MainWindow = window;
         bool backgroundStart = eventArgs.Args.Contains("--background", StringComparer.Ordinal);
         if (backgroundStart)
@@ -129,6 +134,11 @@ public partial class App : System.Windows.Application
             ContextMenuStrip = new ContextMenuStrip(),
         };
         tray.ContextMenuStrip.Items.Add("Open", null, (_, _) => ShowWindow());
+        tray.ContextMenuStrip.Items.Add("Production drafts", null, (_, _) =>
+        {
+            ShowWindow();
+            window?.ShowNextProductionHandoff();
+        });
         tray.ContextMenuStrip.Items.Add("Exit", null, (_, _) => ExitApp());
         tray.DoubleClick += (_, _) => ShowWindow();
     }
@@ -138,6 +148,7 @@ public partial class App : System.Windows.Application
         window?.Dispose();
         tray?.Dispose();
         agent?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        productionAgent?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         catalogue?.Dispose();
         if (instanceLock is not null)
         {

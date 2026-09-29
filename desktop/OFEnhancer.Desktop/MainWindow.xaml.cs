@@ -26,6 +26,8 @@ public partial class MainWindow : Window, IDisposable
     private readonly UploadCatalogueController uploadCatalogue;
     private readonly UploadThumbnailCatalogue uploadThumbnails;
     private readonly GeneratedUploadMediaStore generatedUploadMedia = new();
+    private readonly ProductionHandoffCoordinator productionHandoffs;
+    private ProductionHandoffReviewWindow? productionReview;
     private VideoOpeningFrameStore? openingFrames;
     private readonly ChromeIntegration chromeIntegration;
     private readonly bool hasExtensionOverride;
@@ -38,6 +40,8 @@ public partial class MainWindow : Window, IDisposable
     {
         InitializeComponent();
         this.catalogue = catalogue;
+        productionHandoffs = new ProductionHandoffCoordinator(catalogue, Dispatcher,
+            ShowProductionHandoff);
         hasExtensionOverride = extensionOverride;
         settings = new DesktopSettingsStore(AppConfiguration.SettingsPath);
         uploads.Reset = new ChromeExtensionReset(AppConfiguration.ChromeResetPath,
@@ -76,6 +80,49 @@ public partial class MainWindow : Window, IDisposable
                 Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { uploadEvent = value }));
         });
         thumbnails = new ThumbnailResourceResolver(catalogue);
+    }
+
+    internal Task<ProductionHandoffResponse> HandleProductionHandoffAsync(
+        ProductionHandoffRequest request, CancellationToken stop) =>
+        productionHandoffs.HandleAsync(request, stop);
+
+    internal async void ShowNextProductionHandoff()
+    {
+        var next = catalogue.GetPendingProductionHandoffs().FirstOrDefault();
+        if (next is null)
+        {
+            System.Windows.MessageBox.Show(this, "No production drafts need review.", "Production drafts",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        try
+        {
+            var status = await productionHandoffs.GetStatusAsync(Guid.Parse(next.HandoffId),
+                CancellationToken.None);
+            ShowProductionHandoff(status);
+        }
+        catch (Exception error)
+        {
+            System.Windows.MessageBox.Show(this, error.Message, "Production drafts", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void ShowProductionHandoff(ProductionHandoffStatus status)
+    {
+        if (productionReview is { IsVisible: true })
+        {
+            productionReview.Activate();
+            return;
+        }
+        Show();
+        ShowInTaskbar = true;
+        WindowState = WindowState.Normal;
+        Activate();
+        productionReview = new ProductionHandoffReviewWindow(status, catalogue.GetItems(),
+            productionHandoffs) { Owner = this };
+        productionReview.Closed += (_, _) => productionReview = null;
+        productionReview.Show();
     }
 
     public async Task<AgentResponse> HandleAgentRequest(AgentRequest request)
