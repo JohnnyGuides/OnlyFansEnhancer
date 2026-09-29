@@ -722,7 +722,10 @@ test("the test-hook guard honours only a real directory under the system temp pa
         });
         assert.equal(result.status, expected, `${name}: ${result.stderr}`);
       } finally {
-        fs.rmSync(path.join(value.root, "junction-outside"), { recursive: true, force: true });
+        fs.rmSync(path.join(value.root, "junction-outside"), {
+          recursive: true,
+          force: true,
+        });
         fs.rmSync(value.root, { recursive: true, force: true });
       }
     }
