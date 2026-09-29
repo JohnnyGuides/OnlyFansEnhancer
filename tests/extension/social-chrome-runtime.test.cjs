@@ -6,6 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
+const nodeCrypto = require("node:crypto");
 const repositoryRoot = require("../support/paths.cjs").personalRoot;
 
 function plan(id, mode = "manual") {
@@ -45,12 +46,15 @@ function loadRuntime() {
   const sessionValues = {};
   const tabs = new Map();
   const actions = [];
+  const xInputs = [];
   const injections = [];
   const files = [];
   const sheet = [];
   let nextTabId = 10;
   let replyLive = false;
   let observedMainUrl = "";
+  let editorText = "";
+  const submitRejections = [];
   const chrome = {
     runtime: {
       getURL(relative) {
@@ -138,11 +142,31 @@ function loadRuntime() {
         }
         const input = details.args[0];
         actions.push(input.action);
+        xInputs.push(structuredClone(input));
         const tab = tabs.get(details.target.tabId);
         if (input.action === "prepare") {
-          return [{ frameId: 0, result: { status: "prepared" } }];
+          editorText = input.caption;
+          return [
+            {
+              frameId: 0,
+              result: {
+                status: "prepared",
+                preparedCaptionSha256: nodeCrypto
+                  .createHash("sha256")
+                  .update(editorText)
+                  .digest("hex"),
+              },
+            },
+          ];
         }
         if (input.action === "submit") {
+          if (
+            nodeCrypto.createHash("sha256").update(editorText).digest("hex") !==
+            input.captionSha256
+          ) {
+            submitRejections.push(input.captionSha256);
+            throw new Error("The X caption changed after the post was armed.");
+          }
           tab.url = "https://x.com/RecordedCreator/status/9000000000000000001";
           observedMainUrl = tab.url;
           return [{ frameId: 0, result: { status: "submitted" } }];
@@ -259,12 +283,13 @@ function loadRuntime() {
       throw new Error("Reddit is not enabled in the X milestone.");
     },
   };
-  function createRuntime() {
+  function createRuntime(orchestratorFactory) {
     return context.CreatorSocialChromeRuntime.create({
       chrome,
       contract: context.CreatorSocialDistributionContract,
       store: context.CreatorSocialDistributionSessionStore,
-      orchestratorFactory: context.CreatorSocialDistributionOrchestrator,
+      orchestratorFactory:
+        orchestratorFactory || context.CreatorSocialDistributionOrchestrator,
       catalogueClient,
       async fileRequest(request) {
         files.push(structuredClone(request));
@@ -275,11 +300,17 @@ function loadRuntime() {
   const runtime = createRuntime();
   return {
     actions,
+    xInputs,
     context,
     files,
     injections,
     runtime,
     restart: createRuntime,
+    submitRejections,
+    values,
+    setEditorText(value) {
+      editorText = value;
+    },
     sessionValues,
     sheet,
     store: context.CreatorSocialDistributionSessionStore,
@@ -461,6 +492,21 @@ test("autonomous X mode durably arms main and reply before the two clicks", asyn
   );
 });
 
+test("autonomous X injections carry the armed caption hash, result id and paid URL", async () => {
+  const fixture = loadRuntime();
+  const id = "social-runtime-expectations-0001";
+  const authorized = plan(id, "autonomous");
+  await fixture.runtime.prepare({ plan: authorized, caption: "Caption" });
+  await fixture.runtime.start(id);
+  const submit = fixture.xInputs.find((input) => input.action === "submit");
+  assert.equal(submit.captionSha256, authorized.caption.sha256);
+  const reply = fixture.xInputs.find(
+    (input) => input.action === "submit-reply",
+  );
+  assert.equal(reply.resultId, "9000000000000000001");
+  assert.equal(reply.paidUrl, authorized.paidUrl);
+});
+
 test("worker restart after prepare restores the exact composer without storing caption text", async () => {
   const fixture = loadRuntime();
   const id = "social-runtime-prepared-restart-0001";
@@ -588,4 +634,91 @@ test("same worker rejects its bound composer tab after unrelated status navigati
   assert.equal(session.jobs.x.stage, "prepared");
   assert.equal(fixture.actions.includes("prepare-reply"), false);
   assert.deepEqual(fixture.sheet, []);
+});
+
+test("prepare persists the composer hash and a restarted worker submits with it", async () => {
+  const fixture = loadRuntime();
+  const id = "social-runtime-persisted-hash-0001";
+  await fixture.runtime.prepare({
+    plan: plan(id, "autonomous"),
+    caption: "Caption",
+  });
+  const persisted = plain(await fixture.store.load(id)).jobs.x
+    .preparedComposerSha256;
+  assert.equal(
+    persisted,
+    nodeCrypto.createHash("sha256").update("Caption").digest("hex"),
+  );
+
+  const restarted = fixture.restart();
+  const session = plain(await restarted.start(id));
+  assert.equal(session.jobs.x.stage, "sheet-complete");
+  const submit = fixture.xInputs.find((input) => input.action === "submit");
+  assert.equal(submit.captionSha256, persisted);
+});
+
+test("worker restart never posts an edited composer", async () => {
+  const fixture = loadRuntime();
+  const id = "social-runtime-restart-edited-0001";
+  await fixture.runtime.prepare({
+    plan: plan(id, "autonomous"),
+    caption: "Caption",
+  });
+  fixture.setEditorText("Caption edited by hand");
+
+  const session = plain(await fixture.restart().start(id));
+  assert.notEqual(session.jobs.x.stage, "sheet-complete");
+  assert.equal(session.jobs.x.stage, "posted-link-unresolved");
+  assert.equal(fixture.submitRejections.length, 1);
+  assert.notEqual(
+    fixture.submitRejections[0],
+    "",
+    "the injection must still carry the persisted hash",
+  );
+  assert.equal(fixture.actions.includes("main-identity"), false);
+  assert.equal(
+    [...fixture.tabs.values()].some((tab) => /status/.test(tab.url)),
+    false,
+  );
+});
+
+test("a prepared job without a persisted hash is refused before the durable arm", async () => {
+  const fixture = loadRuntime();
+  const id = "social-runtime-no-hash-0001";
+  await fixture.runtime.prepare({
+    plan: plan(id, "autonomous"),
+    caption: "Caption",
+  });
+  // A job prepared by an older version has no preparedComposerSha256.
+  const key = `${fixture.store.KEY_PREFIX}${id}`;
+  delete fixture.values[key].jobs.x.preparedComposerSha256;
+
+  let arms = 0;
+  const countingFactory = {
+    create(options) {
+      return fixture.context.CreatorSocialDistributionOrchestrator.create({
+        ...options,
+        adapterFor(jobId) {
+          const adapter = options.adapterFor(jobId);
+          return {
+            ...adapter,
+            submit(input) {
+              return adapter.submit({
+                ...input,
+                async beforeCommit() {
+                  arms += 1;
+                  return input.beforeCommit();
+                },
+              });
+            },
+          };
+        },
+      });
+    },
+  };
+  const session = plain(await fixture.restart(countingFactory).start(id));
+  assert.equal(arms, 0);
+  assert.equal(fixture.actions.includes("submit"), false);
+  assert.notEqual(session.jobs.x.stage, "sheet-complete");
+  assert.match(session.jobs.x.error, /Prepare the draft again/i);
 });

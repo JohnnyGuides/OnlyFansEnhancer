@@ -75,7 +75,15 @@ function loadRuntime(options = {}) {
         if (behavior[`prepare:${jobId}`] === "fail") {
           throw new Error(`prepare failed for ${jobId}`);
         }
-        return { status: "prepared" };
+        return {
+          status: "prepared",
+          ...(jobId === "x"
+            ? {
+                preparedCaptionSha256:
+                  options.preparedCaptionSha256 ?? "c".repeat(64),
+              }
+            : {}),
+        };
       },
       async submit(input) {
         calls.push(`submit:${jobId}`);
@@ -160,6 +168,7 @@ function loadRuntime(options = {}) {
     orchestrator,
     results,
     sheetCalls,
+    values,
     store: context.CreatorSocialDistributionSessionStore,
   };
 }
@@ -578,4 +587,95 @@ test("local catalogue writes stay terminal and visibly unsynced across resume", 
     runtime.calls.filter((call) => call.startsWith("submit:")).length,
     before,
   );
+});
+
+test("X persists the prepared caption hash with the prepared stage", async () => {
+  const runtime = loadRuntime({ preparedCaptionSha256: "c".repeat(64) });
+  const xOnly = plan({ targets: { x: true, reddit: [] } });
+  await runtime.store.create(xOnly);
+  const session = plain(
+    await runtime.orchestrator.prepareSocialDistribution(xOnly.id),
+  );
+  assert.equal(session.jobs.x.stage, "prepared");
+  assert.equal(session.jobs.x.preparedComposerSha256, "c".repeat(64));
+});
+
+test("a malformed prepared caption hash fails preparation instead of checkpointing", async () => {
+  const runtime = loadRuntime({ preparedCaptionSha256: "not-a-hash" });
+  const xOnly = plan({ targets: { x: true, reddit: [] } });
+  await runtime.store.create(xOnly);
+  const session = plain(
+    await runtime.orchestrator.prepareSocialDistribution(xOnly.id),
+  );
+  assert.equal(session.jobs.x.stage, "failed");
+  assert.equal(session.jobs.x.preparedComposerSha256, undefined);
+});
+
+for (const [name, hash] of [
+  ["missing", undefined],
+  ["63 characters", "a".repeat(63)],
+  ["uppercase", "A".repeat(64)],
+]) {
+  test(`an X job prepared without a valid caption hash (${name}) fails without arming and stays failed on resume`, async () => {
+    const runtime = loadRuntime();
+    const xOnly = plan({ targets: { x: true, reddit: [] } });
+    await runtime.store.create(xOnly);
+    await runtime.store.checkpoint(xOnly.id, "x", { stage: "prepared" });
+    // The store rejects malformed hashes on write; an older or damaged record
+    // is written straight into storage.
+    if (hash !== undefined) {
+      runtime.values[
+        `${runtime.store.KEY_PREFIX}${xOnly.id}`
+      ].jobs.x.preparedComposerSha256 = hash;
+    }
+    const stored = async () =>
+      plain((await runtime.store.load(xOnly.id)).jobs.x);
+    await runtime.orchestrator.resumeSocialDistribution(xOnly.id);
+    const first = await stored();
+    assert.equal(first.stage, "failed");
+    assert.equal(first.submitAttempted, false);
+    assert.equal(
+      first.error,
+      "The prepared X caption was not recorded. Prepare the draft again.",
+    );
+    assert.equal(
+      runtime.calls.filter((c) => c.startsWith("submit:")).length,
+      0,
+    );
+    await runtime.orchestrator.resumeSocialDistribution(xOnly.id);
+    const second = await stored();
+    assert.equal(second.stage, first.stage);
+    assert.equal(second.submitAttempted, first.submitAttempted);
+    assert.equal(
+      runtime.calls.filter((c) => c.startsWith("submit:")).length,
+      0,
+    );
+  });
+}
+
+test("an X job with a valid prepared hash still arms and posts once", async () => {
+  const runtime = loadRuntime();
+  const xOnly = plan({ targets: { x: true, reddit: [] } });
+  await runtime.store.create(xOnly);
+  await runtime.store.checkpoint(xOnly.id, "x", {
+    stage: "prepared",
+    preparedComposerSha256: "c".repeat(64),
+  });
+  await runtime.orchestrator.resumeSocialDistribution(xOnly.id);
+  const job = plain((await runtime.store.load(xOnly.id)).jobs.x);
+  assert.equal(job.submitAttempted, true);
+  assert.notEqual(job.stage, "failed");
+  assert.equal(runtime.calls.filter((c) => c === "submit:x").length, 1);
+});
+
+test("a redgifs job in stage prepared without a hash field still proceeds", async () => {
+  const runtime = loadRuntime();
+  const value = plan();
+  await runtime.store.create(value);
+  await runtime.store.checkpoint(value.id, "redgifs", { stage: "prepared" });
+  await runtime.orchestrator.resumeSocialDistribution(value.id);
+  const job = plain((await runtime.store.load(value.id)).jobs.redgifs);
+  assert.equal(job.submitAttempted, true);
+  assert.notEqual(job.stage, "failed");
+  assert.equal(runtime.calls.filter((c) => c === "submit:redgifs").length, 1);
 });

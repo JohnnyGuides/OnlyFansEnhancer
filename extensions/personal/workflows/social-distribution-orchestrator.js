@@ -304,7 +304,7 @@
       if (job.stage === "planned") {
         try {
           const adapter = adapterFor(jobId);
-          await adapter.prepare({
+          const preparedResult = await adapter.prepare({
             dependencyUrl,
             jobId,
             mode: session.plan.mode,
@@ -313,6 +313,12 @@
           });
           session = await store.checkpoint(sessionId, jobId, {
             stage: "prepared",
+            ...(jobId === "x" &&
+            preparedResult?.preparedCaptionSha256 !== undefined
+              ? {
+                  preparedComposerSha256: preparedResult.preparedCaptionSha256,
+                }
+              : {}),
             error: "",
             updatedAt: now(),
           });
@@ -337,6 +343,20 @@
             return { fingerprint, session };
           }
         } else {
+          if (
+            jobId === "x" &&
+            !/^[0-9a-f]{64}$/.test(String(job.preparedComposerSha256 ?? ""))
+          ) {
+            return {
+              fingerprint,
+              session: await fail(
+                session,
+                jobId,
+                "The prepared X caption was not recorded. Prepare the draft again.",
+                false,
+              ),
+            };
+          }
           session = await store.checkpoint(sessionId, jobId, {
             stage: "submit-attempted",
             updatedAt: now(),

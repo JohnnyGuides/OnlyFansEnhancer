@@ -328,3 +328,64 @@ test("list returns durable sessions in stable order", async () => {
     ["social-distribution-0001", "social-distribution-0002"],
   );
 });
+
+test("a prepared X job admits only a 64 lowercase hex caption hash and never changes it", async () => {
+  const { store } = loadStore();
+  const id = plan().id;
+  await store.create(plan());
+  for (const bad of ["", "a".repeat(63), "A".repeat(64), "g".repeat(64), 5]) {
+    await assert.rejects(
+      store.checkpoint(id, "x", {
+        stage: "prepared",
+        preparedComposerSha256: bad,
+      }),
+      /caption hash/i,
+    );
+  }
+  assert.equal(plain(await store.load(id)).jobs.x.stage, "planned");
+
+  const good = "a".repeat(64);
+  const prepared = plain(
+    await store.checkpoint(id, "x", {
+      stage: "prepared",
+      preparedComposerSha256: good,
+    }),
+  );
+  assert.equal(prepared.jobs.x.preparedComposerSha256, good);
+  await assert.rejects(
+    store.checkpoint(id, "x", {
+      stage: "prepared",
+      preparedComposerSha256: "b".repeat(64),
+    }),
+    /cannot change/i,
+  );
+  const later = plain(
+    await store.checkpoint(id, "x", { stage: "submit-attempted" }),
+  );
+  assert.equal(later.jobs.x.preparedComposerSha256, good);
+  assert.equal(later.jobs.x.stage, "submit-attempted");
+});
+
+test("the caption hash is X only and is admitted only with the prepared stage", async () => {
+  const { store } = loadStore();
+  const id = plan().id;
+  await store.create(plan());
+  await assert.rejects(
+    store.checkpoint(id, "redgifs", {
+      stage: "prepared",
+      preparedComposerSha256: "a".repeat(64),
+    }),
+    /caption hash/i,
+  );
+  await assert.rejects(
+    store.checkpoint(id, "x", { preparedComposerSha256: "a".repeat(64) }),
+    /caption hash/i,
+  );
+  await store.checkpoint(id, "x", { stage: "submit-attempted" });
+  await assert.rejects(
+    store.checkpoint(id, "x", {
+      preparedComposerSha256: "a".repeat(64),
+    }),
+    /caption hash/i,
+  );
+});

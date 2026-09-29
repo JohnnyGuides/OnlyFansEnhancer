@@ -41,7 +41,10 @@
       });
     }
     if (args.action === "submit") {
-      return adapter.submit({ beforeCommit: async () => ({ armed: true }) });
+      return adapter.submit({
+        captionSha256: args.captionSha256,
+        beforeCommit: async () => ({ armed: true }),
+      });
     }
     if (args.action === "main-identity") return adapter.mainIdentity();
     if (args.action === "prepare-reply") {
@@ -49,6 +52,8 @@
     }
     if (args.action === "submit-reply") {
       return adapter.submitReply({
+        resultId: args.resultId,
+        paidUrl: args.paidUrl,
         beforeCommit: async () => ({ armed: true }),
       });
     }
@@ -297,11 +302,22 @@
           return execute(binding, "prepare", { caption: binding.caption });
         },
         async submit(input) {
+          const session = await store.load(input.plan.id);
+          const preparedCaptionSha256 =
+            session?.jobs?.x?.preparedComposerSha256;
+          if (!/^[0-9a-f]{64}$/.test(preparedCaptionSha256 || "")) {
+            throw new Error(
+              "The prepared X caption was not recorded. Prepare the draft again.",
+            );
+          }
           const authorization = await input.beforeCommit();
           if (authorization?.armed !== true) {
             throw new Error("The X main post was not durably armed.");
           }
-          return execute(await bindingFor(input.plan.id), "submit");
+          const binding = await bindingFor(input.plan.id);
+          return execute(binding, "submit", {
+            captionSha256: preparedCaptionSha256,
+          });
         },
         async captureResult(input) {
           const binding = await bindingFor(input.plan.id);
@@ -338,7 +354,10 @@
           if (authorization?.armed !== true) {
             throw new Error("The X first reply was not durably armed.");
           }
-          return execute(binding, "submit-reply");
+          return execute(binding, "submit-reply", {
+            resultId: prepared.resultId,
+            paidUrl: input.paidUrl,
+          });
         },
       };
     }

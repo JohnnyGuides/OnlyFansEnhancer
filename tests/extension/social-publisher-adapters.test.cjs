@@ -7,6 +7,8 @@ const test = require("node:test");
 const { chromium } = require("../support/browser.cjs");
 
 const repositoryRoot = require("../support/paths.cjs").personalRoot;
+const sha256Hex = (value) =>
+  require("node:crypto").createHash("sha256").update(value).digest("hex");
 const adapterPath = path.join(
   repositoryRoot,
   "workflows/x-publisher-adapter.js",
@@ -82,6 +84,7 @@ test("X preparation fills one composer and waits for the recorded upload-ready s
       platform: "x",
       status: "prepared",
       upload: "ready",
+      preparedCaptionSha256: sha256Hex("Recorded caption"),
     });
     await context.close();
   } finally {
@@ -96,23 +99,25 @@ test("X submit clicks the recorded main Post only after durable arming", async (
       browser,
       "https://x.com/compose/post",
       `
+        <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0">Recorded caption</div>
         <div role="progressbar" aria-valuenow="100"></div>
         <button type="button" data-testid="tweetButton">Post</button>
       `,
     );
-    const result = await page.evaluate(async () => {
+    const result = await page.evaluate(async (captionSha256) => {
       const order = [];
       document
         .querySelector('[data-testid="tweetButton"]')
         .addEventListener("click", () => order.push("post"));
       const submitted = await CreatorXPublisherAdapter.submit({
+        captionSha256,
         async beforeCommit() {
           order.push("armed");
           return { armed: true };
         },
       });
       return { order, submitted };
-    });
+    }, sha256Hex("Recorded caption"));
     assert.deepEqual(result.order, ["armed", "post"]);
     assert.deepEqual(result.submitted, {
       platform: "x",
@@ -425,6 +430,8 @@ test("X exposes separate reply preparation and armed submission phases", async (
 
     const submitted = await page.evaluate(() =>
       CreatorXPublisherAdapter.submitReply({
+        resultId: "9000000000000000001",
+        paidUrl: "https://onlyfans.com/123/creator",
         async beforeCommit() {
           globalThis.__events.push("armed");
           return { armed: true };
@@ -551,6 +558,341 @@ test("X capture-only recovery stays unresolved when the attempted reply is not v
       /reply.*already attempted.*capture/i,
     );
     assert.equal(await page.evaluate(() => globalThis.__replyClicks), 0);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+const paidUrl = "https://onlyfans.com/123/creator";
+const armedCaption = "Recorded caption";
+const armedCaptionSha256 = sha256Hex(armedCaption);
+
+for (const [name, mutate] of [
+  ["the page left the compose route", () => history.pushState({}, "", "/home")],
+  [
+    "the caption changed",
+    () => {
+      document.querySelector('[data-testid="tweetTextarea_0"]').textContent =
+        "Edited caption";
+    },
+  ],
+]) {
+  test(`X submit rejects without clicking when ${name} after arming`, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const { context, page } = await xPage(
+        browser,
+        "https://x.com/compose/post",
+        `
+          <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0">${armedCaption}</div>
+          <button type="button" data-testid="tweetButton">Post</button>
+          <script>
+            globalThis.__clicks = 0;
+            document.querySelector('[data-testid="tweetButton"]').addEventListener("click", () => globalThis.__clicks++);
+          </script>
+        `,
+      );
+      const result = await page.evaluate(
+        async ({ mutateSource, captionSha256 }) => {
+          const mutate = new Function(`return (${mutateSource})`)();
+          try {
+            await CreatorXPublisherAdapter.submit({
+              captionSha256,
+              async beforeCommit() {
+                mutate();
+                return { armed: true };
+              },
+            });
+            return { rejected: false, clicks: globalThis.__clicks };
+          } catch (error) {
+            return { rejected: true, clicks: globalThis.__clicks };
+          }
+        },
+        { mutateSource: mutate.toString(), captionSha256: armedCaptionSha256 },
+      );
+      assert.deepEqual(result, { rejected: true, clicks: 0 });
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  });
+}
+
+for (const [name, mutate] of [
+  [
+    "the current status id differs from the armed id",
+    () =>
+      history.pushState({}, "", "/RecordedCreator/status/9000000000000000009"),
+  ],
+  [
+    "the editor no longer holds the paid URL",
+    () => {
+      document.querySelector('[data-testid="tweetTextarea_0"]').textContent =
+        "Something else";
+    },
+  ],
+]) {
+  test(`X submitReply rejects without clicking when ${name} after arming`, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const { context, page } = await xPage(
+        browser,
+        "https://x.com/RecordedCreator/status/9000000000000000001",
+        `
+          <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0">${paidUrl}</div>
+          <button type="button" data-testid="tweetButtonInline">Reply</button>
+          <script>
+            globalThis.__clicks = 0;
+            document.querySelector('[data-testid="tweetButtonInline"]').addEventListener("click", () => globalThis.__clicks++);
+          </script>
+        `,
+      );
+      const result = await page.evaluate(
+        async ({ mutateSource, paidUrl }) => {
+          const mutate = new Function(`return (${mutateSource})`)();
+          try {
+            await CreatorXPublisherAdapter.submitReply({
+              resultId: "9000000000000000001",
+              paidUrl,
+              async beforeCommit() {
+                mutate();
+                return { armed: true };
+              },
+            });
+            return { rejected: false, clicks: globalThis.__clicks };
+          } catch (error) {
+            return { rejected: true, clicks: globalThis.__clicks };
+          }
+        },
+        { mutateSource: mutate.toString(), paidUrl },
+      );
+      assert.deepEqual(result, { rejected: true, clicks: 0 });
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  });
+}
+
+const X_COMPOSE_PAGE = `
+  <main>
+    <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div>
+    <input type="file" data-testid="fileInput" />
+    <div role="progressbar" aria-valuenow="100"></div>
+    <button type="button" data-testid="tweetButton">Post</button>
+  </main>
+  <script>
+    globalThis.__clicks = 0;
+    globalThis.__arms = 0;
+    document.querySelector('[data-testid="tweetButton"]').addEventListener("click", () => globalThis.__clicks++);
+  </script>
+`;
+
+async function withXCompose(callback) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/compose/post",
+      X_COMPOSE_PAGE,
+    );
+    await callback(page);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
+const prepareX = (page, caption) =>
+  page.evaluate(
+    (caption) =>
+      CreatorXPublisherAdapter.prepare({
+        caption,
+        async attachFile() {},
+      }),
+    caption,
+  );
+
+const submitX = (page, captionSha256, hook) =>
+  page.evaluate(
+    async ({ captionSha256, hook }) => {
+      if (hook) new Function(hook)();
+      try {
+        await CreatorXPublisherAdapter.submit({
+          captionSha256,
+          async beforeCommit() {
+            globalThis.__arms++;
+            return { armed: true };
+          },
+        });
+        return { rejected: false, clicks: globalThis.__clicks };
+      } catch (error) {
+        return {
+          rejected: true,
+          message: error.message,
+          clicks: globalThis.__clicks,
+          arms: globalThis.__arms,
+        };
+      }
+    },
+    { captionSha256, hook },
+  );
+
+const EDITOR = `document.querySelector('[data-testid="tweetTextarea_0"]')`;
+
+test("X prepare returns the hash of the composer text and submit posts once when it matches", async () => {
+  await withXCompose(async (page) => {
+    const prepared = await prepareX(page, "Recorded caption");
+    assert.match(prepared.preparedCaptionSha256, /^[0-9a-f]{64}$/);
+    assert.equal(prepared.preparedCaptionSha256, sha256Hex("Recorded caption"));
+    const outcome = await submitX(page, prepared.preparedCaptionSha256);
+    assert.equal(outcome.rejected, false);
+    assert.equal(outcome.clicks, 1);
+  });
+});
+
+for (const [name, edit] of [
+  ["one space added", `${EDITOR}.textContent += " ";`],
+  [
+    "one character changed",
+    `${EDITOR}.textContent = ${EDITOR}.textContent.replace("Line one", "Line onf");`,
+  ],
+  [
+    "a line break removed",
+    `${EDITOR}.textContent = ${EDITOR}.textContent.replace("\\n", "");`,
+  ],
+]) {
+  test(`X submit rejects with zero clicks when ${name} after preparation`, async () => {
+    await withXCompose(async (page) => {
+      const prepared = await prepareX(page, "Line one\nLine two");
+      const outcome = await submitX(page, prepared.preparedCaptionSha256, edit);
+      assert.equal(outcome.rejected, true, JSON.stringify(outcome));
+      assert.match(outcome.message, /caption/i);
+      assert.equal(outcome.clicks, 0);
+    });
+  });
+}
+
+for (const [name, hash] of [
+  ["missing", undefined],
+  ["empty", ""],
+  ["63 characters", "a".repeat(63)],
+  ["uppercase", "A".repeat(64)],
+]) {
+  test(`X submit rejects a ${name} caption hash with zero clicks and no arm`, async () => {
+    await withXCompose(async (page) => {
+      await prepareX(page, "Recorded caption");
+      const outcome = await submitX(page, hash);
+      assert.equal(outcome.rejected, true, JSON.stringify(outcome));
+      assert.equal(outcome.clicks, 0);
+      assert.equal(outcome.arms, 0);
+    });
+  });
+}
+
+test("X prepare rejects an editor holding text unrelated to the approved caption", async () => {
+  await withXCompose(async (page) => {
+    await assert.rejects(
+      page.evaluate(() =>
+        CreatorXPublisherAdapter.prepare({
+          caption: "Recorded caption",
+          async attachFile() {
+            document.querySelector(
+              '[data-testid="tweetTextarea_0"]',
+            ).textContent = "Something else entirely";
+          },
+        }),
+      ),
+      /caption/i,
+    );
+  });
+});
+
+test("X prepare tolerates whitespace-only rendering differences and hashes the exact editor text", async () => {
+  await withXCompose(async (page) => {
+    const prepared = await page.evaluate(() =>
+      CreatorXPublisherAdapter.prepare({
+        caption: "Line one\nLine two",
+        async attachFile() {
+          document.querySelector(
+            '[data-testid="tweetTextarea_0"]',
+          ).textContent = "Line one Line two ";
+        },
+      }),
+    );
+    assert.equal(
+      prepared.preparedCaptionSha256,
+      sha256Hex("Line one Line two "),
+    );
+  });
+});
+
+for (const [name, hook] of [
+  [
+    "the composer text changes while the hash is computed",
+    `const digest = crypto.subtle.digest.bind(crypto.subtle);
+     crypto.subtle.digest = async (...args) => {
+       ${EDITOR}.textContent += "!";
+       return digest(...args);
+     };`,
+  ],
+  [
+    "the route changes while the hash is computed",
+    `const digest = crypto.subtle.digest.bind(crypto.subtle);
+     crypto.subtle.digest = async (...args) => {
+       history.pushState({}, "", "/home");
+       return digest(...args);
+     };`,
+  ],
+]) {
+  test(`X submit rejects with zero clicks when ${name}`, async () => {
+    await withXCompose(async (page) => {
+      const prepared = await prepareX(page, "Caption");
+      const outcome = await submitX(page, prepared.preparedCaptionSha256, hook);
+      assert.equal(outcome.rejected, true, JSON.stringify(outcome));
+      assert.equal(outcome.clicks, 0);
+    });
+  });
+}
+
+test("X submitReply requires the armed result id and paid URL", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/RecordedCreator/status/9000000000000000001",
+      `
+        <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0">https://onlyfans.com/1/creator</div>
+        <button type="button" data-testid="tweetButtonInline">Reply</button>
+        <script>
+          globalThis.__clicks = 0;
+          document.querySelector('[data-testid="tweetButtonInline"]').addEventListener("click", () => globalThis.__clicks++);
+        </script>
+      `,
+    );
+    for (const args of [
+      { paidUrl: "https://onlyfans.com/1/creator" },
+      { resultId: "9000000000000000001" },
+      {},
+    ]) {
+      const outcome = await page.evaluate(async (args) => {
+        let arms = 0;
+        try {
+          await CreatorXPublisherAdapter.submitReply({
+            ...args,
+            async beforeCommit() {
+              arms++;
+              return { armed: true };
+            },
+          });
+          return { rejected: false };
+        } catch {
+          return { rejected: true, arms, clicks: globalThis.__clicks };
+        }
+      }, args);
+      assert.deepEqual(outcome, { rejected: true, arms: 0, clicks: 0 });
+    }
     await context.close();
   } finally {
     await browser.close();

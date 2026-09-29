@@ -233,17 +233,60 @@
       );
       return progress && one(MAIN_POST, "The X Post button", enabled);
     }, "The X upload-ready state");
+    const preparedText = one(MAIN_COMPOSER, "The X composer").textContent;
+    if (
+      preparedText.replace(/\s+/g, "") !==
+      String(caption || "").replace(/\s+/g, "")
+    ) {
+      throw new Error("The X composer does not hold the approved caption.");
+    }
+    const preparedCaptionSha256 = await sha256Text(preparedText);
+    if (one(MAIN_COMPOSER, "The X composer").textContent !== preparedText) {
+      throw new Error("The X caption changed while preparation finished.");
+    }
     observePreparedPost(postButton);
-    return { platform: "x", status: "prepared", upload: "ready" };
+    return {
+      platform: "x",
+      status: "prepared",
+      upload: "ready",
+      preparedCaptionSha256,
+    };
   }
 
-  async function submit({ beforeCommit }) {
+  async function sha256Text(value) {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(String(value || "")),
+    );
+    return [...new Uint8Array(digest)]
+      .map((item) => item.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async function submit({ beforeCommit, captionSha256 }) {
     if (typeof beforeCommit !== "function")
       throw new Error("The durable submit gate is unavailable.");
-    const button = one(MAIN_POST, "The X Post button", enabled);
+    if (!/^[0-9a-f]{64}$/.test(String(captionSha256 ?? "")))
+      throw new Error("The prepared X caption hash is missing or malformed.");
+    one(MAIN_POST, "The X Post button", enabled);
     const authorization = await beforeCommit();
     if (authorization?.armed !== true)
       throw new Error("The X post was not durably armed.");
+    const onCompose = () =>
+      location.origin === "https://x.com" &&
+      location.pathname === "/compose/post";
+    if (!onCompose())
+      throw new Error("The X composer changed after the post was armed.");
+    const text = one(MAIN_COMPOSER, "The X composer").textContent;
+    const hash = await sha256Text(text);
+    // No await below: the text, route and button are checked and clicked in one turn.
+    if (one(MAIN_COMPOSER, "The X composer").textContent !== text)
+      throw new Error("The X caption changed after the post was armed.");
+    if (hash !== captionSha256)
+      throw new Error("The X caption changed after the post was armed.");
+    if (!onCompose())
+      throw new Error("The X composer changed after the post was armed.");
+    const button = one(MAIN_POST, "The X Post button", enabled);
     button.click();
     return { platform: "x", status: "submitted" };
   }
@@ -285,21 +328,32 @@
     };
   }
 
-  async function submitReply({ beforeCommit }) {
+  async function submitReply({ beforeCommit, resultId, paidUrl }) {
+    if (typeof resultId !== "string" || !resultId)
+      throw new Error("The armed X result id is required.");
+    if (typeof paidUrl !== "string")
+      throw new Error("The armed X paid URL is required.");
     const main = currentMain();
     const captured = capturedReply(main);
     if (captured) return captured;
     if (typeof beforeCommit !== "function") {
       throw new Error("The durable X reply gate is unavailable.");
     }
-    const button = one(REPLY_POST, "The X Reply button", enabled);
+    one(REPLY_POST, "The X Reply button", enabled);
     const authorization = await beforeCommit({
       resultId: main.resultId,
       resultUrl: main.resultUrl,
     });
     if (authorization?.armed !== true)
       throw new Error("The X reply was not durably armed.");
-    button.click();
+    if (currentMain().resultId !== resultId)
+      throw new Error("The X status changed after the reply was armed.");
+    if (
+      one(MAIN_COMPOSER, "The X reply composer").textContent.trim() !==
+      paidUrl.trim()
+    )
+      throw new Error("The X reply changed after it was armed.");
+    one(REPLY_POST, "The X Reply button", enabled).click();
     const reply = await waitFor(
       () => replyFor(main),
       "The canonical first X reply",
@@ -331,7 +385,11 @@
     if (prepared.replyResultId || mode === "manual") return prepared;
     if (mode !== "autonomous")
       throw new Error("The X execution mode is invalid.");
-    return submitReply({ beforeCommit: beforeReplyCommit });
+    return submitReply({
+      beforeCommit: beforeReplyCommit,
+      resultId: prepared.resultId,
+      paidUrl,
+    });
   }
 
   globalThis.CreatorXPublisherAdapter = Object.freeze({

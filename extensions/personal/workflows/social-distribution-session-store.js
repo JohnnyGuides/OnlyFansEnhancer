@@ -169,6 +169,15 @@
       if (!replyResultUrl) throw new Error("Invalid X reply result URL.");
       output.replyResultUrl = replyResultUrl;
     }
+    if (Object.hasOwn(value, "preparedComposerSha256")) {
+      if (
+        typeof value.preparedComposerSha256 !== "string" ||
+        !/^[0-9a-f]{64}$/.test(value.preparedComposerSha256)
+      ) {
+        throw new Error("Invalid prepared caption hash.");
+      }
+      output.preparedComposerSha256 = value.preparedComposerSha256;
+    }
     if (Object.hasOwn(value, "error")) output.error = clean(value.error, 500);
     if (Object.hasOwn(value, "updatedAt")) {
       const timestamp = Number(value.updatedAt);
@@ -220,6 +229,20 @@
         );
       }
       if (previous[field]) output[field] = previous[field];
+    }
+    if (patch.preparedComposerSha256) {
+      if (jobId !== "x" || output.stage !== "prepared") {
+        throw new Error("Invalid prepared caption hash for this job stage.");
+      }
+      if (
+        previous.preparedComposerSha256 &&
+        previous.preparedComposerSha256 !== patch.preparedComposerSha256
+      ) {
+        throw new Error("The prepared caption hash cannot change.");
+      }
+    }
+    if (previous.preparedComposerSha256) {
+      output.preparedComposerSha256 = previous.preparedComposerSha256;
     }
     if (
       LINEAR_STAGES.indexOf(output.stage) >=

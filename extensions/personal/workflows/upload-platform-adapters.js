@@ -2372,36 +2372,79 @@
     if (["none", "now"].includes(draft.scheduleIntent)) {
       if (composer.querySelector(".b-dropzone__preview.m-schedule"))
         throw new Error("OnlyFans already has a schedule; inspect this draft.");
-      if (!mediaReady() || labels().length !== labelsBefore.length)
-        throw new Error("OnlyFans media or labels changed during preparation.");
-      if (draft.scheduleIntent === "none")
-        return { platform: "onlyfans", status: "manual-submit-required" };
-      const post = await waitFor(
+      await waitFor(
         () => {
-          const controls = [...composer.querySelectorAll("button")].filter(
-            (button) =>
-              visible(button) &&
-              enabled(button) &&
-              !button.closest("[role='dialog']") &&
-              ["post", "save"].includes(
-                button.textContent.trim().toLowerCase(),
-              ),
-          );
-          return controls.length === 1 ? controls[0] : null;
+          revalidate();
+          return mediaReady();
         },
+        "OnlyFans completed media upload",
+        UPLOAD_TIMEOUT,
+        signal,
+      );
+      const labelsUnchanged = () => {
+        const current = labels();
+        return (
+          labelsBefore.length === current.length &&
+          labelsBefore.every(
+            (item, index) =>
+              item.checked === current[index].checked &&
+              item.value === current[index].value &&
+              item.text === current[index].text,
+          )
+        );
+      };
+      if (!labelsUnchanged())
+        throw new Error("OnlyFans labels changed during preparation.");
+      const unscheduledStateIntact = () => {
+        if (
+          editor.textContent !== String(draft.description || "") ||
+          composer.querySelector(".b-dropzone__preview.m-schedule")
+        )
+          throw new Error(
+            "OnlyFans caption or schedule changed while the upload was processing.",
+          );
+      };
+      if (draft.scheduleIntent === "none") {
+        unscheduledStateIntact();
+        return { platform: "onlyfans", status: "manual-submit-required" };
+      }
+      const publishNowControl = () => {
+        const controls = [...composer.querySelectorAll("button")].filter(
+          (button) =>
+            visible(button) &&
+            enabled(button) &&
+            !button.closest("[role='dialog']") &&
+            ["post", "save"].includes(button.textContent.trim().toLowerCase()),
+        );
+        return controls.length === 1 ? controls[0] : null;
+      };
+      await waitFor(
+        publishNowControl,
         "OnlyFans publish-now control",
         UPLOAD_TIMEOUT,
         signal,
       );
+      unscheduledStateIntact();
+      if (!mediaReady())
+        throw new Error("OnlyFans media is not ready before the post.");
+      verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
       await beforeCommit(context, "OnlyFans");
+      revalidate();
+      verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
+      const post = publishNowControl();
       if (
-        !post.isConnected ||
-        !enabled(post) ||
+        !post ||
+        !editor.isConnected ||
+        editor.textContent !== String(draft.description || "") ||
         !mediaReady() ||
         composer.querySelector(".b-dropzone__preview.m-schedule")
       )
         throw new Error(
           "OnlyFans publish-now state changed before submission.",
+        );
+      if (!labelsUnchanged())
+        throw new Error(
+          "OnlyFans labels changed during the durable checkpoint.",
         );
       click(post, "OnlyFans publish-now control");
       await context.progress?.("submitted");
@@ -3462,10 +3505,16 @@
       if (draft.scheduleIntent === "none")
         return { platform: "fansly", status: "manual-submit-required" };
       await beforeCommit(context, "Fansly");
+      assertFanslyComposer(composer);
+      verifyNoBlockingErrors(composer, "Fansly");
       if (
         !post.isConnected ||
+        composer.querySelector(".new-post-btn") !== post ||
         !enabled(post) ||
-        post.textContent.trim().toLowerCase() !== "post"
+        post.textContent.trim().toLowerCase() !== "post" ||
+        composer.querySelector("app-post-schedule-modal:not([hidden])") ||
+        (draft.fanslyCaption !== undefined &&
+          composer.querySelector("textarea")?.value !== draft.fanslyCaption)
       )
         throw new Error("Fansly publish-now state changed before submission.");
       click(post, "Fansly publish-now control");
