@@ -675,3 +675,95 @@ test("desktop launcher round-trips and legacy final hash prevents new-session by
   );
   assert.equal(values.creatorUploadActionsV1.length, 1);
 });
+
+const journalStep = (actionId, commandId, extra = {}) => ({
+  actionId,
+  platform: "onlyfans",
+  outcome: "intent",
+  commandId,
+  documentId: "22222222-2222-4222-8222-222222222222",
+  signature: "a".repeat(64),
+  tabId: 42,
+  frameId: 0,
+  ...extra,
+});
+const commandIds = [
+  "11111111-1111-4111-8111-111111111111",
+  "33333333-3333-4333-8333-333333333333",
+  "44444444-4444-4444-8444-444444444444",
+];
+
+test("journal admits select-media1 and select-media8 and rejects unbounded roles", async () => {
+  const { store } = loadStore();
+  await store.recordStep(
+    "media-role-session",
+    journalStep("select-media1", commandIds[0]),
+  );
+  await store.recordStep(
+    "media-role-session",
+    journalStep("select-media8", commandIds[1]),
+  );
+  for (const bad of ["select-media0", "select-media9", "select-mediaX"])
+    await assert.rejects(
+      store.recordStep("media-role-session", journalStep(bad, commandIds[2])),
+      /Invalid preparation step journal record/,
+    );
+});
+
+test("journal admits distinct per-role attach ids and refuses a repeated role", async () => {
+  const { store } = loadStore();
+  const record = {
+    id: "attach-role-session",
+    draft: { fullFilename: "neutral.mp4" },
+  };
+  const work = await store.workIdentity(record);
+  await store.recordStep(
+    record.id,
+    journalStep("attach-media1", commandIds[0], { work }),
+  );
+  await store.recordStep(
+    record.id,
+    journalStep("attach-media2", commandIds[1], { work }),
+  );
+  await assert.rejects(
+    store.recordStep(
+      record.id,
+      journalStep("attach-media1", commandIds[2], { work }),
+    ),
+    /existing.*action/i,
+  );
+  await assert.rejects(
+    store.recordStep(
+      "attach-role-new-session",
+      journalStep("attach-media1", commandIds[2], { work }),
+    ),
+    /existing.*action/i,
+  );
+});
+
+test("a legacy attach-media record still refuses a new attach-media intent", async () => {
+  const { store } = loadStore();
+  const record = {
+    id: "legacy-attach-session",
+    draft: { fullFilename: "neutral.mp4" },
+  };
+  const work = await store.workIdentity(record);
+  await store.recordStep(
+    record.id,
+    journalStep("attach-media", commandIds[0], { work }),
+  );
+  await assert.rejects(
+    store.recordStep(
+      record.id,
+      journalStep("attach-media", commandIds[1], { work }),
+    ),
+    /existing.*action/i,
+  );
+  await assert.rejects(
+    store.recordStep(
+      "legacy-attach-other",
+      journalStep("attach-media", commandIds[1], { work }),
+    ),
+    /existing.*action/i,
+  );
+});

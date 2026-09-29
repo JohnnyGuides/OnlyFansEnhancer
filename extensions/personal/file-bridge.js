@@ -45,15 +45,37 @@
     if (
       data?.source !== "creator-upload-console" ||
       data.sessionId !== sessionId ||
-      data.platform !== platform ||
-      !new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
-        data.role,
-      ) ||
-      (platform === "pornhub") !== (data.role === "pornhub") ||
-      (["x", "redgifs"].includes(platform) && data.role !== "social") ||
-      (!["x", "redgifs"].includes(platform) && data.role === "social") ||
-      !(data.file instanceof File)
+      data.platform !== platform
     ) {
+      return;
+    }
+    const role = typeof data.role === "string" ? data.role : "";
+    if (
+      (!new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
+        role,
+      ) &&
+        !/^media[1-8]$/.test(role)) ||
+      (/^media[1-8]$/.test(role) &&
+        !["onlyfans", "fansly"].includes(platform)) ||
+      (platform === "pornhub"
+        ? !["pornhub", "thumbnail"].includes(role)
+        : role === "pornhub") ||
+      (["x", "redgifs"].includes(platform) && role !== "social") ||
+      (!["x", "redgifs"].includes(platform) && role === "social")
+    ) {
+      channel.postMessage({
+        source: "creator-upload-bridge",
+        direction: "ack",
+        sessionId,
+        platform,
+        ...(typeof data.role === "string" ? { role: data.role } : {}),
+        ...(data.requestId === undefined ? {} : { requestId: data.requestId }),
+        ok: false,
+        error: "File transfer was not authorized.",
+      });
+      return;
+    }
+    if (!(data.file instanceof File)) {
       return;
     }
     parent.postMessage(

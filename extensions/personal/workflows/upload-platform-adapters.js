@@ -2989,12 +2989,16 @@
     throw new Error("Fansly date exceeds supported calendar navigation range.");
   }
 
+  function fanslyAttachActionId(role) {
+    return role === "full" ? "attach-media" : `attach-${role}`;
+  }
+
   async function prepareCurrentFanslyMedia(
     context,
     composer,
     modal,
     fullCard,
-    { preview = true } = {},
+    { preview = true, role = "full" } = {},
   ) {
     const { draft, signal } = context;
     if (preview && draft.hasTeaser !== false) {
@@ -3099,7 +3103,11 @@
     const existingCards = new Set(
       composer.querySelectorAll("app-account-media-template"),
     );
-    await context.checkpointStep?.("attach-media", commandId, "intent");
+    await context.checkpointStep?.(
+      fanslyAttachActionId(role),
+      commandId,
+      "intent",
+    );
     click(
       exactText(".btn", "Upload", "Fansly parent media Upload", modal),
       "Fansly parent media Upload",
@@ -3187,10 +3195,14 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    await context.checkpointStep?.("attach-media", commandId, "observed");
+    await context.checkpointStep?.(
+      fanslyAttachActionId(role),
+      commandId,
+      "observed",
+    );
   }
 
-  async function prepareLegacyFanslyExtra(context, composer, card) {
+  async function prepareLegacyFanslyExtra(context, composer, card, role) {
     const { draft, signal } = context;
     const existingCards = new Set(
       composer.querySelectorAll("app-account-media-template"),
@@ -3233,7 +3245,11 @@
     );
     if (!modal) return;
     const commandId = context.checkpointStep ? crypto.randomUUID() : "";
-    await context.checkpointStep?.("attach-media", commandId, "intent");
+    await context.checkpointStep?.(
+      fanslyAttachActionId(role),
+      commandId,
+      "intent",
+    );
     click(
       exactText(
         "button, [role='button'], .btn",
@@ -3256,7 +3272,11 @@
       UPLOAD_TIMEOUT,
       signal,
     );
-    await context.checkpointStep?.("attach-media", commandId, "observed");
+    await context.checkpointStep?.(
+      fanslyAttachActionId(role),
+      commandId,
+      "observed",
+    );
   }
 
   async function runFansly(context) {
@@ -3297,6 +3317,7 @@
         composer,
         currentMediaModal,
         fullCard,
+        { role: mediaRoles[0] },
       );
     } else {
       const mediaModal = fullCard.closest(
@@ -3357,7 +3378,11 @@
           mediaModal,
         );
         abortIfNeeded(signal);
-        await context.checkpointStep?.("attach-media", commandId, "intent");
+        await context.checkpointStep?.(
+          fanslyAttachActionId(mediaRoles[0]),
+          commandId,
+          "intent",
+        );
         click(upload, "Fansly parent media Upload");
         await waitFor(
           () => {
@@ -3382,7 +3407,11 @@
           UPLOAD_TIMEOUT,
           signal,
         );
-        await context.checkpointStep?.("attach-media", commandId, "observed");
+        await context.checkpointStep?.(
+          fanslyAttachActionId(mediaRoles[0]),
+          commandId,
+          "observed",
+        );
       }
     }
 
@@ -3392,8 +3421,9 @@
       if (modal)
         await prepareCurrentFanslyMedia(context, composer, modal, card, {
           preview: false,
+          role,
         });
-      else await prepareLegacyFanslyExtra(context, composer, card);
+      else await prepareLegacyFanslyExtra(context, composer, card, role);
     }
 
     const sharedFansly = globalThis.CreatorToolkitAdapters?.fanslyPrefill;

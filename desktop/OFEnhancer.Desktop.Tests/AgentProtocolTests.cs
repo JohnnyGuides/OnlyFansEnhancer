@@ -21,6 +21,21 @@ public sealed class AgentProtocolTests
     }
 
     [TestMethod]
+    public void Parse_accepts_resolveUploadThumbnail_and_still_rejects_unknown_operations()
+    {
+        AgentRequest request = AgentRequest.Parse(
+            JsonSerializer.Serialize(new { protocolVersion = 1, requestId = RequestId, operation = "resolveUploadThumbnail", payload = new { catalogueId = "ashley-04" } })
+        );
+        Assert.AreEqual("resolveUploadThumbnail", request.Operation);
+        AgentProtocolException error = Assert.ThrowsException<AgentProtocolException>(() =>
+            AgentRequest.Parse(
+                JsonSerializer.Serialize(new { protocolVersion = 1, requestId = RequestId, operation = "resolveUploadThumbnails" })
+            )
+        );
+        Assert.AreEqual("unsupported-operation", error.Code);
+    }
+
+    [TestMethod]
     public void CataloguePayloadAndResultRoundTripWithoutChangingStatusEnvelope()
     {
         AgentRequest request = AgentRequest.Parse($$$"""{"protocolVersion":1,"requestId":"{{{RequestId}}}","operation":"recordUploadResult","payload":{"row":2,"platform":"onlyfans"}}""");

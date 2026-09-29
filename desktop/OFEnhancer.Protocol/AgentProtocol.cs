@@ -34,7 +34,7 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
                 "The desktop request uses an unsupported protocol."
             );
         if (request.Operation is not (AgentProtocol.GetStatusOperation or "getCatalogue" or "getUploadCatalogueSnapshot"
-            or "getUploadThumbnailOptions" or "getUploadThumbnailPreview" or "getCatalogueThumbnailPreviews"
+            or "getUploadThumbnailOptions" or "getUploadThumbnailPreview" or "resolveUploadThumbnail" or "getCatalogueThumbnailPreviews"
             or "recordUploadResult" or "writeUploadCatalogueEntry" or "getSubredditPresets" or "browserExchange" or "showChromeSetup"
             or "loadDevelopmentFixtures" or "resolveDevelopmentFixture"))
             throw new AgentProtocolException(
