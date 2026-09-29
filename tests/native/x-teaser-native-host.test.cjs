@@ -460,7 +460,11 @@ function invokeRaw(value, request, env) {
     [dll, "--request", path.join(value.root, "config.json"), requestPath],
     { cwd: repositoryRoot, encoding: "utf8", env: env ?? process.env },
   );
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 }
 
 function invokeAsync(value, request, env) {
