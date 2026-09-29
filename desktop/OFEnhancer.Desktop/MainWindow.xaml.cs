@@ -342,6 +342,7 @@ public partial class MainWindow : Window, IDisposable
     public async Task ExitAsync()
     {
         exiting = true;
+        googleCatalogue.CancelInFlightGoogleWork();
         await dispatcher.DrainAsync();
         Dispose();
         Close();

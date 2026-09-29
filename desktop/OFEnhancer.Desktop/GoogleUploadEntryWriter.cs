@@ -21,7 +21,7 @@ internal sealed class GoogleUploadEntryWriter(
         GoogleUploadEntryRequest request, CancellationToken cancellationToken)
     {
         Validate(request);
-        GoogleWorkbookSnapshot workbook = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken)
+        GoogleWorkbookSnapshot workbook = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken, preferredSheetId)
             .ConfigureAwait(false);
         GoogleCatalogueImportPreview before = GoogleCatalogueImportReader.Read(workbook, preferredSheetId);
         string id = request.Mode == "new" ? NewId(request, before.Projection.Items) : request.Id!;
@@ -139,7 +139,7 @@ internal sealed class GoogleUploadEntryWriter(
 
     private async Task<GoogleCatalogueImportPreview> ReadAsync(CancellationToken cancellationToken)
     {
-        GoogleWorkbookSnapshot snapshot = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken)
+        GoogleWorkbookSnapshot snapshot = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken, preferredSheetId)
             .ConfigureAwait(false);
         return GoogleCatalogueImportReader.Read(snapshot, preferredSheetId);
     }
@@ -151,14 +151,16 @@ internal sealed class GoogleUploadEntryWriter(
             || !preview.Columns.TryGetValue("sourceKey", out int idColumn)) return null;
         GoogleSheetSnapshot sheet = workbook.Sheets.Single(s => s.SheetId == preview.CatalogueSheetId);
         int? selected = null;
+        // Columns A-L plus every column of the detected mapping, which includes those the writer fills.
+        int[] inspectedColumns = [.. Enumerable.Range(0, 12).Union(preview.Columns.Values.Select(column => column - 1))];
         foreach (GoogleWorkbookRowSnapshot row in sheet.Rows.Where(r => r.RowNumber > preview.HeaderRow))
         {
             string? date = row.Cells.ElementAtOrDefault(dateColumn - 1)?.Value;
             if (date != releaseDate) continue;
             // A date alone reserves a slot; any other content means it belongs to another entry.
-            bool occupied = Enumerable.Range(0, Math.Min(12, row.Cells.Count))
+            bool occupied = inspectedColumns
                 .Where(index => index != dateColumn - 1)
-                .Any(index => !string.IsNullOrWhiteSpace(row.Cells[index].Value));
+                .Any(index => !string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(index)?.Value));
             if (occupied) continue;
             if (!string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(idColumn - 1)?.Value)) continue;
             selected ??= row.RowNumber;

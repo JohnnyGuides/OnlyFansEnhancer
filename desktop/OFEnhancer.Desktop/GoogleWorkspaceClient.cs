@@ -34,11 +34,13 @@ internal sealed class GoogleWorkspaceClient
         "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,formattedValue,hyperlink,effectiveFormat(numberFormat(type)))),columnMetadata(hiddenByUser)),columnGroups(range(sheetId,dimension,startIndex,endIndex),depth,collapsed)),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))";
     private readonly HttpClient _httpClient;
     private readonly IGoogleAccessTokenSource _tokens;
+    private readonly TimeSpan _operationTimeout;
 
-    internal GoogleWorkspaceClient(HttpClient httpClient, IGoogleAccessTokenSource tokens)
+    internal GoogleWorkspaceClient(HttpClient httpClient, IGoogleAccessTokenSource tokens, TimeSpan? operationTimeout = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _tokens = tokens ?? throw new ArgumentNullException(nameof(tokens));
+        _operationTimeout = operationTimeout ?? TimeSpan.FromSeconds(30);
     }
 
     internal async Task<GoogleSpreadsheetIdentity> ValidateSpreadsheetAsync(
@@ -124,36 +126,37 @@ internal sealed class GoogleWorkspaceClient
         return snapshot;
     }
 
-    internal async Task<GoogleWorkbookSnapshot> ReadImportWorkbookAsync(string fileId, CancellationToken cancellationToken)
+    internal async Task<GoogleWorkbookSnapshot> ReadImportWorkbookAsync(string fileId, CancellationToken cancellationToken, int? preferredSheetId = null)
     {
         string workbookId = Required(fileId, 256, "fileId");
         GoogleWorkbookSnapshot metadata = await ReadWorkbookMetadataAsync(workbookId, cancellationToken).ConfigureAwait(false);
         GoogleSheetSnapshot[] visible = metadata.Sheets.Where(sheet =>
-            !sheet.Hidden && sheet.RowCount > 0 && sheet.ColumnCount > 0).ToArray();
+            !sheet.Hidden && sheet.RowCount > 0 && sheet.ColumnCount > 0
+            && (preferredSheetId is null || sheet.SheetId == preferredSheetId)).ToArray();
         if (visible.Length == 0)
             throw new GoogleCatalogueException("catalogue-tab-not-found");
         GoogleWorkbookSnapshot headers = await ReadImportRangesAsync(metadata, visible, headerDiscovery: true,
             cancellationToken).ConfigureAwait(false);
-        GoogleCatalogueImportPreview discovered = GoogleCatalogueImportReader.Detect(headers);
+        GoogleCatalogueImportPreview discovered = GoogleCatalogueImportReader.Detect(headers, preferredSheetId);
         GoogleSheetSnapshot selected = headers.Sheets.Single(sheet => sheet.SheetId == discovered.CatalogueSheetId);
         if (selected.RowCount > 5002)
             throw new GoogleCatalogueException("workbook-row-limit");
         GoogleWorkbookSnapshot body = await ReadImportRangesAsync(metadata, [selected], headerDiscovery: false,
             cancellationToken).ConfigureAwait(false);
-        GoogleCatalogueImportPreview verified = GoogleCatalogueImportReader.Detect(body);
+        GoogleCatalogueImportPreview verified = GoogleCatalogueImportReader.Detect(body, preferredSheetId);
         if (!discovered.HasSameMapping(verified))
             throw new GoogleCatalogueException("catalogue-layout-changed");
         return body;
     }
 
-    internal async Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(string fileId, CancellationToken cancellationToken)
+    internal async Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(string fileId, CancellationToken cancellationToken, int? preferredSheetId = null)
     {
         string workbookId=Required(fileId,256,"fileId");
         GoogleWorkbookSnapshot metadata=await ReadWorkbookMetadataAsync(workbookId,cancellationToken).ConfigureAwait(false);
-        GoogleSheetSnapshot[] visible=metadata.Sheets.Where(sheet=>!sheet.Hidden && sheet.RowCount>0 && sheet.ColumnCount>0).ToArray();
+        GoogleSheetSnapshot[] visible=metadata.Sheets.Where(sheet=>!sheet.Hidden && sheet.RowCount>0 && sheet.ColumnCount>0 && (preferredSheetId is null || sheet.SheetId==preferredSheetId)).ToArray();
         if(visible.Length==0) throw new GoogleCatalogueException("catalogue-tab-not-found");
         GoogleWorkbookSnapshot headers=await ReadImportRangesAsync(metadata,visible,true,cancellationToken).ConfigureAwait(false);
-        GoogleCatalogueImportPreview detected=GoogleCatalogueImportReader.Detect(headers);
+        GoogleCatalogueImportPreview detected=GoogleCatalogueImportReader.Detect(headers,preferredSheetId);
         GoogleSheetSnapshot selected=headers.Sheets.Single(sheet=>sheet.SheetId==detected.CatalogueSheetId);
         if(selected.ColumnCount<28) throw new GoogleCatalogueException("subreddit-presets-unavailable");
         int lastRow=Math.Min(501,selected.RowCount);
@@ -493,22 +496,44 @@ internal sealed class GoogleWorkspaceClient
         Func<string, HttpRequestMessage> createRequest,
         Uri expectedOrigin,
         int maximumResponseBytes,
-        CancellationToken cancellationToken
+        CancellationToken callerToken
     )
     {
-        string token = await ReadTokenAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
-        using HttpResponseMessage first = await SendAsync(createRequest(token), cancellationToken).ConfigureAwait(false);
-        if (first.StatusCode != HttpStatusCode.Unauthorized)
-            return await ReadSuccessfulResponseAsync(first, expectedOrigin, maximumResponseBytes, cancellationToken).ConfigureAwait(false);
+        // One deadline covers token acquisition, headers and body.
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
+        deadline.CancelAfter(_operationTimeout);
+        CancellationToken cancellationToken = deadline.Token;
+        try
+        {
+            string token = await ReadTokenAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
+            using HttpResponseMessage first = await SendAsync(createRequest(token), cancellationToken).ConfigureAwait(false);
+            if (first.StatusCode != HttpStatusCode.Unauthorized)
+                return await ReadSuccessfulResponseAsync(first, expectedOrigin, maximumResponseBytes, cancellationToken).ConfigureAwait(false);
 
-        string refreshed = await ReadTokenAsync(forceRefresh: true, cancellationToken).ConfigureAwait(false);
-        using HttpResponseMessage second = await SendAsync(createRequest(refreshed), cancellationToken).ConfigureAwait(false);
-        return await ReadSuccessfulResponseAsync(second, expectedOrigin, maximumResponseBytes, cancellationToken).ConfigureAwait(false);
+            string refreshed = await ReadTokenAsync(forceRefresh: true, cancellationToken).ConfigureAwait(false);
+            using HttpResponseMessage second = await SendAsync(createRequest(refreshed), cancellationToken).ConfigureAwait(false);
+            return await ReadSuccessfulResponseAsync(second, expectedOrigin, maximumResponseBytes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            throw new GoogleCatalogueException("google-request-timeout");
+        }
     }
 
-    private async Task SendMutationAsync(Uri endpoint, byte[] body, CancellationToken cancellationToken)
+    private async Task SendMutationAsync(Uri endpoint, byte[] body, CancellationToken callerToken)
     {
-        string token = await ReadTokenAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
+        deadline.CancelAfter(_operationTimeout);
+        CancellationToken cancellationToken = deadline.Token;
+        string token;
+        try
+        {
+            token = await ReadTokenAsync(forceRefresh: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            throw new GoogleCatalogueException("google-request-timeout");
+        }
         try
         {
             using HttpResponseMessage response = await SendAsync(
@@ -522,8 +547,9 @@ internal sealed class GoogleWorkspaceClient
                 cancellationToken
             ).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // Once dispatched, a deadline or caller cancellation leaves the outcome unknown.
             throw new GoogleMutationUncertainException();
         }
         catch (HttpRequestException)

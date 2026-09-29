@@ -568,7 +568,6 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             {
                 ThrowIfDisposed();
                 _inspection = result.Inspection ?? _inspection;
-                _ready = true;
                 WorkbookInspection readyInspection = _inspection
                     ?? throw new GoogleCatalogueControllerException("google-migration-failed");
                 _store.SaveGoogleCatalogueProfile(
@@ -580,12 +579,15 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                     DateTimeOffset.UtcNow
                 );
                 _selection = _store.GetGoogleCatalogueSelection();
+                _ready = true;
                 _syncIssueCode = null;
                 return StatusLocked();
             }
         }
         catch (Exception exception)
         {
+            lock (_gate)
+                _ready = false;
             throw SafeException(exception);
         }
         finally
@@ -624,10 +626,16 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             lock (_gate)
             {
                 ThrowIfDisposed();
+                // The worker skips stored conflicts, so success also needs the scoped stored state to be clean.
+                SyncOutboxCounts stored = _store.GetSyncOperationCounts(workbookId, sheetId);
                 if (summary.RemoteVerificationOccurred
                     && summary.Conflicts == 0
                     && summary.Unresolved == 0
-                    && summary.Pending == 0)
+                    && summary.Pending == 0
+                    && stored.Pending == 0
+                    && stored.Attempted == 0
+                    && stored.Conflicts == 0
+                    && stored.Unresolved == 0)
                 {
                     _store.MarkGoogleCatalogueSync(
                         workbookId,
@@ -636,9 +644,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                     );
                     _selection = _store.GetGoogleCatalogueSelection();
                 }
-                _syncIssueCode = summary.Conflicts > 0
+                _syncIssueCode = summary.Conflicts > 0 || stored.Conflicts > 0
                     ? "google-sync-conflict"
-                    : summary.Unresolved > 0
+                    : summary.Unresolved > 0 || stored.Unresolved > 0 || stored.Attempted > 0
                         ? "google-sync-unresolved"
                         : null;
                 _syncing = false;
@@ -686,6 +694,18 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             _ready = false;
             return StatusLocked();
         }
+    }
+
+    // Called before the window drains its dispatcher so an in-flight Google call cannot hold exit open.
+    internal void CancelInFlightGoogleWork()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+        }
+        try { _lifetime.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     public void Dispose()
@@ -952,7 +972,11 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             GoogleConnectionCompletion completion = new(
                 selection.WorkbookId,
                 selection.WorkbookTitle,
-                credential.AccessTokenExpiresAt
+                credential.AccessTokenExpiresAt,
+                int.TryParse(selection.SheetId, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out int storedSheetId)
+                    ? storedSheetId
+                    : null
             );
             _session = _sessionFactory(clientId, completion);
             _completion = completion;
@@ -1055,12 +1079,12 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
 
     public async Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken)
     {
-        GoogleWorkbookSnapshot snapshot = await _workspace.ReadImportWorkbookAsync(_workbookId, cancellationToken).ConfigureAwait(false);
+        GoogleWorkbookSnapshot snapshot = await _workspace.ReadImportWorkbookAsync(_workbookId, cancellationToken, _preferredSheetId).ConfigureAwait(false);
         return GoogleCatalogueImportReader.Read(snapshot, _preferredSheetId);
     }
 
     public Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(CancellationToken cancellationToken) =>
-        _workspace.ReadSubredditPresetsAsync(_workbookId,cancellationToken);
+        _workspace.ReadSubredditPresetsAsync(_workbookId,cancellationToken,_preferredSheetId);
 
     public Task<WorkbookMigrationResult> ApplyMigrationAsync(
         string planHash,
@@ -1087,6 +1111,7 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
     private readonly IGoogleTokenVault _vault;
     private readonly Func<string>? _clientSecret;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly TimeSpan _timeout;
     private string? _accessToken;
     private DateTimeOffset _expiresAt;
     private int _disposed;
@@ -1095,7 +1120,8 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
         string clientId,
         HttpClient httpClient,
         IGoogleTokenVault vault,
-        Func<string>? clientSecret = null
+        Func<string>? clientSecret = null,
+        TimeSpan? timeout = null
     )
     {
         if (!AppConfiguration.IsValidGoogleOAuthClientId(clientId))
@@ -1104,14 +1130,33 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _vault = vault ?? throw new ArgumentNullException(nameof(vault));
         _clientSecret = clientSecret;
+        _timeout = timeout ?? TimeSpan.FromSeconds(30);
     }
 
     public async ValueTask<string> GetAccessTokenAsync(
         bool forceRefresh,
-        CancellationToken cancellationToken
+        CancellationToken callerToken
     )
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        // One deadline covers the gate wait, the request headers and the response body.
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
+        deadline.CancelAfter(_timeout);
+        try
+        {
+            return await RefreshAsync(forceRefresh, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            throw new GoogleCatalogueException("google-token-refresh-timeout");
+        }
+    }
+
+    private async ValueTask<string> RefreshAsync(
+        bool forceRefresh,
+        CancellationToken cancellationToken
+    )
+    {
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

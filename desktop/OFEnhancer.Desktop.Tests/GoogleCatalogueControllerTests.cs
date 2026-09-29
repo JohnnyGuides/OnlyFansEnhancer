@@ -44,6 +44,184 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(0, harness.Session.MigrationCalls - 1);
     }
 
+    [TestMethod]
+    public void SaveFailureAfterMigrationLeavesTheControllerNotReadyAndSyncRefused()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        WorkbookInspection inspection = Inspection(alreadyMigrated: false);
+        harness.Session.Inspection = inspection;
+        harness.Session.Migration = new("applied", inspection with
+        {
+            AlreadyMigrated = true,
+            MigrationPlan = inspection.MigrationPlan with { Operations = [] },
+        });
+        harness.Controller.inspectGoogleWorkbook();
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={harness.Store.DatabasePath};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TRIGGER fail_ready BEFORE UPDATE ON settings WHEN NEW.key='google.catalogue.ready' BEGIN SELECT RAISE(ABORT,'fixture failure'); END";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.ThrowsException<GoogleCatalogueControllerException>(() => harness.Controller.applyGoogleWorkbookMigration(PlanHash));
+
+        Assert.AreNotEqual("ready", harness.Controller.getGoogleCatalogueStatus().State);
+        Assert.AreEqual("google-workbook-not-ready", Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => harness.Controller.syncGoogleCatalogue()).Code);
+    }
+
+    [DataTestMethod]
+    [DataRow(false, "google-sync-conflict")]
+    [DataRow(true, "google-sync-unresolved")]
+    public void OldStoredConflictOrAttemptedOperationKeepsSyncFromAdvancingLastVerified(bool attempted, string expectedCode)
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Session.Inspection = InspectionWithRows(1, []);
+        harness.Controller.inspectGoogleWorkbook();
+        string itemId = harness.Store.GetCatalogue().Items.Single().ItemId;
+        SyncOutboxItem old = harness.Store.EnqueueProjection(Projection(itemId, "old-issue", WorkbookId));
+        if (attempted)
+            harness.Store.MarkSyncAttempted(old.OperationId, DateTimeOffset.UtcNow);
+        else
+            harness.Store.MarkSyncPendingConflict(old.OperationId, "remote-value-not-empty", DateTimeOffset.UtcNow);
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(1, 0, 0, 0, true));
+
+        GoogleCatalogueStatusView status = harness.Controller.syncGoogleCatalogue();
+
+        Assert.IsNull(status.LastVerifiedSync);
+        Assert.IsNull(harness.Store.GetGoogleCatalogueSelection()!.LastSuccessfulSyncUtc);
+        Assert.AreEqual("conflict", status.State);
+        Assert.AreEqual(expectedCode, status.ErrorCode);
+        Assert.AreEqual(attempted ? SyncOutboxState.Attempted : SyncOutboxState.Conflict,
+            harness.Store.GetSyncOperation(old.OperationId).State);
+    }
+
+    [TestMethod]
+    public void ConflictInAnotherWorkbookDoesNotBlockSyncSuccess()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Session.Inspection = InspectionWithRows(1, []);
+        harness.Controller.inspectGoogleWorkbook();
+        string itemId = harness.Store.GetCatalogue().Items.Single().ItemId;
+        SyncOutboxItem other = harness.Store.EnqueueProjection(Projection(itemId, "other-workbook", "workbook-a"));
+        harness.Store.MarkSyncPendingConflict(other.OperationId, "remote-value-not-empty", DateTimeOffset.UtcNow);
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(1, 0, 0, 0, true));
+
+        GoogleCatalogueStatusView status = harness.Controller.syncGoogleCatalogue();
+
+        Assert.IsNotNull(status.LastVerifiedSync);
+        Assert.AreEqual("ready", status.State);
+    }
+
+    [TestMethod]
+    public void RestoreHandsTheStoredSheetIdToTheSessionAsTheApprovedIdentity()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleConnectionCompletion? seen = null;
+
+        using GoogleCatalogueController restarted = new(harness.Settings, harness.Store, harness.Vault,
+            (_, _, _) => throw new AssertFailedException(), (_, completion) =>
+            {
+                seen = completion;
+                return harness.Session;
+            });
+
+        Assert.AreEqual(1, seen!.PreferredSheetId);
+    }
+
+    [TestMethod]
+    public void RestoredControllerImportsOnlyTheStoredSheetThroughTheProductionSessionFactory()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Store.SaveGoogleCatalogueProfile(WorkbookId, "44", "Second tab", "catalogue-v1", false, DateTimeOffset.UtcNow);
+        GoogleRoutingHandler handler = new();
+        string metadata = GoogleRoutingHandler.Metadata(("First tab", 1), ("Second tab", 44));
+        handler.Sheets(metadata);
+        handler.Sheets(GoogleRoutingHandler.Tab(("Second tab", 44), false));
+        handler.Sheets(GoogleRoutingHandler.Tab(("Second tab", 44), true));
+        using HttpClient http = new(handler);
+        using GoogleCatalogueController restarted = new(harness.Settings, harness.Store, harness.Vault, http, _ => { });
+
+        GoogleCatalogueImportResult result = restarted.importGoogleCatalogue();
+
+        Assert.AreEqual("Second tab", result.SheetName);
+        Assert.AreEqual(1, result.ImportedItems);
+        Assert.AreEqual(3, handler.SheetsRequests.Count);
+        Assert.IsTrue(handler.SheetsRequests.All(uri => !Uri.UnescapeDataString(uri.Query).Contains("First tab", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task CancellingInFlightGoogleWorkEndsAnImportBeforeDispose()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Session.ReadImportAction = async cancellationToken =>
+        {
+            entered.TrySetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        };
+        Task<GoogleCatalogueControllerException> import = Task.Run(() =>
+            Assert.ThrowsException<GoogleCatalogueControllerException>(() => harness.Controller.importGoogleCatalogue()));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        harness.Controller.CancelInFlightGoogleWork();
+
+        Task finished = await Task.WhenAny(import, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(import, finished, "the import kept running after the cancel call");
+        Assert.AreEqual("google-operation-cancelled", (await import).Code);
+    }
+
+    [TestMethod]
+    public async Task StalledGoogleBodyEndsAtTheDeadlineAndReleasesTheOperationGate()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        GoogleRoutingHandler handler = new();
+        handler.StallNextSheetsBody();
+        handler.Sheets(GoogleRoutingHandler.Metadata(("First tab", 1)));
+        handler.Sheets(GoogleRoutingHandler.Tab(("First tab", 1), false));
+        handler.Sheets(GoogleRoutingHandler.Tab(("First tab", 1), true));
+        using HttpClient http = new(handler);
+        using GoogleCatalogueController controller = new(harness.Settings, harness.Store, harness.Vault,
+            (_, _, _) => throw new AssertFailedException(),
+            (_, completion) => new GoogleCatalogueSession(WorkbookId,
+                new GoogleWorkspaceClient(http, new FixedTokenSource(), TimeSpan.FromMilliseconds(200)),
+                harness.Store, null, completion.PreferredSheetId));
+
+        Task<GoogleCatalogueControllerException> stalled = Task.Run(() =>
+            Assert.ThrowsException<GoogleCatalogueControllerException>(() => controller.importGoogleCatalogue()));
+        Task finished = await Task.WhenAny(stalled, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(stalled, finished, "the stalled read never ended");
+        Assert.AreEqual("google-request-timeout", (await stalled).Code);
+
+        Assert.AreEqual(1, controller.importGoogleCatalogue().ImportedItems);
+    }
+
+    [TestMethod]
+    public async Task StalledTokenEndpointFailsAtTheDeadlineAndTheNextRefreshProceeds()
+    {
+        MemoryGoogleTokenVault vault = new();
+        vault.Save(new("private-refresh-token", DateTimeOffset.UtcNow.AddMinutes(-1), ClientId));
+        StallOnceTokenHandler handler = new();
+        using HttpClient http = new(handler);
+        using GoogleRefreshAccessTokenSource source = new(ClientId, http, vault, null, TimeSpan.FromMilliseconds(200));
+        using CancellationTokenSource caller = new();
+
+        Task<GoogleCatalogueException> stalled = Assert.ThrowsExceptionAsync<GoogleCatalogueException>(async () =>
+            await source.GetAccessTokenAsync(false, caller.Token));
+        Task finished = await Task.WhenAny(stalled, Task.Delay(TimeSpan.FromSeconds(10)));
+        if (!ReferenceEquals(finished, stalled))
+        {
+            caller.Cancel();
+            Assert.Fail("The token refresh did not end at its own deadline.");
+        }
+        Assert.AreEqual("google-token-refresh-timeout", (await stalled).Code);
+
+        Assert.AreEqual("private-access-token-2",
+            await source.GetAccessTokenAsync(false, CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
     private const string ClientId =
         "123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com";
     private const string OtherClientId =
@@ -1157,8 +1335,10 @@ public sealed class GoogleCatalogueControllerTests
         public Task<WorkbookInspection> InspectAsync(CancellationToken cancellationToken) =>
             InspectAction?.Invoke(cancellationToken) ?? Task.FromResult(Inspection);
 
+        internal Func<CancellationToken, Task<GoogleCatalogueImportPreview>>? ReadImportAction { get; set; }
+
         public Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new GoogleCatalogueImportPreview(Inspection.Projection, 17, Inspection.CatalogueSheetTitle, 1,
+            ReadImportAction?.Invoke(cancellationToken) ?? Task.FromResult(new GoogleCatalogueImportPreview(Inspection.Projection, 17, Inspection.CatalogueSheetTitle, 1,
                 new Dictionary<string, int>()));
 
         public Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(CancellationToken cancellationToken) =>
@@ -1198,6 +1378,108 @@ public sealed class GoogleCatalogueControllerTests
         internal string Path { get; }
 
         public void Dispose() => Directory.Delete(Path, recursive: true);
+    }
+
+    private sealed class FixedTokenSource : IGoogleAccessTokenSource
+    {
+        public ValueTask<string> GetAccessTokenAsync(bool forceRefresh, CancellationToken cancellationToken) =>
+            ValueTask.FromResult("access");
+    }
+
+    private sealed class StallOnceTokenHandler : HttpMessageHandler
+    {
+        private int _calls;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            int call = Interlocked.Increment(ref _calls);
+            if (call == 1)
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StringContent($$"""{"access_token":"private-access-token-{{call}}","expires_in":3600,"token_type":"Bearer"}""",
+                    Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    private sealed class StalledBodyContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.Delay(Timeout.Infinite);
+        protected override bool TryComputeLength(out long length) { length = -1; return false; }
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new StalledBodyStream());
+        protected override Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<Stream>(new StalledBodyStream());
+    }
+
+    private sealed class StalledBodyStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class GoogleRoutingHandler : HttpMessageHandler
+    {
+        private readonly Queue<Func<HttpRequestMessage, HttpResponseMessage>> _sheets = [];
+        internal List<Uri> SheetsRequests { get; } = [];
+
+        internal void Sheets(string json) => _sheets.Enqueue(request => new(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        });
+
+        internal void StallNextSheetsBody() => _sheets.Enqueue(request => new(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StalledBodyContent(),
+        });
+
+        internal static string Metadata(params (string Title, int Id)[] tabs) => $$"""
+            {"spreadsheetId":"{{WorkbookId}}","properties":{"title":"Work"},"sheets":[{{string.Join(",", tabs.Select(tab => Properties(tab)))}}]}
+            """;
+
+        internal static string Tab((string Title, int Id) tab, bool withItem)
+        {
+            string item = withItem ? """,{"values":[{"formattedValue":"item-one"},{"formattedValue":"Video one"}]}""" : "";
+            return $$"""
+                {"spreadsheetId":"{{WorkbookId}}","properties":{"title":"Work"},"sheets":[{"properties":{{PropertiesBody(tab)}},"data":[{"rowData":[
+                {"values":[{"formattedValue":"ID"},{"formattedValue":"Title"}]}{{item}}
+                ]}]}]}
+                """;
+        }
+
+        private static string Properties((string Title, int Id) tab) => "{\"properties\":" + PropertiesBody(tab) + "}";
+
+        private static string PropertiesBody((string Title, int Id) tab) =>
+            "{\"sheetId\":" + tab.Id + ",\"title\":\"" + tab.Title + "\",\"hidden\":false,\"gridProperties\":{\"rowCount\":50,\"columnCount\":6}}";
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host == "oauth2.googleapis.com")
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("""{"access_token":"private-access-token","expires_in":3600,"token_type":"Bearer"}""",
+                        Encoding.UTF8, "application/json"),
+                });
+            SheetsRequests.Add(request.RequestUri);
+            return Task.FromResult(_sheets.Dequeue()(request));
+        }
     }
 
     private sealed class RecordingTokenHandler : HttpMessageHandler
