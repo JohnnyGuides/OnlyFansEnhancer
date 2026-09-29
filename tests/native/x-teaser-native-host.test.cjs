@@ -440,3 +440,348 @@ test("native host rejects multiple matches and reparse-point escapes", (t) => {
     fs.rmSync(value.root, { recursive: true, force: true });
   }
 });
+
+// ---- B12: audit/move serialization, staged writes, framing errors ----
+const { spawn } = require("node:child_process");
+
+function faultEnv(value, extra) {
+  return {
+    ...process.env,
+    OFENHANCER_TEST_FAULT_DIR: value.root,
+    ...extra,
+  };
+}
+
+function invokeRaw(value, request, env) {
+  const requestPath = path.join(value.root, `${crypto.randomUUID()}.json`);
+  fs.writeFileSync(requestPath, JSON.stringify(request));
+  const result = spawnSync(
+    "dotnet",
+    [dll, "--request", path.join(value.root, "config.json"), requestPath],
+    { cwd: repositoryRoot, encoding: "utf8", env: env ?? process.env },
+  );
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+function invokeAsync(value, request, env) {
+  const requestPath = path.join(value.root, `${crypto.randomUUID()}.json`);
+  fs.writeFileSync(requestPath, JSON.stringify(request));
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "dotnet",
+      [dll, "--request", path.join(value.root, "config.json"), requestPath],
+      { cwd: repositoryRoot, env: env ?? process.env },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", reject);
+    child.on("close", (status) => {
+      let output = {};
+      try {
+        output = JSON.parse(stdout.trim());
+      } catch {
+        output = { ok: false, error: `unparseable: ${stdout} ${stderr}` };
+      }
+      resolve({ ...output, exitCode: status });
+    });
+  });
+}
+
+function addSource(value, request, name, statusId, text) {
+  const source = path.join(value.teaserRoot, name);
+  const bytes = Buffer.from(text);
+  fs.writeFileSync(source, bytes);
+  return {
+    ...request,
+    basename: name,
+    fileProof: {
+      basename: name,
+      size: bytes.length,
+      lastModified: fs.statSync(source).mtimeMs,
+      duration: 12,
+      sha256: sha256(bytes),
+    },
+    status: {
+      ...request.status,
+      statusId,
+      statusUrl: `https://x.com/Johnny_Guides/status/${statusId}`,
+    },
+  };
+}
+
+function walk(directory) {
+  const found = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...walk(full));
+    else found.push(full);
+  }
+  return found;
+}
+
+function tempFiles(value) {
+  return walk(value.auditRoot).filter((file) => file.endsWith(".tmp"));
+}
+
+function readAggregates(value) {
+  return {
+    catalogue: JSON.parse(
+      fs.readFileSync(path.join(value.auditRoot, "catalogue.json"), "utf8"),
+    ),
+    frameData: JSON.parse(
+      fs.readFileSync(path.join(value.auditRoot, "frame-data.json"), "utf8"),
+    ),
+  };
+}
+
+function waitFor(predicate, timeoutMs) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      if (predicate()) return resolve();
+      if (Date.now() - started > timeoutMs) return reject(new Error("timeout"));
+      setTimeout(tick, 25);
+    };
+    tick();
+  });
+}
+
+test("two host processes extending one audit root lose no update", async () => {
+  for (let repetition = 0; repetition < 10; repetition++) {
+    const value = fixture();
+    try {
+      const first = auditRequest(value);
+      const second = addSource(
+        value,
+        first,
+        "second-teaser.mp4",
+        "2094523397057237307",
+        "second confirmed teaser fixture",
+      );
+      const env = faultEnv(value, { OFENHANCER_TEST_PAUSE_MS: "300" });
+      const results = await Promise.all([
+        invokeAsync(value, first, env),
+        invokeAsync(value, second, env),
+      ]);
+      for (const result of results) {
+        assert.ok(
+          result.ok === true || /busy/i.test(result.error),
+          `${result.error}`,
+        );
+      }
+      const succeeded = [first, second].filter((_, i) => results[i].ok);
+      const { catalogue, frameData } = readAggregates(value);
+      assert.deepEqual(
+        catalogue.rows[0].urls.slice().sort(),
+        succeeded.map((r) => r.status.statusUrl).sort(),
+      );
+      assert.deepEqual(
+        frameData.entries.map((entry) => entry.url).sort(),
+        succeeded.map((r) => r.status.statusUrl).sort(),
+      );
+      assert.equal(succeeded.length, 2, "both waited for the lock");
+      assert.deepEqual(tempFiles(value), []);
+    } finally {
+      fs.rmSync(value.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a held audit lock yields a busy error and writes nothing", async () => {
+  const value = fixture();
+  try {
+    const first = auditRequest(value);
+    const second = addSource(
+      value,
+      first,
+      "second-teaser.mp4",
+      "2094523397057237307",
+      "second confirmed teaser fixture",
+    );
+    const holder = invokeAsync(
+      value,
+      first,
+      faultEnv(value, { OFENHANCER_TEST_PAUSE_MS: "3000" }),
+    );
+    await waitFor(
+      () => fs.readdirSync(value.root).some((n) => n.endsWith(".marker")),
+      15000,
+    );
+    const blocked = await invokeAsync(
+      value,
+      second,
+      faultEnv(value, { OFENHANCER_TEST_LOCK_TIMEOUT_MS: "300" }),
+    );
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.error, /busy/i);
+    const held = await holder;
+    assert.equal(held.ok, true, held.error);
+    const { catalogue, frameData } = readAggregates(value);
+    assert.deepEqual(catalogue.rows[0].urls, [first.status.statusUrl]);
+    assert.equal(frameData.entries.length, 1);
+    assert.equal(
+      fs.existsSync(
+        path.join(
+          value.auditRoot,
+          ".creator-x-teaser-receipts",
+          `${second.status.statusId}.json`,
+        ),
+      ),
+      false,
+    );
+    assert.equal(
+      fs
+        .readdirSync(path.join(value.auditRoot, "frames"))
+        .some((name) => name.includes(second.status.statusId)),
+      false,
+    );
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+const interruptionPoints = [
+  "mid-write-frame-1",
+  "staged-frame-1",
+  "after-frame-1",
+  "after-frame-3",
+  "after-catalogue",
+  "after-frame-data",
+  "before-receipt",
+  "mid-write-receipt",
+  "staged-receipt",
+];
+
+for (const point of interruptionPoints) {
+  test(`an audit interrupted at ${point} recovers to the uninterrupted receipt`, () => {
+    const baseline = fixture();
+    const value = fixture();
+    try {
+      const expected = invoke(baseline, auditRequest(baseline));
+      assert.equal(expected.ok, true, expected.error);
+      const request = auditRequest(value);
+      const killed = invokeRaw(
+        value,
+        request,
+        faultEnv(value, { OFENHANCER_TEST_FAULT: point }),
+      );
+      assert.equal(killed.status, 87, `fault ${point} not injected`);
+      assert.equal(killed.stdout, "");
+      const retry = invoke(value, request);
+      assert.equal(retry.ok, true, retry.error);
+      assert.equal(retry.receipt, expected.receipt);
+      assert.deepEqual(tempFiles(value), []);
+      const { catalogue, frameData } = readAggregates(value);
+      assert.deepEqual(catalogue.rows[0].urls, [request.status.statusUrl]);
+      assert.equal(frameData.entries.length, 1);
+      const moved = invoke(value, {
+        operation: "move",
+        basename: value.basename,
+        fileProof: value.proof,
+        statusId: request.status.statusId,
+        receipt: retry.receipt,
+      });
+      assert.equal(moved.ok, true, moved.error);
+      assert.deepEqual(tempFiles(value), []);
+    } finally {
+      fs.rmSync(baseline.root, { recursive: true, force: true });
+      fs.rmSync(value.root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("no temporary files remain after success or a failed move", () => {
+  const value = fixture();
+  try {
+    const request = auditRequest(value);
+    const audited = invoke(value, request);
+    assert.equal(audited.ok, true, audited.error);
+    assert.deepEqual(tempFiles(value), []);
+    fs.writeFileSync(path.join(value.done, value.basename), "collision");
+    const collision = invoke(value, {
+      operation: "move",
+      basename: value.basename,
+      fileProof: value.proof,
+      statusId: request.status.statusId,
+      receipt: audited.receipt,
+    });
+    assert.equal(collision.ok, false);
+    assert.deepEqual(tempFiles(value), []);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test("a failed aggregate publish removes its temporary file", () => {
+  const value = fixture();
+  try {
+    fs.mkdirSync(path.join(value.auditRoot, "index.html"));
+    const failed = invoke(value, auditRequest(value));
+    assert.equal(failed.ok, false);
+    assert.deepEqual(tempFiles(value), []);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test("a foreign final-name artifact is never overwritten", () => {
+  const value = fixture();
+  try {
+    const request = auditRequest(value);
+    const foreign = path.join(
+      value.auditRoot,
+      "frames",
+      `${value.row.id}-${request.status.statusId}-f2.jpg`,
+    );
+    fs.writeFileSync(foreign, "foreign bytes");
+    const failed = invoke(value, request);
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /collision/i);
+    assert.equal(fs.readFileSync(foreign, "utf8"), "foreign bytes");
+    assert.equal(
+      fs.existsSync(
+        path.join(
+          value.auditRoot,
+          ".creator-x-teaser-receipts",
+          `${request.status.statusId}.json`,
+        ),
+      ),
+      false,
+    );
+    assert.deepEqual(tempFiles(value), []);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test("a leftover host temporary file is removed and a foreign dot-file is kept", () => {
+  const value = fixture();
+  try {
+    const frames = path.join(value.auditRoot, "frames");
+    const leftover = path.join(frames, ".x.0123.ofe-audit.tmp");
+    const foreign = path.join(frames, ".keep.tmp");
+    fs.writeFileSync(leftover, "torn");
+    fs.writeFileSync(foreign, "not ours");
+    const result = invoke(value, auditRequest(value));
+    assert.equal(result.ok, true, result.error);
+    assert.equal(fs.existsSync(leftover), false);
+    assert.equal(fs.readFileSync(foreign, "utf8"), "not ours");
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
+test("an invalid length prefix gets a structured error, not a crash", () => {
+  const result = spawnSync("dotnet", [dll], {
+    cwd: repositoryRoot,
+    input: Buffer.from([0xff, 0xff, 0xff, 0xff]),
+  });
+  assert.equal(result.status, 1, String(result.stderr));
+  const length = result.stdout.readUInt32LE(0);
+  const response = JSON.parse(result.stdout.subarray(4, 4 + length).toString());
+  assert.equal(response.ok, false);
+  assert.match(response.error, /bounded size/i);
+  assert.doesNotMatch(String(result.stderr), /Unhandled exception/i);
+});

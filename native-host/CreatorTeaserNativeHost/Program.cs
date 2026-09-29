@@ -128,12 +128,33 @@ internal sealed class TeaserHost
 
     public HostResponse Handle(HostRequest request)
     {
-        return request.Operation switch
+        if (request.Operation is not ("audit" or "move"))
+            throw new HostValidationException("Unsupported native host operation.");
+        using AuditRootLock owner = AuditRootLock.Acquire(auditRoot, TestHooks.LockTimeoutMs());
+        RemoveStagingLeftovers();
+        return request.Operation == "audit" ? Audit(request) : Move(request);
+    }
+
+    // Only names the host itself stages (".<name>.<guid>.ofe-audit.tmp") are removed.
+    private void RemoveStagingLeftovers()
+    {
+        string[] directories =
+        [
+            auditRoot,
+            Path.Combine(auditRoot, "frames"),
+            Path.Combine(auditRoot, ".creator-x-teaser-receipts"),
+        ];
+        foreach (string directory in directories)
         {
-            "audit" => Audit(request),
-            "move" => Move(request),
-            _ => throw new HostValidationException("Unsupported native host operation."),
-        };
+            if (!Directory.Exists(directory)) continue;
+            RejectReparsePath(directory);
+            foreach (string file in Directory.EnumerateFiles(directory, "*" + StagingSuffix))
+            {
+                if (!Path.GetFileName(file).StartsWith('.')) continue;
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) continue;
+                File.Delete(file);
+            }
+        }
     }
 
     private HostResponse Audit(HostRequest request)
@@ -192,7 +213,8 @@ internal sealed class TeaserHost
         {
             string target = Path.GetFullPath(Path.Combine(framesRoot, frameNames[index]));
             EnsureInside(framesRoot, target, "Audit frame");
-            WriteNewOrVerify(target, frames[index], frameHashes[index]);
+            WriteNewOrVerify(target, frames[index], frameHashes[index], $"frame-{index + 1}");
+            TestHooks.At($"after-frame-{index + 1}");
         }
 
         string cataloguePath = AuditFile("catalogue.json");
@@ -201,6 +223,7 @@ internal sealed class TeaserHost
         string indexPath = AuditFile("index.html", mustExist: false);
         JsonObject catalogueData = ReadObject(cataloguePath);
         JsonObject frameData = ReadObject(frameDataPath);
+        TestHooks.PauseHoldingLock();
         JsonObject catalogueRow = FindCatalogueRow(catalogueData, catalogue.Row, catalogue.Id);
         AppendUrl(catalogueRow, status.StatusUrl);
 
@@ -238,8 +261,11 @@ internal sealed class TeaserHost
         string generatedHtml = template.Replace("__AUDIT_DATA__", frameJson, StringComparison.Ordinal);
 
         WriteAtomic(cataloguePath, catalogueData.ToJsonString(JsonOptions));
+        TestHooks.At("after-catalogue");
         WriteAtomic(frameDataPath, frameJson);
+        TestHooks.At("after-frame-data");
         WriteAtomic(indexPath, generatedHtml);
+        TestHooks.At("before-receipt");
         expectedReceipt.AggregateFiles = ["catalogue.json", "frame-data.json", "index.html"];
         expectedReceipt.AuditEntrySha256 = Sha256(
             Encoding.UTF8.GetBytes(auditEntry.ToJsonString(JsonOptions))
@@ -248,7 +274,8 @@ internal sealed class TeaserHost
         WriteNewOrVerify(
             receiptPath,
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(expectedReceipt, JsonOptions)),
-            Sha256(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(expectedReceipt, JsonOptions)))
+            Sha256(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(expectedReceipt, JsonOptions))),
+            "receipt"
         );
         _ = source;
         return new HostResponse
@@ -661,17 +688,30 @@ internal sealed class TeaserHost
     private static int IntValue(JsonObject value, string name) =>
         value[name]?.GetValue<int>() ?? 0;
 
+    private const string StagingSuffix = ".ofe-audit.tmp";
+
+    private static string StagingPath(string path) =>
+        Path.Combine(
+            Path.GetDirectoryName(path)!,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}{StagingSuffix}"
+        );
+
     private static void WriteAtomic(string path, string value)
     {
-        string temp = Path.Combine(
-            Path.GetDirectoryName(path)!,
-            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp"
-        );
-        File.WriteAllText(temp, value, new UTF8Encoding(false));
-        File.Move(temp, path, true);
+        string temp = StagingPath(path);
+        try
+        {
+            File.WriteAllText(temp, value, new UTF8Encoding(false));
+            File.Move(temp, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 
-    private static void WriteNewOrVerify(string path, byte[] bytes, string expectedHash)
+    // A new artifact is staged beside its final name, verified, then published without overwrite.
+    private static void WriteNewOrVerify(string path, byte[] bytes, string expectedHash, string label)
     {
         if (File.Exists(path))
         {
@@ -680,9 +720,27 @@ internal sealed class TeaserHost
                 throw new HostValidationException("Existing audit artifact collision.");
             return;
         }
-        using FileStream output = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        output.Write(bytes);
-        output.Flush(true);
+        string temp = StagingPath(path);
+        try
+        {
+            using (FileStream output = new(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                int half = bytes.Length / 2;
+                output.Write(bytes, 0, half);
+                output.Flush(true);
+                TestHooks.At($"mid-write-{label}");
+                output.Write(bytes, half, bytes.Length - half);
+                output.Flush(true);
+            }
+            TestHooks.At($"staged-{label}");
+            if (Sha256(File.ReadAllBytes(temp)) != expectedHash)
+                throw new HostValidationException("Staged audit artifact failed verification.");
+            File.Move(temp, path, false);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 
     private static string ResolveConfiguredRoot(string value, string label)
@@ -728,6 +786,88 @@ internal sealed class TeaserHost
         Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant();
 }
 
+// One owner per canonical audit root across host processes (Chrome starts one per message).
+internal sealed class AuditRootLock : IDisposable
+{
+    private readonly Mutex mutex;
+
+    private AuditRootLock(Mutex mutex) => this.mutex = mutex;
+
+    public static AuditRootLock Acquire(string root, int timeoutMs)
+    {
+        string canonical = Path.GetFullPath(root).ToLowerInvariant();
+        string name = "Local\\OFEnhancer-XTeaserAudit-"
+            + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32];
+        Mutex mutex = new(false, name);
+        bool held;
+        try
+        {
+            held = mutex.WaitOne(timeoutMs);
+        }
+        catch (AbandonedMutexException)
+        {
+            held = true;
+        }
+        if (!held)
+        {
+            mutex.Dispose();
+            throw new HostValidationException("The audit root is busy; another native host operation holds it.");
+        }
+        return new AuditRootLock(mutex);
+    }
+
+    public void Dispose()
+    {
+        mutex.ReleaseMutex();
+        mutex.Dispose();
+    }
+}
+
+// Test-only fault injection. Honoured only when OFENHANCER_TEST_FAULT_DIR names an existing
+// directory under the system temp path; otherwise every hook is inert.
+//   OFENHANCER_TEST_FAULT           exit(87) at the named point
+//   OFENHANCER_TEST_PAUSE_MS        sleep inside the critical section (writes a .marker file)
+//   OFENHANCER_TEST_LOCK_TIMEOUT_MS shorten the lock acquisition bound
+internal static class TestHooks
+{
+    private const int DefaultLockTimeoutMs = 10_000;
+    private static readonly string? FaultDirectory = ResolveDirectory();
+
+    private static string? ResolveDirectory()
+    {
+        string? value = Environment.GetEnvironmentVariable("OFENHANCER_TEST_FAULT_DIR");
+        if (string.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value)) return null;
+        char separator = Path.DirectorySeparatorChar;
+        string full = Path.GetFullPath(value).TrimEnd(separator);
+        string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(separator);
+        if (!Directory.Exists(full)) return null;
+        return full.StartsWith(temp + separator, StringComparison.OrdinalIgnoreCase) ? full : null;
+    }
+
+    private static int? IntSetting(string name) =>
+        FaultDirectory is not null && int.TryParse(Environment.GetEnvironmentVariable(name), out int value)
+            ? value
+            : null;
+
+    public static int LockTimeoutMs() =>
+        IntSetting("OFENHANCER_TEST_LOCK_TIMEOUT_MS") ?? DefaultLockTimeoutMs;
+
+    public static void At(string point)
+    {
+        if (FaultDirectory is null) return;
+        if (Environment.GetEnvironmentVariable("OFENHANCER_TEST_FAULT") == point)
+            Environment.Exit(87);
+    }
+
+    public static void PauseHoldingLock()
+    {
+        int? pause = IntSetting("OFENHANCER_TEST_PAUSE_MS");
+        if (pause is null) return;
+        File.WriteAllText(Path.Combine(FaultDirectory!, $"paused-{Environment.ProcessId}.marker"), "");
+        Thread.Sleep(pause.Value);
+    }
+}
+
 internal static class Program
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -748,12 +888,22 @@ internal static class Program
         string configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
         using Stream input = Console.OpenStandardInput();
         using Stream output = Console.OpenStandardOutput();
-        while (TryReadMessage(input, out string? message))
+        while (true)
         {
+            string? message;
+            try
+            {
+                if (!TryReadMessage(input, out message)) return 0;
+            }
+            catch (Exception error)
+            {
+                // Framing is lost after a bad prefix, so answer once and stop cleanly.
+                WriteMessage(output, JsonSerializer.Serialize(ErrorResponse(error), JsonOptions));
+                return 1;
+            }
             HostResponse response = Execute(configPath, message!);
             WriteMessage(output, JsonSerializer.Serialize(response, JsonOptions));
         }
-        return 0;
     }
 
     private static HostResponse Execute(string configPath, string requestJson)
@@ -770,19 +920,24 @@ internal static class Program
         }
         catch (Exception error)
         {
-            return new HostResponse
-            {
-                Ok = false,
-                Error = error switch
-                {
-                    HostValidationException validation => validation.PublicMessage,
-                    IOException => "native-filesystem-failure",
-                    UnauthorizedAccessException => "native-access-denied",
-                    JsonException => "native-invalid-json",
-                    _ => "native-operation-failed",
-                },
-            };
+            return ErrorResponse(error);
         }
+    }
+
+    private static HostResponse ErrorResponse(Exception error)
+    {
+        return new HostResponse
+        {
+            Ok = false,
+            Error = error switch
+            {
+                HostValidationException validation => validation.PublicMessage,
+                IOException => "native-filesystem-failure",
+                UnauthorizedAccessException => "native-access-denied",
+                JsonException => "native-invalid-json",
+                _ => "native-operation-failed",
+            },
+        };
     }
 
     private static bool TryReadMessage(Stream input, out string? message)
