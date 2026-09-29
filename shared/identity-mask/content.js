@@ -15,6 +15,7 @@
   let scanning = false;
   let rescanRequested = false;
   const identityCache = new Map();
+  let generation = 0;
 
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
@@ -55,7 +56,12 @@
     return contexts;
   }
 
-  async function resolveIdentityBatch(contexts) {
+  function invalidateIdentities() {
+    generation += 1;
+    identityCache.clear();
+  }
+
+  async function resolveIdentityBatch(contexts, startedGeneration) {
     const unresolvedByPrimary = new Map();
     for (const context of contexts) {
       if (cachedIdentity(context)) continue;
@@ -76,24 +82,43 @@
         items: [...unresolvedByPrimary.values()],
       });
 
+      if (startedGeneration !== generation) return false;
+
       for (const item of response.items) {
         for (const key of [item.primaryKey, ...item.aliases]) {
           identityCache.set(key, item.identity);
         }
       }
     }
+    return startedGeneration === generation;
   }
 
   async function scan() {
     scheduled = false;
-    if (scanning || !settings.enabled || !document.documentElement) return;
+    if (!settings.enabled || !document.documentElement) return;
+    if (scanning) {
+      rescanRequested = true;
+      return;
+    }
     scanning = true;
 
     try {
       const contexts = markPendingContexts();
-      await resolveIdentityBatch(contexts);
-      for (const context of contexts) {
-        core.maskContext(context, cachedIdentity(context));
+      const startedGeneration = generation;
+      const current = await resolveIdentityBatch(contexts, startedGeneration);
+      if (current) {
+        const primaryKeys = new Map();
+        for (const fresh of core.collectContexts(document, settings)) {
+          primaryKeys.set(fresh.container, fresh.primaryKey);
+        }
+        for (const context of contexts) {
+          if (primaryKeys.get(context.container) !== context.primaryKey) {
+            continue;
+          }
+          core.maskContext(context, cachedIdentity(context));
+        }
+      } else {
+        rescanRequested = true;
       }
     } catch (error) {
       console.warn("[Fan Identity Mask]", error);
@@ -107,7 +132,12 @@
   }
 
   function scheduleScan() {
-    if (scheduled || !settings.enabled) return;
+    if (!settings.enabled) return;
+    if (scanning) {
+      rescanRequested = true;
+      return;
+    }
+    if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => {
       window.setTimeout(scan, 40);
@@ -211,19 +241,15 @@
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
     if (changes.fimControlV1) {
-      identityCache.clear();
+      invalidateIdentities();
       markPendingContexts();
-      if (scanning) {
-        rescanRequested = true;
-      } else {
-        scheduleScan();
-      }
+      scheduleScan();
       return;
     }
     if (!changes.fimSettingsV1) return;
     const previousEnabled = settings.enabled;
     settings = changes.fimSettingsV1.newValue || settings;
-    identityCache.clear();
+    invalidateIdentities();
 
     if (previousEnabled !== settings.enabled) {
       location.reload();

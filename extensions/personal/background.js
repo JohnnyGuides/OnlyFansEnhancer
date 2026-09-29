@@ -849,15 +849,34 @@ function handleSlug(value) {
     .replace(/[^a-z0-9_]/g, "");
 }
 
+const HANDLE_HASH_ATTEMPTS = 1000;
+const HANDLE_SUFFIX_LIMIT = 100000;
+
 function uniqueHandle(base, state, key) {
   const normalizedBase = handleSlug(base) || "girl";
+  const isFree = (handle) =>
+    !state.usedHandles[handle] || state.usedHandles[handle] === key;
   let candidate = normalizedBase;
   let counter = 2;
 
-  while (state.usedHandles[candidate] && state.usedHandles[candidate] !== key) {
+  while (!isFree(candidate) && counter <= HANDLE_HASH_ATTEMPTS) {
     const suffix = 1 + (hashString(`${key}:${counter}`) % 99);
     candidate = `${normalizedBase}${suffix}`;
     counter += 1;
+  }
+
+  if (!isFree(candidate)) {
+    candidate = "";
+    for (let suffix = 1; suffix <= HANDLE_SUFFIX_LIMIT; suffix += 1) {
+      const next = `${normalizedBase}${suffix}`;
+      if (isFree(next)) {
+        candidate = next;
+        break;
+      }
+    }
+    if (!candidate) {
+      throw new Error("No unused masked handle is available for this account.");
+    }
   }
 
   state.usedHandles[candidate] = key;
@@ -2048,19 +2067,21 @@ async function updateSettings(patch) {
 }
 
 async function resetMappings() {
-  const previous = await getState();
-  const next = normalizeState({
-    customAvatars: previous.customAvatars,
-    usedAvatarIds: previous.usedAvatarIds,
-    usedRealbooruIds: previous.usedRealbooruIds,
-    usedAvatarUrls: previous.usedAvatarUrls,
-    usedAvatarFingerprints: previous.usedAvatarFingerprints,
-    gelbooruHistory: previous.gelbooruHistory,
-    realbooruPool: previous.realbooruPool,
-    gelbooruPageCount: previous.gelbooruPageCount,
-    gelbooruRecentPages: previous.gelbooruRecentPages,
+  await queueStateMutation(async (state) => {
+    const next = normalizeState({
+      customAvatars: state.customAvatars,
+      usedAvatarIds: state.usedAvatarIds,
+      usedRealbooruIds: state.usedRealbooruIds,
+      usedAvatarUrls: state.usedAvatarUrls,
+      usedAvatarFingerprints: state.usedAvatarFingerprints,
+      gelbooruHistory: state.gelbooruHistory,
+      realbooruPool: state.realbooruPool,
+      gelbooruPageCount: state.gelbooruPageCount,
+      gelbooruRecentPages: state.gelbooruRecentPages,
+    });
+    for (const key of Object.keys(state)) delete state[key];
+    Object.assign(state, next);
   });
-  await chrome.storage.local.set({ [STATE_KEY]: next });
 }
 
 async function signalIdentityRefresh(kind) {

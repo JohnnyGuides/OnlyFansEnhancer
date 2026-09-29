@@ -42,7 +42,12 @@
     const parts = url.pathname.split("/").filter(Boolean);
     if (parts.length !== 1) return null;
 
-    const segment = decodeURIComponent(parts[0]).trim();
+    let segment;
+    try {
+      segment = decodeURIComponent(parts[0]).trim();
+    } catch {
+      return null;
+    }
     if (!segment || PROFILE_RESERVED_SEGMENTS.has(segment.toLowerCase()))
       return null;
 
