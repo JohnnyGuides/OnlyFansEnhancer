@@ -107,6 +107,10 @@
   let currentAsset = null;
   let googleStatusView = null;
   let googlePollTimer = null;
+  let googleStatusRequests = 0;
+  let googleStatusRendered = 0;
+  let matchDialogSerial = 0;
+  let matchPendingSerial = 0;
   let frozenMigration = null;
   let browserSettingsView = null;
   let connectionStartPending = false;
@@ -1311,13 +1315,20 @@
   async function refreshGoogleCatalogue() {
     stopGooglePolling();
     if (!googleControlsAreVisible()) return;
+    const generation = ++googleStatusRequests;
     try {
       const status = await global.OFEnhancerHost.request(
         "getGoogleCatalogueStatus",
       );
-      if (googleControlsAreVisible()) renderGoogleCatalogue(status);
+      if (generation < googleStatusRendered) return;
+      if (googleControlsAreVisible()) {
+        googleStatusRendered = generation;
+        renderGoogleCatalogue(status);
+      }
     } catch (error) {
+      if (generation < googleStatusRendered) return;
       if (!googleControlsAreVisible()) return;
+      googleStatusRendered = generation;
       renderGoogleCatalogue({ state: "error", errorCode: error?.message });
     }
   }
@@ -1669,6 +1680,7 @@
 
   function openMatchDialog(asset) {
     currentAsset = asset;
+    matchDialogSerial += 1;
     matchDialogFile.textContent = asset.fileName;
     matchDialogImage.replaceChildren(
       makeThumbnail(asset.assetId, "dialog-thumbnail"),
@@ -1703,21 +1715,35 @@
   }
 
   async function confirmMatch(button, candidate) {
-    if (!currentAsset) return;
-    setBusy(button, true);
+    if (!currentAsset || matchPendingSerial === matchDialogSerial) return;
+    const serial = matchDialogSerial;
+    const asset = currentAsset;
+    const stillOpen = () =>
+      serial === matchDialogSerial &&
+      matchDialog.open &&
+      currentAsset === asset;
+    const choices = [...candidateList.querySelectorAll("button")];
+    matchPendingSerial = serial;
+    for (const choice of choices) setBusy(choice, true);
     matchDialogStatus.textContent = "Saving match…";
+    let saved = false;
     try {
       await global.OFEnhancerHost.request("confirmAssetBinding", {
-        assetId: currentAsset.assetId,
+        assetId: asset.assetId,
         itemId: candidate.itemId,
       });
-      matchDialog.close();
-      catalogueStatus.textContent = "Thumbnail matched.";
+      saved = true;
+      if (stillOpen()) {
+        matchDialog.close();
+        catalogueStatus.textContent = "Thumbnail matched.";
+      }
       await loadCatalogue(true);
     } catch (error) {
-      matchDialogStatus.textContent = friendlyCatalogueError(error);
+      if (stillOpen())
+        matchDialogStatus.textContent = friendlyCatalogueError(error);
     } finally {
-      setBusy(button, false);
+      if (matchPendingSerial === serial) matchPendingSerial = 0;
+      if (!saved) for (const choice of choices) setBusy(choice, false);
     }
   }
 

@@ -141,6 +141,7 @@
       }
       return store.checkpoint(session.id, jobId, {
         stage: "result-captured",
+        capturedAt: now(),
         resultId: result.resultId,
         resultUrl: result.resultUrl,
         ...(jobId === "x"
@@ -154,74 +155,104 @@
       });
     }
 
+    function frozenEvents(session, jobId, job, catalogue) {
+      const event = (eventJobId, resultId, resultUrl, extra = {}) => ({
+        eventId: "published",
+        runId: session.id,
+        jobId: eventJobId,
+        platform: platformFor(jobId),
+        catalogueRow: catalogue.row,
+        catalogueId: catalogue.id,
+        resultId,
+        resultUrl,
+        ...extra,
+        status: "published",
+        recordedAt: job.capturedAt,
+      });
+      return {
+        main: event(jobId, job.resultId, job.resultUrl),
+        ...(jobId === "x" && job.replyResultId && job.replyResultUrl
+          ? {
+              reply: event("x:reply", job.replyResultId, job.replyResultUrl, {
+                parentResultId: job.resultId,
+              }),
+            }
+          : {}),
+      };
+    }
+
     async function appendResult(session, jobId, currentFingerprint) {
       const catalogue = session.catalogueAssociation || session.plan.catalogue;
       if (!catalogue) return { session, fingerprint: currentFingerprint };
-      const job = session.jobs[jobId];
-      const platform = platformFor(jobId);
-      const ledger = await catalogueClient.appendDistributionLedger({
-        eventId: "published",
-        runId: session.id,
-        jobId,
-        platform,
-        catalogueRow: catalogue.row,
-        catalogueId: catalogue.id,
-        resultId: job.resultId,
-        resultUrl: job.resultUrl,
-        status: "published",
-        recordedAt: job.updatedAt || session.plan.authorization.at,
-      });
-      assertSheetResult(ledger, "Distribution ledger append");
-
-      if (jobId === "x" && job.replyResultId && job.replyResultUrl) {
-        const replyLedger = await catalogueClient.appendDistributionLedger({
-          eventId: "published",
-          runId: session.id,
-          jobId: "x:reply",
-          platform: "x",
-          catalogueRow: catalogue.row,
-          catalogueId: catalogue.id,
-          resultId: job.replyResultId,
-          resultUrl: job.replyResultUrl,
-          parentResultId: job.resultId,
-          status: "published",
-          recordedAt: job.updatedAt || session.plan.authorization.at,
+      let job = session.jobs[jobId];
+      if (!job.ledgerEvents) {
+        if (!job.capturedAt) {
+          throw new Error(
+            "This captured result has no recorded capture time. Review it before recording.",
+          );
+        }
+        session = await store.checkpoint(session.id, jobId, {
+          ledgerEvents: frozenEvents(session, jobId, job, catalogue),
         });
-        assertSheetResult(replyLedger, "X reply ledger append");
+        job = session.jobs[jobId];
       }
 
-      let compact = null;
-      if (jobId === "x") {
-        compact = await catalogueClient.appendTwitterTeaser({
-          row: catalogue.row,
-          id: catalogue.id,
-          fingerprint: currentFingerprint,
-          statusUrl: job.resultUrl,
+      async function record(part, run) {
+        if (job.appended?.[part]) return;
+        const response = assertSheetResult(await run(), `${part} append`);
+        const remote =
+          response.googleSynced !== false &&
+          response.status !== "recorded-local";
+        session = await store.checkpoint(session.id, jobId, {
+          appended: { [part]: remote ? "remote" : "local" },
         });
-        assertSheetResult(compact, "Twitter teaser append");
-      } else if (jobId.startsWith("reddit:")) {
-        compact = await catalogueClient.appendRedditPost({
-          row: catalogue.row,
-          id: catalogue.id,
-          fingerprint: currentFingerprint,
-          redditUrl: job.resultUrl,
-        });
-        assertSheetResult(compact, "Reddit post append");
+        job = session.jobs[jobId];
+        return response;
       }
+
+      await record("main", () =>
+        catalogueClient.appendDistributionLedger(job.ledgerEvents.main),
+      );
+      if (job.ledgerEvents.reply) {
+        await record("reply", () =>
+          catalogueClient.appendDistributionLedger(job.ledgerEvents.reply),
+        );
+      }
+
+      let fingerprint = currentFingerprint;
+      const compactAction =
+        jobId === "x"
+          ? () =>
+              catalogueClient.appendTwitterTeaser({
+                row: catalogue.row,
+                id: catalogue.id,
+                fingerprint: currentFingerprint,
+                statusUrl: job.resultUrl,
+              })
+          : jobId.startsWith("reddit:")
+            ? () =>
+                catalogueClient.appendRedditPost({
+                  row: catalogue.row,
+                  id: catalogue.id,
+                  fingerprint: currentFingerprint,
+                  redditUrl: job.resultUrl,
+                })
+            : null;
+      if (compactAction) {
+        const compact = await record("compact", compactAction);
+        fingerprint = compact?.fingerprint || currentFingerprint;
+      }
+      const required = ["main", ...(job.ledgerEvents.reply ? ["reply"] : [])];
+      if (compactAction) required.push("compact");
       const next = await store.checkpoint(session.id, jobId, {
         stage: COMPLETE,
-        googleSynced:
-          ledger.googleSynced !== false &&
-          ledger.status !== "recorded-local" &&
-          compact?.googleSynced !== false &&
-          compact?.status !== "recorded-local",
+        googleSynced: required.every(
+          (part) => job.appended?.[part] === "remote",
+        ),
         error: "",
         updatedAt: now(),
       });
-      return {
-        fingerprint: compact?.fingerprint || currentFingerprint,
-        session: next,
-      };
+      return { fingerprint, session: next };
     }
 
     async function recoverFingerprint(session) {

@@ -135,6 +135,21 @@
     return jobs;
   }
 
+  function ledgerEvent(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Invalid frozen ledger event.");
+    }
+    const entries = Object.entries(value);
+    if (entries.length > 20) throw new Error("Invalid frozen ledger event.");
+    const output = {};
+    for (const [field, item] of entries) {
+      if (typeof item === "string") output[field] = clean(item, 1000);
+      else if (Number.isSafeInteger(item)) output[field] = item;
+      else throw new Error("Invalid frozen ledger event.");
+    }
+    return output;
+  }
+
   function checkpointPatch(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("Invalid distribution checkpoint.");
@@ -177,6 +192,34 @@
         throw new Error("Invalid prepared caption hash.");
       }
       output.preparedComposerSha256 = value.preparedComposerSha256;
+    }
+    if (Object.hasOwn(value, "capturedAt")) {
+      if (!Number.isSafeInteger(value.capturedAt) || value.capturedAt < 1) {
+        throw new Error("Invalid capture time.");
+      }
+      output.capturedAt = value.capturedAt;
+    }
+    if (Object.hasOwn(value, "ledgerEvents")) {
+      const events = value.ledgerEvents;
+      if (!events || typeof events !== "object" || !events.main) {
+        throw new Error("Invalid frozen ledger events.");
+      }
+      output.ledgerEvents = {
+        main: ledgerEvent(events.main),
+        ...(events.reply ? { reply: ledgerEvent(events.reply) } : {}),
+      };
+    }
+    if (Object.hasOwn(value, "appended")) {
+      const appended = {};
+      for (const part of ["main", "reply", "compact"]) {
+        const state = value.appended?.[part];
+        if (state === undefined) continue;
+        if (state !== "remote" && state !== "local") {
+          throw new Error("Invalid ledger append state.");
+        }
+        appended[part] = state;
+      }
+      output.appended = appended;
     }
     if (Object.hasOwn(value, "error")) output.error = clean(value.error, 500);
     if (Object.hasOwn(value, "updatedAt")) {
@@ -229,6 +272,20 @@
         );
       }
       if (previous[field]) output[field] = previous[field];
+    }
+    if (previous.capturedAt) output.capturedAt = previous.capturedAt;
+    if (previous.ledgerEvents) {
+      if (
+        patch.ledgerEvents &&
+        JSON.stringify(previous.ledgerEvents) !==
+          JSON.stringify(patch.ledgerEvents)
+      ) {
+        throw new Error("The frozen ledger events cannot change.");
+      }
+      output.ledgerEvents = previous.ledgerEvents;
+    }
+    if (patch.appended || previous.appended) {
+      output.appended = { ...patch.appended, ...previous.appended };
     }
     if (patch.preparedComposerSha256) {
       if (jobId !== "x" || output.stage !== "prepared") {

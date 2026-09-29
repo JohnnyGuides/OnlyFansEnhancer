@@ -14,6 +14,9 @@
     "getSubredditPresetSnapshot",
   ]);
 
+  const CANCELLED_MESSAGE =
+    "Catalogue bridge request timed out or was cancelled.";
+
   function normalizeConfig(value = {}) {
     if (value.source === "desktop")
       return {
@@ -188,7 +191,8 @@
    * @param {{fetchImpl?: typeof fetch, signal?: AbortSignal}} [options]
    */
   async function request(config, action, payload, options = {}) {
-    if (config?.source === "desktop") return desktopRequest(action, payload);
+    if (config?.source === "desktop")
+      return desktopRequest(action, payload, options);
     const { fetchImpl = fetch, signal } = options;
     const expectedSource =
       /** @type {{backend?: string, workbookId?: string, sheetName?: string} | undefined} */ (
@@ -197,6 +201,7 @@
     const normalized = normalizeConfig(config);
     if (!normalized.valid) throw new Error(normalized.errors.join(" "));
     if (!ACTIONS.has(action)) throw new Error("Unsupported catalogue action.");
+    if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
     const abort = () => controller.abort();
@@ -237,12 +242,9 @@
       return body.result;
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error(
-          "Catalogue bridge request timed out or was cancelled.",
-          {
-            cause: error,
-          },
-        );
+        throw new Error(CANCELLED_MESSAGE, {
+          cause: error,
+        });
       }
       throw error;
     } finally {
@@ -275,7 +277,9 @@
     return request(await loadConfig(), "matchCatalogue", payload, options);
   }
 
-  async function desktopRequest(action, payload = {}) {
+  async function desktopRequest(action, payload = {}, options = {}) {
+    const { signal } = options;
+    if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
     const operation =
       action === "getCatalogueSnapshot"
         ? "getUploadCatalogueSnapshot"
@@ -349,9 +353,13 @@
       value.installation =
         installation?.status === "ready" ? installation : null;
     }
+    if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
     return new Promise((resolve, reject) => {
       const requestId = crypto.randomUUID();
+      const abort = () => reject(new Error(CANCELLED_MESSAGE));
+      signal?.addEventListener("abort", abort, { once: true });
       const done = (response) => {
+        signal?.removeEventListener("abort", abort);
         if (chrome.runtime.lastError || !response?.ok)
           return reject(
             new Error(

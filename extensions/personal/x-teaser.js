@@ -8,6 +8,9 @@ const fileInput = document.querySelector("#teaserFile"),
 let fileProof = null,
   rows = [],
   frames = [],
+  framesProof = null,
+  pairing = null,
+  fileGeneration = 0,
   resumeSession = null,
   rebindCandidate = null,
   suppressAutoReconcile = false;
@@ -116,14 +119,37 @@ function sameFileProof(left, right) {
     Math.abs(left.duration - right.duration) < 0.05
   );
 }
+function currentPairing() {
+  return resumeSession
+    ? { id: resumeSession.id, file: resumeSession.pairing.file }
+    : pairing;
+}
+function framesMatch(id) {
+  const active = currentPairing();
+  return Boolean(
+    active &&
+    active.id === id &&
+    frames.length === 3 &&
+    sameFileProof(framesProof, active.file),
+  );
+}
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files?.[0];
   if (!file) return;
+  const generation = ++fileGeneration;
+  fileProof = null;
+  frames = [];
+  framesProof = null;
   confirmButton.disabled = true;
   fileStatus.textContent = "Reading file identity…";
   try {
-    fileProof = await proofOf(file);
-    frames = await framesOf(file, fileProof.duration);
+    const proof = await proofOf(file);
+    if (generation !== fileGeneration) return;
+    const selectedFrames = await framesOf(file, proof.duration);
+    if (generation !== fileGeneration) return;
+    fileProof = proof;
+    frames = selectedFrames;
+    framesProof = proof;
     if (resumeSession) {
       if (!sameFileProof(fileProof, resumeSession.pairing.file))
         throw new Error(
@@ -146,15 +172,22 @@ fileInput.addEventListener("change", async () => {
     fileStatus.textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB · identity ready`;
     updateConfirmation();
   } catch (error) {
-    fileStatus.textContent = error.message;
+    if (generation === fileGeneration) fileStatus.textContent = error.message;
   }
 });
 
 chrome.runtime.onMessage.addListener((incoming) => {
   if (incoming?.type !== "X_TEASER_CAPTURED") return;
+  const active = currentPairing();
+  if (active && incoming.id !== active.id) return;
+  const reselect =
+    "X status captured. Reselect the exact teaser to resume reconciliation without reposting.";
   if (suppressAutoReconcile || frames.length !== 3) {
-    result.textContent =
-      "X status captured. Reselect the exact teaser to resume reconciliation without reposting.";
+    result.textContent = reselect;
+    return;
+  }
+  if (!framesMatch(incoming.id)) {
+    result.textContent = reselect;
     return;
   }
   result.textContent =
@@ -178,6 +211,7 @@ confirmButton.addEventListener("click", async () => {
   try {
     if (rebindCandidate) {
       frames = [];
+      framesProof = null;
       const response = await message({
         type: "CONFIRM_X_TEASER_REBIND",
         ...rebindCandidate,
@@ -193,6 +227,10 @@ confirmButton.addEventListener("click", async () => {
       return;
     }
     if (resumeSession) {
+      if (!framesMatch(resumeSession.id))
+        throw new Error(
+          "Reselect the exact teaser to resume reconciliation without reposting.",
+        );
       const response = await message({
         type: "RECONCILE_X_TEASER",
         id: resumeSession.id,
@@ -216,10 +254,12 @@ confirmButton.addEventListener("click", async () => {
         item.fingerprint === row.fingerprint,
     );
     if (!fresh) throw new Error("That catalogue row changed. Select it again.");
-    await message({
+    const pairedProof = fileProof;
+    const paired = await message({
       type: "PAIR_X_TEASER",
-      pairing: CreatorXTeaserContract.freezePairing(fileProof, fresh),
+      pairing: CreatorXTeaserContract.freezePairing(pairedProof, fresh),
     });
+    pairing = { id: paired.xTeaser?.id, file: pairedProof };
     result.textContent =
       "Paired. Chrome opened X and is waiting for the resulting status page.";
   } catch (error) {
@@ -239,10 +279,12 @@ message({ type: "GET_X_TEASER_SESSIONS" })
         .find((session) => session.capture && session.stage !== "moved") ||
       null;
     if (paired) {
+      pairing = { id: paired.id, file: paired.pairing.file };
       result.textContent = `Observation resumed for ${paired.pairing.file.basename}. Continue in the bound X tab; Chrome will not repost.`;
     }
     if (rebind?.action === "confirm-status") {
       frames = [];
+      framesProof = null;
       suppressAutoReconcile = true;
       fileInput.disabled = true;
       rebindCandidate = {
