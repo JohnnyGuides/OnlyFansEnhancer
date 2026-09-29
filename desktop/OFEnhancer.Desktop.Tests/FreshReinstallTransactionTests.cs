@@ -180,6 +180,23 @@ public sealed class FreshReinstallTransactionTests
     }
 
     [TestMethod]
+    public void Shared_root_cleanup_removes_sqlite_side_files_of_owned_backup_and_restore_databases_only()
+    {
+        using var fixture = new Fixture(sharedData: true);
+        string data = Path.Combine(fixture.Data, "data");
+        string backup = "catalogue.db.backup-v3-abc_9.sqlite", restore = "catalogue.db.restore-" + new string('b', 32) + ".sqlite";
+        string[] owned = [.. new[] { backup, restore }.SelectMany(name => new[] { name, name + "-journal", name + "-wal", name + "-shm" })];
+        string[] unrelated = ["other.sqlite-wal", backup + "-bak", "unrelated.sqlite-journal", "catalogue.db.backup-v3-abc_9.sqlite-wal.keep"];
+        foreach (string name in owned.Concat(unrelated)) File.WriteAllText(Path.Combine(data, name), "x");
+        FreshReinstallTransaction transaction = fixture.Create(dataExclusive: false);
+        transaction.MarkPreviousPackageRemoved();
+        transaction.CleanOwnedState();
+
+        foreach (string name in owned) Assert.IsFalse(File.Exists(Path.Combine(data, name)), name);
+        foreach (string name in unrelated) Assert.IsTrue(File.Exists(Path.Combine(data, name)), name);
+    }
+
+    [TestMethod]
     public void Shared_root_with_only_owned_data_is_fully_cleaned_without_an_unowned_report()
     {
         using var fixture = new Fixture(sharedData: true);

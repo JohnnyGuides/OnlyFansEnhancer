@@ -696,6 +696,41 @@ for (const point of interruptionPoints) {
   });
 }
 
+test("the test-hook guard honours only a real directory under the system temp path", () => {
+  const outside = fs.mkdtempSync(path.join(repositoryRoot, "guard-outside-"));
+  const cases = [
+    ["a directory outside temp", () => outside, 0],
+    [
+      "a junction under temp pointing outside",
+      (value) => {
+        const junction = path.join(value.root, "junction-outside");
+        fs.symlinkSync(outside, junction, "junction");
+        return junction;
+      },
+      0,
+    ],
+    ["a real directory under temp", (value) => value.root, 87],
+  ];
+  try {
+    for (const [name, faultDirectory, expected] of cases) {
+      const value = fixture();
+      try {
+        const result = invokeRaw(value, auditRequest(value), {
+          ...process.env,
+          OFENHANCER_TEST_FAULT_DIR: faultDirectory(value),
+          OFENHANCER_TEST_FAULT: "after-catalogue",
+        });
+        assert.equal(result.status, expected, `${name}: ${result.stderr}`);
+      } finally {
+        fs.rmSync(path.join(value.root, "junction-outside"), { recursive: true, force: true });
+        fs.rmSync(value.root, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test("no temporary files remain after success or a failed move", () => {
   const value = fixture();
   try {

@@ -841,7 +841,11 @@ internal static class TestHooks
         string full = Path.GetFullPath(value).TrimEnd(separator);
         string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(separator);
         if (!Directory.Exists(full)) return null;
-        return full.StartsWith(temp + separator, StringComparison.OrdinalIgnoreCase) ? full : null;
+        if (!full.StartsWith(temp + separator, StringComparison.OrdinalIgnoreCase)) return null;
+        // A junction or symlink under temp may lead outside it: no component below temp may be a reparse point.
+        for (string? current = full; current is not null && current.Length > temp.Length; current = Path.GetDirectoryName(current))
+            if (new DirectoryInfo(current).Attributes.HasFlag(FileAttributes.ReparsePoint)) return null;
+        return full;
     }
 
     private static int? IntSetting(string name) =>

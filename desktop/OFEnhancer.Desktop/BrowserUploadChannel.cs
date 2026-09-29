@@ -197,10 +197,11 @@ public sealed class BrowserUploadChannel : IDisposable
             if (selected == id) commands.Clear();
         }
         foreach (var value in events)
-        {
-            try { EventReceived?.Invoke(value); }
-            catch (Exception) { /* A subscriber failure must not lose the commands already dequeued for this response. */ }
-        }
+            foreach (Action<JsonElement> subscriber in EventReceived?.GetInvocationList() ?? [])
+            {
+                try { subscriber(value); }
+                catch (Exception) { /* A subscriber failure must not lose the commands already dequeued for this response, nor starve the other subscribers. */ }
+            }
         return new { commands = work, connectionId, setupGeneration, requiredExtensionVersion = AgentProtocol.ProductVersion };
     }
 

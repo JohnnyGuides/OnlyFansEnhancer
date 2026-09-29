@@ -257,6 +257,76 @@ public sealed class GoogleConnectionCoordinatorTests
         Assert.IsNull(coordinator.Snapshot.ErrorCode);
     }
 
+    [TestMethod]
+    public async Task TokenExchangeWithFastHeadersAndStalledBodyEndsAtTheDeadlineAndKeepsTheStoredToken()
+    {
+        FakeCallbackReceiver receiver = new(RedirectUri);
+        GoogleRefreshCredential existing = new("existing-refresh-value", DateTimeOffset.Parse("2026-09-04T10:00:00Z"), ClientId);
+        TrackingTokenVault vault = new(existing);
+        bool completed = false;
+        GoogleConnectionCoordinator coordinator = new(
+            ClientId,
+            new HttpClient(new StalledBodyHandler()),
+            vault,
+            () => receiver,
+            uri => receiver.AuthorizationUri = uri,
+            _ => completed = true,
+            operationTimeout: TimeSpan.FromMilliseconds(200)
+        );
+
+        coordinator.Start();
+        await WaitUntilAsync(() => receiver.AuthorizationUri is not null);
+        string state = QueryValue(receiver.AuthorizationUri!, "state");
+        receiver.Complete(new($"{RedirectUri}?state={state}&code=authorization-code&picked_file_ids=sheet-123"));
+
+        using CancellationTokenSource limit = new(TimeSpan.FromSeconds(10));
+        while (coordinator.Snapshot.State != GoogleConnectionState.Error)
+        {
+            try { await Task.Delay(20, limit.Token); }
+            catch (OperationCanceledException) { coordinator.Cancel(); Assert.Fail("The token exchange did not end at its own deadline."); }
+        }
+
+        Assert.AreEqual("token_exchange_failed", coordinator.Snapshot.ErrorCode);
+        Assert.AreEqual(existing, vault.Load());
+        Assert.AreEqual(0, vault.SaveCalls);
+        Assert.AreEqual(0, vault.DeleteCalls);
+        Assert.IsFalse(completed);
+    }
+
+    private sealed class StalledBodyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StalledContent() });
+    }
+
+    private sealed class StalledContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.Delay(Timeout.Infinite);
+        protected override bool TryComputeLength(out long length) { length = -1; return false; }
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new StalledStream());
+        protected override Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<Stream>(new StalledStream());
+    }
+
+    private sealed class StalledStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            return 0;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private static GoogleConnectionCoordinator CreateCoordinator(
         FakeCallbackReceiver receiver,
         HttpMessageHandler handler,

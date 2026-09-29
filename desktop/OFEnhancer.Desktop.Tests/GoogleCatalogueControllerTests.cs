@@ -305,6 +305,96 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public async Task ClientSecretCheckWithStalledBodyEndsAtTheDeadlineAndKeepsTheStoredSecret()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        using TestDirectory temp = new();
+        GoogleDesktopClientStore clientStore = new(Path.Combine(temp.Path, "client.dat"));
+        clientStore.Save(new(ClientId, "working-secret"));
+        string file = Path.Combine(temp.Path, "download.json");
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            installed = new { client_id = ClientId, client_secret = "new-secret" }
+        }));
+        using HttpClient http = new(new StalledBodyHandler());
+        using GoogleCatalogueController controller = new(harness.Settings, harness.Store, harness.Vault, http, _ => { },
+            clientStore: clientStore, operationTimeout: TimeSpan.FromMilliseconds(200));
+
+        Task<GoogleCatalogueControllerException> import = Task.Run(() =>
+            Assert.ThrowsException<GoogleCatalogueControllerException>(() => controller.ImportGoogleClientConfiguration(() => file)));
+        Task finished = await Task.WhenAny(import, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.AreSame(import, finished, "The client secret check did not end at its own deadline.");
+        Assert.AreEqual("google-client-configuration-check-failed", (await import).Code);
+        Assert.AreEqual("working-secret", clientStore.Load(ClientId)!.ClientSecret);
+    }
+
+    private static void AssertSettingsRefusedAndUntouched(string path, Action operation)
+    {
+        byte[] damaged = Encoding.UTF8.GetBytes("{\"extensionId\": ");
+        File.WriteAllBytes(path, damaged);
+        Assert.AreEqual("invalid-settings", Assert.ThrowsException<GoogleCatalogueControllerException>(operation).Code);
+        CollectionAssert.AreEqual(damaged, File.ReadAllBytes(path), "unreadable settings were rewritten");
+    }
+
+    [TestMethod]
+    public void UnreadableSettingsAreRefusedAtEverySaveSiteAndLeftUntouched()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        using TestDirectory temp = new();
+        GoogleDesktopClientStore clientStore = new(Path.Combine(temp.Path, "client.dat"));
+        string file = Path.Combine(temp.Path, "download.json");
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(new { installed = new { client_id = ClientId, client_secret = "secret" } }));
+        using GoogleCatalogueController controller = new(harness.Settings, harness.Store, harness.Vault,
+            (_, _, _) => throw new AssertFailedException(), (_, _) => harness.Session,
+            clientStore: clientStore, validateClientSecret: _ => Task.CompletedTask);
+        string path = harness.Settings.SettingsPath;
+
+        AssertSettingsRefusedAndUntouched(path, () => controller.saveGoogleClientId(OtherClientId));
+        AssertSettingsRefusedAndUntouched(path, () => controller.saveGoogleSheetTarget("https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696"));
+        AssertSettingsRefusedAndUntouched(path, () => controller.ImportGoogleClientConfiguration(() => file));
+        Assert.IsNull(clientStore.Load(ClientId), "the credential was stored although settings could not be saved");
+    }
+
+    [TestMethod]
+    public void ImportRefusesSettingsThatBecameUnreadableDuringTheSecretCheckAndLeavesThemUntouched()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        using TestDirectory temp = new();
+        GoogleDesktopClientStore clientStore = new(Path.Combine(temp.Path, "client.dat"));
+        string file = Path.Combine(temp.Path, "download.json");
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(new { installed = new { client_id = ClientId, client_secret = "secret" } }));
+        string path = harness.Settings.SettingsPath;
+        byte[] damaged = Encoding.UTF8.GetBytes("{\"extensionId\": ");
+        using GoogleCatalogueController controller = new(harness.Settings, harness.Store, harness.Vault,
+            (_, _, _) => throw new AssertFailedException(), (_, _) => harness.Session,
+            clientStore: clientStore,
+            validateClientSecret: _ => { File.WriteAllBytes(path, damaged); return Task.CompletedTask; });
+
+        Assert.AreEqual("invalid-settings", Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => controller.ImportGoogleClientConfiguration(() => file)).Code);
+        CollectionAssert.AreEqual(damaged, File.ReadAllBytes(path), "unreadable settings were rewritten");
+        Assert.IsNull(clientStore.Load(ClientId), "the credential was stored although settings could not be saved");
+    }
+
+    [TestMethod]
+    public void AbsentSettingsFileStillBehavesAsBefore()
+    {
+        using ControllerHarness harness = new(configure: false);
+        Assert.IsFalse(File.Exists(harness.Settings.SettingsPath));
+        harness.Controller.saveGoogleSheetTarget("https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696");
+        Assert.IsNotNull(harness.Settings.Load().GoogleSheetUrl);
+        File.Delete(harness.Settings.SettingsPath);
+        harness.Controller.saveGoogleClientId(ClientId);
+        Assert.AreEqual(ClientId, harness.Settings.Load().GoogleOAuthClientId);
+    }
+
+    private sealed class StalledBodyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = new StalledBodyContent() });
+    }
+
+    [TestMethod]
     public void RejectedDownloadedSecretDoesNotReplaceSavedCredential()
     {
         using ControllerHarness harness = ReadyHarness();

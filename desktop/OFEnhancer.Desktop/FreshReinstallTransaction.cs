@@ -332,7 +332,7 @@ internal sealed class FreshReinstallTransaction
     ];
     private static readonly Regex OwnedDataTemporaryPattern = new(
         "^(?:catalogue\\.db|google-oauth-token\\.dat|google-desktop-client\\.dat|chrome-reset\\.json)\\.[a-f0-9]{32}\\.tmp$"
-        + "|^catalogue\\.db\\.backup-v[0-9]+-[0-9A-Za-z_-]+\\.sqlite$|^catalogue\\.db\\.restore-[a-f0-9]{32}\\.sqlite$",
+        + "|^catalogue\\.db\\.backup-v[0-9]+-[0-9A-Za-z_-]+\\.sqlite(?:-journal|-wal|-shm)?$|^catalogue\\.db\\.restore-[a-f0-9]{32}\\.sqlite(?:-journal|-wal|-shm)?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     // Returns true when content the application does not own was left in place.

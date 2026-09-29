@@ -229,6 +229,23 @@ public class BrowserUploadChannelTests
     }
 
     [TestMethod]
+    public void ThrowingFirstSubscriberDoesNotStopTheSecondFromReceivingTheEvent()
+    {
+        using var channel = new BrowserUploadChannel();
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        var request = channel.RequestAsync(Json(new { kind = "message" }));
+        List<string> received = [];
+        channel.EventReceived += _ => throw new InvalidOperationException("first subscriber failed");
+        channel.EventReceived += value => received.Add(value.GetProperty("message").GetProperty("type").GetString()!);
+        var events = new[] { new { portId = Guid.NewGuid().ToString(), message = new { type = "a" } }, new { portId = Guid.NewGuid().ToString(), message = new { type = "b" } } };
+        var exchange = Json(channel.Exchange(Json(new { browserId = browser, events })));
+        CollectionAssert.AreEqual(new[] { "a", "b" }, received);
+        Assert.AreEqual(1, exchange.GetProperty("commands").GetArrayLength());
+        Assert.IsFalse(request.IsCompleted);
+    }
+
+    [TestMethod]
     public async Task RequestsAfterDisposeFailAtOnce()
     {
         var channel = new BrowserUploadChannel();

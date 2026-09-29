@@ -233,6 +233,28 @@ ative\host.json";
         Assert.AreEqual(ChromeResetStage.Replacement, fixture.Channel.Reset!.Stage);
     }
 
+    [TestMethod]
+    public void Prepare_completes_a_resumed_replacement_stage_with_the_canonical_registration()
+    {
+        using var fixture = new Fixture();
+        (string journal, byte[] maintenance) = BeginReset(fixture);
+        fixture.Integration.ContinueFreshReset(ChromeRemovalEvidence.Unknown);
+        File.WriteAllBytes(fixture.Manifest, maintenance);
+        fixture.Targets = [];
+        byte[] cutoff = File.ReadAllBytes(journal);
+
+        fixture.Integration.Prepare();
+
+        using JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(fixture.Manifest));
+        Assert.AreEqual("OFEnhancer desktop bridge", manifest.RootElement.GetProperty("description").GetString());
+        CollectionAssert.AreEqual(new[] { $"chrome-extension://{ChromeIntegration.CanonicalExtensionId}/" },
+            manifest.RootElement.GetProperty("allowed_origins").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        CollectionAssert.AreEqual(new[] { fixture.Manifest }, fixture.Targets, "registry target passed to the delegate");
+        Assert.AreEqual(ChromeIntegration.CanonicalExtensionId, fixture.Settings.Load().ExtensionId);
+        CollectionAssert.AreEqual(cutoff, File.ReadAllBytes(journal), "resume must not move the reset checkpoint");
+        Assert.AreEqual(ChromeResetStage.Replacement, fixture.Channel.Reset!.Stage);
+    }
+
     [DataTestMethod]
     [DataRow("foreign")]
     [DataRow("package")]

@@ -19,6 +19,7 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
     private readonly object _gate = new();
     private readonly string _clientId;
     private readonly string? _clientSecret;
+    private readonly TimeSpan _operationTimeout;
     private readonly HttpClient _httpClient;
     private readonly IGoogleTokenVault _tokenVault;
     private readonly Func<IGoogleOAuthCallbackReceiver> _receiverFactory;
@@ -39,10 +40,12 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
         Action<Uri> openBrowser,
         Action<GoogleConnectionCompletion> completed,
         string? clientSecret = null,
-        GoogleSheetReference? target = null
+        GoogleSheetReference? target = null,
+        TimeSpan? operationTimeout = null
     )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
+        _operationTimeout = operationTimeout ?? TimeSpan.FromSeconds(30);
         _clientId = clientId;
         _clientSecret = clientSecret;
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -150,15 +153,26 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
             _openBrowser(start.AuthorizationUri);
             Uri callbackUri = await receiver.ReceiveAsync(cancellation.Token).ConfigureAwait(false);
             GoogleOAuthCallback callback = GoogleOAuthProtocol.ParseCallback(callbackUri, start.State);
-            GoogleTokenSet tokens = await GoogleOAuthProtocol.ExchangeCodeAsync(
-                _httpClient,
-                _clientId,
-                callback.AuthorizationCode,
-                receiver.RedirectUri,
-                start.CodeVerifier,
-                cancellation.Token,
-                _clientSecret
-            ).ConfigureAwait(false);
+            // One deadline covers the token request headers and body.
+            using CancellationTokenSource exchangeDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+            exchangeDeadline.CancelAfter(_operationTimeout);
+            GoogleTokenSet tokens;
+            try
+            {
+                tokens = await GoogleOAuthProtocol.ExchangeCodeAsync(
+                    _httpClient,
+                    _clientId,
+                    callback.AuthorizationCode,
+                    receiver.RedirectUri,
+                    start.CodeVerifier,
+                    exchangeDeadline.Token,
+                    _clientSecret
+                ).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+            {
+                throw new GoogleOAuthException("token_exchange_failed");
+            }
             if (_target is not null
                 && !string.Equals(callback.WorkbookId, _target.WorkbookId, StringComparison.Ordinal))
                 throw new GoogleOAuthException("selected_sheet_does_not_match_url");

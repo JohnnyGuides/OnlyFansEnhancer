@@ -1,3 +1,4 @@
+using System.IO;
 using OFEnhancer.Catalogue;
 using System.Diagnostics;
 using System.Net.Http;
@@ -113,7 +114,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         HttpClient httpClient,
         Action<Uri> openBrowser,
         Func<Action, Task>? completionDispatcher = null,
-        GoogleDesktopClientStore? clientStore = null
+        GoogleDesktopClientStore? clientStore = null,
+        TimeSpan? operationTimeout = null
     )
         : this(
             settings,
@@ -126,7 +128,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 static () => new HttpListenerGoogleOAuthCallbackReceiver(),
                 openBrowser,
                 completed,
-                clientStore?.Load(clientId)?.ClientSecret
+                clientStore?.Load(clientId)?.ClientSecret,
+                operationTimeout: operationTimeout
             ),
             (clientId, completion) =>
             {
@@ -147,12 +150,25 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             },
             completionDispatcher,
             clientStore,
-            credential => GoogleOAuthProtocol.ValidateClientSecretAsync(
-                httpClient, credential.ClientId, credential.ClientSecret, CancellationToken.None)
+            async credential =>
+            {
+                using CancellationTokenSource deadline = new(operationTimeout ?? TimeSpan.FromSeconds(30));
+                await GoogleOAuthProtocol.ValidateClientSecretAsync(
+                    httpClient, credential.ClientId, credential.ClientSecret, deadline.Token).ConfigureAwait(false);
+            }
         )
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(openBrowser);
+    }
+
+    // Unreadable settings must never be replaced by defaults derived from an empty load.
+    private DesktopSettings LoadSettingsForUpdate()
+    {
+        if (!File.Exists(_settings.SettingsPath)) return DesktopSettings.Empty;
+        if (!_settings.TryLoad(out DesktopSettings current))
+            throw new GoogleCatalogueControllerException("invalid-settings");
+        return current;
     }
 
     public GoogleCatalogueStatusView getGoogleCatalogueStatus()
@@ -175,7 +191,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             ThrowIfDisposed();
             if (_importingClient)
                 throw new GoogleCatalogueControllerException("google-operation-in-progress");
-            DesktopSettings current = _settings.Load();
+            DesktopSettings current = LoadSettingsForUpdate();
             try
             {
                 _settings.Save(current with { GoogleOAuthClientId = clientId });
@@ -233,7 +249,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             GoogleDesktopClientCredential credential = GoogleDesktopClientStore.ReadFile(path);
             lock (_gate)
             {
-                DesktopSettings current = _settings.Load();
+                DesktopSettings current = LoadSettingsForUpdate();
                 if (current.GoogleOAuthClientId is not null
                     && !string.Equals(current.GoogleOAuthClientId, credential.ClientId, StringComparison.Ordinal))
                     throw new GoogleCatalogueControllerException("google-client-configuration-mismatch");
@@ -246,7 +262,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             lock (_gate)
             {
                 ThrowIfDisposed();
-                DesktopSettings current = _settings.Load();
+                DesktopSettings current = LoadSettingsForUpdate();
                 if (current.GoogleOAuthClientId is not null
                     && !string.Equals(current.GoogleOAuthClientId, credential.ClientId, StringComparison.Ordinal))
                     throw new GoogleCatalogueControllerException("google-client-configuration-mismatch");
@@ -281,7 +297,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         lock (_gate)
         {
             ThrowIfDisposed();
-            DesktopSettings current = _settings.Load();
+            DesktopSettings current = LoadSettingsForUpdate();
             _settings.Save(current with { GoogleSheetUrl = target.CanonicalUrl });
             return StatusLocked();
         }
