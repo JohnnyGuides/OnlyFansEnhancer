@@ -343,3 +343,44 @@ test("rejects a non-absolute local path before attaching", async () => {
   );
   assert.equal(fake.calls.length, 0);
 });
+
+test("abort during the pre-attach frame check sets no file and releases the slot after detach", async () => {
+  const attacher = load();
+  const fake = createChrome();
+  const controller = new AbortController();
+  const originalSend = fake.chrome.debugger.sendCommand;
+  let frameTrees = 0;
+  fake.chrome.debugger.sendCommand = (target, method, parameters, callback) => {
+    if (method === "Page.getFrameTree" && ++frameTrees === 3)
+      controller.abort();
+    originalSend(target, method, parameters, callback);
+  };
+  let acknowledgeDetach;
+  fake.chrome.debugger.detach = (target, callback) => {
+    fake.calls.push(["debugger.detach", target.tabId]);
+    acknowledgeDetach = callback;
+  };
+  const first = assert.rejects(
+    attacher.attach(request({ signal: controller.signal }), fake.chrome),
+    /attachment-cancelled/,
+  );
+  await new Promise(setImmediate);
+  assert.equal(typeof acknowledgeDetach, "function");
+  await assert.rejects(
+    attacher.attach(request(), fake.chrome),
+    /attachment-in-progress/,
+  );
+  acknowledgeDetach();
+  await first;
+  assert.deepEqual(fake.fileInputs, []);
+  fake.chrome.debugger.detach = (target, callback) => {
+    fake.calls.push(["debugger.detach", target.tabId]);
+    callback();
+  };
+  fake.chrome.debugger.sendCommand = originalSend;
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await attacher.attach(request(), fake.chrome))),
+    { attached: true },
+  );
+  assert.deepEqual(fake.fileInputs, [[privatePath]]);
+});

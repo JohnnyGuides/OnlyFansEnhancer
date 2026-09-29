@@ -525,6 +525,7 @@
         prepared.allowedOrigins,
         attachedFrame,
       );
+      checkActive();
       await command(chromeApi, target, "DOM.setFileInputFiles", {
         files: [prepared.filePath],
         ...inputNode,

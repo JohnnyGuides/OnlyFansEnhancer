@@ -3510,6 +3510,22 @@ function creatorUploadPost(sessionId, message) {
   }
 }
 
+// Advisory status message that follows a durable transition. A missing or
+// closed console must not change the outcome that was already recorded.
+function creatorUploadNotify(sessionId, message) {
+  try {
+    creatorUploadPost(sessionId, message);
+    return true;
+  } catch (error) {
+    if (
+      error.message === "The upload console is not connected." ||
+      error.message === "The upload port disconnected."
+    )
+      return false;
+    throw error;
+  }
+}
+
 function creatorUploadRequestFile(session, platform, role) {
   const target = session.platforms.get(platform);
   const token = target?.tokens?.[role];
@@ -4531,6 +4547,8 @@ async function invokeCreatorUploadAdapter(args) {
       const selected = await globalThis.CreatorUploadFileBridge.waitFor(
         args.sessionId,
         role,
+        undefined,
+        controller.signal,
       );
       if (controller.signal.aborted)
         throw new Error("Preparation was cancelled.");
@@ -4838,7 +4856,7 @@ async function runCreatorManyVidsPlatform(session, target) {
     target.submitAttempted = true;
     target.status = "save-clicked";
     await checkpointCreatorUploadSession(session);
-    creatorUploadPost(session.id, {
+    creatorUploadNotify(session.id, {
       type: "platform-progress",
       platform,
       status: target.status,
@@ -4869,7 +4887,7 @@ async function runCreatorManyVidsPlatform(session, target) {
     };
     Object.assign(target, result);
     await checkpointCreatorUploadSession(session);
-    creatorUploadPost(session.id, {
+    creatorUploadNotify(session.id, {
       type: "platform-result",
       platform,
       result,
@@ -4950,7 +4968,7 @@ async function runCreatorPornhubPlatform(session, target) {
     }
     Object.assign(target, result);
     await checkpointCreatorUploadSession(session);
-    creatorUploadPost(session.id, {
+    creatorUploadNotify(session.id, {
       type: "platform-result",
       platform,
       result,
@@ -5102,7 +5120,7 @@ async function runCreatorUploadPlatform(session, platform) {
     target.submitAttempted = true;
     target.status = "submitted";
     await checkpointCreatorUploadSession(session);
-    creatorUploadPost(session.id, {
+    creatorUploadNotify(session.id, {
       type: "platform-progress",
       platform,
       status: target.status,
@@ -5123,7 +5141,7 @@ async function runCreatorUploadPlatform(session, platform) {
     target.status = "link-captured";
     target.postUrl = postUrl;
     await checkpointCreatorUploadSession(session);
-    creatorUploadPost(session.id, {
+    creatorUploadNotify(session.id, {
       type: "platform-progress",
       platform,
       status: target.status,
@@ -5142,7 +5160,7 @@ async function runCreatorUploadPlatform(session, platform) {
     };
     Object.assign(target, result);
     await checkpointCreatorUploadSession(session);
-    creatorUploadPost(session.id, {
+    creatorUploadNotify(session.id, {
       type: "platform-result",
       platform,
       result,
@@ -5509,43 +5527,46 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 async function stopCreatorUploadSession(session) {
   session.cancelled = true;
-  for (const [id, pending] of creatorUploadFileRequests) {
-    if (pending.sessionId !== session.id) continue;
-    clearTimeout(pending.timeout);
-    pending.fileController?.abort();
-    pending.reject(new Error("Preparation was cancelled."));
-    creatorUploadFileRequests.delete(id);
-  }
-  for (const target of session.platforms.values()) {
-    if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
-    target.status = "cancelled";
-    target.stage = "cancelled";
-    if (target.tabId) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: target.tabId, documentIds: [target.documentId] },
-          func: (sessionId) => {
-            for (const [key, run] of globalThis.CreatorUploadRuns || [])
-              if (key.startsWith(`${sessionId}:`)) run.controller.abort();
-          },
-          args: [session.id],
-        });
-      } catch {
-        /* A closed document has already stopped its executor. */
-      }
+  try {
+    for (const [id, pending] of creatorUploadFileRequests) {
+      if (pending.sessionId !== session.id) continue;
+      clearTimeout(pending.timeout);
+      pending.fileController?.abort();
+      pending.reject(new Error("Preparation was cancelled."));
+      creatorUploadFileRequests.delete(id);
     }
-    creatorUploadPost(session.id, {
-      type: "platform-result",
-      platform: target.platform,
-      result: {
+    for (const target of session.platforms.values()) {
+      if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
+      target.status = "cancelled";
+      target.stage = "cancelled";
+      if (target.tabId) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: target.tabId, documentIds: [target.documentId] },
+            func: (sessionId) => {
+              for (const [key, run] of globalThis.CreatorUploadRuns || [])
+                if (key.startsWith(`${sessionId}:`)) run.controller.abort();
+            },
+            args: [session.id],
+          });
+        } catch {
+          /* A closed document has already stopped its executor. */
+        }
+      }
+      creatorUploadNotify(session.id, {
+        type: "platform-result",
         platform: target.platform,
-        status: "cancelled",
-        error:
-          "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
-      },
-    });
+        result: {
+          platform: target.platform,
+          status: "cancelled",
+          error:
+            "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
+        },
+      });
+    }
+  } finally {
+    await checkpointCreatorUploadSession(session);
   }
-  await checkpointCreatorUploadSession(session);
 }
 
 let creatorUploadRetirement = null;
@@ -6217,7 +6238,7 @@ async function recordCreatorManualPreparation(session, target) {
   };
   Object.assign(target, result);
   await checkpointCreatorUploadSession(session);
-  creatorUploadPost(session.id, {
+  creatorUploadNotify(session.id, {
     type: "platform-result",
     platform: target.platform,
     result,

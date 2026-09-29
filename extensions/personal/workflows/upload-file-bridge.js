@@ -187,19 +187,41 @@
     return { sessionId, platform, roles: [...roleMap.keys()] };
   }
 
-  function waitFor(sessionId, role, timeoutMs = 600_000) {
+  function namedError(name, message) {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
+  function waitFor(sessionId, role, timeoutMs = 600_000, signal) {
     const entry = sessions.get(sessionId)?.roleMap.get(role);
     if (!entry) return Promise.reject(new Error("Unknown upload file role."));
     if (entry.value) return Promise.resolve(entry.value);
+    if (signal?.aborted)
+      return Promise.reject(
+        namedError("AbortError", "Waiting for the video was cancelled."),
+      );
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        entry.waiters = entry.waiters.filter((waiter) => waiter !== done);
-        reject(new Error(`Timed out waiting for the ${role} video.`));
+        fail(new Error(`Timed out waiting for the ${role} video.`));
       }, timeoutMs);
-      const done = (value) => {
+      const onAbort = () =>
+        fail(namedError("AbortError", "Waiting for the video was cancelled."));
+      const settle = () => {
         clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        entry.waiters = entry.waiters.filter((waiter) => waiter !== done);
+      };
+      const fail = (error) => {
+        settle();
+        reject(error);
+      };
+      const done = (value) => {
+        settle();
         resolve(value);
       };
+      done.fail = fail;
+      signal?.addEventListener("abort", onAbort, { once: true });
       entry.waiters.push(done);
     });
   }
@@ -207,6 +229,14 @@
   function dispose(sessionId) {
     const session = sessions.get(sessionId);
     if (!session) return;
+    for (const entry of session.roleMap.values())
+      for (const waiter of entry.waiters.splice(0))
+        waiter.fail?.(
+          namedError(
+            "UploadFileBridgeDisposedError",
+            "The upload file bridge was disposed.",
+          ),
+        );
     globalThis.removeEventListener("message", session.onMessage);
     session.iframe.remove();
     sessions.delete(sessionId);
