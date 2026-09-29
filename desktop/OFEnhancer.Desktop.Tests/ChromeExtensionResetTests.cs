@@ -157,6 +157,80 @@ public sealed class ChromeExtensionResetTests
         finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
     }
 
+    private static ChromeExtensionReset LoadJournal(string path, bool pending, string stage, string evidence = "None")
+    {
+        long started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            Schema = 5, Generation = Guid.NewGuid().ToString(), StartedAt = started, Pending = pending,
+            ExtensionId = ChromeIntegration.CanonicalExtensionId, RetiredReceipts = Array.Empty<string>(),
+            Stage = stage, RemovalEvidence = evidence, LastRemovalError = (string?)null,
+            RemovalRequestedAt = 0L, UserAssertedAt = 0L, AdmittedReceipt = (string?)null, AdmittedAt = 0L,
+        }));
+        return new ChromeExtensionReset(path);
+    }
+
+    [DataTestMethod]
+    [DataRow(true, "7", "None")]
+    [DataRow(true, "Removal,Replacement", "None")]
+    [DataRow(true, "Removal", "9")]
+    [DataRow(true, "Removal", "None,Requested")]
+    [DataRow(true, "Admitted", "None")]
+    [DataRow(false, "Removal", "None")]
+    [DataRow(false, "Replacement", "None")]
+    public void Journal_with_undefined_or_inconsistent_fields_is_corrupt(bool pending, string stage, string evidence)
+    {
+        string path = TempPath();
+        try
+        {
+            var reset = LoadJournal(path, pending, stage, evidence);
+            Assert.IsFalse(reset.IsValid);
+            Assert.IsTrue(reset.Pending, "a corrupt record keeps Chrome blocked");
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
+    }
+
+    [DataTestMethod]
+    [DataRow(true, "Removal")]
+    [DataRow(true, "Replacement")]
+    [DataRow(false, "Admitted")]
+    public void Journal_with_named_consistent_fields_loads(bool pending, string stage)
+    {
+        string path = TempPath();
+        try
+        {
+            var reset = LoadJournal(path, pending, stage);
+            Assert.IsTrue(reset.IsValid);
+            Assert.AreEqual(pending, reset.Pending);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
+    }
+
+    [DataTestMethod]
+    [DataRow(1, true)]
+    [DataRow(2, false)]
+    [DataRow(3, true)]
+    public void Supported_legacy_journals_still_load(int schema, bool pending)
+    {
+        string path = TempPath();
+        try
+        {
+            long started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, JsonSerializer.Serialize(new
+            {
+                Schema = schema, Generation = Guid.NewGuid().ToString(), StartedAt = started, Pending = pending,
+                ExtensionId = ChromeIntegration.CanonicalExtensionId, RetiredReceipts = Array.Empty<string>(),
+            }));
+            var migrated = new ChromeExtensionReset(path);
+            Assert.IsTrue(migrated.IsValid);
+            Assert.AreEqual(pending, migrated.Pending);
+            Assert.AreEqual(pending ? ChromeResetStage.Removal : ChromeResetStage.Admitted, migrated.Stage);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(path)!, true); }
+    }
+
     private static string TempPath() => Path.Combine(Path.GetTempPath(), "ofe-reset-" + Guid.NewGuid().ToString("N"), "reset.json");
     private static JsonElement Receipt(string id, DateTimeOffset installedAt) =>
         JsonSerializer.SerializeToElement(new { id, installedAt = installedAt.ToUnixTimeMilliseconds() });

@@ -141,6 +141,66 @@ public sealed class FreshReinstallTransactionTests
         Assert.AreEqual("preserve", File.ReadAllText(Path.Combine(fixture.Data, "created-after-checkpoint.txt")));
     }
 
+    [DataTestMethod]
+    [DataRow("99")]
+    [DataRow("0")]
+    [DataRow("Preflight,Complete")]
+    public void Journal_with_an_undefined_phase_is_corrupt(string phase)
+    {
+        using var fixture = new Fixture();
+        fixture.Create();
+        File.WriteAllText(fixture.TransactionPath,
+            File.ReadAllText(fixture.TransactionPath).Replace("\"Phase\":\"Preflight\"", $"\"Phase\":\"{phase}\""));
+        Assert.ThrowsException<InvalidOperationException>(() => FreshReinstallTransaction.Load(fixture.TransactionPath));
+    }
+
+    [TestMethod]
+    public void Shared_root_cleanup_deletes_only_owned_entries_and_reports_unowned_content()
+    {
+        using var fixture = new Fixture(sharedData: true);
+        string data = Path.Combine(fixture.Data, "data");
+        string[] owned = ["google-desktop-client.dat", "google-oauth-token.dat", "catalogue.db-wal", "chrome-reset.json",
+            "google-oauth-token.dat." + new string('a', 32) + ".tmp"];
+        foreach (string name in owned) File.WriteAllText(Path.Combine(data, name), "owned");
+        File.WriteAllText(Path.Combine(data, "unrelated.txt"), "keep");
+        Directory.CreateDirectory(Path.Combine(data, "unrelated-folder"));
+        File.WriteAllText(Path.Combine(data, "unrelated-folder", "inner.txt"), "keep");
+        FreshReinstallTransaction transaction = fixture.Create(dataExclusive: false);
+        transaction.MarkPreviousPackageRemoved();
+        transaction.CleanOwnedState();
+
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(data, "unrelated.txt")));
+        Assert.AreEqual("keep", File.ReadAllText(Path.Combine(data, "unrelated-folder", "inner.txt")));
+        foreach (string name in owned.Append("catalogue.db")) Assert.IsFalse(File.Exists(Path.Combine(data, name)), name);
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Data, "settings.json")));
+        Assert.AreEqual(FreshReinstallPhase.OwnedStatePurged, FreshReinstallTransaction.Load(fixture.TransactionPath).Phase);
+        using JsonDocument journal = JsonDocument.Parse(File.ReadAllText(fixture.TransactionPath));
+        CollectionAssert.Contains(journal.RootElement.GetProperty("Observations").EnumerateArray().Select(item => item.GetString()).ToArray(),
+            "data-root-purged-unowned-content-remains");
+    }
+
+    [TestMethod]
+    public void Shared_root_with_only_owned_data_is_fully_cleaned_without_an_unowned_report()
+    {
+        using var fixture = new Fixture(sharedData: true);
+        FreshReinstallTransaction transaction = fixture.Create(dataExclusive: false);
+        transaction.MarkPreviousPackageRemoved();
+        transaction.CleanOwnedState();
+        Assert.IsFalse(Directory.Exists(Path.Combine(fixture.Data, "data")));
+        Assert.IsFalse(File.ReadAllText(fixture.TransactionPath).Contains("unowned-content-remains"));
+    }
+
+    [TestMethod]
+    public void Exclusive_root_cleanup_still_removes_everything_including_unrecognised_content()
+    {
+        using var fixture = new Fixture();
+        File.WriteAllText(Path.Combine(fixture.Data, "data", "unrecognised.bin"), "x");
+        FreshReinstallTransaction transaction = fixture.Create();
+        transaction.MarkPreviousPackageRemoved();
+        transaction.CleanOwnedState();
+        Assert.IsFalse(Directory.Exists(fixture.Data));
+    }
+
     [TestMethod]
     public void Legacy_chrome_phases_migrate_without_claiming_chrome_completion()
     {

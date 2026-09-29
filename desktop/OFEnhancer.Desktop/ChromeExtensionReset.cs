@@ -99,10 +99,15 @@ internal sealed class ChromeExtensionReset
         if (value is null || value.Schema != 5 || !Guid.TryParse(value.Generation, out _) || value.StartedAt <= 0
             || AppConfiguration.NormalizeExtensionId(value.ExtensionId) is null || value.RetiredReceipts is null
             || value.RetiredReceipts.Length > 256 || value.RetiredReceipts.Any(receipt => !Guid.TryParse(receipt, out _))
-            || !Enum.TryParse<ChromeResetStage>(value.Stage, false, out _) || !Enum.TryParse<ChromeRemovalEvidence>(value.RemovalEvidence, false, out _)
+            || !IsNamedMember<ChromeResetStage>(value.Stage) || !IsNamedMember<ChromeRemovalEvidence>(value.RemovalEvidence)
+            || value.Pending == (value.Stage == ChromeResetStage.Admitted.ToString())
             || value.LastRemovalError?.Length > 500 || value.RemovalRequestedAt < 0 || value.UserAssertedAt < 0 || value.AdmittedAt < 0
             || value.AdmittedReceipt is not null && !Guid.TryParse(value.AdmittedReceipt, out _)) throw new InvalidOperationException();
     }
+
+    // Enum.TryParse also accepts numeric strings and comma lists; a journal must name exactly one member.
+    private static bool IsNamedMember<T>(string? value) where T : struct, Enum
+        => value is not null && Enum.GetNames<T>().Contains(value, StringComparer.Ordinal);
 
     private void Save(Journal value)
     {

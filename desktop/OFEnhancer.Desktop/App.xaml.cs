@@ -177,9 +177,13 @@ public partial class App : System.Windows.Application
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
-        if (window is not null)
-            await window.ExitAsync();
-        Shutdown();
+        try
+        {
+            if (window is not null)
+                await window.ExitAsync();
+        }
+        catch (Exception) { /* Cleanup already ran in ExitAsync; the application must still exit. */ }
+        finally { Shutdown(); }
     }
 
     private static void RunAgentOnce(IReadOnlyList<string> args)

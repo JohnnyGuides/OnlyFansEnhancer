@@ -89,4 +89,27 @@ public sealed class WebMessageDispatcherTests
         await Task.WhenAll(request, completion);
         CollectionAssert.AreEqual(new[] { "request", "completion" }, order);
     }
+
+    [TestMethod]
+    public async Task Drain_completes_without_throwing_when_the_last_request_faulted()
+    {
+        WebMessageDispatcher dispatcher = new(_ => throw new InvalidOperationException("request failed"));
+        Task<string> failing = dispatcher.HandleAsync("boom");
+        await dispatcher.DrainAsync();
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => failing);
+        await dispatcher.DrainAsync();
+        await dispatcher.DrainAsync();
+    }
+
+    [TestMethod]
+    public async Task Request_arriving_after_drain_is_refused_with_the_closing_error()
+    {
+        int calls = 0;
+        WebMessageDispatcher dispatcher = new(value => { Interlocked.Increment(ref calls); return value; });
+        Assert.AreEqual("first", await dispatcher.HandleAsync("first"));
+        await dispatcher.DrainAsync();
+        await Assert.ThrowsExceptionAsync<WebMessageDispatcherClosedException>(() => dispatcher.HandleAsync("late").WaitAsync(TimeSpan.FromSeconds(2)));
+        await Assert.ThrowsExceptionAsync<WebMessageDispatcherClosedException>(() => dispatcher.EnqueueAsync(() => calls++).WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.AreEqual(1, calls);
+    }
 }

@@ -158,4 +158,84 @@ public class BrowserUploadChannelTests
         await request;
         channel.Select(second);
     }
+
+    private static (BrowserUploadChannel Channel, string Browser, string CommandId, Task<JsonElement> Request) Pending()
+    {
+        var channel = new BrowserUploadChannel();
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        var request = channel.RequestAsync(Json(new { kind = "message" }));
+        var sent = Json(channel.Exchange(Json(new { browserId = browser })));
+        return (channel, browser, sent.GetProperty("commands")[0].GetProperty("id").GetString()!, request);
+    }
+
+    [TestMethod]
+    public async Task ReplyWithoutResultSettlesItsRequestWithAProtocolError()
+    {
+        var (channel, browser, id, request) = Pending();
+        using (channel)
+        {
+            channel.Exchange(Json(new { browserId = browser, replies = new[] { new { id } } }));
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => request.WaitAsync(TimeSpan.FromSeconds(2)));
+            channel.Select(browser);
+            Assert.AreEqual(0, Json(channel.Exchange(Json(new { browserId = browser }))).GetProperty("commands").GetArrayLength());
+        }
+    }
+
+    [TestMethod]
+    public async Task ReplyWithNonStringErrorSettlesItsRequestWithAProtocolError()
+    {
+        var (channel, browser, id, request) = Pending();
+        using (channel)
+        {
+            channel.Exchange(Json(new { browserId = browser, replies = new[] { new { id, error = new { code = 7 } } } }));
+            var failure = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => request.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.IsTrue(failure.Message.Length is > 0 and <= 200);
+        }
+    }
+
+    [TestMethod]
+    public async Task MalformedEntryWithoutIdDoesNotAbortTheRestOfTheBatch()
+    {
+        var (channel, browser, id, request) = Pending();
+        using (channel)
+        {
+            var second = channel.RequestAsync(Json(new { kind = "message" }));
+            List<JsonElement> received = [];
+            channel.EventReceived += value => received.Add(value);
+            var events = new[] { new { portId = Guid.NewGuid().ToString(), message = new { type = "session-bound" } } };
+            object[] replies = [5, new { result = 1 }, new { id = 12, result = 1 }, new { id, result = new { ok = true } }];
+            var exchange = Json(channel.Exchange(Json(new { browserId = browser, replies, events })));
+            Assert.IsTrue((await request.WaitAsync(TimeSpan.FromSeconds(2))).GetProperty("ok").GetBoolean());
+            Assert.AreEqual(1, received.Count);
+            Assert.AreEqual(1, exchange.GetProperty("commands").GetArrayLength());
+            Assert.IsFalse(second.IsCompleted);
+        }
+    }
+
+    [TestMethod]
+    public async Task ThrowingSubscriberStillReturnsTheExchangeResponseWithItsCommands()
+    {
+        using var channel = new BrowserUploadChannel();
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        var request = channel.RequestAsync(Json(new { kind = "message" }));
+        channel.EventReceived += _ => throw new InvalidOperationException("subscriber failed");
+        var events = new[] { new { portId = Guid.NewGuid().ToString(), message = new { type = "a" } }, new { portId = Guid.NewGuid().ToString(), message = new { type = "b" } } };
+        var exchange = Json(channel.Exchange(Json(new { browserId = browser, events })));
+        Assert.AreEqual(1, exchange.GetProperty("commands").GetArrayLength());
+        Assert.IsFalse(request.IsCompleted);
+        await Task.CompletedTask;
+    }
+
+    [TestMethod]
+    public async Task RequestsAfterDisposeFailAtOnce()
+    {
+        var channel = new BrowserUploadChannel();
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        channel.Dispose();
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(new { kind = "message" })).WaitAsync(TimeSpan.FromSeconds(2)));
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.OpenChromePageAsync("extensions", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2)));
+    }
 }

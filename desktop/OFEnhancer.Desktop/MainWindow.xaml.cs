@@ -127,6 +127,7 @@ public partial class MainWindow : Window, IDisposable
 
     public async Task<AgentResponse> HandleAgentRequest(AgentRequest request)
     {
+        if (exiting) return AgentResponse.Failure(request.RequestId.ToString(), "desktop-closing");
         try
         {
             if (request.Operation == "getStatus") return AgentResponse.Success(request, AgentStatus.Current);
@@ -342,10 +343,22 @@ public partial class MainWindow : Window, IDisposable
     public async Task ExitAsync()
     {
         exiting = true;
-        googleCatalogue.CancelInFlightGoogleWork();
-        await dispatcher.DrainAsync();
-        Dispose();
-        Close();
+        try
+        {
+            googleCatalogue.CancelInFlightGoogleWork();
+            await dispatcher.DrainAsync();
+        }
+        finally
+        {
+            try { Dispose(); }
+            finally { Close(); }
+        }
+    }
+
+    private async Task ShutdownAfterDrainAsync()
+    {
+        try { await Task.WhenAny(dispatcher.DrainAsync(), Task.Delay(TimeSpan.FromSeconds(3))); }
+        finally { System.Windows.Application.Current.Shutdown(); }
     }
 
     public void Dispose()
@@ -364,6 +377,8 @@ public partial class MainWindow : Window, IDisposable
     {
         showChromeSetup = true;
         Show();
+        ShowInTaskbar = true;
+        WindowState = WindowState.Normal;
         Activate();
         if (Browser.CoreWebView2 is not null)
             Browser.CoreWebView2.Navigate("https://app.ofenhancer.local/index.html");
@@ -512,7 +527,7 @@ public partial class MainWindow : Window, IDisposable
         if (decision.Shutdown)
         {
             exiting = true;
-            System.Windows.Application.Current.Shutdown();
+            _ = ShutdownAfterDrainAsync();
         }
         return decision.Result;
     }

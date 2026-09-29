@@ -117,7 +117,7 @@ internal sealed class FreshReinstallTransaction
             if (migrated) value = value! with { Schema = 2, Phase = MigrateLegacyPhase(value.Phase).ToString() };
             if (value is null || value.Schema != 2 || !Guid.TryParse(value.Generation, out _)
                 || value.StartedAt <= 0 || !VersionPattern.IsMatch(value.PackageVersion)
-                || !Enum.TryParse<FreshReinstallPhase>(value.Phase, false, out _)
+                || !Enum.GetNames<FreshReinstallPhase>().Contains(value.Phase, StringComparer.Ordinal)
                 || value.ExtensionIds is null or { Length: 0 } || value.ExtensionIds.Length > 16
                 || value.ExtensionIds.Any(id => AppConfiguration.NormalizeExtensionId(id) is null)
                 || value.Observations is null || value.Observations.Length > 128
@@ -192,11 +192,12 @@ internal sealed class FreshReinstallTransaction
         }
         if (Phase == FreshReinstallPhase.InstallRootPurged)
         {
+            bool unownedRemains = false;
             if (journal.DataRootExclusive)
                 DeleteOwnedRoot(journal.DataRoot, exclusive: true);
             else
-                DeleteSharedDataRoot(journal.DataRoot);
-            Advance(FreshReinstallPhase.DataRootPurged, "data-root-purged");
+                unownedRemains = DeleteSharedDataRoot(journal.DataRoot);
+            Advance(FreshReinstallPhase.DataRootPurged, unownedRemains ? "data-root-purged-unowned-content-remains" : "data-root-purged");
         }
         if (Phase == FreshReinstallPhase.DataRootPurged)
         {
@@ -231,7 +232,7 @@ internal sealed class FreshReinstallTransaction
     {
         string data = ValidateRoot(dataRoot, "data");
         string webView = ValidateRoot(webViewRoot, "WebView2");
-        if (dataRootExclusive) DeleteOwnedRoot(data, exclusive: true); else DeleteSharedDataRoot(data);
+        if (dataRootExclusive) DeleteOwnedRoot(data, exclusive: true); else _ = DeleteSharedDataRoot(data);
         if (webViewRootExclusive) DeleteOwnedRoot(webView, exclusive: true);
         else if (Directory.Exists(webView))
             throw new InvalidOperationException("The configured WebView2 folder is not proven exclusive to OFEnhancer.");
@@ -323,12 +324,38 @@ internal sealed class FreshReinstallTransaction
             throw new IOException("An owned Fresh reinstall root remained after cleanup.");
     }
 
-    private static void DeleteSharedDataRoot(string root)
+    // Names the application itself creates inside the shared root's data folder.
+    private static readonly string[] OwnedDataFiles =
+    [
+        "catalogue.db", "catalogue.db-wal", "catalogue.db-shm", "catalogue.db-journal",
+        "google-oauth-token.dat", "google-desktop-client.dat", "chrome-reset.json", "agent-paused",
+    ];
+    private static readonly Regex OwnedDataTemporaryPattern = new(
+        "^(?:catalogue\\.db|google-oauth-token\\.dat|google-desktop-client\\.dat|chrome-reset\\.json)\\.[a-f0-9]{32}\\.tmp$"
+        + "|^catalogue\\.db\\.backup-v[0-9]+-[0-9A-Za-z_-]+\\.sqlite$|^catalogue\\.db\\.restore-[a-f0-9]{32}\\.sqlite$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    // Returns true when content the application does not own was left in place.
+    private static bool DeleteSharedDataRoot(string root)
     {
-        if (!Directory.Exists(root)) return;
+        if (!Directory.Exists(root)) return false;
         RejectReparsePoints(root, descend: false);
+        bool unownedRemains = false;
         string data = Path.Combine(root, "data");
-        if (Directory.Exists(data)) DeleteOwnedRoot(data, exclusive: true);
+        if (Directory.Exists(data))
+        {
+            RejectReparsePoints(data, descend: false);
+            foreach (string entry in Directory.EnumerateFileSystemEntries(data).ToArray())
+            {
+                string name = Path.GetFileName(entry);
+                bool owned = File.Exists(entry) && (OwnedDataFiles.Contains(name, StringComparer.OrdinalIgnoreCase)
+                    || OwnedDataTemporaryPattern.IsMatch(name));
+                if (!owned) { unownedRemains = true; continue; }
+                RejectReparsePoints(entry, descend: false);
+                File.Delete(entry);
+            }
+            if (!unownedRemains) Directory.Delete(data);
+        }
         foreach (string name in new[] { "settings.json", ".ofenhancer-owned-root.json" })
         {
             string target = Path.Combine(root, name);
@@ -345,6 +372,7 @@ internal sealed class FreshReinstallTransaction
                 File.Delete(temporary);
             }
         }
+        return unownedRemains;
     }
 
     private static void RejectReparsePoints(string path, bool descend = true)

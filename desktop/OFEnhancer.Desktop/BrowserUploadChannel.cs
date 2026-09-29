@@ -57,6 +57,7 @@ public sealed class BrowserUploadChannel : IDisposable
         }
     }
     private readonly System.Threading.Timer timer;
+    private bool disposed;
     public event Action<JsonElement>? EventReceived;
 
     private readonly TimeProvider clock;
@@ -82,6 +83,7 @@ public sealed class BrowserUploadChannel : IDisposable
         timer.Dispose();
         lock (gate)
         {
+            disposed = true;
             foreach (var waiting in pending.Values) waiting.TrySetException(new InvalidOperationException("The desktop upload window closed."));
             pending.Clear();
             commands.Clear();
@@ -174,22 +176,31 @@ public sealed class BrowserUploadChannel : IDisposable
             if (!browsers.ContainsKey(id) && browsers.Count >= 128) throw new InvalidOperationException("browser-limit");
             connections[id] = connectionId;
             browsers[id] = clock.GetUtcNow();
-            if (payload.TryGetProperty("replies", out JsonElement replies))
+            if (payload.TryGetProperty("replies", out JsonElement replies) && replies.ValueKind == JsonValueKind.Array)
                 foreach (JsonElement reply in replies.EnumerateArray().Take(64))
                 {
                     if (selected != id) continue;
-                    string key = reply.GetProperty("id").GetString() ?? "";
+                    // An entry that cannot name a request is skipped; a named request is always settled.
+                    if (reply.ValueKind != JsonValueKind.Object || !reply.TryGetProperty("id", out var replyId)
+                        || replyId.ValueKind != JsonValueKind.String) continue;
+                    string key = replyId.GetString() ?? "";
                     if (!pending.Remove(key, out var waiting)) continue;
-                    if (reply.TryGetProperty("error", out var error))
+                    if (reply.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String)
                         waiting.TrySetException(new InvalidOperationException(error.GetString()));
-                    else waiting.TrySetResult(reply.GetProperty("result").Clone());
+                    else if (!reply.TryGetProperty("error", out _) && reply.TryGetProperty("result", out var result))
+                        waiting.TrySetResult(result.Clone());
+                    else waiting.TrySetException(new InvalidOperationException("invalid-browser-reply"));
                 }
             if (selected == id && payload.TryGetProperty("events", out JsonElement incoming))
                 events.AddRange(incoming.EnumerateArray().Take(64).Select(value => value.Clone()));
             work = selected == id ? commands.Values.ToArray() : [];
             if (selected == id) commands.Clear();
         }
-        foreach (var value in events) EventReceived?.Invoke(value);
+        foreach (var value in events)
+        {
+            try { EventReceived?.Invoke(value); }
+            catch (Exception) { /* A subscriber failure must not lose the commands already dequeued for this response. */ }
+        }
         return new { commands = work, connectionId, setupGeneration, requiredExtensionVersion = AgentProtocol.ProductVersion };
     }
 
@@ -276,6 +287,7 @@ public sealed class BrowserUploadChannel : IDisposable
         TaskCompletionSource<JsonElement> waiting = new(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (gate)
         {
+            if (disposed) throw new InvalidOperationException("The desktop upload window closed.");
             Expire();
             if (Reset?.Pending == true) throw new InvalidOperationException(Reset.Message);
             var live = browsers.Where(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)).ToArray();

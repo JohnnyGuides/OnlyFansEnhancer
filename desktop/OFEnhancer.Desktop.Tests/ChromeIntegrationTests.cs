@@ -16,6 +16,7 @@ public sealed class ChromeIntegrationTests
         internal string[] Targets = [];
         internal bool Chrome = true;
         internal bool FailRegistration;
+        internal Action? OnIdentityRead;
         internal string Manifest => Path.Combine(Root, "native", ChromeIntegration.HostName + ".json");
 
         internal Fixture()
@@ -34,7 +35,7 @@ public sealed class ChromeIntegrationTests
             var files = Directory.GetFiles(Root, "*", SearchOption.AllDirectories).Select(file => new { path = Path.GetRelativePath(Root, file).Replace('\\', '/'), size = new FileInfo(file).Length, sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))) }).ToArray();
             File.WriteAllText(Path.Combine(Root, "package-manifest.json"), JsonSerializer.Serialize(new { product = "OFEnhancer", files }));
             Settings = new(Path.Combine(Root, "data", "settings.json"));
-            Integration = new(Root, Settings, () => Settings.Load().ExtensionId, Channel,
+            Integration = new(Root, Settings, () => { OnIdentityRead?.Invoke(); return Settings.Load().ExtensionId; }, Channel,
                 () => Chrome ? new("chrome", "Google Chrome", "fixture.exe") : null,
                 () => Targets,
                 manifest => { if (FailRegistration) throw new IOException("injected registry failure"); Targets = [manifest]; },
@@ -180,4 +181,86 @@ public sealed class ChromeIntegrationTests
         Assert.AreEqual(ChromeResetStage.Replacement.ToString().ToLowerInvariant(), rebound.ResetStage);
     }
 
+
+    private const string ForeignManifest = @"C:\other-installation
+ative\host.json";
+
+    private static string Legacy => new('b', 32);
+
+    private static (string Journal, byte[] Maintenance) BeginReset(Fixture fixture)
+    {
+        string journal = Path.Combine(fixture.Root, "data", "reset.json");
+        fixture.Settings.Save(new(Legacy, null, "edge"));
+        fixture.Targets = [fixture.Manifest];
+        fixture.Channel.Reset = new ChromeExtensionReset(journal);
+        fixture.Integration.Prepare();
+        fixture.Integration.FreshReset();
+        return (journal, File.ReadAllBytes(fixture.Manifest));
+    }
+
+    private static void BreakCondition(Fixture fixture, string condition)
+    {
+        if (condition == "foreign") fixture.Targets = [ForeignManifest];
+        else if (condition == "package") File.Delete(Path.Combine(fixture.Root, "package-manifest.json"));
+        else File.WriteAllText(fixture.Settings.SettingsPath, "{\"extensionId\": ");
+    }
+
+    private static (byte[] Manifest, byte[] Settings, byte[] Journal, string[] Targets) Snapshot(Fixture fixture, string journal) =>
+        (File.ReadAllBytes(fixture.Manifest), File.ReadAllBytes(fixture.Settings.SettingsPath), File.ReadAllBytes(journal), fixture.Targets.ToArray());
+
+    private static void AssertUnchanged(Fixture fixture, string journal, (byte[] Manifest, byte[] Settings, byte[] Journal, string[] Targets) before)
+    {
+        CollectionAssert.AreEqual(before.Manifest, File.ReadAllBytes(fixture.Manifest), "registration manifest was rewritten");
+        CollectionAssert.AreEqual(before.Settings, File.ReadAllBytes(fixture.Settings.SettingsPath), "settings were rewritten");
+        CollectionAssert.AreEqual(before.Journal, File.ReadAllBytes(journal), "journal checkpoint moved");
+        CollectionAssert.AreEqual(before.Targets, fixture.Targets, "registry registration changed");
+    }
+
+    [DataTestMethod]
+    [DataRow("foreign")]
+    [DataRow("package")]
+    [DataRow("settings")]
+    public void Get_never_writes_registration_from_a_pending_replacement_stage(string condition)
+    {
+        using var fixture = new Fixture();
+        (string journal, byte[] maintenance) = BeginReset(fixture);
+        fixture.Integration.ContinueFreshReset(ChromeRemovalEvidence.Unknown);
+        File.WriteAllBytes(fixture.Manifest, maintenance);
+        BreakCondition(fixture, condition);
+        var before = Snapshot(fixture, journal);
+        try { fixture.Integration.Get(); } catch (Exception) { }
+        AssertUnchanged(fixture, journal, before);
+        Assert.AreEqual(ChromeResetStage.Replacement, fixture.Channel.Reset!.Stage);
+    }
+
+    [DataTestMethod]
+    [DataRow("foreign")]
+    [DataRow("package")]
+    [DataRow("settings")]
+    public void ContinueFreshReset_refuses_without_writing_when_ownership_checks_fail(string condition)
+    {
+        using var fixture = new Fixture();
+        (string journal, _) = BeginReset(fixture);
+        BreakCondition(fixture, condition);
+        var before = Snapshot(fixture, journal);
+        try { fixture.Integration.ContinueFreshReset(ChromeRemovalEvidence.Unknown); Assert.Fail("continue must be refused"); }
+        catch (AssertFailedException) { throw; }
+        catch (Exception) { }
+        AssertUnchanged(fixture, journal, before);
+        Assert.AreEqual(ChromeResetStage.Removal, fixture.Channel.Reset!.Stage);
+    }
+
+    [TestMethod]
+    public void Registration_write_refuses_settings_that_became_unreadable_and_leaves_them_untouched()
+    {
+        using var fixture = new Fixture();
+        fixture.Settings.Save(new(null, "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com", "edge"));
+        byte[] valid = File.ReadAllBytes(fixture.Settings.SettingsPath);
+        byte[] damaged = System.Text.Encoding.UTF8.GetBytes("{\"extensionId\": \"x\", \"unknownField\": 1}");
+        fixture.OnIdentityRead = () => File.WriteAllBytes(fixture.Settings.SettingsPath, damaged);
+        Assert.ThrowsException<InvalidOperationException>(fixture.Integration.Prepare);
+        CollectionAssert.AreEqual(damaged, File.ReadAllBytes(fixture.Settings.SettingsPath));
+        Assert.IsFalse(File.Exists(fixture.Manifest), "the manifest must not be written for unreadable settings");
+        Assert.AreNotEqual(0, valid.Length);
+    }
 }

@@ -73,22 +73,6 @@ internal sealed class ChromeIntegration
     {
         lock (gate)
         {
-            if (channel.Reset is { Pending: true, Stage: ChromeResetStage.Replacement })
-            {
-                VerifyPackage();
-                bool canonicalRegistration = false;
-                try
-                {
-                    using JsonDocument current = JsonDocument.Parse(ReadBounded(NativeManifest));
-                    JsonElement origins = current.RootElement.GetProperty("allowed_origins");
-                    canonicalRegistration = origins.GetArrayLength() == 1
-                        && origins[0].GetString() == $"chrome-extension://{CanonicalExtensionId}/"
-                        && effectiveIdentity() == CanonicalExtensionId;
-                }
-                catch (Exception ignored) when (ignored is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException)
-                { }
-                if (!canonicalRegistration) WriteRegistration(CanonicalExtensionId);
-            }
             bool chrome = findChrome() is not null;
             string? id = effectiveIdentity();
             string? error = null;
@@ -206,17 +190,14 @@ internal sealed class ChromeIntegration
         lock (gate)
         {
             if (channel.Reset?.Pending == true) return ConfigureFreshReset(false);
-            VerifyPackage();
-            if (!permanentInstall()) throw new InvalidOperationException("Run OFEnhancer from its permanent installed location before preparing Chrome. Staging and builds do not register hosts.");
-            ValidateSettings();
+            var targets = RegistrationPreflight(
+                "Run OFEnhancer from its permanent installed location before preparing Chrome. Staging and builds do not register hosts.",
+                "A different installation owns the native bridge. No registration was changed.");
             string? previous = effectiveIdentity();
             string id = previous ?? CanonicalId();
             ResolveFolder(id);
-            var targets = registrationTargets();
             if (previous is null && targets.Length > 0)
                 throw new InvalidOperationException("An existing registration has no verified effective identity. Preserve the existing extension and repair its saved identity first.");
-            if (targets.Any(target => !SamePath(target, NativeManifest)))
-                throw new InvalidOperationException("A different installation owns the native bridge. No registration was changed.");
             if (previous is not null && previous != CanonicalId() && targets.Length == 0)
                 throw new InvalidOperationException("Legacy installation location is unverified. Preserve its Chrome load folder and use advanced identity repair; do not load the new keyed extension.");
             WriteRegistration(id);
@@ -231,6 +212,8 @@ internal sealed class ChromeIntegration
         lock (gate)
         {
             if (channel.Reset?.Pending != true) throw new InvalidOperationException("No Chrome reset is waiting for action.");
+            RegistrationPreflight("Install this build before continuing Fresh reset.",
+                "Another OFEnhancer installation owns Chrome setup. No extension state was changed.");
             channel.Reset.ContinueToReplacement(evidence);
             WriteRegistration(CanonicalId());
             return Get();
@@ -241,12 +224,8 @@ internal sealed class ChromeIntegration
     {
         lock (gate)
         {
-            VerifyPackage();
-            if (!permanentInstall()) throw new InvalidOperationException("Install this build before starting Fresh reset.");
-            ValidateSettings();
-            var targets = registrationTargets();
-            if (targets.Any(target => !SamePath(target, NativeManifest)))
-                throw new InvalidOperationException("Another OFEnhancer installation owns Chrome setup. No extension state was changed.");
+            RegistrationPreflight("Install this build before starting Fresh reset.",
+                "Another OFEnhancer installation owns Chrome setup. No extension state was changed.");
             string canonical = CanonicalId();
             ResolveFolder(canonical);
             // Persist the rejection barrier before changing registration or sending
@@ -258,6 +237,18 @@ internal sealed class ChromeIntegration
             else WriteMaintenanceRegistration(previous);
             return Get();
         }
+    }
+
+    // The one ownership check every registration-changing path passes before it writes.
+    private string[] RegistrationPreflight(string notPermanentMessage, string foreignMessage)
+    {
+        VerifyPackage();
+        if (!permanentInstall()) throw new InvalidOperationException(notPermanentMessage);
+        ValidateSettings();
+        var targets = registrationTargets();
+        if (targets.Any(target => !SamePath(target, NativeManifest)))
+            throw new InvalidOperationException(foreignMessage);
+        return targets;
     }
 
     private void WriteMaintenanceRegistration(string previousId)
@@ -281,8 +272,12 @@ internal sealed class ChromeIntegration
     {
         // Atomic file/settings commits make retries recoverable. No settings or Chrome storage migration.
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { name = HostName, description = "OFEnhancer desktop bridge", path = NativeExecutable, type = "stdio", allowed_origins = new[] { $"chrome-extension://{id}/" } });
+        // Unreadable settings must never be replaced by defaults derived from an empty load.
+        DesktopSettings current = DesktopSettings.Empty;
+        if (File.Exists(settings.SettingsPath) && !settings.TryLoad(out current))
+            throw new InvalidOperationException("Existing settings need repair. They were preserved; no new identity was assigned.");
         CommitManifest(bytes);
-        settings.Save(settings.Load() with { ExtensionId = id });
+        settings.Save(current with { ExtensionId = id });
         register(NativeManifest);
     }
 
