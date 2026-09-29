@@ -635,12 +635,18 @@ function creatorUploadHandle(action, payload) {
         "The distribution ledger is busy; retry this checkpoint.",
       );
     try {
+      creatorUploadPlanLedgerAppend([], payload || {});
       var ledgerSheet = creatorUploadLedgerSheet(book);
       var ledgerPlan = creatorUploadPlanLedgerAppend(
         creatorUploadReadLedgerRows(ledgerSheet),
         payload || {},
       );
       if (ledgerPlan.status !== "updated") return ledgerPlan;
+      if (ledgerSheet.getLastRow() + 1 > 20000) {
+        throw new Error(
+          "The distribution ledger is full; no further events can be recorded.",
+        );
+      }
       var ledgerRow = ledgerPlan.row;
       ledgerSheet.appendRow([
         ledgerRow.key,
@@ -791,6 +797,18 @@ function creatorUploadHandle(action, payload) {
     var verified = creatorUploadReadRows(sheet).find(function (row) {
       return row.row === rowNumber;
     });
+    if (
+      !verified ||
+      verified[field] !== plan.row[field] ||
+      (creatorUploadEmptyRow(current) &&
+        (verified.id !== plan.row.id ||
+          verified.releaseDate !==
+            creatorUploadDateValue(plan.row.releaseDate) ||
+          verified.title !== plan.row.title ||
+          verified.description !== plan.row.description))
+    ) {
+      throw new Error("The platform link commit could not be verified.");
+    }
     return {
       status: "updated",
       row: verified,
