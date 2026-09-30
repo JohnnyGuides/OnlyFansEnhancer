@@ -2867,7 +2867,9 @@ test("upload console performs no platform mutation before the single Upload acti
       "catalogue matching is read-only and must not prepare platform tabs",
     );
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "Catalogue description",
     );
     assert.equal(await page.locator("#targetOnlyfans").isChecked(), true);
@@ -3478,7 +3480,9 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
     await page.locator("#catalogueBrowseToggle").click();
     await page.locator("#catalogueRow").selectOption("row:20");
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "Episode one description",
     );
     await page.locator("#targetManyvids").uncheck();
@@ -3499,7 +3503,9 @@ test("ambiguous catalogue wording opens the picker without enabling Upload", asy
     await page.locator("#catalogueRow").selectOption("row:21");
     assert.equal(await page.locator("#uploadTitle").inputValue(), "Claire VR");
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "Episode two description",
     );
   } finally {
@@ -3809,7 +3815,9 @@ for (const scenario of [
         /Catalogue unavailable.*saved locally/i,
       );
       assert.equal(
-        await page.locator("#uploadDescription").inputValue(),
+        await page
+          .locator("#uploadDescription")
+          .evaluate((element) => element.value),
         "My description",
       );
       assert.equal(
@@ -4168,7 +4176,9 @@ test("Load Template fills the actual Upload Console with path descriptors withou
       "Neutral upload verification",
     );
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "Neutral upload verification. Unpublished test.",
     );
     assert.equal(
