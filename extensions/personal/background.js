@@ -1108,7 +1108,9 @@ async function fetchRealbooruHtml(url) {
       ...(signal ? { signal } : {}),
     });
   } catch (error) {
-    throw new Error(`Could not reach Realbooru: ${error.message}`);
+    throw new Error(`Could not reach Realbooru: ${error.message}`, {
+      cause: error,
+    });
   }
   if (!response.ok) {
     throw new Error(`Realbooru returned HTTP ${response.status}.`);
@@ -1292,7 +1294,9 @@ async function requestGelbooruPage(settings, pid, limit = 100) {
       },
     });
   } catch (error) {
-    throw new Error(`Could not reach Gelbooru: ${error.message}`);
+    throw new Error(`Could not reach Gelbooru: ${error.message}`, {
+      cause: error,
+    });
   }
 
   if (!response.ok) {
@@ -4672,7 +4676,7 @@ async function resolveCreatorUploadAdapterResult(
     throw new Error("Adapter result document binding is missing.");
   const direct = execution?.[0]?.result;
   if (typeof direct?.status === "string") return direct;
-  let state = null;
+  let state;
   try {
     const [inspection] = await chrome.scripting.executeScript({
       target: { tabId, documentIds: [documentId] },
@@ -4684,6 +4688,7 @@ async function resolveCreatorUploadAdapterResult(
   } catch (error) {
     throw new Error(
       `The platform adapter result was unavailable and its bound page could not be inspected: ${error.message}`,
+      { cause: error },
     );
   }
   if (

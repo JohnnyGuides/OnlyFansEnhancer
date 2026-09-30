@@ -259,7 +259,7 @@
     currentWrapper?.classList.add("fim-avatar-loading");
     image.classList.remove("fim-avatar-pop");
 
-    let aliases = [];
+    let aliases;
     try {
       aliases = JSON.parse(image.dataset.fimAvatarAliases || "[]");
     } catch {

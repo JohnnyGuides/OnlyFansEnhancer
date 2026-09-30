@@ -69,11 +69,22 @@ async function load() {
 }
 
 $("#enabled").addEventListener("change", async (event) => {
-  await sendMessage({
-    type: "SET_SETTINGS",
-    patch: { enabled: event.target.checked },
-  });
-  $("#note").textContent = "Identity-mask setting saved—reload OnlyFans.";
+  // A change event fires after the toggle, so the previous value is the inverse.
+  const previous = !event.target.checked;
+  try {
+    await sendMessage({
+      type: "SET_SETTINGS",
+      patch: { enabled: event.target.checked },
+    });
+    $("#note").textContent = "Identity-mask setting saved—reload OnlyFans.";
+  } catch (error) {
+    $("#note").textContent = error.message;
+    try {
+      await load();
+    } catch {
+      event.target.checked = previous;
+    }
+  }
 });
 
 $("#sourceMix").addEventListener("input", (event) => {
@@ -138,7 +149,7 @@ $("#resetPictures").addEventListener("click", () => {
 });
 
 $("#options").addEventListener("click", () => {
-  chrome.runtime.openOptionsPage();
+  void chrome.runtime.openOptionsPage();
 });
 
 $("#uploadConsole").addEventListener("click", () => {

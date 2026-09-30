@@ -19,6 +19,9 @@ $finalPublishRoot = $publishRoot
 $finalZipPath = $zipPath
 $publishRoot = Join-Path $distRoot (".teaser-build-" + [guid]::NewGuid().ToString('N'))
 $zipPath = "$publishRoot.zip"
+$temporaryPublishRoot = $publishRoot
+$temporaryZipPath = $zipPath
+try {
 dotnet publish $project -c Release -r win-x64 --self-contained false -o $publishRoot
 if ($LASTEXITCODE -ne 0) { throw "The X teaser native host publish failed." }
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "native-host\config.example.json") -Destination $publishRoot
@@ -44,3 +47,12 @@ $zipPath = $finalZipPath
   -CurrentVersion $manifest.version
 Write-Output "PACKAGE=$zipPath"
 Write-Output "SHA256=$hashValue"
+} finally {
+  # Remove only the temporary paths this run created; a successful publish has
+  # already moved them to their final names.
+  foreach ($temporary in @($temporaryPublishRoot, $temporaryZipPath)) {
+    if (Test-Path -LiteralPath $temporary) {
+      Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}

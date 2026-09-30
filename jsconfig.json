@@ -13,6 +13,12 @@
   },
   "include": [
     "extensions/personal/workflows/**/*.js",
-    "extensions/personal/realbooru-parser.js"
+    "extensions/personal/realbooru-parser.js",
+    "extensions/personal/file-bridge.js",
+    "extensions/personal/popup.js",
+    "extensions/personal/identity-settings.js",
+    "extensions/store/identity-settings.js",
+    "extensions/store/popup.js",
+    "shared/workspace/host-bridge.js"
   ]
 }

@@ -40,6 +40,8 @@ required. Do not modify policy merely to pass a registration test.
 | `npm run check:windows`                   | .NET, native integration, registration/release/package gates                         |
 | `npm run check`                           | Both aggregates; intentionally fails when required tools are unavailable             |
 
+Static-check scope: `npm run lint` covers all first-party production JavaScript (personal and store extensions, `shared/`, the Apps Script bridge, and `tools/`). `npm run typecheck` covers the workflow modules, the parser and the small boundary files listed in `jsconfig.json`; `background.js`, `upload-console.js`, `upload-host.js` and `app.js` stay outside `checkJs` because of their size and untyped page globals.
+
 Tests live by verified subsystem under `tests/`; .NET tests sit beside their
 owning projects in `desktop/`. `OFEnhancer.Desktop.Tests` covers the Windows app
 and its Chrome protocol boundary; `OFEnhancer.Catalogue.Tests` covers storage and

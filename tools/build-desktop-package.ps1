@@ -87,6 +87,8 @@ if (-not $stage.StartsWith($outputPrefix, [System.StringComparison]::OrdinalIgno
 $finalStage = $stage
 $stage = Join-Path $outputFull (".desktop-build-" + [guid]::NewGuid().ToString('N'))
 
+$installerStage = $null
+try {
 $desktopDirectory = Join-Path $stage "desktop"
 $nativeDirectory = Join-Path $stage "native"
 $extensionDirectory = Join-Path $stage "extension"
@@ -235,3 +237,12 @@ Write-Output "MANIFEST_SHA256=$manifestHash"
   -OutputRoot $outputFull `
   -Family DesktopInstaller `
   -CurrentVersion $version
+} finally {
+  # Remove only the directories this run created; a successful publish has
+  # already moved them to their final names.
+  foreach ($temporary in @($stage, $installerStage)) {
+    if ($temporary -and (Test-Path -LiteralPath $temporary)) {
+      Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}

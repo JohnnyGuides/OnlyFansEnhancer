@@ -4,21 +4,54 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-function collect(directory) {
+function collect(directory, base = root) {
   return fs
-    .readdirSync(path.join(root, directory), { withFileTypes: true })
+    .readdirSync(path.join(base, directory), { withFileTypes: true })
     .flatMap((entry) => {
       const name = `${directory}/${entry.name}`;
       return entry.isDirectory()
-        ? collect(name)
+        ? collect(name, base)
         : name.endsWith(".test.cjs")
           ? [name]
           : [];
     });
 }
 
+const browserSupport = "tests/support/browser.cjs";
+const requirePattern = /require\(\s*["'](\.{1,2}\/[^"']*)["']\s*\)/g;
+
+// A test is a browser test when any test-tree file it requires, directly or
+// through helpers, is the browser support module.
+function reachesBrowser(base, file, seen = new Set()) {
+  if (file === browserSupport) return true;
+  if (seen.has(file)) return false;
+  seen.add(file);
+  let text;
+  try {
+    text = fs.readFileSync(path.join(base, file), "utf8");
+  } catch {
+    return false;
+  }
+  for (const [, specifier] of text.matchAll(requirePattern)) {
+    const target = path
+      .relative(base, path.resolve(base, path.dirname(file), specifier))
+      .split(path.sep)
+      .join("/");
+    if (!target.startsWith("tests/")) continue;
+    for (const candidate of [target, `${target}.cjs`, `${target}.js`]) {
+      if (
+        fs.existsSync(path.join(base, candidate)) &&
+        fs.statSync(path.join(base, candidate)).isFile() &&
+        reachesBrowser(base, candidate, seen)
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
 // Group by the executable boundary, not a hand-maintained list of test filenames.
-export function testGroups() {
+export function testGroups(base = root) {
   const groups = {
     unit: [],
     browser: [],
@@ -28,7 +61,7 @@ export function testGroups() {
     "windows-packaging": [],
     private: [],
   };
-  for (const file of collect("tests").sort()) {
+  for (const file of collect("tests", base).sort()) {
     let group;
     if (file.startsWith("tests/private/")) group = "private";
     else if (file.startsWith("tests/native/")) group = "native";
@@ -36,12 +69,7 @@ export function testGroups() {
       group = "windows-packaging";
     else if (file.startsWith("tests/structure/")) group = "structure";
     else if (file.startsWith("tests/packaging/")) group = "packages";
-    else if (
-      /require\(["'][^"']*support\/browser\.cjs["']\)/.test(
-        fs.readFileSync(path.join(root, file), "utf8"),
-      )
-    )
-      group = "browser";
+    else if (reachesBrowser(base, file)) group = "browser";
     else group = "unit";
     groups[group].push(file);
   }

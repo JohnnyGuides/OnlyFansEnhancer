@@ -71,6 +71,59 @@ test("failed desktop publish preserves the last current deliverable", () => {
   }
 });
 
+function runFailingBuild(script, outputRoot, extraArguments) {
+  const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+  // Like a real publish, the shim creates its -o directory before it fails.
+  const shim = `function dotnet { $i = [array]::IndexOf($args, '-o'); if ($i -ge 0) { New-Item -ItemType Directory -Path $args[$i + 1] -Force | Out-Null }; $global:LASTEXITCODE = 1 }`;
+  const command = `${shim}; & ${quote(path.join(root, "tools", script))} ${extraArguments} -OutputRoot ${quote(outputRoot)}`;
+  const result = spawnSync(
+    "powershell",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+    { encoding: "utf8", windowsHide: true },
+  );
+  if (result.error) throw result.error;
+  return result;
+}
+
+for (const [label, script, extraArguments] of [
+  ["desktop", "build-desktop-package.ps1", "-StageOnly"],
+  ["X teaser host", "build-x-teaser-native-host.ps1", ""],
+]) {
+  test(`failed ${label} build leaves no temporary build directory`, () => {
+    const temporary = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ofe-build-temp-cleanup-"),
+    );
+    createDirectory(temporary, "ofenhancer-desktop-v0.20.9");
+    createDirectory(temporary, ".desktop-build-owned-by-someone-else");
+    try {
+      const result = runFailingBuild(script, temporary, extraArguments);
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.deepEqual(
+        fs
+          .readdirSync(temporary)
+          .filter((name) =>
+            /^\.(desktop|installer|teaser)-build-[0-9a-f]{32}(\.zip)?$/.test(
+              name,
+            ),
+          ),
+        [],
+        "a failed build must remove the temporary directories it created",
+      );
+      assert.ok(
+        fs.existsSync(
+          path.join(
+            temporary,
+            ".desktop-build-owned-by-someone-else/proof.txt",
+          ),
+        ),
+        "a build must not delete directories it did not create",
+      );
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+}
+
 test("cleanup rejects a linked current release before deleting any stale release", () => {
   const temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "ofe-linked-current-"),

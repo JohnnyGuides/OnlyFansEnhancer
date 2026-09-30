@@ -154,7 +154,7 @@
     for (const image of document.querySelectorAll(
       "[data-fim-avatar-primary]",
     )) {
-      let aliases = [];
+      let aliases;
       try {
         aliases = JSON.parse(image.dataset.fimAvatarAliases || "[]");
       } catch {

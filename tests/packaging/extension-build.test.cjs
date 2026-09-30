@@ -245,3 +245,135 @@ test("unexpected release objects prevent cleanup of any existing release", async
     fs.rmSync(output, { recursive: true, force: true });
   }
 });
+
+test("a failed publish keeps the previous unpacked stage and exits non-zero", () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "ofenhancer-publish-"));
+  try {
+    const archive = build("personal", output);
+    const stage = path.join(output, "extensions", "personal");
+    fs.writeFileSync(path.join(stage, "previous-marker.txt"), "previous");
+    // A directory where the archive belongs makes the publish rename fail.
+    fs.rmSync(archive);
+    fs.mkdirSync(archive);
+    fs.writeFileSync(path.join(archive, "blocker.txt"), "blocker");
+    const result = spawnSync(
+      process.execPath,
+      [builder, "personal", "--output-root", output],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.notEqual(result.status, 0, result.stdout + result.stderr);
+    assert.equal(
+      fs.readFileSync(path.join(stage, "previous-marker.txt"), "utf8"),
+      "previous",
+      "the previous stage must survive a failed publish",
+    );
+    assert.deepEqual(
+      fs.readdirSync(path.join(output, "extensions")),
+      ["personal"],
+      "no temporary or backup stage may remain",
+    );
+  } finally {
+    fs.rmSync(output, { recursive: true, force: true });
+  }
+});
+
+async function buildWithRenameFailures(output, shouldFail) {
+  const { buildExtension } = await import("../../tools/build-extensions.mjs");
+  const original = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    const reason = shouldFail(String(from), String(to));
+    if (reason) throw new Error(reason);
+    return original(from, to);
+  };
+  try {
+    return { result: buildExtension("personal", output) };
+  } catch (error) {
+    return { error };
+  } finally {
+    fs.renameSync = original;
+  }
+}
+
+function seededStage(output) {
+  build("personal", output);
+  const stage = path.join(output, "extensions", "personal");
+  fs.writeFileSync(path.join(stage, "previous-marker.txt"), "previous");
+  return stage;
+}
+
+const isNewStage = (from, to) =>
+  path.basename(to) === "personal" &&
+  !path.basename(from).endsWith(".previous");
+const isBackupRestore = (from, to) =>
+  path.basename(from).endsWith(".previous") && path.basename(to) === "personal";
+
+test("when publish and restore both fail the previous stage survives in its backup", async () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "ofenhancer-restore-"));
+  try {
+    const stage = seededStage(output);
+    const { error } = await buildWithRenameFailures(output, (from, to) => {
+      if (isNewStage(from, to)) return "EBUSY publish";
+      if (isBackupRestore(from, to)) return "EBUSY restore";
+      return null;
+    });
+    assert.ok(error, "the build must fail");
+    assert.match(error.message, /EBUSY publish/);
+    assert.match(error.message, /EBUSY restore/);
+    const backups = fs
+      .readdirSync(path.join(output, "extensions"))
+      .filter((name) => name.endsWith(".previous"));
+    assert.equal(backups.length, 1);
+    assert.ok(
+      error.message.includes(backups[0]),
+      "the message names the backup",
+    );
+    assert.equal(
+      fs.readFileSync(
+        path.join(output, "extensions", backups[0], "previous-marker.txt"),
+        "utf8",
+      ),
+      "previous",
+    );
+    assert.equal(fs.existsSync(stage), false);
+  } finally {
+    fs.rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test("when publish fails and restore succeeds the old stage is intact and no backup remains", async () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "ofenhancer-restore-"));
+  try {
+    const stage = seededStage(output);
+    const { error } = await buildWithRenameFailures(output, (from, to) =>
+      isNewStage(from, to) ? "EBUSY publish" : null,
+    );
+    assert.match(error?.message ?? "", /EBUSY publish/);
+    assert.equal(
+      fs.readFileSync(path.join(stage, "previous-marker.txt"), "utf8"),
+      "previous",
+    );
+    assert.deepEqual(fs.readdirSync(path.join(output, "extensions")), [
+      "personal",
+    ]);
+  } finally {
+    fs.rmSync(output, { recursive: true, force: true });
+  }
+});
+
+test("a successful build leaves no backup and removes a stale backup from an earlier run", async () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "ofenhancer-restore-"));
+  try {
+    const stage = seededStage(output);
+    const stale = path.join(output, "extensions", ".personal.previous");
+    fs.mkdirSync(stale);
+    fs.writeFileSync(path.join(stale, "old.txt"), "old");
+    const { error } = await buildWithRenameFailures(output, () => null);
+    assert.equal(error, undefined);
+    assert.equal(fs.existsSync(path.join(stage, "previous-marker.txt")), false);
+    assert.deepEqual(fs.readdirSync(path.join(output, "extensions")), [
+      "personal",
+    ]);
+  } finally {
+    fs.rmSync(output, { recursive: true, force: true });
+  }
+});

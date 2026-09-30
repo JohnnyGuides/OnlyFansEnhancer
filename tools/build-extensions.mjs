@@ -214,13 +214,18 @@ export function buildExtension(
   rejectSymlink(output);
   rejectSymlink(extensions);
   rejectSymlink(stage);
+  rejectSymlink(path.join(extensions, `.${edition}.previous`));
   fs.mkdirSync(extensions, { recursive: true });
   const temporary = path.join(extensions, `.${edition}-${randomUUID()}`);
+  // Fixed name: a backup kept after a failed restore is found by the next build.
+  const backup = path.join(extensions, `.${edition}.previous`);
   const packageName = `${families[edition]}-v${manifest.version}.zip`;
   const packagePath = path.join(output, packageName);
   const temporaryZip = `${packagePath}.${randomUUID()}.tmp`;
   rejectSymlink(packagePath);
   const zip = createZip(entries);
+  // A leftover backup from an earlier run has passed the symlink check above.
+  fs.rmSync(backup, { recursive: true, force: true });
   try {
     fs.mkdirSync(temporary);
     for (const entry of entries) {
@@ -229,10 +234,31 @@ export function buildExtension(
       fs.writeFileSync(destination, entry.bytes, { flag: "wx" });
     }
     fs.writeFileSync(temporaryZip, zip, { flag: "wx" });
-    fs.rmSync(stage, { recursive: true, force: true });
-    fs.renameSync(temporary, stage);
-    fs.renameSync(temporaryZip, packagePath);
-    cleanPreviousPackages(output, families[edition], packageName);
+    // Move the previous stage aside instead of deleting it, so a failed
+    // publish can put it back.
+    const movedAside = fs.existsSync(stage);
+    if (movedAside) fs.renameSync(stage, backup);
+    try {
+      fs.renameSync(temporary, stage);
+      fs.renameSync(temporaryZip, packagePath);
+      cleanPreviousPackages(output, families[edition], packageName);
+    } catch (error) {
+      if (movedAside) {
+        try {
+          fs.rmSync(stage, { recursive: true, force: true });
+          fs.renameSync(backup, stage);
+        } catch (restoreError) {
+          // The backup is the only remaining copy of the previous stage.
+          throw new Error(
+            `${error.message}; restoring the previous stage also failed: ${restoreError.message}; the previous stage is kept at ${backup}`,
+            { cause: restoreError },
+          );
+        }
+      }
+      throw error;
+    }
+    // Published: the backup is no longer needed.
+    fs.rmSync(backup, { recursive: true, force: true });
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
     fs.rmSync(temporaryZip, { force: true });

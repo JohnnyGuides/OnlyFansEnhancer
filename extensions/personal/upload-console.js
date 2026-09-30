@@ -920,6 +920,7 @@
                 value.length <= 200 &&
                 value.trim() === value &&
                 value.length > 0 &&
+                // eslint-disable-next-line no-control-regex -- control characters are the rejected input
                 !/[\x00-\x1f]/.test(value),
             )
             .slice(0, 100);
@@ -985,7 +986,6 @@
     const reviewRecovery = get("#reviewRecovery");
     const refreshReadiness = get("#refreshReadiness");
     const results = get("#results");
-    const workspaceTabs = get("#workspaceTabs");
     const uploaderTab = get("#uploaderTab");
     const settingsTab = get("#settingsTab");
     const uploaderPanel = get("#uploaderPanel");
@@ -1092,7 +1092,7 @@
     function handleWorkspaceTabKey(event) {
       const tabs = [uploaderTab, settingsTab];
       const current = tabs.indexOf(event.currentTarget);
-      let next = current;
+      let next;
       if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
       else if (event.key === "ArrowLeft") {
         next = (current - 1 + tabs.length) % tabs.length;
@@ -3626,7 +3626,7 @@
       if (mainPublishMode.checked && workflowMode?.value !== "teaser") {
         // Decide the queue refusal the post-write check would make before a
         // row exists, from the same inputs that check uses.
-        let expected = null;
+        let expected;
         try {
           expected =
             mode === "new"
@@ -5691,6 +5691,7 @@
     }
     function addMetadata(metadata) {
       const name = metadata.search.value.trim().replace(/\s+/g, " ");
+      // eslint-disable-next-line no-control-regex -- control characters are the rejected input
       if (!name || name.length > 200 || /[\x00-\x1f]/.test(name)) return;
       const value = ensureMetadataOption(metadata.select, name);
       if (

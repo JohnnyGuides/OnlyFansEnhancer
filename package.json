@@ -21,7 +21,7 @@
     "test:snapshots": "npm run build:personal && node tools/run-tests.mjs private",
     "test:desktop-shell-ui": "node tests/desktop/desktop-shell-ui.test.cjs",
     "test:desktop-catalogue-ui": "node tests/desktop/desktop-catalogue-ui.test.cjs",
-    "lint": "eslint extensions/personal/workflows extensions/personal/options.js extensions/personal/realbooru-parser.js tools",
+    "lint": "eslint extensions/personal extensions/store shared integrations/google-apps-script/catalogue-bridge.gs tools",
     "typecheck": "tsc -p jsconfig.json",
     "format": "prettier --write \"{extensions,shared}/**/*.{html,css,js,json}\" \"tools/**/*.mjs\" \"tests/**/*.cjs\" \"docs/**/*.{md,html}\" \"packaging/**/*.{json,md,html}\" README.md package.json jsconfig.json eslint.config.mjs .prettierrc.json",
     "format:check": "prettier --check \"{extensions,shared}/**/*.{html,css,js,json}\" \"tools/**/*.mjs\" \"tests/**/*.cjs\" \"docs/**/*.{md,html}\" \"packaging/**/*.{json,md,html}\" README.md package.json jsconfig.json eslint.config.mjs .prettierrc.json",

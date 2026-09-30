@@ -17,6 +17,7 @@
           }, 4000)
         : null;
       pending.set(id, { resolve, reject, timeout });
+      // @ts-expect-error -- chrome.webview exists only inside the desktop WebView host
       global.chrome.webview.postMessage(
         JSON.stringify({ requestId: id, operation, payload }),
       );
@@ -44,7 +45,9 @@
     });
   }
 
+  // @ts-expect-error -- chrome.webview exists only inside the desktop WebView host
   if (global.chrome?.webview) {
+    // @ts-expect-error -- chrome.webview exists only inside the desktop WebView host
     global.chrome.webview.addEventListener("message", ({ data }) => {
       const response = typeof data === "string" ? JSON.parse(data) : data;
       const waiting = pending.get(response?.requestId);
@@ -63,6 +66,7 @@
     request(operation, payload = {}) {
       if (typeof global.__OFENHANCER_TEST_HOST__ === "function")
         return global.__OFENHANCER_TEST_HOST__(operation, payload);
+      // @ts-expect-error -- chrome.webview exists only inside the desktop WebView host
       if (global.chrome?.webview) return desktopRequest(operation, payload);
       if (global.chrome?.runtime?.sendMessage)
         return extensionRequest(operation, payload);
