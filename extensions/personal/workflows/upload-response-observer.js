@@ -13,6 +13,8 @@
       path: "/api/v1/post",
     }),
   });
+  const MANUAL_WATCH_EVENT = "creator-upload-manual-publish";
+  const MANUAL_WATCH_MAX_MS = 12 * 60 * 60_000;
   const observers = new Set();
   const xhrMeta = new WeakMap();
   let patched = false;
@@ -139,6 +141,9 @@
       )
         continue;
       if (xhr.status < 200 || xhr.status >= 300) {
+        // A manual watch outlives site validation errors: the owner may fix
+        // the post and publish again from the same composer.
+        if (observer.manual) continue;
         settle(
           observer,
           null,
@@ -184,6 +189,7 @@
     platform,
     timeoutMs = 30 * 60_000,
     deferred = false,
+    manual = false,
   }) {
     if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(sessionId || ""))) {
       return Promise.reject(new Error("Invalid upload response session."));
@@ -201,6 +207,7 @@
         timeout: null,
         armed: false,
         timeoutMs,
+        manual: manual === true,
       };
       observers.add(observer);
       if (!deferred) arm(sessionId, platform);
@@ -221,7 +228,13 @@
           null,
           new Error(`Timed out waiting for ${platform} post confirmation.`),
         ),
-      Math.max(1_000, Math.min(Number(observer.timeoutMs) || 0, 60 * 60_000)),
+      Math.max(
+        1_000,
+        Math.min(
+          Number(observer.timeoutMs) || 0,
+          observer.manual ? MANUAL_WATCH_MAX_MS : 60 * 60_000,
+        ),
+      ),
     );
     return true;
   }
@@ -238,10 +251,43 @@
     }
   }
 
+  // Passive watch for a post the owner publishes from a prepared composer.
+  // Only requests opened after arming in this document count, and the first
+  // matching response settles it. The outcome is announced to the isolated
+  // bridge, which forwards it to the extension worker.
+  function watch({ sessionId, platform, watchId, timeoutMs }) {
+    if (!/^[a-f0-9]{32}$/.test(String(watchId || ""))) return false;
+    cancel(sessionId, platform);
+    const announce = (outcome, postUrl = "") =>
+      document.dispatchEvent(
+        new CustomEvent(MANUAL_WATCH_EVENT, {
+          detail: JSON.stringify({ watchId, outcome, postUrl }),
+        }),
+      );
+    install({ sessionId, platform, timeoutMs, manual: true }).then(
+      (receipt) =>
+        announce(
+          receipt?.postUrl ? "captured" : "unresolved",
+          receipt?.postUrl || "",
+        ),
+      (error) =>
+        announce(/cancelled/i.test(error?.message) ? "cancelled" : "expired"),
+    );
+    return [...observers].some(
+      (item) =>
+        item.manual &&
+        item.armed &&
+        item.sessionId === sessionId &&
+        item.platform === platform,
+    );
+  }
+
   globalThis.CreatorUploadResponseObserver = Object.freeze({
     cancel,
     extractPostUrl,
     install,
     arm,
+    watch,
+    MANUAL_WATCH_EVENT,
   });
 })();

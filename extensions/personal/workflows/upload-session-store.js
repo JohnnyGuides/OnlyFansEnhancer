@@ -735,11 +735,12 @@
       ["documentId", 36],
       ["boundUrl", 500],
       ["progressStage", 20],
+      ["manualWatchId", 32],
     ]) {
       if (Object.hasOwn(value, field))
         output[field] = clean(value[field], maximum);
     }
-    for (const field of ["createdAt", "updatedAt"]) {
+    for (const field of ["createdAt", "updatedAt", "manualWatchUntil"]) {
       const timestamp = finiteInteger(value[field]);
       if (timestamp !== undefined) output[field] = timestamp;
     }

@@ -2798,6 +2798,59 @@ function cancelCreatorUploadResponseObserverInPage(config) {
     config.platform,
   );
 }
+
+function watchCreatorManualPublishInPage(config) {
+  return globalThis.CreatorUploadResponseObserver?.watch?.(config) === true;
+}
+
+// Isolated-world relay for a manual publish watch. The main-world observer
+// announces its outcome as a DOM event; leaving the document ends the watch.
+function installCreatorManualPublishBridge(config) {
+  const bridges = (globalThis.CreatorManualPublishBridges ||= new Map());
+  bridges.get(config.platform)?.();
+  const eventName = "creator-upload-manual-publish";
+  const forward = (outcome, postUrl = "") => {
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: "CREATOR_UPLOAD_MANUAL_PUBLISH_OBSERVED",
+          sessionId: config.sessionId,
+          platform: config.platform,
+          watchId: config.watchId,
+          outcome,
+          postUrl,
+        },
+        () => void chrome.runtime.lastError,
+      );
+    } catch {
+      // An invalidated extension context can no longer report.
+    }
+  };
+  const stop = () => {
+    document.removeEventListener(eventName, onOutcome);
+    globalThis.removeEventListener("pagehide", onPageHide);
+    if (bridges.get(config.platform) === stop) bridges.delete(config.platform);
+  };
+  const onOutcome = (event) => {
+    let detail;
+    try {
+      detail = JSON.parse(String(event.detail || ""));
+    } catch {
+      return;
+    }
+    if (detail?.watchId !== config.watchId) return;
+    stop();
+    forward(String(detail.outcome || ""), String(detail.postUrl || ""));
+  };
+  const onPageHide = () => {
+    stop();
+    forward("left");
+  };
+  document.addEventListener(eventName, onOutcome);
+  globalThis.addEventListener("pagehide", onPageHide);
+  bridges.set(config.platform, stop);
+  return true;
+}
 const creatorUploadSessions = new Map();
 const creatorUploadPreparations = new Set();
 const creatorUploadConsolePorts = new Set();
@@ -2809,6 +2862,7 @@ const CREATOR_UPLOAD_TERMINAL_STATUSES = new Set([
   "catalogue-updated",
   "uploaded-no-sheet",
   "manual-submit-required",
+  "manual-link-watch-ended",
   "already-linked",
   "idempotent",
 ]);
@@ -2939,6 +2993,8 @@ function creatorUploadSessionRecord(session) {
           progressSequence: target.progressSequence,
           progressStage: target.progressStage,
           editorHandoff: target.editorHandoff,
+          manualWatchId: target.manualWatchId,
+          manualWatchUntil: target.manualWatchUntil,
         },
       ]),
     ),
@@ -2997,6 +3053,12 @@ async function getCreatorUploadSession(sessionId) {
       target.status = "posted-link-unresolved";
       target.error =
         "The restored platform submission may already exist; recover its link manually.";
+    } else if (
+      target.status === "awaiting-manual-publish" &&
+      !(target.manualWatchUntil > Date.now())
+    ) {
+      target.status = "manual-link-watch-ended";
+      target.error = CREATOR_MANUAL_PUBLISH_ENDINGS.expired;
     } else if (
       new Set([
         "uploading-full",
@@ -5636,6 +5698,20 @@ async function stopCreatorUploadSession(session) {
     for (const target of session.platforms.values()) {
       if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
       try {
+        if (target.status === "awaiting-manual-publish") {
+          const ended = endCreatorManualPublishWatch(
+            session,
+            target,
+            "stopped",
+          );
+          await cancelCreatorUploadResponseObserver(
+            target.tabId,
+            session.id,
+            target.platform,
+          );
+          await ended;
+          continue;
+        }
         const attempted = target.submitAttempted || target.submitted;
         if (!attempted) {
           target.status = "cancelled";
@@ -5689,6 +5765,10 @@ async function retireCreatorUploadSessions() {
     for (const record of records) {
       if (!record.draft) continue;
       const session = await getCreatorUploadSession(record.id);
+      // A passive manual-publish watch has nothing left to resume; it keeps
+      // watching its prepared tab until it captures, ends or expires.
+      if (session && creatorUploadOnlyWatching(session.platforms.values()))
+        continue;
       if (session) {
         try {
           await stopCreatorUploadSession(session);
@@ -5758,6 +5838,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
         "DELIVER_CREATOR_UPLOAD_FILE",
         "CREATOR_UPLOAD_PLATFORM_PROGRESS",
         "FOREGROUND_CREATOR_UPLOAD_OBSERVATION",
+        "CREATOR_UPLOAD_MANUAL_PUBLISH_OBSERVED",
       ]).has(message.type) &&
       !String(sender.url || "").startsWith(chrome.runtime.getURL(""))
     )
@@ -5831,7 +5912,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
             (record) =>
               (record.launcher || "extension") === launcher &&
               record.draft &&
-              Object.keys(record.platforms || {}).length,
+              Object.keys(record.platforms || {}).length &&
+              !creatorUploadOnlyWatching(Object.values(record.platforms)),
           )
           .sort(
             (left, right) =>
@@ -5972,6 +6054,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
             message.platform,
           ),
         };
+      case "CREATOR_UPLOAD_MANUAL_PUBLISH_OBSERVED":
+        return acceptCreatorManualPublishOutcome(message, sender);
       case "CHECKPOINT_CREATOR_UPLOAD_COMMIT":
         return checkpointCreatorUploadCommit(
           message.sessionId,
@@ -6349,13 +6433,246 @@ function handleExtensionMessage(message, sender, sendResponse) {
 }
 chrome.runtime.onMessage.addListener(handleExtensionMessage);
 
+const CREATOR_MANUAL_PUBLISH_WATCH_MS = 6 * 60 * 60_000;
+const CREATOR_MANUAL_PUBLISH_ENDINGS = Object.freeze({
+  expired:
+    "Stopped watching after 6 hours without a new post. If you published it, add the link to the sheet manually.",
+  closed:
+    "The prepared tab was closed before a post was seen. If you published it, add the link to the sheet manually.",
+  left: "The prepared page was left before a post was seen. If you published it, add the link to the sheet manually.",
+  stopped:
+    "Stopped watching for your post. The draft is preserved; if you publish it, add the link to the sheet manually.",
+});
+
+function creatorUploadOnlyWatching(targets) {
+  const list = [...targets];
+  return (
+    list.some((target) => target.status === "awaiting-manual-publish") &&
+    list.every(
+      (target) =>
+        target.status === "awaiting-manual-publish" ||
+        CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status),
+    )
+  );
+}
+
+// Arms a passive watch in the exact prepared document. Nothing is clicked:
+// only a post the owner creates there after arming can be captured.
+async function armCreatorManualPublishWatch(session, target) {
+  if (!target.tabId || !target.documentId)
+    throw new Error("The prepared document is unknown.");
+  const watchId = [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  const until = Date.now() + CREATOR_MANUAL_PUBLISH_WATCH_MS;
+  const documentTarget = {
+    tabId: target.tabId,
+    documentIds: [target.documentId],
+  };
+  const config = { sessionId: session.id, platform: target.platform, watchId };
+  const [bridge] =
+    (await chrome.scripting.executeScript({
+      target: documentTarget,
+      func: installCreatorManualPublishBridge,
+      args: [config],
+    })) || [];
+  if (bridge?.result !== true)
+    throw new Error("The manual publish relay could not be installed.");
+  await chrome.scripting.executeScript({
+    target: documentTarget,
+    world: "MAIN",
+    files: [
+      "workflows/catalogue-contract.js",
+      CREATOR_UPLOAD_RESPONSE_OBSERVER,
+    ],
+  });
+  const [watching] =
+    (await chrome.scripting.executeScript({
+      target: documentTarget,
+      world: "MAIN",
+      func: watchCreatorManualPublishInPage,
+      args: [{ ...config, timeoutMs: CREATOR_MANUAL_PUBLISH_WATCH_MS }],
+    })) || [];
+  if (watching?.result !== true)
+    throw new Error("The manual publish observer could not be armed.");
+  target.manualWatchId = watchId;
+  target.manualWatchUntil = until;
+}
+
+// Sets the ended status before any await so a duplicate outcome is inert.
+async function endCreatorManualPublishWatch(session, target, ending) {
+  const result = {
+    platform: target.platform,
+    status: "manual-link-watch-ended",
+    error:
+      CREATOR_MANUAL_PUBLISH_ENDINGS[ending] ||
+      CREATOR_MANUAL_PUBLISH_ENDINGS.stopped,
+  };
+  Object.assign(target, result);
+  await checkpointCreatorUploadSession(session);
+  creatorUploadNotify(session.id, {
+    type: "platform-result",
+    platform: target.platform,
+    result,
+  });
+  return result;
+}
+
+// Records the owner's post through the same link/catalogue path as
+// autonomous publication. The status changes before any await.
+async function finishCreatorManualPublish(session, target, rawPostUrl) {
+  const platform = target.platform;
+  const postUrl = rawPostUrl
+    ? CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(platform, rawPostUrl)
+    : null;
+  if (!postUrl) {
+    const result = {
+      platform,
+      status: "posted-link-unresolved",
+      submitted: true,
+      error:
+        "The site created a post, but its link could not be read safely. Add the link to the sheet manually.",
+    };
+    Object.assign(target, result);
+    await checkpointCreatorUploadSession(session);
+    creatorUploadNotify(session.id, {
+      type: "platform-result",
+      platform,
+      result,
+    });
+    return result;
+  }
+  target.status = "link-captured";
+  target.postUrl = postUrl;
+  target.error = "";
+  await checkpointCreatorUploadSession(session);
+  creatorUploadNotify(session.id, {
+    type: "platform-progress",
+    platform,
+    status: target.status,
+  });
+  let result;
+  try {
+    const commit = await commitCreatorUploadResult(session, platform, postUrl);
+    result = {
+      platform,
+      postUrl,
+      status:
+        commit.status === "updated" || commit.status === "idempotent"
+          ? "catalogue-updated"
+          : commit.status,
+      ...(commit.status === "conflict" || commit.status === "stale"
+        ? { error: `Catalogue commit stopped: ${commit.status}.` }
+        : {}),
+    };
+  } catch (error) {
+    result = {
+      platform,
+      status: "catalogue-commit-failed",
+      submitted: true,
+      postUrl,
+      error: error.message,
+    };
+  }
+  Object.assign(target, result);
+  await checkpointCreatorUploadSession(session);
+  creatorUploadNotify(session.id, {
+    type: "platform-result",
+    platform,
+    result,
+  });
+  return result;
+}
+
+async function acceptCreatorManualPublishOutcome(message, sender) {
+  const session = await getCreatorUploadSession(message?.sessionId);
+  const target = session?.platforms.get(message?.platform);
+  if (!target || !["onlyfans", "fansly"].includes(target.platform))
+    return { accepted: false };
+  if (
+    sender?.frameId !== 0 ||
+    sender.tab?.id !== target.tabId ||
+    !sender.documentId ||
+    sender.documentId !== target.documentId
+  )
+    throw new Error("Unauthorized manual publish observation.");
+  // Duplicate, superseded and already ended watches are acknowledged inertly.
+  if (
+    target.status !== "awaiting-manual-publish" ||
+    !target.manualWatchId ||
+    message.watchId !== target.manualWatchId
+  )
+    return { accepted: false };
+  const outcome = String(message.outcome || "");
+  let result;
+  if (!(target.manualWatchUntil > Date.now()))
+    result = await endCreatorManualPublishWatch(session, target, "expired");
+  else if (outcome === "captured" || outcome === "unresolved")
+    result = await finishCreatorManualPublish(
+      session,
+      target,
+      outcome === "captured" ? message.postUrl : null,
+    );
+  else
+    result = await endCreatorManualPublishWatch(
+      session,
+      target,
+      outcome === "left" || outcome === "expired" ? outcome : "stopped",
+    );
+  return { accepted: true, result };
+}
+
+async function endCreatorManualPublishWatchesForTab(tabId) {
+  await ensureCreatorUploadRuntimeVersion();
+  for (const record of await CREATOR_UPLOAD_SESSION_STORE.list()) {
+    if (
+      !Object.values(record.platforms || {}).some(
+        (target) =>
+          target.status === "awaiting-manual-publish" && target.tabId === tabId,
+      )
+    )
+      continue;
+    const session = await getCreatorUploadSession(record.id);
+    for (const target of session?.platforms.values() || []) {
+      if (target.status === "awaiting-manual-publish" && target.tabId === tabId)
+        await endCreatorManualPublishWatch(session, target, "closed");
+    }
+  }
+}
+chrome.tabs.onRemoved?.addListener?.((tabId) => {
+  endCreatorManualPublishWatchesForTab(tabId).catch(() => {});
+});
+
 async function recordCreatorManualPreparation(session, target) {
   if (session.cancelled || target.stage === "cancelled")
     throw new Error("Preparation was cancelled.");
-  const result = {
+  let result = {
     platform: target.platform,
     status: "manual-submit-required",
   };
+  if (
+    session.draft?.publishMode !== "autonomous" &&
+    (target.platform === "onlyfans" || target.platform === "fansly")
+  ) {
+    try {
+      await armCreatorManualPublishWatch(session, target);
+      result = { platform: target.platform, status: "awaiting-manual-publish" };
+    } catch {
+      result = {
+        ...result,
+        error:
+          "The post link will not be recorded automatically. After publishing, add it to the sheet manually.",
+      };
+    }
+    if (session.cancelled || target.stage === "cancelled") {
+      await cancelCreatorUploadResponseObserver(
+        target.tabId,
+        session.id,
+        target.platform,
+      );
+      throw new Error("Preparation was cancelled.");
+    }
+  }
   Object.assign(target, result);
   await checkpointCreatorUploadSession(session);
   creatorUploadNotify(session.id, {
