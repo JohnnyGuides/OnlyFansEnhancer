@@ -1886,6 +1886,30 @@ function send(message) {
     "Generated avatars must remain account-specific.",
   );
 
+  // Overlapping settings patches (two quick popup toggles) must all persist.
+  const settingsBeforeRace = (await send({ type: "GET_SETTINGS" })).settings;
+  await Promise.all([
+    send({
+      type: "SET_SETTINGS",
+      patch: { enabled: !settingsBeforeRace.enabled },
+    }),
+    send({
+      type: "SET_SETTINGS",
+      patch: { avatarMode: "mixed", realbooruPercentage: 37 },
+    }),
+  ]);
+  const settingsAfterRace = (await send({ type: "GET_SETTINGS" })).settings;
+  assert.equal(settingsAfterRace.enabled, !settingsBeforeRace.enabled);
+  assert.equal(settingsAfterRace.realbooruPercentage, 37);
+  await send({
+    type: "SET_SETTINGS",
+    patch: {
+      enabled: settingsBeforeRace.enabled,
+      avatarMode: settingsBeforeRace.avatarMode,
+      realbooruPercentage: settingsBeforeRace.realbooruPercentage,
+    },
+  });
+
   await send({
     type: "SET_SETTINGS",
     patch: {

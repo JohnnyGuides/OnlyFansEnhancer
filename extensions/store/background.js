@@ -284,6 +284,9 @@ const HANDLE_SUFFIXES = [
 ];
 
 let stateQueue = Promise.resolve();
+// Settings patches are read-modify-write; serialize them so overlapping
+// patches (quick popup toggles, popup plus options page) all persist.
+let settingsQueue = Promise.resolve();
 
 function hashString(value) {
   let hash = 2166136261;
@@ -625,11 +628,20 @@ async function rotateAvatar(primaryKey, aliases = []) {
   });
 }
 
-async function updateSettings(patch) {
-  const current = await getSettings();
-  const settings = normalizeSettings({ ...current, ...patch });
-  await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
-  return settings;
+function updateSettings(patch) {
+  const operation = settingsQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const current = await getSettings();
+      const settings = normalizeSettings({ ...current, ...patch });
+      await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+      return settings;
+    });
+  settingsQueue = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
 }
 
 async function resetMappings() {

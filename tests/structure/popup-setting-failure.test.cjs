@@ -104,3 +104,79 @@ test("a failed save with a failed reload restores the pre-toggle value without a
   assert.equal(popup.note.textContent, "Save failed.");
   assert.deepEqual(unhandled, []);
 });
+
+test("a failed save does not reload over a newer save that is still in flight", async () => {
+  const elements = new Map();
+  const element = (selector) => {
+    if (!elements.has(selector)) {
+      const listeners = {};
+      elements.set(selector, {
+        textContent: "",
+        value: "",
+        checked: false,
+        listeners,
+        addEventListener(type, listener) {
+          listeners[type] = listener;
+        },
+      });
+    }
+    return elements.get(selector);
+  };
+  let storedEnabled = true;
+  const pendingSaves = [];
+  let settingsReads = 0;
+  const chrome = {
+    runtime: {
+      lastError: null,
+      sendMessage(message, callback) {
+        if (message.type === "GET_SETTINGS") {
+          settingsReads += 1;
+          callback({
+            ok: true,
+            settings: {
+              enabled: storedEnabled,
+              avatarMode: "mixed",
+              realbooruPercentage: 50,
+            },
+          });
+        } else if (message.type === "GET_STATS")
+          callback({ ok: true, stats: { mappedAccounts: 1 } });
+        else pendingSaves.push({ message, callback });
+      },
+    },
+  };
+  vm.runInNewContext(source, {
+    document: { querySelector: element },
+    chrome,
+    confirm: () => true,
+    Number,
+    Math,
+    Promise,
+    Error,
+  });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  await settle();
+  const checkbox = element("#enabled");
+  const readsAfterOpen = settingsReads;
+
+  checkbox.checked = false;
+  const first = checkbox.listeners.change({ target: checkbox });
+  checkbox.checked = true;
+  const second = checkbox.listeners.change({ target: checkbox });
+  await settle();
+  assert.equal(pendingSaves.length, 2);
+
+  // The older save fails while the newer one is still pending: no reload yet.
+  pendingSaves[0].callback({ ok: false, error: "Save failed." });
+  await settle();
+  assert.equal(settingsReads, readsAfterOpen);
+  assert.equal(checkbox.checked, true);
+
+  // Once the newer save lands, the popup reloads the authoritative value.
+  storedEnabled = true;
+  pendingSaves[1].callback({ ok: true, settings: { enabled: true } });
+  await Promise.all([first, second]);
+  await settle();
+  assert.equal(settingsReads, readsAfterOpen + 1);
+  assert.equal(checkbox.checked, true);
+});

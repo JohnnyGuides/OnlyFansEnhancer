@@ -105,6 +105,25 @@ test("store edition loads, requires consent, and renders settings", async () => 
     });
     assert.equal(stored.consentAccepted, true);
     assert.equal(stored.enabled, true);
+
+    // Overlapping settings patches (two quick popup toggles) must all persist.
+    const raced = await page.evaluate(async () => {
+      const send = (patch) =>
+        new Promise((resolve, reject) =>
+          chrome.runtime.sendMessage(
+            { type: "SET_SETTINGS", patch },
+            (reply) =>
+              reply?.ok ? resolve(reply) : reject(new Error(reply?.error)),
+          ),
+        );
+      await Promise.all([
+        send({ enabled: false }),
+        send({ consentAccepted: true, avatarMode: "custom" }),
+      ]);
+      return (await chrome.storage.local.get("fimSettingsV1")).fimSettingsV1;
+    });
+    assert.equal(raced.enabled, false);
+    assert.equal(raced.avatarMode, "custom");
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();

@@ -68,22 +68,45 @@ async function load() {
   renderMix(percentage);
 }
 
+// Saves may overlap when controls change quickly. A failed save reloads the
+// stored settings only once no other save is in flight, so the reload cannot
+// overwrite a newer change that is still being saved.
+let settingsSavesInFlight = 0;
+let settingsReverts = [];
+
+async function saveSettings(patch, revert) {
+  settingsSavesInFlight += 1;
+  let failure = null;
+  try {
+    await sendMessage({ type: "SET_SETTINGS", patch });
+  } catch (error) {
+    failure = error;
+    settingsReverts.push(revert);
+  } finally {
+    settingsSavesInFlight -= 1;
+  }
+  if (settingsSavesInFlight === 0 && settingsReverts.length) {
+    const reverts = settingsReverts;
+    settingsReverts = [];
+    try {
+      await load();
+    } catch {
+      for (const undo of reverts.reverse()) undo();
+    }
+  }
+  if (failure) throw failure;
+}
+
 $("#enabled").addEventListener("change", async (event) => {
   // A change event fires after the toggle, so the previous value is the inverse.
   const previous = !event.target.checked;
   try {
-    await sendMessage({
-      type: "SET_SETTINGS",
-      patch: { enabled: event.target.checked },
+    await saveSettings({ enabled: event.target.checked }, () => {
+      event.target.checked = previous;
     });
     $("#note").textContent = "Identity-mask setting saved—reload OnlyFans.";
   } catch (error) {
     $("#note").textContent = error.message;
-    try {
-      await load();
-    } catch {
-      event.target.checked = previous;
-    }
   }
 });
 
@@ -94,22 +117,27 @@ $("#sourceMix").addEventListener("input", (event) => {
 $("#sourceMix").addEventListener("change", async (event) => {
   const percentage = Number(event.target.value);
   $("#note").textContent = "Requesting source permissions…";
+  let saving = false;
   try {
     const granted = await requestSourcePermissions(percentage);
     if (!granted)
       throw new Error("Required source permission was not granted.");
-    await sendMessage({
-      type: "SET_SETTINGS",
-      patch: {
+    saving = true;
+    await saveSettings(
+      {
         avatarMode: modeForPercentage(percentage),
         realbooruPercentage: percentage,
       },
-    });
+      () => undefined,
+    );
     $("#note").textContent =
       "Source mix saved. Existing pictures stay; new requests use this mix.";
   } catch (error) {
     $("#note").textContent = error.message;
-    await load();
+    // A failed save has already reloaded. Otherwise show the stored mix again
+    // unless a newer save is still in flight.
+    if (!saving && settingsSavesInFlight === 0)
+      await load().catch(() => undefined);
   }
 });
 
