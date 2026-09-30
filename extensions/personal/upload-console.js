@@ -1066,6 +1066,7 @@
     let runBusy = false;
     let readiness = null;
     let readinessRevision = 0;
+    let renderedPicker = null;
     const lockedControls = new Map();
     let lastAttempt = null;
     let socialPollTimer = null;
@@ -1761,8 +1762,8 @@
         releaseInstant.getTime() < Date.now()
       ) {
         releaseSummary.textContent = mainPublishMode.checked
-          ? "Catalogue date · publish now"
-          : "Catalogue date · no site schedule";
+          ? "Past date — sheet update, posts publish now without a schedule"
+          : "Past date — sheet update, posts go up unscheduled";
         return;
       }
       const iso = scheduledIsoForReleaseDate(releaseDate.value);
@@ -1951,7 +1952,7 @@
           autoThumbnailAssetId = choice.assetId;
           thumbnailInput.value = "";
           renderFilePickers();
-          scheduleMatch();
+          refreshThumbnailReadiness();
         }
         catalogueThumbnailStatus.textContent =
           autoThumbnailAssetId === thumbnailFile?.assetId
@@ -1992,7 +1993,7 @@
               catalogueThumbnails.hidePopover();
             thumbnailPickerToggle.focus();
             renderFilePickers();
-            scheduleMatch();
+            refreshThumbnailReadiness();
           });
           catalogueThumbnailChoices.append(button);
         }
@@ -2168,6 +2169,65 @@
           );
         });
       }
+      const cards = visible.slice(0, 4);
+      if (
+        Number.isInteger(selectedCatalogueRow) &&
+        !cards.some((candidate) => candidate.row === selectedCatalogueRow)
+      ) {
+        const selected = visible.find(
+          (candidate) => candidate.row === selectedCatalogueRow,
+        );
+        if (selected) cards.push(selected);
+      }
+      // Similar entries rebuild only when what they show changes. While an
+      // entry is selected its neighbours keep their order, so choosing it (which
+      // copies its title into the form) cannot reshuffle the cards.
+      const rendered = {
+        query,
+        teaser: workflowMode?.value === "teaser",
+        visible: visible.map((candidate) => candidate.row),
+        cards: cards.map((candidate) => candidate.row),
+        content: visible
+          .map((candidate) =>
+            [
+              candidate.row,
+              candidate.id,
+              candidate.title,
+              candidate.category,
+              candidate.seasonArc,
+            ].join("\u0001"),
+          )
+          .sort()
+          .join("\u0002"),
+      };
+      const previous = renderedPicker;
+      const sameRows = (left, right) =>
+        left.length === right.length &&
+        (left.every((row, index) => row === right[index]) ||
+          (Number.isInteger(selectedCatalogueRow) &&
+            [...left].sort().join() === [...right].sort().join()));
+      if (
+        previous &&
+        previous.query === rendered.query &&
+        previous.teaser === rendered.teaser &&
+        previous.content === rendered.content &&
+        sameRows(previous.visible, rendered.visible) &&
+        sameRows(previous.cards, rendered.cards) &&
+        catalogueCards.children.length === Math.max(previous.cards.length, 1)
+      ) {
+        if (selectedCatalogueRow === "new") catalogueRow.value = "new";
+        else if (Number.isInteger(selectedCatalogueRow))
+          catalogueRow.value = `row:${selectedCatalogueRow}`;
+        for (const card of catalogueCards.children)
+          if (card.dataset.row)
+            card.setAttribute(
+              "aria-pressed",
+              String(Number(card.dataset.row) === selectedCatalogueRow),
+            );
+        cataloguePicker.hidden = false;
+        return;
+      }
+      renderedPicker = rendered;
       catalogueRow.replaceChildren();
       const prompt = document.createElement("option");
       prompt.value = "";
@@ -2196,16 +2256,6 @@
         catalogueRow.value = `row:${selectedCatalogueRow}`;
       }
       catalogueCards.replaceChildren();
-      const cards = visible.slice(0, 4);
-      if (
-        Number.isInteger(selectedCatalogueRow) &&
-        !cards.some((candidate) => candidate.row === selectedCatalogueRow)
-      ) {
-        const selected = visible.find(
-          (candidate) => candidate.row === selectedCatalogueRow,
-        );
-        if (selected) cards.push(selected);
-      }
       const previewIds = [];
       catalogueMoreLabel.textContent =
         visible.length > cards.length
@@ -2223,6 +2273,7 @@
         const card = document.createElement("button");
         card.type = "button";
         card.className = "catalogue-card";
+        card.dataset.row = String(candidate.row);
         card.setAttribute(
           "aria-pressed",
           String(candidate.row === selectedCatalogueRow),
@@ -2389,7 +2440,11 @@
       );
     }
 
-    function applyProposal(proposal, catalogueStatus = "matched") {
+    function applyProposal(
+      proposal,
+      catalogueStatus = "matched",
+      { explicit = false } = {},
+    ) {
       uploadWithoutSheet = false;
       catalogueFallback = false;
       currentProposal = proposal;
@@ -2453,11 +2508,16 @@
             .filter(Boolean),
         ),
       ];
+      // A deliberate click on an entry takes its sheet date exactly; a past
+      // date then prepares unscheduled posts (see draft()).
       if (newlySelected)
         releaseDate.value =
-          executableDates.length === 1
-            ? executableDates[0]
-            : candidate.releaseDate || releaseDate.value;
+          explicit &&
+          /^\d{4}-\d{2}-\d{2}$/.test(String(candidate.releaseDate || ""))
+            ? candidate.releaseDate
+            : executableDates.length === 1
+              ? executableDates[0]
+              : candidate.releaseDate || releaseDate.value;
       refreshReleaseSummary();
       pornhubRecommendation.textContent = proposal.targets.recommended.includes(
         "pornhub",
@@ -2968,6 +3028,21 @@
             "Catalogue unavailable. Check the catalogue connection in Settings and try again.";
         }
       }
+    }
+
+    // A thumbnail cannot change which entries look similar, so with a match in
+    // place only readiness is rechecked and the catalogue cards stay untouched.
+    function refreshThumbnailReadiness() {
+      if (runBusy || activeSession) return;
+      if (!currentMatch) {
+        scheduleMatch();
+        return;
+      }
+      confirmedRepeatTargets = new Set();
+      uploadError.textContent = "";
+      validate(Boolean(thumbnailFile && !isImageFile(thumbnailFile)));
+      renderRunSettings();
+      void checkReadiness();
     }
 
     function scheduleMatch() {
@@ -5571,7 +5646,7 @@
         autoThumbnailAssetId = null;
         closeFrameDialog();
         renderFilePickers();
-        scheduleMatch();
+        refreshThumbnailReadiness();
       } catch (error) {
         if (frameOperationCurrent(generation, source, proof))
           frameStatus.textContent = error.message;
@@ -5759,7 +5834,7 @@
         thumbnailFile,
         "Center-cropped to 640 × 360 for ManyVids and Pornhub",
       );
-      if (!activeSession) scheduleMatch();
+      if (!activeSession) refreshThumbnailReadiness();
     });
     loadCatalogueThumbnails.addEventListener("click", () => {
       if (thumbnailCatalogueId)
@@ -6023,6 +6098,7 @@
       applyProposal(
         proposal,
         selectedCatalogueRow === "new" ? "new" : "matched",
+        { explicit: true },
       );
       renderPicker();
       if (catalogueBrowseDialog.open) catalogueBrowseDialog.close();

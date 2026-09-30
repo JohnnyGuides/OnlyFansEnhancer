@@ -2913,10 +2913,12 @@ test("upload console performs no platform mutation before the single Upload acti
     );
     assert.equal(mutationMessages[0].catalogue.row, 135);
     assert.equal(mutationMessages[0].catalogue.releaseDate, "2026-08-28");
-    assert.notEqual(
+    // An explicit click takes the sheet date; this one is past, so unscheduled.
+    assert.equal(
       mutationMessages[0].catalogue.releaseDate,
       mutationMessages[0].draft.releaseDate,
     );
+    assert.equal(mutationMessages[0].draft.scheduleIntent, "none");
     assert.equal(mutationMessages[0].catalogue.seasonArc, "Episodes");
     assert.equal(mutationMessages[0].catalogue.episode, "42");
     assert.equal(
@@ -2935,11 +2937,8 @@ test("upload console performs no platform mutation before the single Upload acti
     );
     assert.equal(typeof mutationMessages[0].draft.profileSignature, "string");
     assert.equal(mutationMessages[0].catalogue.fanslyLink, "");
-    assert.equal(mutationMessages[0].draft.releaseDate, "2026-09-11");
-    assert.equal(
-      mutationMessages[0].draft.scheduledIso.endsWith("T15:00:00.000Z"),
-      true,
-    );
+    assert.equal(mutationMessages[0].draft.releaseDate, "2026-08-28");
+    assert.equal(mutationMessages[0].draft.scheduledIso, "");
     assert.equal(
       mutationMessages[0].draft.fullFilename,
       "Episode 42 (full).mp4",
@@ -3511,6 +3510,8 @@ test("unverified platform queue allows manual drafts but blocks automatic publis
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
+    // The sheet date must stay in the future for this scheduled-publishing case.
+    await page.clock.setFixedTime(new Date("2026-08-01T09:00:00Z"));
     const html = fs
       .readFileSync(path.join(repositoryRoot, "upload-console.html"), "utf8")
       .replace(/<script[^>]+><\/script>/gi, "");
