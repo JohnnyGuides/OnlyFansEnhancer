@@ -266,3 +266,29 @@ test("legacy Fansly first preset with an empty name stops before applying it", a
   });
   assert.equal(outcome.presets.full, undefined);
 });
+
+test("legacy Fansly without a Load Preset control uses the named preset for a first-preset run", async () => {
+  const outcome = await runLegacyFansly({
+    mediaModal: true,
+    fanslyPreset: "defaulT",
+    fanslyPresetSelection: "first",
+  });
+  assert.deepEqual(outcome.result, {
+    platform: "fansly",
+    status: "manual-submit-required",
+  });
+  assert.deepEqual(outcome.presets, { full: "defaulT" });
+});
+
+test("legacy Fansly additional media without a Load Preset control uses the named preset", async () => {
+  const outcome = await runLegacyFansly({
+    fanslyPreset: "defaulT",
+    fanslyPresetSelection: "first",
+    mediaFiles: [{ role: "media1", name: "photo.jpg", kind: "image" }],
+  });
+  assert.deepEqual(outcome.result, {
+    platform: "fansly",
+    status: "manual-submit-required",
+  });
+  assert.deepEqual(outcome.presets, { full: "defaulT", media1: "defaulT" });
+});

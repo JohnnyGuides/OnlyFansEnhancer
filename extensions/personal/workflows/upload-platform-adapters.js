@@ -3245,9 +3245,11 @@
     );
   }
 
-  // "first" is scoped to the Load Preset menu, as on the current path.
+  // "first" is scoped to the Load Preset menu, as on the current path. A
+  // legacy page without a Load Preset control has no menu to take "first"
+  // from; it lists presets directly, so the named preset is chosen instead.
   function legacyFanslyPreset(draft, load, label) {
-    if (draft.fanslyPresetSelection === "first") {
+    if (draft.fanslyPresetSelection === "first" && load) {
       const menu = load?.closest(".transparent-dropdown");
       if (!menu) throw new Error("Fansly preset menu scope is missing.");
       const preset = [
