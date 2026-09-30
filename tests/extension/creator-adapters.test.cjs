@@ -1034,6 +1034,37 @@ test("ManyVids never substitutes a fixed co-performer option", async () => {
     );
     assert.equal(ambiguous.first.status, "failed");
     assert.equal(ambiguous.value, "");
+
+    for (const blank of ["", "  "]) {
+      const placeholder = await apply(
+        '<option value="">Pick</option><option value="NO">No</option>',
+        blank,
+      );
+      assert.equal(placeholder.first.status, "failed");
+      assert.match(
+        placeholder.first.detail,
+        /Could not resolve one exact option/,
+      );
+      assert.equal(placeholder.value, "");
+    }
+    for (const blank of ["", "  "]) {
+      const emptyText = await apply(
+        '<option value=""></option><option value="NO" selected>No</option>',
+        blank,
+      );
+      assert.equal(emptyText.first.status, "failed");
+      assert.match(
+        emptyText.first.detail,
+        /Could not resolve one exact option/,
+      );
+      assert.equal(emptyText.value, "NO");
+    }
+    const negative = await apply(
+      '<option value="">Pick</option><option value="NO">No</option>',
+      "No",
+    );
+    assert.equal(negative.first.status, "changed");
+    assert.equal(negative.value, "NO");
     await mv.context.close();
   } finally {
     await browser.close();
@@ -1203,6 +1234,86 @@ test("C4S 4K editor injects nothing into the uploader when closed during encodin
       })),
       { submitted: null, files: 0 },
     );
+    await c4s.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("C4S 4K editor discards an encode whose image was replaced by a newer selection", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { c4s, dialog } = await openC4sEditor(browser);
+    const first = await c4sImageFixture(c4s.page, "first.png", "#204060");
+    const second = await c4sImageFixture(c4s.page, "second.png", "#a05030");
+    const input = dialog.locator('input[type="file"]');
+    await input.setInputFiles(first);
+    await dialog
+      .getByText("Move the 4K mark, then set the thumbnail.")
+      .waitFor();
+    await c4s.page.evaluate(() => {
+      const create = globalThis.createImageBitmap.bind(globalThis);
+      globalThis.__releaseDecode = null;
+      globalThis.createImageBitmap = async (...args) => {
+        const bitmap = await create(...args);
+        await new Promise((resolve) => {
+          globalThis.__releaseDecode = resolve;
+        });
+        return bitmap;
+      };
+      const toBlob = HTMLCanvasElement.prototype.toBlob;
+      globalThis.__releaseEncode = null;
+      let held = false;
+      HTMLCanvasElement.prototype.toBlob = function (callback, ...rest) {
+        if (held) return toBlob.call(this, callback, ...rest);
+        held = true;
+        toBlob.call(
+          this,
+          (blob) => {
+            globalThis.__releaseEncode = () => callback(blob);
+          },
+          ...rest,
+        );
+      };
+    });
+    await input.setInputFiles(second);
+    await c4s.page.waitForFunction(() => globalThis.__releaseDecode);
+    await dialog.getByRole("button", { name: "Set thumbnail" }).click();
+    await c4s.page.waitForFunction(() => globalThis.__releaseEncode);
+    await c4s.page.evaluate(() => globalThis.__releaseDecode());
+    await dialog.locator(".filename").getByText("second.png").waitFor();
+    await c4s.page.evaluate(() => globalThis.__releaseEncode());
+    await c4s.page.waitForTimeout(150);
+    assert.deepEqual(
+      await c4s.page.evaluate(() => ({
+        submitted: globalThis.__submittedThumbnail?.name ?? null,
+        files: document.querySelector('input[type="file"]').files.length,
+        keys: Object.keys(__toolkitTestStorage).filter((key) =>
+          key.startsWith("c4s-4k-placement-"),
+        ),
+      })),
+      { submitted: null, files: 0, keys: [] },
+    );
+    await dialog.getByRole("button", { name: "Set thumbnail" }).click();
+    await c4s.page.waitForFunction(() => globalThis.__submittedThumbnail);
+    const sent = await c4s.page.evaluate(async () => {
+      const image = await new Promise((resolve) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.src = URL.createObjectURL(globalThis.__submittedThumbnail);
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const drawing = canvas.getContext("2d");
+      drawing.drawImage(image, 0, 0);
+      return {
+        name: globalThis.__submittedThumbnail.name,
+        pixel: Array.from(drawing.getImageData(20, 700, 1, 1).data),
+      };
+    });
+    assert.equal(sent.name, "second_4k.png");
+    assert.deepEqual(sent.pixel, [160, 80, 48, 255]);
     await c4s.context.close();
   } finally {
     await browser.close();

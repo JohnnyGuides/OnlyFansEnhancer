@@ -948,7 +948,15 @@
     setThumbnail.addEventListener("click", async () => {
       if (!bitmap || !file) return;
       const selection = generation;
-      const current = () => !closed && selection === generation;
+      const selectedFile = file;
+      const selectedKey = fileKey;
+      const selectedBitmap = bitmap;
+      const current = () =>
+        !closed &&
+        selection === generation &&
+        file === selectedFile &&
+        fileKey === selectedKey &&
+        bitmap === selectedBitmap;
       setThumbnail.disabled = true;
       try {
         const target = findThumbnailInput();

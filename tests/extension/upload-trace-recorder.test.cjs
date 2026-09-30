@@ -785,14 +785,17 @@ test("a write is dropped when another document discarded the trace after it read
           "run-start",
           { toolId: "test", label: "late" },
         );
-        while (!__gate.pending.length) await sleep(5);
-        __gate.pending.shift()();
-        for (let waited = 0; !__gate.pending.length && waited < 1000;) {
-          await sleep(5);
-          waited += 5;
+        // Release the generation read and the trace read, then stop at the
+        // generation read the write performs before it stores anything.
+        for (let step = 0; step < 3; step += 1) {
+          for (let waited = 0; !__gate.pending.length && waited < 1000;) {
+            await sleep(5);
+            waited += 5;
+          }
+          if (step < 2) __gate.pending.shift()();
         }
-        // The other document discards: it removes the trace and bumps the
-        // generation.
+        // The other document discards after the update read and before its
+        // write: it removes the trace and bumps the generation.
         delete __traceData[traceKey];
         __traceData[generationKey] = (__traceData[generationKey] || 0) + 1;
         __gate.hold = false;

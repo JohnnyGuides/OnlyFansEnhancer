@@ -355,11 +355,13 @@
     budget,
   ) {
     const options = Array.from(select.options);
-    let resolution = toolkit.resolveExact(options, expectedLabel, (option) =>
-      toolkit.displayText(option.textContent),
-    );
-    if (resolution.status === "missing") {
-      const wanted = toolkit.normalizeText(expectedLabel);
+    const wanted = toolkit.normalizeText(expectedLabel);
+    let resolution = wanted
+      ? toolkit.resolveExact(options, expectedLabel, (option) =>
+          toolkit.displayText(option.textContent),
+        )
+      : { status: "missing", matches: [] };
+    if (resolution.status === "missing" && wanted) {
       const sameValue = options.filter(
         (option) => toolkit.normalizeText(option.value) === wanted,
       );
