@@ -6,6 +6,7 @@
   const SOURCE = "creator-upload-file-bridge";
   const VIDEO_EXTENSIONS = /\.(?:mp4|m4v|mov|webm|avi|mkv)$/i;
   const IMAGE_EXTENSIONS = /\.(?:jpe?g|png)$/i;
+  const AUDIO_EXTENSIONS = /\.(?:mp3|m4a|wav|aac|ogg|flac)$/i;
   const sessions = new Map();
 
   function assertToken(value, label) {
@@ -23,9 +24,13 @@
         ? type
           ? ["image/png", "image/jpeg"].includes(type)
           : IMAGE_EXTENSIONS.test(file.name)
-        : type
-          ? type.startsWith("video/")
-          : VIDEO_EXTENSIONS.test(file.name)),
+        : kind === "audio"
+          ? type
+            ? type.startsWith("audio/")
+            : AUDIO_EXTENSIONS.test(file.name)
+          : type
+            ? type.startsWith("video/")
+            : VIDEO_EXTENSIONS.test(file.name)),
     );
   }
 
@@ -60,7 +65,7 @@
     }
     if (sessions.has(sessionId)) dispose(sessionId);
 
-    /** @type {Array<[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]>} */
+    /** @type {Array<[string, {selector: string, kind: "video" | "image" | "audio", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]>} */
     const roleEntries = Object.entries(roles).map(([role, definition]) => {
       if (
         (!new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
@@ -78,14 +83,14 @@
         throw new Error("Unsupported upload file role.");
       }
       const kind = definition?.kind || "video";
-      if (!new Set(["video", "image"]).has(kind)) {
+      if (!new Set(["video", "image", "audio"]).has(kind)) {
         throw new Error(`Unsupported ${role} file kind.`);
       }
       assertToken(definition?.token, `${role} file token`);
       if (!String(definition?.selector || "").trim()) {
         throw new Error(`Missing ${role} file selector.`);
       }
-      return /** @type {[string, {selector: string, kind: "video" | "image", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]} */ ([
+      return /** @type {[string, {selector: string, kind: "video" | "image" | "audio", token: string, used: boolean, value: any, waiters: Function[], activatedInput?: HTMLInputElement}]} */ ([
         role,
         {
           selector: definition.selector,

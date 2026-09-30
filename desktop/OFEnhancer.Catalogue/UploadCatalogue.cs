@@ -9,7 +9,7 @@ namespace OFEnhancer.Catalogue;
 public sealed record UploadCatalogueRow(int Row, string Id, string ItemId, string ReleaseDate, string Title,
     string Description, string SeasonArc, string Episode, string PornhubLink, string OnlyfansLink,
     string FanslyLink, string ManyvidsLink, string TwitterTeasers, string RedditPosts, int RedditPostCount,
-    string Fingerprint, IReadOnlyDictionary<string,string> PublicationState);
+    string Fingerprint, IReadOnlyDictionary<string,string> PublicationState, string Category = "");
 public sealed record UploadCatalogueSnapshot(string Status, string Source, IReadOnlyList<UploadCatalogueRow> Rows, object? EmptyRow = null, IReadOnlyDictionary<string,string>? SeasonAliases = null);
 public sealed record UploadResultMetadata(string Id, string? ReleaseDate = null, string? Title = null, string? Description = null);
 public sealed record UploadResultRequest(int Row, string Fingerprint, string Platform, string PostUrl,
@@ -175,7 +175,7 @@ public sealed partial class CatalogueStore
         return new(item.SourceRow ?? 0, item.SourceKey, item.ItemId, item.PlannedDate ?? "", item.Title, item.Description,
             item.Series ?? "", item.Episode ?? "", Link("pornhubFree"), Link("onlyfans"), Link("fansly"), Link("manyvids"),
             string.Join("\n",SourceUrls(item,"x")), string.Join("\n",SourceUrls(item,"reddit")), item.RedditTeasers,
-            UploadFingerprint(item),states);
+            UploadFingerprint(item),states,item.Category ?? "");
     }
 
     private static string PublicationState(CatalogueItemSummary item, string platform)

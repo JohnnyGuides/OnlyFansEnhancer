@@ -1629,22 +1629,29 @@ html {
 .thumbnail-frame-dialog .opening-frame-choice {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-height: 36px;
   margin-right: auto;
+  padding: 6px 12px 6px 10px;
+  border-radius: 8px;
   color: #d4e0ec;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   cursor: pointer;
+  user-select: none;
+}
+.thumbnail-frame-dialog .opening-frame-choice:hover {
+  background: rgba(101, 197, 244, 0.1);
 }
 .thumbnail-frame-dialog .opening-frame-choice[hidden] {
   display: none;
 }
 .thumbnail-frame-dialog .opening-frame-choice input {
+  width: 18px;
+  height: 18px;
   margin: 0;
+  flex-shrink: 0;
   accent-color: #65c5f4;
-}
-.thumbnail-frame-dialog .opening-frame-choice small {
-  color: #9fb6ca;
-  font-size: 0.76rem;
+  cursor: pointer;
 }
 .upload-media .file-information {
   display: grid;
@@ -1945,7 +1952,7 @@ a {
 .additional-media-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   margin: -6px 0 18px;
 }
@@ -1962,15 +1969,22 @@ a {
   font-size: 0.82rem;
   font-weight: 650;
 }
+.additional-media-row > button {
+  flex: none;
+}
 .additional-media-row > span {
+  flex: none;
   color: #a9c5d7;
   font-size: 0.78rem;
 }
 .additional-media-list {
   display: flex;
-  flex: 1 1 100%;
-  flex-wrap: wrap;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
   gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .additional-media-list:empty {
   display: none;
@@ -1979,7 +1993,8 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: min(100%, 260px);
+  flex: 0 0 auto;
+  max-width: 170px;
   min-width: 0;
   border-radius: 9px;
   text-align: left;
@@ -2303,7 +2318,7 @@ a {
 .thumbnail-frame-dialog > .file-actions {
   position: sticky;
   bottom: 0;
-  z-index: 1;
+  z-index: 3;
   padding: 14px 22px;
   border-top: 1px solid #2b3949;
   background: #121b26;

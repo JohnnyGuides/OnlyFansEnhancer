@@ -2,6 +2,7 @@ using OFEnhancer.Protocol;
 using System.Security.Cryptography;
 using System.Text;
 using System.Net;
+using System.Text.Json;
 using OFEnhancer.Catalogue;
 using OFEnhancer.Desktop;
 
@@ -456,6 +457,48 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(selection, harness.Store.GetGoogleCatalogueSelection());
         Assert.AreEqual(0, harness.Session.MigrationCalls);
     }
+
+    [TestMethod]
+    public void MissingUploadEntryRefreshesTheLocalCatalogueAndRetriesTheSameIdOnce()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        GoogleCatalogueImportPreview preview = new(harness.Session.Inspection.Projection, 17,
+            harness.Session.Inspection.CatalogueSheetTitle, 1, new Dictionary<string, int>());
+        int attempts = 0;
+        harness.Session.WriteUploadEntryAction = request => ++attempts == 1
+            ? Task.FromException<GoogleUploadEntryResult>(new GoogleCatalogueException("catalogue-entry-missing"))
+            : Task.FromResult(new GoogleUploadEntryResult(request.Id!, 2, "already-updated", preview));
+
+        object written = harness.Controller.WriteUploadEntry(UploadEntryPayload("stale-id"));
+
+        StringAssert.Contains(JsonSerializer.Serialize(written), "\"status\":\"already-updated\"");
+        Assert.AreEqual(1, harness.Session.ReadImportCalls);
+        Assert.AreEqual(harness.Session.Inspection.Projection.Items.Count, harness.Store.GetItems().Count);
+        CollectionAssert.AreEqual(new[] { "update:stale-id", "update:stale-id" },
+            harness.Session.UploadEntryRequests.Select(request => $"{request.Mode}:{request.Id}").ToArray());
+    }
+
+    [TestMethod]
+    public void UploadEntryStillMissingAfterRefreshFailsWithADistinctCodeAndNoNewRow()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Session.WriteUploadEntryAction = _ =>
+            Task.FromException<GoogleUploadEntryResult>(new GoogleCatalogueException("catalogue-entry-missing"));
+
+        GoogleCatalogueControllerException error = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => harness.Controller.WriteUploadEntry(UploadEntryPayload("removed-id")));
+
+        Assert.AreEqual("catalogue-entry-not-on-sheet", error.Code);
+        Assert.AreEqual(1, harness.Session.ReadImportCalls);
+        CollectionAssert.AreEqual(new[] { "update:removed-id", "update:removed-id" },
+            harness.Session.UploadEntryRequests.Select(request => $"{request.Mode}:{request.Id}").ToArray());
+    }
+
+    private static JsonElement UploadEntryPayload(string id) => JsonSerializer.SerializeToElement(new
+    {
+        mode = "update", title = "Episode 2", description = "", releaseDate = "2026-09-18",
+        id, expectedTitle = "Episode 2", expectedDescription = "",
+    });
 
     [TestMethod]
     public void Configuration_and_background_connection_expose_only_coarse_status()
@@ -1451,12 +1494,26 @@ public sealed class GoogleCatalogueControllerTests
 
         internal Func<CancellationToken, Task<GoogleCatalogueImportPreview>>? ReadImportAction { get; set; }
 
-        public Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken) =>
-            ReadImportAction?.Invoke(cancellationToken) ?? Task.FromResult(new GoogleCatalogueImportPreview(Inspection.Projection, 17, Inspection.CatalogueSheetTitle, 1,
+        public Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken)
+        {
+            ReadImportCalls++;
+            return ReadImportAction?.Invoke(cancellationToken) ?? Task.FromResult(new GoogleCatalogueImportPreview(Inspection.Projection, 17, Inspection.CatalogueSheetTitle, 1,
                 new Dictionary<string, int>()));
+        }
 
         public Task<GoogleSubredditPresetSnapshot> ReadSubredditPresetsAsync(CancellationToken cancellationToken) =>
             Task.FromResult(new GoogleSubredditPresetSnapshot("snapshot",[],Inspection.CatalogueSheetTitle));
+
+        internal Func<GoogleUploadEntryRequest, Task<GoogleUploadEntryResult>>? WriteUploadEntryAction { get; set; }
+        internal List<GoogleUploadEntryRequest> UploadEntryRequests { get; } = [];
+        internal int ReadImportCalls { get; private set; }
+
+        public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+            CancellationToken cancellationToken)
+        {
+            UploadEntryRequests.Add(request);
+            return WriteUploadEntryAction!(request);
+        }
 
         public Task<WorkbookMigrationResult> ApplyMigrationAsync(
             string planHash,

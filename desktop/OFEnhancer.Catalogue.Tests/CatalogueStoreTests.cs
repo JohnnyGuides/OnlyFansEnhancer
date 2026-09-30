@@ -32,8 +32,32 @@ public sealed class CatalogueStoreTests
         Assert.AreEqual("kept-id", item.ItemId);
         Assert.AreEqual("Kept title", item.Title);
         Assert.AreEqual(0, item.SourceLinkCells!.Count);
-        Assert.AreEqual(4, store.SchemaVersion);
+        Assert.AreEqual(5, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v2-*.sqlite").Length);
+    }
+
+    [TestMethod]
+    public void VersionFourUpgradeKeepsRowsAndLeavesCategoryEmptyUntilTheNextImport()
+    {
+        using TempDirectory temp = new();
+        string databasePath = Path.Combine(temp.Path, "catalogue.db");
+        using (CatalogueStore oldStore = CatalogueStore.OpenForTesting(databasePath,
+            [Migrations.VersionOne, Migrations.VersionTwo, Migrations.VersionThree, Migrations.VersionFour]))
+        {
+            using SqliteCommand command = oldStore.Connection.CreateCommand();
+            command.CommandText = "INSERT INTO catalogue_items(item_id,source_key,source_row,title,description,updated_utc) VALUES ('kept-id','kept-key',2,'Kept title','','2026-09-08T12:00:00Z')";
+            command.ExecuteNonQuery();
+        }
+        using CatalogueStore store = CatalogueStore.Open(databasePath);
+        Assert.AreEqual(5, store.SchemaVersion);
+        Assert.IsNull(store.GetItems().Single().Category);
+        Assert.AreEqual("", store.GetUploadCatalogueSnapshot().Rows.Single().Category);
+        Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v4-*.sqlite").Length);
+        store.ImportWorkbookProjection(new("work", "1", true, [new(2, "kept-key", "Kept title", "", null, null, null, 0, 0,
+            new Dictionary<string, string>(), null, null, "Review")]), false);
+        CatalogueItemSummary item = store.GetItems().Single();
+        Assert.AreEqual("kept-id", item.ItemId);
+        Assert.AreEqual("Review", item.Category);
     }
 
     [TestMethod]
@@ -44,7 +68,7 @@ public sealed class CatalogueStoreTests
 
         using CatalogueStore store = CatalogueStore.Open(databasePath);
 
-        Assert.AreEqual(4, store.SchemaVersion);
+        Assert.AreEqual(5, store.SchemaVersion);
         CollectionAssert.AreEqual(
             new[]
             {
@@ -75,7 +99,7 @@ public sealed class CatalogueStoreTests
         }
 
         using CatalogueStore migrated = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(4, ReadVersion(databasePath));
+        Assert.AreEqual(5, ReadVersion(databasePath));
         Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
         Assert.AreEqual("ok", ReadIntegrity(databasePath));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);

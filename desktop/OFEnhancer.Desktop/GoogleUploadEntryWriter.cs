@@ -9,7 +9,8 @@ internal sealed record GoogleUploadEntryRequest(
     string Mode, string Title, string Description, string ReleaseDate,
     string? FileName = null, long? FileSize = null, long? FileLastModified = null,
     string? Id = null, string? ExpectedTitle = null, string? ExpectedDescription = null,
-    string Category = "", string SeasonArc = "");
+    string Category = "", string SeasonArc = "",
+    string? ExpectedCategory = null, string? ExpectedSeasonArc = null);
 
 internal sealed record GoogleUploadEntryResult(string Id, int Row, string Status,
     GoogleCatalogueImportPreview Preview);
@@ -26,6 +27,13 @@ internal sealed class GoogleUploadEntryWriter(
         GoogleCatalogueImportPreview before = GoogleCatalogueImportReader.Read(workbook, preferredSheetId);
         string id = request.Mode == "new" ? NewId(request, before.Projection.Items) : request.Id!;
         WorkbookCatalogueItem? existing = before.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
+        // In update mode Season/Arc and Category change only when the user moved them off the
+        // selection baseline; an untouched or unknown baseline never blanks a sheet value.
+        bool seriesRequested = request.Mode == "new" || (request.ExpectedSeasonArc is null
+            ? request.SeasonArc.Length > 0 : request.SeasonArc != request.ExpectedSeasonArc);
+        bool categoryRequested = request.Mode == "new" ? request.Category.Length > 0
+            : request.ExpectedCategory is null
+                ? request.Category.Length > 0 : request.Category != request.ExpectedCategory;
         if (request.Mode == "new")
         {
             if (!before.Columns.ContainsKey("plannedDate") || !before.Columns.ContainsKey("description"))
@@ -58,11 +66,12 @@ internal sealed class GoogleUploadEntryWriter(
         else
         {
             if (existing is null) throw new GoogleCatalogueException("catalogue-entry-missing");
-            bool detailsAlreadyMatch = existing.Title == request.Title
-                && existing.Description == request.Description
-                && (existing.Series ?? "") == request.SeasonArc;
-            if (detailsAlreadyMatch && (string.IsNullOrEmpty(request.Category)
-                || await ReadFieldAsync(before, existing, "category", cancellationToken).ConfigureAwait(false) == request.Category))
+            string? currentCategory = categoryRequested
+                ? await ReadFieldAsync(before, existing, "category", cancellationToken).ConfigureAwait(false)
+                : null;
+            if (existing.Title == request.Title && existing.Description == request.Description
+                && (!seriesRequested || (existing.Series ?? "") == request.SeasonArc)
+                && (!categoryRequested || currentCategory == request.Category))
                 return new(id, existing.SourceRow, "already-updated", before);
             if (existing.Title != request.ExpectedTitle || existing.Description != request.ExpectedDescription)
                 throw new GoogleCatalogueException("catalogue-entry-changed");
@@ -73,17 +82,12 @@ internal sealed class GoogleUploadEntryWriter(
             if (existing.Description != request.Description)
                 updates.Add(await CheckedUpdateAsync(before, existing, "description", request.Description,
                     request.ExpectedDescription!, cancellationToken).ConfigureAwait(false));
-            if ((existing.Series ?? "") != request.SeasonArc)
+            if (seriesRequested && (existing.Series ?? "") != request.SeasonArc)
                 updates.Add(await CheckedUpdateAsync(before, existing, "series", request.SeasonArc,
-                    existing.Series ?? "", cancellationToken).ConfigureAwait(false));
-            if (!string.IsNullOrEmpty(request.Category))
-            {
-                string currentCategory = await ReadFieldAsync(before, existing, "category", cancellationToken)
-                    .ConfigureAwait(false);
-                if (currentCategory != request.Category)
-                    updates.Add(await CheckedUpdateAsync(before, existing, "category", request.Category,
-                        currentCategory, cancellationToken).ConfigureAwait(false));
-            }
+                    request.ExpectedSeasonArc ?? existing.Series ?? "", cancellationToken).ConfigureAwait(false));
+            if (categoryRequested && currentCategory != request.Category)
+                updates.Add(await CheckedUpdateAsync(before, existing, "category", request.Category,
+                    request.ExpectedCategory ?? currentCategory!, cancellationToken).ConfigureAwait(false));
             if (updates.Count == 0)
                 return new(id, existing.SourceRow, "already-updated", before);
             try
@@ -100,10 +104,10 @@ internal sealed class GoogleUploadEntryWriter(
         if (!before.HasSameMapping(after)) throw new GoogleCatalogueException("catalogue-layout-changed");
         WorkbookCatalogueItem? written = after.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
         if (written is null || written.Title != request.Title || written.Description != request.Description
-            || written.Series != (string.IsNullOrEmpty(request.SeasonArc) ? null : request.SeasonArc)
+            || seriesRequested && written.Series != (string.IsNullOrEmpty(request.SeasonArc) ? null : request.SeasonArc)
             || request.Mode == "new" && written.PlannedDate != request.ReleaseDate)
             throw new GoogleCatalogueException("google-row-write-unresolved");
-        if (!string.IsNullOrEmpty(request.Category)
+        if (categoryRequested
             && await ReadFieldAsync(after, written, "category", cancellationToken).ConfigureAwait(false) != request.Category)
             throw new GoogleCatalogueException("google-row-write-unresolved");
         return new(id, written.SourceRow, request.Mode == "new" ? "created" : "updated", after);
@@ -232,6 +236,7 @@ internal sealed class GoogleUploadEntryWriter(
             || request.SeasonArc is not { Length: <= 200 }
             || request.Title.Any(char.IsControl) || request.Description.Any(c => c is '\0' or '\r')
             || request.Category.Any(char.IsControl) || request.SeasonArc.Any(char.IsControl)
+            || request.ExpectedCategory is { Length: > 200 } || request.ExpectedSeasonArc is { Length: > 200 }
             || !DateOnly.TryParseExact(request.ReleaseDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out _))
             throw new GoogleCatalogueException("invalid-catalogue-entry");

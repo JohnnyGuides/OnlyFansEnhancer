@@ -81,6 +81,9 @@ internal static class GoogleCatalogueImportReader
             string description = Value(row, selected.Columns, "description") ?? "";
             string? series = Value(row, selected.Columns, "series");
             string? episode = Value(row, selected.Columns, "episode");
+            string? category = Value(row, selected.Columns, "category");
+            if (category?.Length > 200)
+                throw new GoogleCatalogueImportException("invalid-workbook-projection", row.RowNumber);
             if (sourceKey.Length > 200 || !keys.Add(sourceKey) || title is null || title.Length > 300
                 || description.Length > 10_000 || series?.Length > 200 || episode?.Length > 100)
                 throw new GoogleCatalogueImportException("invalid-workbook-projection", row.RowNumber);
@@ -110,7 +113,7 @@ internal static class GoogleCatalogueImportReader
             }
             items.Add(new(row.RowNumber, sourceKey, title, description, date, series, episode,
                 Math.Max(Count(row, selected.Columns, "xTeasers"), sourceLinks.GetValueOrDefault("x")?.Urls.Count ?? 0),
-                Count(row, selected.Columns, "redditTeasers"), links, null, sourceLinks));
+                Count(row, selected.Columns, "redditTeasers"), links, null, sourceLinks, category));
         }
         if (items.Count > 5000)
             throw new GoogleCatalogueException("workbook-row-limit");

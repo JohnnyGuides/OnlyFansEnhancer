@@ -1056,3 +1056,190 @@ test("linked destination requires confirmation before any catalogue write", asyn
     await fixture.close();
   }
 });
+
+function installBindingCatalogue(page, { missing = false } = {}) {
+  return page.evaluate((missing) => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = (message, callback) =>
+      message.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY"
+        ? callback({ ok: true, availability: { ready: true } })
+        : send(message, callback);
+    globalThis.catalogueWrites = [];
+    globalThis.snapshotReads = 0;
+    const entry = {
+      row: 42,
+      id: "studio",
+      itemId: "studio",
+      title: "Studio tour",
+      description: "Original description",
+      category: "GameSync",
+      seasonArc: "Setaria",
+      releaseDate: "2026-09-25",
+      fingerprint: "a".repeat(64),
+      publicationState: { onlyfans: "empty" },
+    };
+    globalThis.CreatorCatalogueClient = {
+      loadConfig: async () => ({ source: "desktop", connected: true }),
+      getCatalogueSnapshot: async () => {
+        snapshotReads++;
+        return {
+          status: "snapshot",
+          source: "desktop",
+          // The removed entry disappears from the refreshed snapshot.
+          rows: missing && catalogueWrites.length ? [] : [entry],
+        };
+      },
+      writeUploadCatalogueEntry: async (value) => {
+        catalogueWrites.push(value);
+        throw new Error(
+          missing
+            ? "catalogue-entry-not-on-sheet"
+            : "Fixture stops before external writes",
+        );
+      },
+    };
+    globalThis.CreatorUploadQueueEvidence = {
+      snapshot: () =>
+        Object.fromEntries(
+          ["onlyfans", "fansly", "manyvids"].map((p) => [
+            p,
+            { verified: true, scheduled: [], occupiedFridays: [] },
+          ]),
+        ),
+    };
+  }, missing);
+}
+
+async function uploadLabel(page, label) {
+  await page
+    .waitForFunction(
+      (label) =>
+        !document.querySelector("#uploadButton").disabled &&
+        document.querySelector("#uploadButton").textContent === label,
+      label,
+    )
+    .catch(async (error) => {
+      const actual = await page.evaluate(() => ({
+        label: document.querySelector("#uploadButton").textContent,
+        disabled: document.querySelector("#uploadButton").disabled,
+        description: document.querySelector("#uploadDescription").value,
+      }));
+      throw new Error(`Expected "${label}", saw ${JSON.stringify(actual)}`, {
+        cause: error,
+      });
+    });
+}
+
+test("clicking an auto-matched entry overwrites every field and binds a plain upload", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const { page } = fixture;
+    await installBindingCatalogue(page);
+    await fixture.ready();
+    await page.locator("#uploadDescription").fill("");
+    await page.locator("#uploadTitle").fill("Studio tour");
+    // An empty description takes the matched entry's text instead of
+    // reading as an edit that would blank the sheet.
+    await uploadLabel(page, "Upload");
+    assert.equal(
+      await page.locator("#uploadDescription").inputValue(),
+      "Original description",
+    );
+    for (const [selector, value] of [
+      ["#uploadCategory", "Other category"],
+      ["#uploadSeason", "Other season"],
+    ]) {
+      const previous = await page.locator(selector).inputValue();
+      await page.evaluate(
+        ([selector, value]) => {
+          const select = document.querySelector(selector);
+          select.add(new Option(value, value));
+          select.value = value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+        [selector, value],
+      );
+      await uploadLabel(page, "Update & upload");
+      await page.evaluate(
+        ([selector, value]) => {
+          const select = document.querySelector(selector);
+          select.value = value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+        [selector, previous],
+      );
+      await uploadLabel(page, "Upload");
+    }
+    await page.locator("#uploadDescription").fill("Typed over the entry");
+    await uploadLabel(page, "Update & upload");
+    await page.locator("#catalogueCards .catalogue-card").first().click();
+    await uploadLabel(page, "Upload");
+    assert.deepEqual(
+      await page.evaluate(() => [
+        document.querySelector("#uploadTitle").value,
+        document.querySelector("#uploadDescription").value,
+        document.querySelector("#uploadCategory").value,
+        document.querySelector("#uploadSeason").value,
+      ]),
+      ["Studio tour", "Original description", "GameSync", "Setaria"],
+    );
+    await page.locator("#uploadDescription").fill("Edited description");
+    await uploadLabel(page, "Update & upload");
+    await page.locator("#catalogueCards .catalogue-card").first().click();
+    await uploadLabel(page, "Upload");
+    assert.equal(
+      await page.locator("#uploadDescription").inputValue(),
+      "Original description",
+    );
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() => catalogueWrites.length === 1);
+    const write = await page.evaluate(() => catalogueWrites[0]);
+    assert.equal(write.mode, "update");
+    assert.equal(write.id, "studio");
+    assert.equal(write.title, "Studio tour");
+    assert.equal(write.description, "Original description");
+    assert.equal(write.expectedTitle, "Studio tour");
+    assert.equal(write.expectedDescription, "Original description");
+    assert.equal(write.category, "GameSync");
+    assert.equal(write.expectedCategory, "GameSync");
+    assert.equal(write.seasonArc, "Setaria");
+    assert.equal(write.expectedSeasonArc, "Setaria");
+    assert.deepEqual(await fixture.commands(), []);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("an entry missing from the sheet clears the binding and asks for a new choice", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const { page } = fixture;
+    await installBindingCatalogue(page, { missing: true });
+    await fixture.ready();
+    await page.locator("#uploadTitle").fill("Studio tour");
+    await uploadLabel(page, "Update & upload");
+    await page.locator("#catalogueCards .catalogue-card").first().click();
+    await uploadLabel(page, "Upload");
+    const readsBefore = await page.evaluate(() => snapshotReads);
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#uploadError")
+        .textContent.includes("no longer on the sheet"),
+    );
+    const error = await page.locator("#uploadError").textContent();
+    assert.match(error, /Choose the entry again/);
+    assert.doesNotMatch(error, /catalogue-entry-not-on-sheet/);
+    assert.equal(await page.evaluate(() => catalogueWrites.length), 1);
+    assert.ok((await page.evaluate(() => snapshotReads)) > readsBefore);
+    assert.equal(
+      await page.locator('#catalogueCards [aria-pressed="true"]').count(),
+      0,
+    );
+    assert.deepEqual(await fixture.commands(), []);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});

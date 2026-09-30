@@ -19,6 +19,26 @@ public sealed class UploadCatalogueTests
     }
 
     [TestMethod]
+    public void GoogleImportCarriesCategoryToTheUploadRowWithoutChangingItsFingerprint()
+    {
+        using TestStore test=new();
+        WorkbookCatalogueItem Item(string? category)=>new(2,"tower-11","Title","Description","2026-09-11","Tower","11",0,0,
+            new Dictionary<string,string>(),null,null,category);
+        test.Store.ImportWorkbookProjection(new("work","1",true,[Item(null)]),false);
+        var before=test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("",before.Category);
+        test.Store.ImportWorkbookProjection(new("work","1",true,[Item(" GameSync ")]),false);
+        var after=test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("GameSync",after.Category);
+        Assert.AreEqual(before.Fingerprint,after.Fingerprint);
+        StringAssert.Contains(System.Text.Json.JsonSerializer.Serialize(after,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)),"\"category\":\"GameSync\"");
+        // A projection without Category (the Google sync path) leaves the imported value alone.
+        test.Store.ImportWorkbookProjection(new("work","1",true,[Item(null)]));
+        Assert.AreEqual("GameSync",test.Store.GetUploadCatalogueSnapshot().Rows.Single().Category);
+    }
+
+    [TestMethod]
     public void ConfirmedRepeatPreservesOriginalAndNewLinksWithoutHidingFutureConflicts()
     {
         using TestStore test = new();

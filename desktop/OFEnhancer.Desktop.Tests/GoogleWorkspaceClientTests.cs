@@ -254,6 +254,86 @@ public sealed class GoogleWorkspaceClientTests
         Assert.AreEqual("catalogue-entry-changed", error.Code);
     }
 
+    [TestMethod]
+    public async Task UploadEntryWriterReportsAMissingIdWithoutWriting()
+    {
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, UploadWorkbookResponse(null, includeNotes: true).ToJsonString(),
+            UploadWorkbookResponse(null).ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            writer.WriteAsync(new("update", "Old video", "Old description", "2026-09-18",
+                Id: "removed-video", ExpectedTitle: "Old video", ExpectedDescription: "Old description"),
+                CancellationToken.None));
+
+        Assert.AreEqual("catalogue-entry-missing", error.Code);
+        Assert.AreEqual(0, handler.Requests.Count(request => request.Method == HttpMethod.Post));
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterLeavesUntouchedSeasonAndCategoryAloneEvenWhenTheFormIsBlank()
+    {
+        (string metadata, string discovery, string before) = SeasonCategoryWorkbook("Old video");
+        RecordingHandler handler = new();
+        foreach (string response in new[] { metadata, discovery, before })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(new("update", "Old video", "Old description", "2026-09-18",
+            Id: "old-video", ExpectedTitle: "Old video", ExpectedDescription: "Old description",
+            Category: "", SeasonArc: "", ExpectedCategory: "", ExpectedSeasonArc: ""), CancellationToken.None);
+
+        Assert.AreEqual("already-updated", result.Status);
+        Assert.AreEqual(3, handler.Requests.Count);
+        Assert.AreEqual(0, handler.Requests.Count(request => request.Method == HttpMethod.Post));
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterWritesOnlyFieldsMovedOffTheSelectionBaseline()
+    {
+        (string metadata, string discovery, string before) = SeasonCategoryWorkbook("Old video");
+        (_, _, string after) = SeasonCategoryWorkbook("Changed video");
+        RecordingHandler handler = new();
+        foreach (string response in new[] { metadata, discovery, before,
+            """{"range":"Videos!C2","values":[["Old video"]]}""", "{}", metadata, discovery, after })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(new("update", "Changed video", "Old description", "2026-09-18",
+            Id: "old-video", ExpectedTitle: "Old video", ExpectedDescription: "Old description",
+            Category: "GameSync", SeasonArc: "Setaria", ExpectedCategory: "GameSync", ExpectedSeasonArc: "Setaria"),
+            CancellationToken.None);
+
+        Assert.AreEqual("updated", result.Status);
+        RecordedRequest mutation = handler.Requests.Single(request => request.Method == HttpMethod.Post);
+        string[] ranges = JsonDocument.Parse(mutation.Body).RootElement.GetProperty("data").EnumerateArray()
+            .Select(update => update.GetProperty("range").GetString()!).ToArray();
+        CollectionAssert.AreEqual(new[] { "'Videos'!C2" }, ranges);
+    }
+
+    private static (string Metadata, string Discovery, string Catalogue) SeasonCategoryWorkbook(string title)
+    {
+        JsonObject catalogue = UploadWorkbookResponse(null);
+        JsonArray rows = catalogue["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
+        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Category" }));
+        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Season" }));
+        rows[1]!["values"]![2]!["formattedValue"] = title;
+        rows[1]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "GameSync" }));
+        rows[1]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Setaria" }));
+        JsonObject discovery = JsonNode.Parse(catalogue.ToJsonString())!.AsObject();
+        discovery["sheets"]!.AsArray().Add(UploadWorkbookResponse(null, includeNotes: true)["sheets"]![1]!.DeepClone());
+        static string Rename(string json) => json.Replace("2026 Video Catalogue", "Videos", StringComparison.Ordinal);
+        return (Rename(WorkbookMetadataJson), Rename(discovery.ToJsonString()), Rename(catalogue.ToJsonString()));
+    }
+
     private static JsonObject UploadWorkbookResponse(string? addedId, bool includeNotes = false)
     {
         JsonObject response = ImportWorkbookResponse(["ID", "Release", "Title", "Description"],

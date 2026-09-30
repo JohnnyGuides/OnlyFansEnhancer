@@ -3230,11 +3230,13 @@ async function validateCreatorUploadRequest(message) {
       (item, index) =>
         item.role !== `media${index + 1}` ||
         !item.name ||
-        !["video", "image"].includes(item.kind) ||
+        !["video", "image", "audio"].includes(item.kind) ||
         draft.fileProof[item.role]?.name !== item.name ||
         (item.kind === "image"
           ? !/\.(png|jpe?g)$/i.test(item.name)
-          : !/\.(mp4|m4v|mov|mkv|avi|webm)$/i.test(item.name)),
+          : item.kind === "audio"
+            ? !/\.(mp3|m4a|wav|aac|ogg|flac)$/i.test(item.name)
+            : !/\.(mp4|m4v|mov|mkv|avi|webm)$/i.test(item.name)),
     ) ||
     (draft.mediaFiles.length &&
       !targets.some((target) => ["onlyfans", "fansly"].includes(target))) ||

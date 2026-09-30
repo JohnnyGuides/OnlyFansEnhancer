@@ -67,8 +67,9 @@ internal static class WorkbookProjectionImporter
             command.ExecuteNonQuery();
             if (!updateGoogleBindings)
                 Execute(connection, transaction,
-                    "UPDATE catalogue_items SET source_link_cells_json = $cells WHERE item_id = $itemId",
-                    ("$cells", JsonSerializer.Serialize(row.SourceLinkCells, StorageJson)), ("$itemId", itemId));
+                    "UPDATE catalogue_items SET source_link_cells_json = $cells, category = $category WHERE item_id = $itemId",
+                    ("$cells", JsonSerializer.Serialize(row.SourceLinkCells, StorageJson)),
+                    ("$category", (object?)row.Category ?? DBNull.Value), ("$itemId", itemId));
             bindings.Add(new GoogleRowBinding(
                 validated.WorkbookId,
                 validated.SheetId,
@@ -170,7 +171,8 @@ internal static class WorkbookProjectionImporter
                 row.RedditTeasers,
                 ValidateLinks(row.PlatformLinks),
                 metadataId,
-                ValidateSourceLinkCells(row.SourceLinkCells)
+                ValidateSourceLinkCells(row.SourceLinkCells),
+                Optional(row.Category, 200, "category")
             ));
         }
         return new ValidatedProjection(workbookId, sheetId, projection.Complete, rows);
@@ -265,7 +267,9 @@ internal static class WorkbookProjectionImporter
 
     private sealed record ValidatedProjection(string WorkbookId, string SheetId, bool Complete, IReadOnlyList<ValidatedWorkbookItem> Items);
     private sealed record ValidatedWorkbookItem(int SourceRow, string SourceKey, string Title, string Description, string? PlannedDate, string? Series, string? Episode, int XTeasers, int RedditTeasers, IReadOnlyDictionary<string, string> PlatformLinks, string? MetadataId,
-        [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyDictionary<string, CatalogueSourceLinkCell> SourceLinkCells);
+        [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyDictionary<string, CatalogueSourceLinkCell> SourceLinkCells,
+        // Excluded from the binding fingerprint so existing Google bindings stay verified.
+        [property: System.Text.Json.Serialization.JsonIgnore] string? Category);
 }
 
 public sealed partial class CatalogueStore

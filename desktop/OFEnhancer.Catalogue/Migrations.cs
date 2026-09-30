@@ -124,5 +124,11 @@ internal static class Migrations
         """
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour];
+    // Nullable so existing rows load unchanged; values fill on the next Google import or write.
+    internal static readonly MigrationStep VersionFive = new(
+        5,
+        "ALTER TABLE catalogue_items ADD COLUMN category TEXT;"
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive];
 }

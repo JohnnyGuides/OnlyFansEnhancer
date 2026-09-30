@@ -340,6 +340,12 @@
               ...(payload.expectedDescription !== undefined
                 ? { expectedDescription: String(payload.expectedDescription) }
                 : {}),
+              ...(payload.expectedCategory !== undefined
+                ? { expectedCategory: String(payload.expectedCategory) }
+                : {}),
+              ...(payload.expectedSeasonArc !== undefined
+                ? { expectedSeasonArc: String(payload.expectedSeasonArc) }
+                : {}),
             }
           : {};
     // The desktop-hosted console delegates identity to the extension background.

@@ -726,6 +726,49 @@ function send(message) {
   assert.equal(validatedUpload.draft.fanslyPreset, "defaulT");
   assert.equal(validatedUpload.draft.fullFilename, "Episode 42 (full).mp4");
   assert.equal(validatedUpload.draft.manyvidsThumbnail, true);
+  const extraMediaRequest = (name, kind) => ({
+    ...validatedUpload,
+    targets: ["onlyfans", "fansly"],
+    draft: {
+      ...validatedUpload.draft,
+      manyvidsThumbnail: false,
+      mediaFiles: [{ role: "media1", name, kind }],
+      fileProof: {
+        full: {
+          name: validatedUpload.draft.fullFilename,
+          size: 10,
+          lastModified: 1,
+          type: "video/mp4",
+        },
+        media1: { name, size: 10, lastModified: 1, type: "" },
+      },
+    },
+  });
+  for (const [name, kind] of [
+    ["voice note.mp3", "audio"],
+    ["track.FLAC", "audio"],
+  ]) {
+    context.extraRequest = extraMediaRequest(name, kind);
+    const accepted = await vm.runInContext(
+      "validateCreatorUploadRequest(extraRequest)",
+      context,
+    );
+    assert.equal(accepted.draft.mediaFiles[0].kind, "audio");
+  }
+  for (const [name, kind] of [
+    ["clip.mp4", "audio"],
+    ["track.mp3", "video"],
+    ["notes.txt", "audio"],
+    ["script.funscript", "video"],
+    ["track.mp3", "document"],
+  ]) {
+    context.extraRequest = extraMediaRequest(name, kind);
+    await assert.rejects(
+      vm.runInContext("validateCreatorUploadRequest(extraRequest)", context),
+      /Additional upload media does not match/,
+      `${name} as ${kind} must stay rejected`,
+    );
+  }
   context.proofSession = {
     draft: validatedUpload.draft,
   };

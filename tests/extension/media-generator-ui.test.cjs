@@ -349,6 +349,9 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
         ),
       });
     }
+    const chosenPosition = await page
+      .locator("#thumbnailFramePosition")
+      .textContent();
     await page.locator("#useThumbnailFrame").click();
     await page.waitForFunction(
       () => !document.querySelector("#thumbnailFrameDialog").open,
@@ -357,10 +360,105 @@ test("Upload Hub frame picker uses a chosen video frame", async () => {
       await page.locator("#manyvidsThumbnailSummary").textContent(),
       /frame 640x360/,
     );
+    // Reopening the picker restores the last chosen frame, not the default.
+    await page.locator("#chooseThumbnailFrame").click();
+    await page.waitForFunction(
+      () => !document.querySelector("#thumbnailFrameTime").disabled,
+    );
+    assert.equal(
+      await page.locator("#thumbnailFramePosition").textContent(),
+      chosenPosition,
+    );
+    assert.notEqual(chosenPosition.split(".")[0], "0:00");
+    await page.locator("#cancelThumbnailFrame").click();
+    // Replacing the full video forgets the remembered frame.
+    const replacementPath = path.join(work, "neutral-replacement.mp4");
+    fs.copyFileSync(videoPath, replacementPath);
+    await page.locator("#uploadFullVideo").setInputFiles(replacementPath);
+    await page.waitForFunction(
+      () => !document.querySelector("#chooseThumbnailFrame").disabled,
+    );
+    await page.locator("#chooseThumbnailFrame").click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#thumbnailFrameDialog").open &&
+        document.querySelector("#thumbnailFrameDuration").textContent !==
+          "0:00" &&
+        !document.querySelector("#thumbnailFrameTime").disabled,
+    );
+    assert.notEqual(
+      await page.locator("#thumbnailFramePosition").textContent(),
+      chosenPosition,
+    );
+    await page.locator("#cancelThumbnailFrame").click();
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();
     fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extra media chips sit compactly beside Add media with a remove control", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const page = fixture.page;
+    await page.setViewportSize({ width: 1200, height: 850 });
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "Episode main.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign fixture"),
+    });
+    await page.locator("#uploadAdditionalMedia").setInputFiles([
+      {
+        name: "a very long neutral extra clip name for the layout check.mp4",
+        mimeType: "video/mp4",
+        buffer: Buffer.from("benign fixture"),
+      },
+      {
+        name: "ambient loop.mp3",
+        mimeType: "audio/mpeg",
+        buffer: Buffer.from("benign fixture"),
+      },
+    ]);
+    const chips = page.locator("#additionalMediaList button");
+    assert.equal(await chips.count(), 2);
+    const addBox = await page
+      .locator('[data-choose-file="uploadAdditionalMedia"]')
+      .boundingBox();
+    for (let index = 0; index < 2; index += 1) {
+      const box = await chips.nth(index).boundingBox();
+      assert.ok(box.x > addBox.x + addBox.width - 1, "chip right of Add media");
+      assert.ok(Math.abs(box.y - addBox.y) < addBox.height, "same row");
+      assert.ok(box.width <= 171, `chip ${index} is compact`);
+    }
+    assert.equal(
+      await chips
+        .first()
+        .locator(".additional-media-name")
+        .evaluate((node) => node.scrollWidth > node.clientWidth),
+      true,
+    );
+    assert.equal(
+      await chips.nth(1).getAttribute("aria-label"),
+      "Remove ambient loop.mp3",
+    );
+    assert.equal(
+      await chips.nth(1).locator(".additional-media-remove").textContent(),
+      "×",
+    );
+    assert.equal(await page.locator("#draftErrors").textContent(), "");
+    if (process.env.OFENHANCER_REVIEW_DIR) {
+      fs.mkdirSync(process.env.OFENHANCER_REVIEW_DIR, { recursive: true });
+      await page.locator("#additionalMediaRow").scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: path.join(process.env.OFENHANCER_REVIEW_DIR, "media-chips.png"),
+      });
+    }
+    await chips.nth(1).click();
+    assert.equal(await chips.count(), 1);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
   }
 });
 

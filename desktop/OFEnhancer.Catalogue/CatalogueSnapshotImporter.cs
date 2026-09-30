@@ -504,7 +504,8 @@ public sealed partial class CatalogueStore
         command.CommandText =
             """
             SELECT item_id, source_key, source_row, title, description, planned_date,
-                   series, episode, x_teasers, reddit_teasers, platform_links_json, archived, source_link_cells_json
+                   series, episode, x_teasers, reddit_teasers, platform_links_json, archived, source_link_cells_json,
+                   category
             FROM catalogue_items
             WHERE $includeArchived = 1 OR archived = 0
             ORDER BY CASE WHEN planned_date IS NULL THEN 1 ELSE 0 END, planned_date, title, item_id
@@ -531,7 +532,8 @@ public sealed partial class CatalogueStore
                     reader.GetInt32(9),
                     links,
                     reader.GetInt32(11) == 1,
-                    SourceLinkCells: JsonSerializer.Deserialize<Dictionary<string, CatalogueSourceLinkCell>>(reader.GetString(12)) ?? []
+                    SourceLinkCells: JsonSerializer.Deserialize<Dictionary<string, CatalogueSourceLinkCell>>(reader.GetString(12)) ?? [],
+                    Category: reader.IsDBNull(13) ? null : reader.GetString(13)
                 )
             );
         }

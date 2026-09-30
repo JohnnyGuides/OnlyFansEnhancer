@@ -9,6 +9,7 @@
   };
   const VIDEO_EXTENSIONS = /\.(?:mp4|m4v|mov|webm|avi|mkv)$/i;
   const IMAGE_EXTENSIONS = /\.(?:jpe?g|png)$/i;
+  const AUDIO_EXTENSIONS = /\.(?:mp3|m4a|wav|aac|ogg|flac)$/i;
   const TARGETS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
   const SOCIAL_TARGETS = new Set(["x", "reddit"]);
   const QUEUE_EVIDENCE_BLOCKER =
@@ -137,6 +138,20 @@
         ? ["image/png", "image/jpeg"].includes(mimeType)
         : IMAGE_EXTENSIONS.test(String(file.name || ""))),
     );
+  }
+
+  function isAudioFile(file) {
+    const mimeType = String(file?.type || "");
+    return Boolean(
+      file &&
+      Number(file.size) > 0 &&
+      AUDIO_EXTENSIONS.test(String(file.name || "")) &&
+      (!mimeType || mimeType.startsWith("audio/")),
+    );
+  }
+
+  function extraMediaKind(file) {
+    return isImageFile(file) ? "image" : isAudioFile(file) ? "audio" : "video";
   }
 
   const normalizedThumbnails = new WeakMap();
@@ -336,9 +351,14 @@
     if (
       mainEnabled &&
       (extraMedia.length > 8 ||
-        extraMedia.some((file) => !isVideoFile(file) && !isImageFile(file)))
+        extraMedia.some(
+          (file) =>
+            !isVideoFile(file) && !isImageFile(file) && !isAudioFile(file),
+        ))
     )
-      errors.push("Choose up to eight additional videos or PNG/JPEG images.");
+      errors.push(
+        "Choose up to eight additional videos, audio files, or PNG/JPEG images.",
+      );
     const additionalOnly =
       extraMedia.length > 0 &&
       selectedTargets.every((target) =>
@@ -1011,6 +1031,7 @@
     let fullFile = null;
     let additionalMedia = [];
     let openingFrame = null;
+    let rememberedFrame = null;
     let teaserFile = null;
     let thumbnailFile = null;
     let thumbnailCatalogueId = null;
@@ -1039,6 +1060,7 @@
     let uploadWithoutSheet = false;
     let catalogueFallback = false;
     let lastPrefilledCatalogueRow = null;
+    let catalogueBaseline = null;
     let activeSession = null;
     let resumable = null;
     let runBusy = false;
@@ -2334,6 +2356,39 @@
       renderMatch(currentMatch);
     }
 
+    // The selected entry's values as the form shows them. Update & upload
+    // writes only fields that moved off this baseline.
+    function catalogueBaselineOf(candidate) {
+      const option = (select, value) =>
+        value
+          ? [...select.options].find(
+              (item) =>
+                item.value.toLocaleLowerCase() === value.toLocaleLowerCase(),
+            )?.value || value
+          : "";
+      return {
+        row: candidate.row,
+        id: candidate.id,
+        title: (candidate.title || "").trim(),
+        description: (candidate.description || "").trim(),
+        category: option(uploadCategory, candidate.category),
+        seasonArc: option(uploadSeason, candidate.seasonArc),
+        sheetCategory: candidate.category || "",
+        sheetSeasonArc: candidate.seasonArc || "",
+      };
+    }
+
+    function catalogueEntryEdited() {
+      const baseline = catalogueBaseline;
+      return (
+        !baseline ||
+        title.value.trim() !== baseline.title ||
+        description.value.trim() !== baseline.description ||
+        uploadCategory.value !== baseline.category ||
+        uploadSeason.value !== baseline.seasonArc
+      );
+    }
+
     function applyProposal(proposal, catalogueStatus = "matched") {
       uploadWithoutSheet = false;
       catalogueFallback = false;
@@ -2356,13 +2411,12 @@
       if (newlySelected) {
         if (candidate.title) title.value = candidate.title;
         description.value = candidate.description || "";
-        uploadSeason.value = candidate.seasonArc || "";
-        if (candidate.seasonArc && !uploadSeason.value)
-          ensureMetadataOption(uploadSeason, candidate.seasonArc);
-        if (candidate.seasonArc) uploadSeason.value = candidate.seasonArc;
-        if (candidate.category)
-          ensureMetadataOption(uploadCategory, candidate.category);
-        uploadCategory.value = candidate.category || "";
+        uploadSeason.value = candidate.seasonArc
+          ? ensureMetadataOption(uploadSeason, candidate.seasonArc)
+          : "";
+        uploadCategory.value = candidate.category
+          ? ensureMetadataOption(uploadCategory, candidate.category)
+          : "";
         for (const metadata of metadataControls)
           renderMetadataSelection(metadata);
         if (candidate.seasonArc && workflowProfiles) {
@@ -2376,6 +2430,13 @@
         }
         lastPrefilledCatalogueRow = candidate.row;
       }
+      if (
+        catalogueStatus === "matched" &&
+        (newlySelected ||
+          catalogueBaseline?.row !== candidate.row ||
+          catalogueBaseline?.id !== candidate.id)
+      )
+        catalogueBaseline = catalogueBaselineOf(candidate);
       const inferredTargets = [...proposal.targets.executable];
       if (
         !candidate.pornhubLink &&
@@ -2453,7 +2514,7 @@
           mediaFiles: additionalMedia.map((file, index) => ({
             role: `media${index + 1}`,
             name: file.name,
-            kind: isImageFile(file) ? "image" : "video",
+            kind: extraMediaKind(file),
           })),
           releaseDate: value.releaseDate,
           scheduleIntent: value.scheduleIntent,
@@ -2589,7 +2650,9 @@
         currentMatch?.status === "upload-only"
           ? "Upload"
           : currentMatch?.status === "matched"
-            ? "Update & upload"
+            ? catalogueEntryEdited()
+              ? "Update & upload"
+              : "Upload"
             : "Create & upload";
       uploadButton.disabled =
         runBusy ||
@@ -2845,6 +2908,25 @@
               uploadSeason.value = season;
               renderMetadataSelection(metadataControls[1]);
             }
+            if (
+              lastPrefilledCatalogueRow !== exactMatches[0].row &&
+              !uploadCategory.value &&
+              exactMatches[0].category
+            ) {
+              uploadCategory.value = ensureMetadataOption(
+                uploadCategory,
+                exactMatches[0].category,
+              );
+              renderMetadataSelection(metadataControls[0]);
+            }
+            // An empty description would otherwise read as an edit and blank
+            // the sheet's description on Update & upload.
+            if (
+              lastPrefilledCatalogueRow !== exactMatches[0].row &&
+              !description.value.trim() &&
+              exactMatches[0].description
+            )
+              description.value = exactMatches[0].description;
             lastPrefilledCatalogueRow = exactMatches[0].row;
             applyProposal(buildProposal(exactMatches[0].row));
             return;
@@ -3666,30 +3748,71 @@
         if (expected?.status === "needs-queue-evidence")
           throw new Error(QUEUE_EVIDENCE_BLOCKER);
       }
+      const edited = mode === "update" && catalogueEntryEdited();
+      const baseline =
+        mode === "update" &&
+        catalogueBaseline?.row === candidate.row &&
+        catalogueBaseline?.id === candidate.id
+          ? catalogueBaseline
+          : catalogueBaselineOf(candidate);
       matchStatus.textContent =
         mode === "new"
           ? "Creating the new row in Work…"
-          : "Updating the selected Work row…";
-      const written =
-        await globalThis.CreatorCatalogueClient.writeUploadCatalogueEntry({
-          mode,
-          title: title.value.trim(),
-          description: description.value.trim(),
-          releaseDate: releaseDate.value,
-          category: uploadCategory.value,
-          seasonArc: uploadSeason.value,
-          ...(mode === "new"
-            ? {
-                fileName: (fullFile || pornhubFile)?.name,
-                fileSize: (fullFile || pornhubFile)?.size,
-                fileLastModified: (fullFile || pornhubFile)?.lastModified,
-              }
-            : {
-                id: candidate.id,
-                expectedTitle: candidate.title,
-                expectedDescription: candidate.description,
-              }),
-        });
+          : edited
+            ? "Updating the selected Work row…"
+            : "Checking the selected Work row…";
+      let written;
+      try {
+        written =
+          await globalThis.CreatorCatalogueClient.writeUploadCatalogueEntry({
+            mode,
+            title: title.value.trim(),
+            description: description.value.trim(),
+            releaseDate: releaseDate.value,
+            category: uploadCategory.value,
+            seasonArc: uploadSeason.value,
+            ...(mode === "new"
+              ? {
+                  fileName: (fullFile || pornhubFile)?.name,
+                  fileSize: (fullFile || pornhubFile)?.size,
+                  fileLastModified: (fullFile || pornhubFile)?.lastModified,
+                }
+              : {
+                  id: candidate.id,
+                  expectedTitle: baseline.title,
+                  expectedDescription: baseline.description,
+                  expectedCategory: baseline.sheetCategory,
+                  expectedSeasonArc: baseline.sheetSeasonArc,
+                  // An untouched field keeps the sheet value exactly.
+                  ...(uploadCategory.value === baseline.category
+                    ? { category: baseline.sheetCategory }
+                    : {}),
+                  ...(uploadSeason.value === baseline.seasonArc
+                    ? { seasonArc: baseline.sheetSeasonArc }
+                    : {}),
+                }),
+          });
+      } catch (error) {
+        if (error?.message !== "catalogue-entry-not-on-sheet") throw error;
+        // The desktop already re-read the sheet and retried this ID once.
+        selectedCatalogueRow = null;
+        lastPrefilledCatalogueRow = null;
+        catalogueBaseline = null;
+        currentMatch = null;
+        currentProposal = null;
+        try {
+          currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        } catch {
+          // The guidance below still applies; the picker refreshes on retry.
+        }
+        renderPicker();
+        catalogueSelectionStatus.textContent =
+          "The selected catalogue entry is no longer on the sheet.";
+        throw new Error(
+          "The catalogue entry you selected is no longer on the sheet. Choose the entry again from the catalogue list.",
+          { cause: error },
+        );
+      }
       currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
       const saved = currentSnapshot.rows.find(
         (row) => row.id === written.id && row.row === written.row,
@@ -3700,6 +3823,7 @@
         );
       selectedCatalogueRow = saved.row;
       lastPrefilledCatalogueRow = saved.row;
+      catalogueBaseline = catalogueBaselineOf(saved);
       currentMatch = { status: "matched", candidate: saved };
       currentProposal = buildProposal(saved.row);
       if (
@@ -3713,7 +3837,10 @@
           "The Work row was saved, but the upload schedule needs review. Check the selected destinations before retrying Upload.",
         );
       renderPicker();
-      catalogueSelectionStatus.textContent = `Work row ${saved.row} ${written.status === "created" ? "created" : "updated"} and verified.`;
+      catalogueSelectionStatus.textContent =
+        written.status === "already-updated" && !edited
+          ? `Work row ${saved.row} verified.`
+          : `Work row ${saved.row} ${written.status === "created" ? "created" : "updated"} and verified.`;
     }
 
     async function startUpload() {
@@ -3897,7 +4024,7 @@
             mediaFiles: additionalMedia.map((file, index) => ({
               role: `media${index + 1}`,
               name: file.name,
-              kind: isImageFile(file) ? "image" : "video",
+              kind: extraMediaKind(file),
             })),
             pornhubFilename: selectedPornhubFile(value.pornhubMode)?.name || "",
             manyvidsThumbnail:
@@ -4541,6 +4668,7 @@
       mainPublishMode.checked = false;
       uploadWithoutSheet = false;
       lastPrefilledCatalogueRow = null;
+      catalogueBaseline = null;
       for (const target of [onlyfans, fansly, manyvids, pornhub, pornhubPaid])
         target.checked = target.defaultChecked;
       socialX.checked = false;
@@ -4636,6 +4764,7 @@
         input.value = "";
       selectedCatalogueRow = null;
       lastPrefilledCatalogueRow = null;
+      catalogueBaseline = null;
       manualTargets = null;
       renderFilePickers();
       for (const control of [onlyfans, fansly, manyvids, pornhub])
@@ -5364,9 +5493,14 @@
           await globalThis.CreatorMediaGenerator.waitForMetadata(frameVideo);
         if (!current()) return;
         frameDuration.textContent = formatPosition(duration);
-        timelineZoom = 1;
-        timelineStart = 0;
-        crop = { zoom: 1, x: 0, y: 0 };
+        const remembered =
+          rememberedFrame?.source === source &&
+          rememberedFrame.thumbnail === thumbnailFile
+            ? rememberedFrame
+            : null;
+        timelineZoom = remembered?.timelineZoom ?? 1;
+        timelineStart = remembered?.timelineStart ?? 0;
+        crop = remembered ? { ...remembered.crop } : { zoom: 1, x: 0, y: 0 };
         const previewWidth = Math.min(960, frameVideo.videoWidth);
         cropPreview.width = previewWidth;
         cropPreview.height = Math.round(
@@ -5376,7 +5510,9 @@
         if (!current()) return;
         await drawFrameStrip(++stripRevision);
         if (!current()) return;
-        const initialTime = Math.min(3, duration * 0.02);
+        const initialTime = remembered
+          ? Math.min(remembered.seconds, duration)
+          : Math.min(3, duration * 0.02);
         await globalThis.CreatorMediaGenerator.seek(frameVideo, initialTime);
         if (!current()) return;
         renderTimeline(frameVideo.currentTime);
@@ -5421,6 +5557,14 @@
         if (!frameOperationCurrent(generation, source, proof)) return;
         thumbnailFile = generated;
         thumbnailFile.source = "generated";
+        rememberedFrame = {
+          source,
+          thumbnail: generated,
+          seconds,
+          crop: selectedFrameCrop,
+          timelineZoom,
+          timelineStart,
+        };
         openingFrame = keepOpeningFrame
           ? { seconds, crop: selectedFrameCrop }
           : null;
@@ -5455,9 +5599,11 @@
       if (teaserFile?.source === "generated") teaserFile = null;
       if (thumbnailFile?.source === "generated") thumbnailFile = null;
       openingFrame = null;
+      rememberedFrame = null;
       fullFile = fullInput.files?.[0] || null;
       selectedCatalogueRow = null;
       lastPrefilledCatalogueRow = null;
+      catalogueBaseline = null;
       manualTargets = null;
       get("#fullFileSummary").textContent = fileSummary(
         fullFile,
@@ -5604,6 +5750,7 @@
     });
     thumbnailInput.addEventListener("change", () => {
       autoThumbnailAssetId = null;
+      rememberedFrame = null;
       thumbnailFile = thumbnailInput.files?.[0] || null;
       if (thumbnailFile && !catalogueThumbnails.hidden)
         catalogueThumbnailStatus.textContent = `Using ${thumbnailFile.name}.`;
@@ -5868,6 +6015,10 @@
       if (!value) return;
       selectedCatalogueRow = value === "new" ? "new" : Number(value.slice(4));
       manualTargets = null;
+      // An explicit choice binds the entry and copies all of its fields,
+      // including a re-click on an auto-matched entry.
+      lastPrefilledCatalogueRow = null;
+      catalogueBaseline = null;
       const proposal = buildProposal(selectedCatalogueRow);
       applyProposal(
         proposal,

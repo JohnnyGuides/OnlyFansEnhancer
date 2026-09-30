@@ -461,8 +461,32 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
         try
         {
-            GoogleUploadEntryResult result = session.WriteUploadEntryAsync(request, _lifetime.Token)
-                .GetAwaiter().GetResult();
+            GoogleUploadEntryResult result;
+            try
+            {
+                result = session.WriteUploadEntryAsync(request, _lifetime.Token).GetAwaiter().GetResult();
+            }
+            catch (GoogleCatalogueException missing) when (missing.Code == "catalogue-entry-missing")
+            {
+                // The selected ID may come from a stale local snapshot. Refresh it from the sheet and
+                // retry the same ID once; never fall back to a new row or a title match.
+                GoogleCatalogueImportPreview preview = session.ReadImportAsync(_lifetime.Token).GetAwaiter().GetResult();
+                lock (_gate)
+                {
+                    ThrowIfDisposed();
+                    if (!ReferenceEquals(session, _session))
+                        throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                    _store.ImportWorkbookProjection(preview.Projection, updateGoogleBindings: false);
+                }
+                try
+                {
+                    result = session.WriteUploadEntryAsync(request, _lifetime.Token).GetAwaiter().GetResult();
+                }
+                catch (GoogleCatalogueException again) when (again.Code == "catalogue-entry-missing")
+                {
+                    throw new GoogleCatalogueControllerException("catalogue-entry-not-on-sheet");
+                }
+            }
             lock (_gate)
             {
                 ThrowIfDisposed();

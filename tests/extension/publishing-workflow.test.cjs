@@ -286,6 +286,38 @@ test("additional photos and videos can accompany the primary ManyVids video", ()
   assert.equal(withoutManyVidsPrimary.valid, false);
 });
 
+test("additional audio files are accepted as extra media and other types are rejected", () => {
+  const context = loadScripts("upload-console.js");
+  const build = (additionalMedia) => ({
+    fullFile: { name: "primary.mp4", type: "video/mp4", size: 42 },
+    additionalMedia,
+    title: "Episode 42",
+    scheduledIso: "2026-10-02T15:00:00.000Z",
+    targets: ["onlyfans", "fansly"],
+  });
+  for (const file of [
+    { name: "voice.mp3", type: "audio/mpeg", size: 42 },
+    { name: "voice.m4a", type: "", size: 42 },
+    { name: "voice.flac", type: "audio/flac", size: 42 },
+  ]) {
+    const result = plain(
+      context.CreatorUploadConsole.normalizeDraft(build([file])),
+    );
+    assert.equal(result.valid, true, file.name);
+  }
+  for (const file of [
+    { name: "script.funscript", type: "", size: 42 },
+    { name: "notes.txt", type: "text/plain", size: 42 },
+    { name: "empty.mp3", type: "audio/mpeg", size: 0 },
+  ]) {
+    const result = plain(
+      context.CreatorUploadConsole.normalizeDraft(build([file])),
+    );
+    assert.equal(result.valid, false, file.name);
+    assert.match(result.errors.join(" "), /audio files/);
+  }
+});
+
 test("past release dates keep catalogue date separate from site scheduling", () => {
   const context = loadScripts("upload-console.js");
   const base = {

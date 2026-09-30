@@ -611,7 +611,7 @@
       output.mediaFiles = value.mediaFiles.slice(0, 8).map((item, index) => ({
         role: `media${index + 1}`,
         name: clean(item?.name, 500),
-        kind: item?.kind === "image" ? "image" : "video",
+        kind: ["image", "audio"].includes(item?.kind) ? item.kind : "video",
       }));
     if (Object.hasOwn(value, "manyvidsThumbnail")) {
       output.manyvidsThumbnail = value.manyvidsThumbnail === true;
