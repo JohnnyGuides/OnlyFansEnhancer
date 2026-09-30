@@ -11,6 +11,8 @@
   const IMAGE_EXTENSIONS = /\.(?:jpe?g|png)$/i;
   const TARGETS = new Set(["onlyfans", "fansly", "manyvids", "pornhub"]);
   const SOCIAL_TARGETS = new Set(["x", "reddit"]);
+  const QUEUE_EVIDENCE_BLOCKER =
+    "Verify the selected platform queues before automatic publishing, or turn off Publish immediately to prepare drafts.";
   const PAID_LINK_SOURCES = new Set(["onlyfans", "fansly", "manyvids"]);
   const TRACE_HASH = /^[a-f0-9]{64}$/i;
   const PRESET_ID = /^[A-Za-z0-9_-]{2,100}$/;
@@ -1056,7 +1058,8 @@
           stored.creatorSocialSubredditSelectionV1,
         )
           ? stored.creatorSocialSubredditSelectionV1
-              .map((name) => String(name).toLowerCase())
+              .filter((name) => typeof name === "string" && name !== "null")
+              .map((name) => name.toLowerCase())
               .slice(0, 100)
           : [];
       });
@@ -1455,10 +1458,14 @@
       checkbox.addEventListener("change", async () => {
         overrides.hidden = !checkbox.checked;
         lastSubredditSelection = [
-          ...subredditList.querySelectorAll(
-            '.subreddit-preset input[type="checkbox"]:checked',
+          ...new Set(
+            [
+              ...subredditList.querySelectorAll(
+                ".subreddit-preset input[data-subreddit]:checked",
+              ),
+            ].map((input) => input.dataset.subreddit),
           ),
-        ].map((input) => input.dataset.subreddit);
+        ].slice(0, 100);
         await chrome.storage.local.set({
           creatorSocialSubredditSelectionV1: lastSubredditSelection,
         });
@@ -2263,7 +2270,7 @@
       cataloguePicker.hidden = false;
     }
 
-    function buildProposal(selectedRow = null) {
+    function buildProposal(selectedRow = null, snapshot = currentSnapshot) {
       if (workflowMode?.value === "teaser") {
         const candidate = currentSnapshot?.rows.find(
           (row) => Number(row.row) === selectedRow,
@@ -2277,7 +2284,7 @@
       }
       return globalThis.CreatorCatalogueProposal.build({
         draft: proposalDraft(),
-        snapshot: currentSnapshot,
+        snapshot,
         repeatPlatforms:
           currentSnapshot?.source === "desktop" ? selectedTargets() : [],
         selectedRow,
@@ -2529,7 +2536,7 @@
         !(currentProposal.status === "nothing-pending" && social.enabled)
       )
         return currentProposal.status === "needs-queue-evidence"
-          ? "Verify the selected platform queues before automatic publishing, or turn off Publish immediately to prepare drafts."
+          ? QUEUE_EVIDENCE_BLOCKER
           : "Resolve the catalogue recommendation before uploading. Choose an executable destination.";
       if (!pendingTargets(value, currentMatch).length && !social.enabled)
         return "Every selected platform already has a catalogue link. Nothing will be uploaded.";
@@ -2606,7 +2613,7 @@
     function lockDraft(locked) {
       if (locked) {
         for (const control of document.querySelectorAll(
-          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry",
+          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #refreshCatalogue",
         )) {
           if (control.closest("#uploadRecovery")) continue;
           if (!lockedControls.has(control))
@@ -2764,9 +2771,10 @@
         if (!config.connected && !config.endpoint && !config.secret) {
           throw new Error("Catalogue matching is not connected.");
         }
-        currentSnapshot = await loadCatalogueSnapshot();
+        const fetched = await loadCatalogueSnapshot();
         get("#catalogueConnectionStatus").textContent = "";
         if (revision !== matchRevision) return;
+        currentSnapshot = fetched;
         if (forceNew) selectedCatalogueRow = "new";
         renderPicker();
         if (!value.valid) {
@@ -3133,7 +3141,8 @@
         seasonArc,
         value.contentPreset,
       );
-      await globalThis.CreatorToolkit.saveSettings(settings);
+      const saved = await globalThis.CreatorToolkit.saveSettings(settings);
+      workflowProfiles = saved.profiles;
     }
 
     function fileIdentity(file) {
@@ -3614,6 +3623,29 @@
         return;
       const candidate = currentMatch?.candidate;
       const mode = currentMatch?.status === "matched" ? "update" : "new";
+      if (mainPublishMode.checked && workflowMode?.value !== "teaser") {
+        // Decide the queue refusal the post-write check would make before a
+        // row exists, from the same inputs that check uses.
+        let expected = null;
+        try {
+          expected =
+            mode === "new"
+              ? buildProposal(candidate.row, {
+                  ...currentSnapshot,
+                  rows: currentSnapshot.rows.some(
+                    (row) =>
+                      row.id === candidate.id && row.row === candidate.row,
+                  )
+                    ? currentSnapshot.rows
+                    : [...currentSnapshot.rows, candidate],
+                })
+              : buildProposal(candidate.row);
+        } catch {
+          expected = null;
+        }
+        if (expected?.status === "needs-queue-evidence")
+          throw new Error(QUEUE_EVIDENCE_BLOCKER);
+      }
       matchStatus.textContent =
         mode === "new"
           ? "Creating the new row in Work…"
@@ -4170,7 +4202,20 @@
 
     get("#resumeUpload")?.addEventListener("click", async () => {
       if (!resumable || activeSession || runBusy) return;
+      runBusy = true;
+      get("#resumeUpload").disabled = true;
+      try {
+        await resumeSavedUpload();
+      } finally {
+        runBusy = false;
+        get("#resumeUpload").disabled = false;
+      }
+    });
+
+    async function resumeSavedUpload() {
       const expected = resumable.draft;
+      const previousTeaser = teaserFile;
+      const previousThumbnail = thumbnailFile;
       try {
         if (fullFile instanceof File || pornhubFile instanceof File) {
           if (expected.hasTeaser && !teaserFile)
@@ -4193,6 +4238,8 @@
           renderFilePickers();
         }
       } catch (error) {
+        teaserFile = previousTeaser;
+        thumbnailFile = previousThumbnail;
         get("#resumeError").textContent = error.message;
         return;
       }
@@ -4331,7 +4378,7 @@
       } finally {
         button.disabled = false;
       }
-    });
+    }
 
     async function loadRecovery() {
       const button = get("#refreshRecovery");
@@ -4836,6 +4883,7 @@
     const cropArea = get("#thumbnailCropArea");
     let frameUrl = null;
     let frameSource = null;
+    let frameGeneration = 0;
     let timelineZoom = 1;
     let timelineStart = 0;
     let stripRevision = 0;
@@ -5230,8 +5278,20 @@
         ? `${base}.${String(Math.floor((seconds % 1) * 100)).padStart(2, "0")}`
         : base;
     };
+    const frameFileProof = (file) =>
+      file ? JSON.stringify([file.name, file.size, file.lastModified]) : "";
+    function frameOperationCurrent(generation, source, proof) {
+      return (
+        generation === frameGeneration &&
+        frameDialog.open &&
+        frameSource === source &&
+        fullFile === source &&
+        frameFileProof(source) === proof
+      );
+    }
     function closeFrameDialog() {
       clearTimeout(stripRenderTimer);
+      frameGeneration++;
       stripRevision++;
       stripVideo.pause();
       stripVideo.removeAttribute("src");
@@ -5247,6 +5307,10 @@
     get("#chooseThumbnailFrame").addEventListener("click", async () => {
       if (!(fullFile instanceof File) || runBusy || activeSession) return;
       frameSource = fullFile;
+      const generation = ++frameGeneration;
+      const source = fullFile;
+      const proof = frameFileProof(source);
+      const current = () => frameOperationCurrent(generation, source, proof);
       openingFrameChoice.checked = Boolean(openingFrame);
       frameStatus.textContent = "Loading video timeline…";
       cropArea.hidden = true;
@@ -5262,6 +5326,7 @@
       try {
         const duration =
           await globalThis.CreatorMediaGenerator.waitForMetadata(frameVideo);
+        if (!current()) return;
         frameDuration.textContent = formatPosition(duration);
         timelineZoom = 1;
         timelineStart = 0;
@@ -5272,16 +5337,19 @@
           (previewWidth * frameVideo.videoHeight) / frameVideo.videoWidth,
         );
         await globalThis.CreatorMediaGenerator.waitForMetadata(stripVideo);
+        if (!current()) return;
         await drawFrameStrip(++stripRevision);
+        if (!current()) return;
         const initialTime = Math.min(3, duration * 0.02);
         await globalThis.CreatorMediaGenerator.seek(frameVideo, initialTime);
+        if (!current()) return;
         renderTimeline(frameVideo.currentTime);
         renderCropPreview();
         frameStatus.textContent = "";
         frameSlider.disabled = false;
         get("#useThumbnailFrame").disabled = false;
       } catch (error) {
-        frameStatus.textContent = error.message;
+        if (current()) frameStatus.textContent = error.message;
       }
     });
     frameSlider.addEventListener("input", () => {
@@ -5299,27 +5367,37 @@
     get("#useThumbnailFrame").addEventListener("click", async () => {
       if (!frameSource || frameSource !== fullFile) return;
       const button = get("#useThumbnailFrame");
+      const generation = frameGeneration;
+      const source = frameSource;
+      const proof = frameFileProof(source);
+      const seconds = frameVideo.currentTime;
+      const selectedFrameCrop = selectedCrop();
+      const keepOpeningFrame = openingFrameChoice.checked;
       button.disabled = true;
       frameStatus.textContent = "Creating 640 × 360 thumbnail…";
       try {
-        thumbnailFile =
+        const generated =
           await globalThis.CreatorMediaGenerator.thumbnailFromVideo(
-            frameSource,
-            frameVideo.currentTime,
-            selectedCrop(),
+            source,
+            seconds,
+            selectedFrameCrop,
           );
+        if (!frameOperationCurrent(generation, source, proof)) return;
+        thumbnailFile = generated;
         thumbnailFile.source = "generated";
-        openingFrame = openingFrameChoice.checked
-          ? { seconds: frameVideo.currentTime, crop: selectedCrop() }
+        openingFrame = keepOpeningFrame
+          ? { seconds, crop: selectedFrameCrop }
           : null;
         autoThumbnailAssetId = null;
         closeFrameDialog();
         renderFilePickers();
         scheduleMatch();
       } catch (error) {
-        frameStatus.textContent = error.message;
+        if (frameOperationCurrent(generation, source, proof))
+          frameStatus.textContent = error.message;
       } finally {
-        button.disabled = false;
+        if (!frameDialog.open || generation === frameGeneration)
+          button.disabled = false;
       }
     });
     const fileControlObserver = new MutationObserver(renderFilePickers);
@@ -5442,27 +5520,32 @@
           Number(candidate.row) === Number(get("#savedCatalogueRow").value),
       );
       if (!row || !activeSession) return;
+      const session = activeSession;
+      const socialSessionId = session.socialSessionId;
       const button = get("#associateSavedResults");
       button.disabled = true;
       try {
         if (selectedTargets().length)
           await sendMessage({
             type: "ASSOCIATE_CREATOR_UPLOAD_CATALOGUE",
-            sessionId: activeSession.id,
+            sessionId: session.id,
             catalogue: row,
           });
-        if (activeSession.socialSessionId) {
+        if (activeSession !== session) return;
+        if (socialSessionId) {
           const response = await sendMessage({
             type: "ASSOCIATE_CREATOR_SOCIAL_CATALOGUE",
-            sessionId: activeSession.socialSessionId,
+            sessionId: socialSessionId,
             catalogue: row,
           });
+          if (activeSession !== session) return;
           applySocialJob(response.socialDistribution?.jobs?.x);
         }
         get("#savedAssociationStatus").textContent =
           "Association saved. No uploads or publications were repeated.";
       } catch (error) {
-        get("#savedAssociationStatus").textContent = error.message;
+        if (activeSession === session)
+          get("#savedAssociationStatus").textContent = error.message;
       } finally {
         button.disabled = false;
       }
@@ -5758,9 +5841,12 @@
     });
     refreshCatalogue.addEventListener("click", async () => {
       refreshCatalogue.disabled = true;
+      const revision = matchRevision;
       matchStatus.textContent = "Refreshing the catalogue snapshot…";
       try {
-        currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        const fetched = await loadCatalogueSnapshot({ refresh: true });
+        if (runBusy || activeSession || revision !== matchRevision) return;
+        currentSnapshot = fetched;
         renderPicker();
         if (selectedCatalogueRow === null) {
           matchStatus.textContent =
@@ -5783,7 +5869,9 @@
       } catch (error) {
         matchStatus.textContent = error.message;
       } finally {
-        refreshCatalogue.disabled = false;
+        if (lockedControls.has(refreshCatalogue))
+          lockedControls.set(refreshCatalogue, false);
+        else refreshCatalogue.disabled = false;
       }
     });
     globalThis.addEventListener("beforeunload", (event) => {
