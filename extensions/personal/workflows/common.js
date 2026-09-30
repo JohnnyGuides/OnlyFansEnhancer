@@ -474,6 +474,9 @@
     );
   }
 
+  /** @type {WeakMap<AbortController, () => void>} */
+  const linkedDetachers = new WeakMap();
+
   function createLinkedAbortController(parentSignal) {
     const controller = new AbortController();
     if (!parentSignal) return controller;
@@ -481,10 +484,10 @@
       controller.abort(parentSignal.reason);
       return controller;
     }
-    parentSignal.addEventListener(
-      "abort",
-      () => controller.abort(parentSignal.reason),
-      { once: true },
+    const onAbort = () => controller.abort(parentSignal.reason);
+    parentSignal.addEventListener("abort", onAbort, { once: true });
+    linkedDetachers.set(controller, () =>
+      parentSignal.removeEventListener("abort", onAbort),
     );
     return controller;
   }
@@ -949,6 +952,7 @@
           console.error(`[Creator Workflow Toolkit] ${toolId}`, error);
         return result;
       } finally {
+        linkedDetachers.get(activeController)?.();
         activeController = null;
         panel.setRunning(false);
       }
@@ -999,6 +1003,7 @@
       try {
         settings = await loadSettings();
       } catch (error) {
+        if (disposed || token !== evaluation) return;
         await unmount("Settings unavailable.");
         console.error(
           `[Creator Workflow Toolkit] ${id} settings failed.`,
@@ -1021,7 +1026,7 @@
           shouldMount ? "Configuration or route changed." : "Tool disabled.",
         );
       }
-      if (!shouldMount || active || disposed) return;
+      if (!shouldMount || active || disposed || token !== evaluation) return;
 
       const controller = new AbortController();
       const record = {

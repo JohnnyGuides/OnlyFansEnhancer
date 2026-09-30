@@ -358,6 +358,18 @@
     let resolution = toolkit.resolveExact(options, expectedLabel, (option) =>
       toolkit.displayText(option.textContent),
     );
+    if (resolution.status === "missing") {
+      const wanted = toolkit.normalizeText(expectedLabel);
+      const sameValue = options.filter(
+        (option) => toolkit.normalizeText(option.value) === wanted,
+      );
+      if (sameValue.length) {
+        resolution =
+          sameValue.length === 1
+            ? { status: "found", element: sameValue[0] }
+            : { status: "ambiguous", matches: sameValue };
+      }
+    }
     if (resolution.status === "missing" && fallbackValue) {
       const byValue = options.filter(
         (option) => String(option.value) === String(fallbackValue),
@@ -417,7 +429,7 @@
         selectExactOption(
           coPerformer,
           plan.profile.coPerformer,
-          "NO",
+          "",
           signal,
           budget,
         ),

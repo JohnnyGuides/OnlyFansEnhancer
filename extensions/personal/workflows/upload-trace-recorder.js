@@ -4,6 +4,7 @@
   if (globalThis.CreatorUploadTraceRecorder) return;
 
   const STORAGE_KEY = "creatorUploadTraceRecorderV1";
+  const GENERATION_KEY = "creatorUploadTraceRecorderGenerationV1";
   const HOST_ID = "creator-upload-trace-recorder-host";
   const MAX_EVENTS = 800;
   const MAX_DURATION_MS = 45 * 60 * 1000;
@@ -530,8 +531,29 @@
       : null;
   }
 
-  /** @param {TraceState} trace */
-  async function writeTrace(trace) {
+  /** @param {Record<string, unknown>} stored */
+  function generationOf(stored) {
+    const value = stored[GENERATION_KEY];
+    return typeof value === "number" && Number.isSafeInteger(value) ? value : 0;
+  }
+
+  /** @returns {Promise<{ trace: TraceState | null, generation: number }>} */
+  async function readTraceState() {
+    // The generation is read first: a discard in between only makes the
+    // later write see a newer generation and drop itself.
+    const generation = generationOf(
+      await chrome.storage.local.get(GENERATION_KEY),
+    );
+    return { trace: await readTrace(), generation };
+  }
+
+  /**
+   * @param {TraceState} trace
+   * @param {number} generation The generation observed when the update began.
+   */
+  async function writeTrace(trace, generation) {
+    const stored = await chrome.storage.local.get(GENERATION_KEY);
+    if (generationOf(stored) !== generation) return null;
     await chrome.storage.local.set({ [STORAGE_KEY]: trace });
     currentTrace = trace;
     renderPanel();
@@ -539,22 +561,41 @@
   }
 
   /**
-   * @param {(trace: TraceState | null) => TraceState | null | undefined | Promise<TraceState | null | undefined>} update
-   * @returns {Promise<TraceState | null>}
+   * @template T
+   * @param {() => Promise<T>} task
+   * @returns {Promise<T>}
    */
-  function updateTrace(update) {
-    const operation = storageQueue
-      .catch(() => {})
-      .then(async () => {
-        const previous = await readTrace();
-        const next = await update(previous);
-        return next === undefined ? previous : writeTrace(next);
-      });
+  function enqueueStorage(task) {
+    const operation = storageQueue.catch(() => {}).then(task);
     storageQueue = operation.then(
       () => undefined,
       (error) => showPanelError(error),
     );
     return operation;
+  }
+
+  function discardTrace() {
+    return enqueueStorage(async () => {
+      const { generation } = await readTraceState();
+      await chrome.storage.local.set({ [GENERATION_KEY]: generation + 1 });
+      await chrome.storage.local.remove(STORAGE_KEY);
+      currentTrace = null;
+      renderPanel();
+    });
+  }
+
+  /**
+   * @param {(trace: TraceState | null) => TraceState | null | undefined | Promise<TraceState | null | undefined>} update
+   * @returns {Promise<TraceState | null>}
+   */
+  function updateTrace(update) {
+    return enqueueStorage(async () => {
+      const { trace: previous, generation } = await readTraceState();
+      const next = await update(previous);
+      return next === undefined || next === previous
+        ? previous
+        : writeTrace(next, generation);
+    });
   }
 
   function eventRecord(trace, type, data, now = Date.now()) {
@@ -1391,11 +1432,7 @@
       const trace = await readTrace();
       if (trace) downloadTrace(trace);
     });
-    const discard = makeButton("Discard saved trace", async () => {
-      await chrome.storage.local.remove(STORAGE_KEY);
-      currentTrace = null;
-      renderPanel();
-    });
+    const discard = makeButton("Discard saved trace", discardTrace);
     actions.append(start, stop, download, discard);
     const status = document.createElement("div");
     status.setAttribute("role", "status");

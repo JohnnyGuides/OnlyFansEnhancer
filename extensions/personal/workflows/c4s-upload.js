@@ -722,8 +722,12 @@
     let position = { x: 0.88, y: 0.13 };
     let badge = null;
     let dragging = false;
+    let generation = 0;
+    let closed = false;
 
     function close() {
+      closed = true;
+      generation += 1;
       bitmap?.close();
       bitmap = null;
       if (dialog.open) dialog.close();
@@ -787,7 +791,7 @@
     }
 
     function savePlacement() {
-      if (!fileKey) return;
+      if (!fileKey || closed) return;
       void chrome.storage.local.set({ [fileKey]: { style, ...position } });
     }
 
@@ -801,8 +805,14 @@
         status.textContent = "Choose a PNG or JPEG under 50 MB.";
         return;
       }
+      const selection = ++generation;
+      const current = () => !closed && selection === generation;
       try {
         const next = await createImageBitmap(selected);
+        if (!current()) {
+          next.close();
+          return;
+        }
         if (
           next.width < 1 ||
           next.height < 1 ||
@@ -812,21 +822,33 @@
           next.close();
           throw new Error("Image dimensions are unsupported.");
         }
+        let nextKey;
+        let saved;
+        try {
+          const digest = await crypto.subtle.digest(
+            "SHA-256",
+            await selected.arrayBuffer(),
+          );
+          nextKey =
+            "c4s-4k-placement-" +
+            Array.from(new Uint8Array(digest), (byte) =>
+              byte.toString(16).padStart(2, "0"),
+            ).join("");
+          saved = await new Promise((resolve) =>
+            chrome.storage.local.get(nextKey, resolve),
+          );
+        } catch (error) {
+          next.close();
+          throw error;
+        }
+        if (!current()) {
+          next.close();
+          return;
+        }
         bitmap?.close();
         bitmap = next;
         file = selected;
-        const digest = await crypto.subtle.digest(
-          "SHA-256",
-          await selected.arrayBuffer(),
-        );
-        fileKey =
-          "c4s-4k-placement-" +
-          Array.from(new Uint8Array(digest), (byte) =>
-            byte.toString(16).padStart(2, "0"),
-          ).join("");
-        const saved = await new Promise((resolve) =>
-          chrome.storage.local.get(fileKey, resolve),
-        );
+        fileKey = nextKey;
         const preset = saved[fileKey];
         style = ["wordmark", "dark", "light"].includes(preset?.style)
           ? preset.style
@@ -854,6 +876,7 @@
           : "Move the 4K mark, then set the thumbnail.";
         render();
       } catch (error) {
+        if (!current()) return;
         status.textContent =
           error?.message || "That image could not be opened.";
       }
@@ -924,6 +947,8 @@
 
     setThumbnail.addEventListener("click", async () => {
       if (!bitmap || !file) return;
+      const selection = generation;
+      const current = () => !closed && selection === generation;
       setThumbnail.disabled = true;
       try {
         const target = findThumbnailInput();
@@ -949,9 +974,11 @@
         const encode = (type, quality) =>
           new Promise((resolve) => output.toBlob(resolve, type, quality));
         let blob = await encode("image/png");
+        if (!current()) return;
         if (blob?.size > 5 * 1024 * 1024)
           for (const quality of [0.9, 0.8, 0.7]) {
             blob = await encode("image/jpeg", quality);
+            if (!current()) return;
             if (blob?.size <= 5 * 1024 * 1024) break;
           }
         if (!blob) throw new Error("The 4K image could not be created.");
@@ -971,8 +998,9 @@
         savePlacement();
         status.textContent = "4K thumbnail sent to the Clips4Sale uploader.";
       } catch (error) {
-        status.textContent =
-          error?.message || "The 4K thumbnail could not be set.";
+        if (current())
+          status.textContent =
+            error?.message || "The 4K thumbnail could not be set.";
       } finally {
         setThumbnail.disabled = false;
       }

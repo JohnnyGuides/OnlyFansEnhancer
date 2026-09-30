@@ -251,3 +251,92 @@ test("loading schema 2 settings persists the one-time all-helper activation", as
     await browser.close();
   }
 });
+
+test("a stale settings failure does not unmount a newer mount", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await loadRuntime(page);
+    const result = await page.evaluate(async () => {
+      const events = [];
+      const realGet = chrome.storage.local.get;
+      const held = [];
+      let calls = 0;
+      chrome.storage.local.get = (keys, callback) => {
+        calls += 1;
+        if (calls === 1) {
+          held.push(() => {
+            chrome.runtime.lastError = { message: "read failed" };
+            callback({});
+            chrome.runtime.lastError = null;
+          });
+          return;
+        }
+        realGet(keys, callback);
+      };
+      const originalError = console.error;
+      console.error = () => {};
+      CreatorToolkit.mountTool({
+        id: "c4sUpload",
+        match: () => true,
+        mount({ signal }) {
+          events.push("mounted");
+          signal.addEventListener("abort", () => events.push("aborted"));
+          return () => events.push("disposed");
+        },
+      });
+      for (const listener of __toolkitStorageListeners) {
+        listener({ creatorToolkitV2: {} }, "local");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const afterNewer = [...events];
+      held[0]();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      console.error = originalError;
+      return { afterNewer, afterStaleFailure: [...events] };
+    });
+    assert.deepEqual(result.afterNewer, ["mounted"]);
+    assert.deepEqual(result.afterStaleFailure, ["mounted"]);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("action runs remove their parent abort listener when they end", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await loadRuntime(page);
+    const result = await page.evaluate(async () => {
+      const panel = CreatorToolkit.createToolPanel({
+        id: "runtime-listener-test",
+        title: "Runtime test",
+      });
+      const parent = new AbortController();
+      let listeners = 0;
+      const add = parent.signal.addEventListener.bind(parent.signal);
+      const remove = parent.signal.removeEventListener.bind(parent.signal);
+      parent.signal.addEventListener = (type, ...rest) => {
+        if (type === "abort") listeners += 1;
+        return add(type, ...rest);
+      };
+      parent.signal.removeEventListener = (type, ...rest) => {
+        if (type === "abort") listeners -= 1;
+        return remove(type, ...rest);
+      };
+      const runner = CreatorToolkit.createActionRunner({
+        toolId: "c4sUpload",
+        panel,
+        lifecycleSignal: parent.signal,
+      });
+      for (let index = 0; index < 10; index += 1) {
+        await runner.run("Action", async () => ({ status: "success" }));
+      }
+      panel.destroy();
+      return listeners;
+    });
+    assert.equal(result, 0);
+  } finally {
+    await browser.close();
+  }
+});

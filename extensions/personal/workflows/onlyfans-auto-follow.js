@@ -83,8 +83,26 @@
     row.scrollIntoView({ block: "center", behavior: "instant" });
     await toolkit.sleep(80, signal);
     assertNoBlockers();
+    const owners = lists
+      .rows()
+      .filter(
+        (candidateRow) => lists.stableUserKey(candidateRow) === candidate.key,
+      );
+    if (owners.length !== 1) {
+      throw new toolkit.ToolkitError(
+        "UNKNOWN_RESULT",
+        `The row for ${candidate.key} changed before the click. Nothing was clicked.`,
+      );
+    }
+    const targetButton = lists.followButton(owners[0]);
+    if (!targetButton) {
+      throw new toolkit.ToolkitError(
+        "UNKNOWN_RESULT",
+        `The Follow control for ${candidate.key} disappeared before the click. Nothing was clicked.`,
+      );
+    }
     budget.step();
-    toolkit.clickElement(button, signal);
+    toolkit.clickElement(targetButton, signal);
 
     const result = await toolkit.waitFor(
       () => {

@@ -886,3 +886,325 @@ test("C4S 4K editor moves a badge, remembers its style, and sets the uploader th
     await browser.close();
   }
 });
+
+test("Follow clicks only the row that still owns the candidate key", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const followPage = await preparePage(browser, {
+      url: "https://onlyfans.com/my/collections/user-lists/expired-follow",
+      html: `
+        <style>.b-users__item,button,h1 { display:block; width:200px; min-height:24px }</style>
+        <h1>Expired users</h1>
+        <div class="b-users__item m-fans" id="row1">
+          <span data-fim-masked-handle="user:1"></span>
+          <button onclick="window.__clicks = (window.__clicks || 0) + 1">Follow</button>
+        </div>
+      `,
+      settings: rawSettings("onlyfansAutoFollow"),
+      scripts: ["onlyfans-list-common.js", "onlyfans-auto-follow.js"],
+    });
+    const run = (mutation) =>
+      followPage.page.evaluate(async (mutate) => {
+        window.__clicks = 0;
+        const adapter = CreatorToolkitAdapters.onlyfansAutoFollow;
+        const candidate = { key: "fim:user:1" };
+        const pending = adapter
+          .followCandidate(candidate, new AbortController().signal, {
+            step() {},
+          })
+          .then(
+            () => "",
+            (error) => error.code,
+          );
+        // The candidate resolves synchronously up to its delay.
+        if (mutate === "reassign") {
+          document.querySelector("#row1 span").dataset.fimMaskedHandle =
+            "user:9";
+        }
+        if (mutate === "duplicate") {
+          const copy = document.querySelector("#row1").cloneNode(true);
+          copy.id = "row2";
+          document.body.appendChild(copy);
+        }
+        const code = await pending;
+        return { code, clicks: window.__clicks };
+      }, mutation);
+
+    const reassigned = await run("reassign");
+    assert.equal(reassigned.clicks, 0);
+    assert.equal(reassigned.code, "UNKNOWN_RESULT");
+
+    await followPage.page.evaluate(() => {
+      document.querySelector("#row1 span").dataset.fimMaskedHandle = "user:1";
+    });
+    const duplicated = await run("duplicate");
+    assert.equal(duplicated.clicks, 0);
+    assert.equal(duplicated.code, "UNKNOWN_RESULT");
+
+    await followPage.page.evaluate(() => {
+      document.querySelector("#row2")?.remove();
+      document.querySelector("#row1 button").textContent = "Follow";
+    });
+    const unchanged = await followPage.page.evaluate(async () => {
+      window.__clicks = 0;
+      document.querySelector("#row1 button").onclick = function () {
+        window.__clicks += 1;
+        this.textContent = "Following";
+      };
+      const outcome =
+        await CreatorToolkitAdapters.onlyfansAutoFollow.followCandidate(
+          { key: "fim:user:1" },
+          new AbortController().signal,
+          { step() {} },
+        );
+      return { status: outcome.status, clicks: window.__clicks };
+    });
+    assert.deepEqual(unchanged, { status: "changed", clicks: 1 });
+    await followPage.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("ManyVids never substitutes a fixed co-performer option", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const mv = await preparePage(browser, {
+      url: "https://www.manyvids.com/Edit-vid/1",
+      html: `
+        <form>
+          <select id="co-performer">
+            <option value="">Pick</option>
+            <option value="NO">No</option>
+            <option value="YES">Yes</option>
+          </select>
+        </form>
+      `,
+      settings: rawSettings("manyvidsAutofill"),
+      scripts: ["manyvids-autofill.js"],
+    });
+    const apply = (options, coPerformer) =>
+      mv.page.evaluate(
+        async ({ options, coPerformer }) => {
+          const form = document.querySelector("form");
+          form.querySelector("select").innerHTML = options;
+          const profile = {
+            ...CreatorToolkitRegistry.clone(
+              CreatorToolkitRegistry.DEFAULT_PROFILES.manyvidsAutofill,
+            ),
+            coPerformer,
+            tags: [],
+          };
+          const plan = CreatorToolkitAdapters.manyvidsAutofill.inspectForm(
+            form,
+            profile,
+          );
+          const result =
+            await CreatorToolkitAdapters.manyvidsAutofill.applyPlan(
+              plan,
+              new AbortController().signal,
+              { step() {} },
+            );
+          return {
+            first: result.items[0],
+            value: form.querySelector("select").value,
+          };
+        },
+        { options, coPerformer },
+      );
+
+    const missing = await apply(
+      '<option value="">Pick</option><option value="NO">No</option><option value="YES">Yes</option>',
+      "Alex",
+    );
+    assert.equal(missing.first.status, "failed");
+    assert.match(missing.first.detail, /Could not resolve one exact option/);
+    assert.equal(missing.value, "");
+
+    const byValue = await apply(
+      '<option value="">Pick</option><option value="NO">Nope</option>',
+      "No",
+    );
+    assert.equal(byValue.first.status, "changed");
+    assert.equal(byValue.value, "NO");
+
+    const ambiguous = await apply(
+      '<option value="">Pick</option><option value="NO">Nope</option><option value="no">Nah</option>',
+      "No",
+    );
+    assert.equal(ambiguous.first.status, "failed");
+    assert.equal(ambiguous.value, "");
+    await mv.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+async function openC4sEditor(browser) {
+  const c4s = await preparePage(browser, {
+    url: "https://workspace.clips4sale.com/upload",
+    html: '<main>Clips4Sale upload fixture<button data-testid="clip-thumbnail_button_reupload">Replace</button><input type="file" data-testid="clip-thumbnail_[0]_input_nsfw-custom-uploader"></main>',
+    settings: rawSettings("c4sUpload"),
+    scripts: ["c4s-upload.js"],
+  });
+  await waitForPanel(c4s.page, "c4sUpload");
+  await c4s.page.evaluate(() => {
+    const input = document.querySelector('input[type="file"]');
+    input.addEventListener("change", () => {
+      globalThis.__submittedThumbnail = input.files[0];
+    });
+  });
+  await c4s.page.getByRole("button", { name: "4K thumbnail" }).click();
+  const dialog = c4s.page.getByRole("dialog", { name: "4K thumbnail" });
+  await dialog.waitFor();
+  return { c4s, dialog };
+}
+
+async function c4sImageFixture(page, name, color) {
+  const base64 = await page.evaluate((fill) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    const drawing = canvas.getContext("2d");
+    drawing.fillStyle = fill;
+    drawing.fillRect(0, 0, 1280, 720);
+    return canvas.toDataURL("image/png").split(",")[1];
+  }, color);
+  return {
+    name,
+    mimeType: "image/png",
+    buffer: Buffer.from(base64, "base64"),
+  };
+}
+
+test("C4S 4K editor saves placement under the key of the latest selected image", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { c4s, dialog } = await openC4sEditor(browser);
+    const first = await c4sImageFixture(c4s.page, "first.png", "#204060");
+    const second = await c4sImageFixture(c4s.page, "second.png", "#a05030");
+    await c4s.page.evaluate(() => {
+      const digest = crypto.subtle.digest.bind(crypto.subtle);
+      let calls = 0;
+      globalThis.__releaseFirstDigest = null;
+      crypto.subtle.digest = async (...args) => {
+        calls += 1;
+        if (calls === 1) {
+          await new Promise((resolve) => {
+            globalThis.__releaseFirstDigest = resolve;
+          });
+        }
+        return digest(...args);
+      };
+    });
+    const input = dialog.locator('input[type="file"]');
+    await input.setInputFiles(first);
+    await c4s.page.waitForFunction(() => globalThis.__releaseFirstDigest);
+    await input.setInputFiles(second);
+    await dialog
+      .getByText("Move the 4K mark, then set the thumbnail.")
+      .waitFor();
+    await c4s.page.evaluate(() => globalThis.__releaseFirstDigest());
+    await c4s.page.waitForTimeout(100);
+    await dialog.getByRole("button", { name: "Light badge" }).click();
+    const expected =
+      "c4s-4k-placement-" +
+      require("node:crypto")
+        .createHash("sha256")
+        .update(second.buffer)
+        .digest("hex");
+    const keys = await c4s.page.evaluate(() =>
+      Object.keys(__toolkitTestStorage).filter((key) =>
+        key.startsWith("c4s-4k-placement-"),
+      ),
+    );
+    assert.deepEqual(keys, [expected]);
+    assert.equal(await dialog.locator(".filename").textContent(), "second.png");
+    await c4s.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("C4S 4K editor closes a bitmap that finishes decoding after the editor closed", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { c4s, dialog } = await openC4sEditor(browser);
+    const image = await c4sImageFixture(c4s.page, "late.png", "#204060");
+    await c4s.page.evaluate(() => {
+      const create = globalThis.createImageBitmap.bind(globalThis);
+      globalThis.__bitmapCloses = 0;
+      globalThis.__releaseBitmap = null;
+      globalThis.createImageBitmap = async (...args) => {
+        const bitmap = await create(...args);
+        const close = bitmap.close.bind(bitmap);
+        bitmap.close = () => {
+          globalThis.__bitmapCloses += 1;
+          close();
+        };
+        await new Promise((resolve) => {
+          globalThis.__releaseBitmap = resolve;
+        });
+        return bitmap;
+      };
+    });
+    await dialog.locator('input[type="file"]').setInputFiles(image);
+    await c4s.page.waitForFunction(() => globalThis.__releaseBitmap);
+    await dialog.getByRole("button", { name: "Close 4K editor" }).click();
+    await c4s.page.waitForTimeout(100);
+    await c4s.page.evaluate(() => globalThis.__releaseBitmap());
+    await c4s.page.waitForTimeout(150);
+    assert.equal(
+      await c4s.page.evaluate(() => globalThis.__bitmapCloses),
+      1,
+      "the late bitmap must be closed",
+    );
+    assert.equal(
+      await c4s.page.locator("[data-ofenhancer-4k-editor]").count(),
+      0,
+    );
+    await c4s.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("C4S 4K editor injects nothing into the uploader when closed during encoding", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { c4s, dialog } = await openC4sEditor(browser);
+    const image = await c4sImageFixture(c4s.page, "cover.png", "#204060");
+    await dialog.locator('input[type="file"]').setInputFiles(image);
+    await dialog
+      .getByText("Move the 4K mark, then set the thumbnail.")
+      .waitFor();
+    await c4s.page.evaluate(() => {
+      const toBlob = HTMLCanvasElement.prototype.toBlob;
+      globalThis.__releaseEncode = null;
+      HTMLCanvasElement.prototype.toBlob = function (callback, ...rest) {
+        toBlob.call(
+          this,
+          (blob) => {
+            globalThis.__releaseEncode = () => callback(blob);
+          },
+          ...rest,
+        );
+      };
+    });
+    await dialog.getByRole("button", { name: "Set thumbnail" }).click();
+    await c4s.page.waitForFunction(() => globalThis.__releaseEncode);
+    await dialog.getByRole("button", { name: "Close 4K editor" }).click();
+    await c4s.page.evaluate(() => globalThis.__releaseEncode());
+    await c4s.page.waitForTimeout(150);
+    assert.deepEqual(
+      await c4s.page.evaluate(() => ({
+        submitted: globalThis.__submittedThumbnail?.name ?? null,
+        files: document.querySelector('input[type="file"]').files.length,
+      })),
+      { submitted: null, files: 0 },
+    );
+    await c4s.context.close();
+  } finally {
+    await browser.close();
+  }
+});

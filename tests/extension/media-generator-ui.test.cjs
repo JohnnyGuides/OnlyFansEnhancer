@@ -400,3 +400,88 @@ test("desktop Upload Hub stages browser-generated media before native file deliv
     await fixture.close();
   }
 });
+
+test("a failing audio context close still releases the teaser source video", async () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "ofenhancer-media-test-"));
+  const videoPath = path.join(work, "neutral-short.mp4");
+  const ffmpeg = spawnSync(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=320x240:rate=30:duration=2",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:duration=2",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-shortest",
+      videoPath,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(ffmpeg.status, 0, ffmpeg.stderr);
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--autoplay-policy=no-user-gesture-required"],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.route("https://media.test/**", (route) =>
+      route.fulfill({
+        body: '<input id="source" type="file">',
+        contentType: "text/html",
+      }),
+    );
+    await page.goto("https://media.test/");
+    await page.addScriptTag({
+      path: path.join(
+        require("../support/paths.cjs").personalRoot,
+        "workflows",
+        "media-generator.js",
+      ),
+    });
+    await page.locator("#source").setInputFiles(videoPath);
+    const result = await page.evaluate(async () => {
+      const revoked = [];
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (url) => {
+        revoked.push(url);
+        revoke(url);
+      };
+      let released = 0;
+      const load = HTMLMediaElement.prototype.load;
+      HTMLMediaElement.prototype.load = function () {
+        if (!this.getAttribute("src")) released += 1;
+        return load.call(this);
+      };
+      AudioContext.prototype.close = () =>
+        Promise.reject(new Error("close failed"));
+      const source = document.querySelector("#source").files[0];
+      let outcome = "resolved";
+      try {
+        await CreatorMediaGenerator.teaserFromVideo(source);
+      } catch (error) {
+        outcome = error.message;
+      }
+      return { outcome, revoked: revoked.length, released };
+    });
+    assert.equal(result.revoked, 1, JSON.stringify(result));
+    assert.equal(result.released, 1, JSON.stringify(result));
+  } finally {
+    await browser.close();
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});

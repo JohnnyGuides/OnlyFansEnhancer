@@ -277,11 +277,22 @@ globalThis.CreatorMediaGenerator = (() => {
         },
       );
     } finally {
-      if (paintTimer) clearInterval(paintTimer);
-      if (recorder?.state !== "inactive") recorder?.stop();
-      canvasStream?.getTracks().forEach((track) => track.stop());
-      await audioContext?.close();
-      dispose();
+      const cleanup = [
+        () => clearInterval(paintTimer),
+        () => {
+          if (recorder?.state !== "inactive") recorder?.stop();
+        },
+        () => canvasStream?.getTracks().forEach((track) => track.stop()),
+        () => audioContext?.close(),
+        dispose,
+      ];
+      for (const step of cleanup) {
+        try {
+          await Promise.resolve(step());
+        } catch (error) {
+          console.warn("Preview cleanup step failed.", error);
+        }
+      }
     }
   }
 

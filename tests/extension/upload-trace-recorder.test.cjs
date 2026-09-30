@@ -655,3 +655,191 @@ test("recorder persists a sanitized two-click upload trace across refresh", asyn
     await browser.close();
   }
 });
+
+const TRACE_KEY = "creatorUploadTraceRecorderV1";
+const TRACE_GENERATION_KEY = "creatorUploadTraceRecorderGenerationV1";
+
+async function prepareGatedRecorder(browser) {
+  const page = await browser.newPage({ acceptDownloads: true });
+  await page.addInitScript(() => {
+    const data = {};
+    const listeners = new Set();
+    const gate = { hold: false, pending: [] };
+    globalThis.__gate = gate;
+    globalThis.__traceData = data;
+    globalThis.__traceListeners = listeners;
+    async function held() {
+      if (!gate.hold) return;
+      await new Promise((resolve) => gate.pending.push(resolve));
+    }
+    globalThis.chrome = globalThis.chrome || {};
+    globalThis.chrome.storage = {
+      local: {
+        async get(keys) {
+          await held();
+          const selected = {};
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            if (Object.hasOwn(data, key)) {
+              selected[key] = structuredClone(data[key]);
+            }
+          }
+          return selected;
+        },
+        async set(values) {
+          await held();
+          const changes = {};
+          for (const [key, value] of Object.entries(values)) {
+            changes[key] = {
+              oldValue: data[key],
+              newValue: structuredClone(value),
+            };
+            data[key] = structuredClone(value);
+          }
+          for (const listener of listeners) listener(changes, "local");
+        },
+        async remove(key) {
+          await held();
+          delete data[key];
+        },
+      },
+      onChanged: {
+        addListener(listener) {
+          listeners.add(listener);
+        },
+        removeListener(listener) {
+          listeners.delete(listener);
+        },
+      },
+    };
+  });
+  await page.route("https://fansly.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<main><form data-testid='upload-composer'></form></main>",
+    }),
+  );
+  await page.goto("https://fansly.com/upload");
+  await page.addScriptTag({ path: recorderPath });
+  await page.evaluate(() => CreatorUploadTraceRecorder.showPanel());
+  await page.getByRole("button", { name: "Start trace" }).click();
+  await page.waitForFunction(() =>
+    Boolean(globalThis.__traceData?.creatorUploadTraceRecorderV1?.active),
+  );
+  return page;
+}
+
+test("a discarded trace is not recreated by a write that was already queued", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await prepareGatedRecorder(browser);
+    await page.evaluate(() => {
+      __gate.hold = true;
+      globalThis.__queuedEvent = CreatorUploadTraceRecorder.recordToolkitEvent(
+        "run-start",
+        { toolId: "test", label: "queued" },
+      );
+    });
+    await page.waitForFunction(() => __gate.pending.length > 0);
+    await page.evaluate(() => {
+      __gate.pending.splice(0).forEach((resolve) => resolve());
+    });
+    await page.waitForFunction(() => __gate.pending.length > 0);
+    // Another document reports the trace as stopped, which enables Discard.
+    await page.evaluate((key) => {
+      const stopped = { ...structuredClone(__traceData[key]), active: false };
+      for (const listener of __traceListeners) {
+        listener({ [key]: { newValue: stopped } }, "local");
+      }
+    }, TRACE_KEY);
+    await page.getByRole("button", { name: "Discard saved trace" }).click();
+    await page.evaluate(async () => {
+      __gate.hold = false;
+      const release = () =>
+        __gate.pending.splice(0).forEach((resolve) => resolve());
+      for (let index = 0; index < 20; index += 1) {
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await globalThis.__queuedEvent;
+    });
+    assert.equal(
+      await page.evaluate((key) => Object.hasOwn(__traceData, key), TRACE_KEY),
+      false,
+      "a queued write must not bring a discarded trace back",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("a write is dropped when another document discarded the trace after it read", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await prepareGatedRecorder(browser);
+    const survived = await page.evaluate(
+      async ({ traceKey, generationKey }) => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        __gate.hold = true;
+        const write = CreatorUploadTraceRecorder.recordToolkitEvent(
+          "run-start",
+          { toolId: "test", label: "late" },
+        );
+        while (!__gate.pending.length) await sleep(5);
+        __gate.pending.shift()();
+        for (let waited = 0; !__gate.pending.length && waited < 1000;) {
+          await sleep(5);
+          waited += 5;
+        }
+        // The other document discards: it removes the trace and bumps the
+        // generation.
+        delete __traceData[traceKey];
+        __traceData[generationKey] = (__traceData[generationKey] || 0) + 1;
+        __gate.hold = false;
+        __gate.pending.splice(0).forEach((resolve) => resolve());
+        await write;
+        await sleep(50);
+        return Object.hasOwn(__traceData, traceKey);
+      },
+      { traceKey: TRACE_KEY, generationKey: TRACE_GENERATION_KEY },
+    );
+    assert.equal(survived, false);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("stopping during a pending write persists the same trace with its event", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await prepareGatedRecorder(browser);
+    const startedId = await page.evaluate(
+      (key) => __traceData[key].id,
+      TRACE_KEY,
+    );
+    await page.evaluate(() => {
+      __gate.hold = true;
+      CreatorUploadTraceRecorder.recordToolkitEvent("run-start", {
+        toolId: "test",
+        label: "pending",
+      });
+    });
+    await page.waitForFunction(() => __gate.pending.length > 0);
+    await page.getByRole("button", { name: "Stop and download" }).click();
+    await page.evaluate(async () => {
+      __gate.hold = false;
+      for (let index = 0; index < 20; index += 1) {
+        __gate.pending.splice(0).forEach((resolve) => resolve());
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    });
+    const stored = await page.evaluate((key) => __traceData[key], TRACE_KEY);
+    assert.equal(stored.id, startedId);
+    assert.equal(stored.active, false);
+    const types = stored.events.map((event) => event.type);
+    assert.ok(types.includes("toolkit-run-start"));
+    assert.equal(types.at(-1), "session-stop");
+  } finally {
+    await browser.close();
+  }
+});
