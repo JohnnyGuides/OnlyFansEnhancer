@@ -286,7 +286,7 @@ public sealed class GoogleConnectionCoordinatorTests
             catch (OperationCanceledException) { coordinator.Cancel(); Assert.Fail("The token exchange did not end at its own deadline."); }
         }
 
-        Assert.AreEqual("token_exchange_failed", coordinator.Snapshot.ErrorCode);
+        Assert.AreEqual("token_exchange_unreachable", coordinator.Snapshot.ErrorCode);
         Assert.AreEqual(existing, vault.Load());
         Assert.AreEqual(0, vault.SaveCalls);
         Assert.AreEqual(0, vault.DeleteCalls);

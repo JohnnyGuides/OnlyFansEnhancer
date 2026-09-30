@@ -1,6 +1,8 @@
 (function startOFEnhancerApp(global) {
   "use strict";
 
+  const INVALID_SETTINGS_MESSAGE =
+    "OFEnhancer couldn't read its saved settings, so this change wasn't saved. The settings file was left as it is. (invalid-settings)";
   const buttons = Array.from(document.querySelectorAll("[data-view]"));
   const panels = Array.from(document.querySelectorAll("[data-panel]"));
   const connectionLabel = document.querySelector("#connectionLabel");
@@ -784,6 +786,13 @@
     setBusy(googleSecondaryAction, false);
   }
 
+  // The controller sends hyphenated codes; older fixtures used the raw form.
+  function isAuthorizationTimeout(code) {
+    return (
+      code === "authorization-timed-out" || code === "authorization_timed_out"
+    );
+  }
+
   function googleErrorPresentation(code) {
     if (code === "catalogue-layout-changed")
       return {
@@ -874,7 +883,28 @@
         label: "Try again",
         action: "connect",
       };
-    if (code === "authorization_timed_out")
+    if (code === "invalid-settings")
+      return {
+        message: INVALID_SETTINGS_MESSAGE,
+        label: "Check status",
+        action: "refresh",
+        className: "secondary-button",
+      };
+    if (code === "token-exchange-failed")
+      return {
+        message:
+          "Google didn't accept the sign-in. Check that the imported Google setup file is the right one, then reconnect. (token-exchange-failed)",
+        label: "Reconnect",
+        action: "connect",
+      };
+    if (code === "token-exchange-unreachable")
+      return {
+        message:
+          "Google sign-in couldn't reach Google to finish. Check your internet connection, then reconnect. (token-exchange-unreachable)",
+        label: "Reconnect",
+        action: "connect",
+      };
+    if (isAuthorizationTimeout(code))
       return {
         message:
           "Google sign-in took longer than 20 minutes. The local callback closed; start a new connection and use its newest browser tab.",
@@ -898,7 +928,6 @@
       };
     if (
       [
-        "token-exchange-failed",
         "invalid-token-response",
         "authorization-denied",
         "state-mismatch",
@@ -1312,14 +1341,15 @@
       googleSettingStatus.dataset.state = "error";
       setGoogleSettingsAction("Import current setup", "setup");
     } else if (
-      googleStatusView?.errorCode === "authorization_timed_out" ||
+      isAuthorizationTimeout(googleStatusView?.errorCode) ||
       googleStatusView?.errorCode === "google-authorization-required" ||
       googleStatusView?.errorCode === "google-token-refresh-failed"
     ) {
-      googleSettingStatus.textContent =
-        googleStatusView?.errorCode === "authorization_timed_out"
-          ? "Google sign-in timed out. Use a new browser tab to reconnect."
-          : "Authorization failed or expired";
+      googleSettingStatus.textContent = isAuthorizationTimeout(
+        googleStatusView?.errorCode,
+      )
+        ? "Google sign-in timed out. Use a new browser tab to reconnect."
+        : "Authorization failed or expired";
       googleSettingStatus.dataset.state = "error";
       setGoogleSettingsAction("Reconnect", "connect");
     } else {
@@ -1886,6 +1916,7 @@
           "Google rejected this file's client secret. The saved credential was not replaced. Download a current setup file.",
         "google-client-configuration-check-failed":
           "Google could not verify this setup file. The saved credential was not replaced. Check your connection and try again.",
+        "invalid-settings": INVALID_SETTINGS_MESSAGE,
       };
       googleSetupImportStatus.textContent =
         messages[error?.message] ||
@@ -1940,7 +1971,9 @@
       await runGoogleAction("connect", { sheetUrl: canonicalUrl });
     } catch (error) {
       googleSheetUrlStatus.textContent =
-        error?.message || "Could not save the Sheet URL.";
+        error?.message === "invalid-settings"
+          ? INVALID_SETTINGS_MESSAGE
+          : error?.message || "Could not save the Sheet URL.";
     }
   });
   googleSetupForm.addEventListener("submit", async (event) => {
@@ -1979,8 +2012,11 @@
         googleSetupStatus.textContent =
           "Google setup changed while saving. Save the current value again.";
       }
-    } catch {
-      googleSetupStatus.textContent = "OFEnhancer could not save Google setup.";
+    } catch (error) {
+      googleSetupStatus.textContent =
+        error?.message === "invalid-settings"
+          ? INVALID_SETTINGS_MESSAGE
+          : "OFEnhancer could not save Google setup.";
     } finally {
       googleClientId.readOnly = false;
       setBusy(googleClientId, false);

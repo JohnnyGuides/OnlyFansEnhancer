@@ -148,6 +148,11 @@ internal static partial class GoogleOAuthProtocol
         {
             throw;
         }
+        catch (Exception error) when (error is HttpRequestException or IOException)
+        {
+            // A network failure is not a malformed or rejected token response.
+            throw new GoogleOAuthException("token_exchange_unreachable");
+        }
         catch
         {
             throw new GoogleOAuthException("invalid_token_response");

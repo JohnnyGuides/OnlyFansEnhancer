@@ -132,6 +132,25 @@ public sealed class GoogleOAuthProtocolTests
     }
 
     [TestMethod]
+    public async Task CodeExchangeThatCannotReachGoogleIsNotReportedAsARejection()
+    {
+        using HttpClient client = new(new UnreachableHandler());
+
+        GoogleOAuthException error = await Assert.ThrowsExceptionAsync<GoogleOAuthException>(() =>
+            GoogleOAuthProtocol.ExchangeCodeAsync(
+                client,
+                ClientId,
+                "authorization-code",
+                RedirectUri,
+                "code-verifier",
+                CancellationToken.None
+            )
+        );
+
+        Assert.AreEqual("token_exchange_unreachable", error.ErrorCode);
+    }
+
+    [TestMethod]
     public async Task DesktopCodeExchangeIncludesSecretOnlyInGooglePost()
     {
         RecordingHandler handler = new("""{"access_token":"access","refresh_token":"refresh","expires_in":3600}""");
@@ -214,6 +233,12 @@ public sealed class GoogleOAuthProtocolTests
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
             };
         }
+    }
+
+    private sealed class UnreachableHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new HttpRequestException(HttpRequestError.NameResolutionError, "oauth2.googleapis.com could not be resolved");
     }
 
     private sealed class RedirectedResponseHandler : HttpMessageHandler

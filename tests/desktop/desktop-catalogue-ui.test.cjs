@@ -356,6 +356,8 @@ async function installHost(page, initialState = null, googleOptions = {}) {
             return structuredClone(googleStatus);
           }
           if (operation === "saveGoogleClientId") {
+            if (globalThis.__settingsUnreadable)
+              throw new Error("invalid-settings");
             googleStatus = { state: "disconnected" };
             return structuredClone(googleStatus);
           }
@@ -937,6 +939,21 @@ async function testGoogleSettings(browser, port) {
   assert.equal(await input.getAttribute("aria-invalid"), "true");
   assert.equal((await googleCalls(page, "saveGoogleClientId")).length, 0);
 
+  await page.evaluate(() => {
+    globalThis.__settingsUnreadable = true;
+  });
+  await input.fill(googleClientId);
+  await setup.getByRole("button", { name: "Save setup" }).click();
+  await setup
+    .getByText(
+      "OFEnhancer couldn't read its saved settings, so this change wasn't saved. The settings file was left as it is. (invalid-settings)",
+      { exact: true },
+    )
+    .waitFor();
+  await page.evaluate(() => {
+    globalThis.__settingsUnreadable = false;
+  });
+
   await input.fill(`  ${googleClientId}  `);
   await setup.getByRole("button", { name: "Save setup" }).click();
   await page.getByText("Not connected", { exact: true }).waitFor();
@@ -1072,6 +1089,21 @@ async function testGoogleEndUserSettings(browser, port) {
   await page.evaluate((next) => __setGoogleState(next), {
     state: "error",
     errorCode: "authorization_timed_out",
+  });
+  await page.getByRole("button", { name: "Uploads", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settings
+    .getByText(
+      "Google sign-in timed out. Use a new browser tab to reconnect.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  // The controller sends the hyphenated form of the same code.
+  await page.evaluate((next) => __setGoogleState(next), {
+    state: "error",
+    errorCode: "authorization-timed-out",
   });
   await page.getByRole("button", { name: "Uploads", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -1616,6 +1648,38 @@ async function testGoogleErrorRecovery(browser, port) {
       action: "Check status",
       operation: "getGoogleCatalogueStatus",
       disconnect: true,
+    },
+    {
+      code: "token-exchange-failed",
+      message:
+        "Google didn't accept the sign-in. Check that the imported Google setup file is the right one, then reconnect. (token-exchange-failed)",
+      action: "Reconnect",
+      operation: "startGoogleCatalogueConnection",
+      disconnect: false,
+    },
+    {
+      code: "token-exchange-unreachable",
+      message:
+        "Google sign-in couldn't reach Google to finish. Check your internet connection, then reconnect. (token-exchange-unreachable)",
+      action: "Reconnect",
+      operation: "startGoogleCatalogueConnection",
+      disconnect: false,
+    },
+    {
+      code: "authorization-timed-out",
+      message:
+        "Google sign-in took longer than 20 minutes. The local callback closed; start a new connection and use its newest browser tab.",
+      action: "Reconnect",
+      operation: "startGoogleCatalogueConnection",
+      disconnect: false,
+    },
+    {
+      code: "invalid-settings",
+      message:
+        "OFEnhancer couldn't read its saved settings, so this change wasn't saved. The settings file was left as it is. (invalid-settings)",
+      action: "Check status",
+      operation: "getGoogleCatalogueStatus",
+      disconnect: false,
     },
     {
       code: "internal-error",

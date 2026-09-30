@@ -171,7 +171,8 @@ internal sealed class GoogleConnectionCoordinator : IGoogleConnectionSession
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
-                throw new GoogleOAuthException("token_exchange_failed");
+                // The deadline passed: Google was not reached in time, it did not reject the sign-in.
+                throw new GoogleOAuthException("token_exchange_unreachable");
             }
             if (_target is not null
                 && !string.Equals(callback.WorkbookId, _target.WorkbookId, StringComparison.Ordinal))
