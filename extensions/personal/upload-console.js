@@ -1031,7 +1031,8 @@
     let currentSnapshot = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
-    let repeatUploadConfirmed = false;
+    // Platforms the user confirmed another copy for in this run attempt.
+    let confirmedRepeatTargets = new Set();
     const cataloguePreviewCache = new Map();
     const cataloguePreviewPending = new Set();
     let manualTargets = null;
@@ -2008,7 +2009,7 @@
     }
 
     function invalidateMatch() {
-      repeatUploadConfirmed = false;
+      confirmedRepeatTargets = new Set();
       readiness = null;
       ++readinessRevision;
       uploadError.textContent = "";
@@ -2430,7 +2431,15 @@
       }
     }
 
-    function creatorUploadRequest(value, sessionId, targets) {
+    // The readiness check sends the same request the run will send, so the
+    // worker applies one preflight to both. Only the repeat confirmation is
+    // assumed for readiness: Upload always asks for it before preparing.
+    function creatorUploadRequest(
+      value,
+      sessionId,
+      targets,
+      { readiness: forReadiness = false } = {},
+    ) {
       return {
         type: "PREPARE_CREATOR_UPLOAD",
         sessionId,
@@ -2500,7 +2509,11 @@
                   currentSnapshot?.source === "desktop"
                     ? repeatedTargets(value)
                     : [],
-                repeatUploadConfirmed,
+                repeatUploadConfirmed:
+                  forReadiness ||
+                  repeatedTargets(value).every((platform) =>
+                    confirmedRepeatTargets.has(platform),
+                  ),
                 publicationState: currentMatch.candidate.publicationState,
                 row: currentMatch.candidate.row,
                 id: currentMatch.candidate.id,
@@ -2657,7 +2670,9 @@
           if (revision !== readinessRevision || runBusy || activeSession)
             return;
           const response = await sendMessage({
-            ...creatorUploadRequest(value, randomSessionId(), targets),
+            ...creatorUploadRequest(value, randomSessionId(), targets, {
+              readiness: true,
+            }),
             type: "CHECK_CREATOR_UPLOAD_AVAILABILITY",
           });
           if (response.availability?.ready !== true)
@@ -2906,7 +2921,7 @@
 
     function refreshDestinationSelection() {
       if (runBusy || activeSession) return;
-      repeatUploadConfirmed = false;
+      confirmedRepeatTargets = new Set();
       readiness = null;
       ++readinessRevision;
       uploadError.textContent = "";
@@ -3585,8 +3600,7 @@
       };
     }
 
-    function confirmRepeatUpload() {
-      const repeated = repeatedTargets();
+    function confirmRepeatUpload(repeated = repeatedTargets()) {
       if (!repeated.length) return Promise.resolve(true);
       const dialog = get("#repeatUploadDialog");
       get("#repeatUploadSummary").textContent =
@@ -3734,7 +3748,7 @@
             "Upload cancelled. Your draft is unchanged.";
           return;
         }
-        repeatUploadConfirmed = repeatedTargets().length > 0;
+        confirmedRepeatTargets = new Set(repeatedTargets());
         await recheckProposalBeforeUpload();
         let openingFrameToken = null;
         if (
@@ -3761,6 +3775,22 @@
         value = validate(true);
         const blocker = draftBlocker(value, social);
         if (blocker) throw new Error(blocker);
+        // Saving the catalogue can reveal another existing post. Ask for it
+        // now instead of sending a run the preflight would refuse.
+        const unconfirmed = repeatedTargets(value).filter(
+          (platform) => !confirmedRepeatTargets.has(platform),
+        );
+        if (unconfirmed.length) {
+          if (!(await confirmRepeatUpload(unconfirmed))) {
+            matchStatus.textContent =
+              "Upload cancelled. Catalogue edits were saved; no upload started.";
+            readiness = null;
+            recheckAfterFailure = true;
+            return;
+          }
+          for (const platform of unconfirmed)
+            confirmedRepeatTargets.add(platform);
+        }
         const sessionId = randomSessionId();
         const mediaTargets = pendingTargets(value);
         if (

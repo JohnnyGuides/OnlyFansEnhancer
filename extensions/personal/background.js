@@ -3383,9 +3383,9 @@ async function validateCreatorUploadRequest(message) {
   ) {
     throw new Error("Invalid catalogue upload preview.");
   }
+  // Readiness and preparation share this preflight; neither is exempt.
   if (
     catalogue.repeatPlatforms.length &&
-    message.type !== "CHECK_CREATOR_UPLOAD_AVAILABILITY" &&
     message.catalogue?.repeatUploadConfirmed !== true
   )
     throw new Error("Confirm uploading another copy before continuing.");

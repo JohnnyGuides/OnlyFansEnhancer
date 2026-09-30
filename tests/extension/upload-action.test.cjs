@@ -889,6 +889,96 @@ test("desktop opening offers New for older browser runs and retires both upload 
   }
 });
 
+test("a repeat revealed by the catalogue save is confirmed before preparation", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const { page } = fixture;
+    await page.evaluate(() => {
+      globalThis.readinessRequests = [];
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = (message, callback) => {
+        if (message.type !== "CHECK_CREATOR_UPLOAD_AVAILABILITY")
+          return send(message, callback);
+        readinessRequests.push(message);
+        callback({ ok: true, availability: { ready: true } });
+      };
+      globalThis.catalogueWrites = [];
+      const row = (published) => ({
+        row: 42,
+        id: "studio",
+        itemId: "studio",
+        title: "Studio tour",
+        description: "Original description",
+        releaseDate: "2026-09-25",
+        fingerprint: "a".repeat(64),
+        onlyfansLink: published
+          ? "https://onlyfans.com/123456789/johnny_guides"
+          : "",
+        publicationState: { onlyfans: published ? "published" : "empty" },
+      });
+      globalThis.CreatorCatalogueClient = {
+        loadConfig: async () => ({ source: "desktop", connected: true }),
+        getCatalogueSnapshot: async () => ({
+          status: "snapshot",
+          source: "desktop",
+          // Another run published OnlyFans while this one saved its edits.
+          rows: [row(catalogueWrites.length > 0)],
+        }),
+        writeUploadCatalogueEntry: async (value) => {
+          catalogueWrites.push(value);
+          return { id: "studio", row: 42, status: "updated" };
+        },
+      };
+      globalThis.CreatorUploadQueueEvidence = {
+        snapshot: () =>
+          Object.fromEntries(
+            ["onlyfans", "fansly", "manyvids"].map((p) => [
+              p,
+              { verified: true, scheduled: [], occupiedFridays: [] },
+            ]),
+          ),
+      };
+    });
+    await fixture.ready();
+    await page.locator("#uploadTitle").fill("Studio tour");
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("#uploadButton").disabled &&
+        document.querySelector("#uploadButton").textContent ===
+          "Update & upload",
+    );
+    await page.locator("#uploadButton").click();
+    await page.locator("#repeatUploadDialog").waitFor({ state: "visible" });
+    assert.equal(await page.evaluate(() => catalogueWrites.length), 1);
+    assert.match(
+      await page.locator("#repeatUploadSummary").textContent(),
+      /^OnlyFans already has a post/,
+    );
+    await page.locator("#repeatUploadCancel").click();
+    await page.locator("#repeatUploadDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(
+      () =>
+        !document.querySelector("#uploadButton").disabled &&
+        readinessRequests.at(-1)?.catalogue?.repeatPlatforms?.length === 1,
+    );
+    assert.deepEqual(
+      (await fixture.commands()).filter(
+        (item) => item.type === "PREPARE_CREATOR_UPLOAD",
+      ),
+      [],
+    );
+    // The readiness request is the run's own request; only the confirmation
+    // Upload always asks for is assumed.
+    const readiness = await page.evaluate(() => readinessRequests.at(-1));
+    assert.deepEqual(readiness.catalogue.repeatPlatforms, ["onlyfans"]);
+    assert.equal(readiness.catalogue.repeatUploadConfirmed, true);
+    assert.equal(await page.locator("#uploadTitle").isEnabled(), true);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("linked destination requires confirmation before any catalogue write", async () => {
   const fixture = await createUploadFixture();
   try {

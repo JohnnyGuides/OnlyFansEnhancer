@@ -786,6 +786,15 @@ function send(message) {
     vm.runInContext("validateCreatorUploadRequest(repeatRequest)", context),
     /Confirm uploading another copy/,
   );
+  // Readiness shares the preparation preflight: it is not exempt either.
+  context.repeatReadiness = {
+    ...context.repeatRequest,
+    type: "CHECK_CREATOR_UPLOAD_AVAILABILITY",
+  };
+  await assert.rejects(
+    vm.runInContext("validateCreatorUploadRequest(repeatReadiness)", context),
+    /Confirm uploading another copy/,
+  );
   context.repeatRequest.catalogue.repeatUploadConfirmed = true;
   const repeatAccepted = await vm.runInContext(
     "validateCreatorUploadRequest(repeatRequest)",

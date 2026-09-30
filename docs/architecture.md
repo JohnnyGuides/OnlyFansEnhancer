@@ -62,7 +62,12 @@ Apps Script client are distinct boundaries, not interchangeable success signals.
 
 The personal background worker owns registration, tab binding, shared settings,
 message allow-lists, and durable progress. The console owns the current selected
-Files and approved preview. Page adapters inspect the current signed-in DOM;
+Files and approved preview. Upload admission follows the worker preflight: the
+console's readiness check sends the run's own request through the same
+preflight PREPARE runs, assuming only the repeat-copy confirmation that Upload
+always asks for first. A repeat revealed by the catalogue save is confirmed
+before PREPARE, and any preflight refusal at PREPARE is a clean not-started
+result that keeps the draft editable and re-checks readiness. Page adapters inspect the current signed-in DOM;
 narrow page-world response observers accept only the expected successful final
 response and canonical identity. They do not grant generic API interception or
 trust a content-script-supplied URL as proof of successful submission.
