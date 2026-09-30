@@ -4918,6 +4918,9 @@ async function runCreatorManyVidsPlatform(session, target) {
     });
     return result;
   } catch (error) {
+    // A cancel that ended this run before any save click keeps its status.
+    if (session.cancelled && !target.submitAttempted && !target.submitted)
+      return target;
     const result = {
       platform,
       status: target.postUrl
@@ -4999,6 +5002,9 @@ async function runCreatorPornhubPlatform(session, target) {
     });
     return result;
   } catch (error) {
+    // A cancel that ended this run before any manual result keeps its status.
+    if (session.cancelled && !target.submitAttempted && !target.submitted)
+      return target;
     const result = {
       platform,
       stage: target.stage,
@@ -5562,35 +5568,43 @@ async function stopCreatorUploadSession(session) {
       pending.reject(new Error("Preparation was cancelled."));
       creatorUploadFileRequests.delete(id);
     }
+    let cancelError = null;
+    let failed = false;
     for (const target of session.platforms.values()) {
       if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
-      target.status = "cancelled";
-      target.stage = "cancelled";
-      if (target.tabId) {
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: target.tabId, documentIds: [target.documentId] },
-            func: (sessionId) => {
-              for (const [key, run] of globalThis.CreatorUploadRuns || [])
-                if (key.startsWith(`${sessionId}:`)) run.controller.abort();
-            },
-            args: [session.id],
-          });
-        } catch {
-          /* A closed document has already stopped its executor. */
+      try {
+        target.status = "cancelled";
+        target.stage = "cancelled";
+        if (target.tabId) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: target.tabId, documentIds: [target.documentId] },
+              func: (sessionId) => {
+                for (const [key, run] of globalThis.CreatorUploadRuns || [])
+                  if (key.startsWith(`${sessionId}:`)) run.controller.abort();
+              },
+              args: [session.id],
+            });
+          } catch {
+            /* A closed document has already stopped its executor. */
+          }
         }
-      }
-      creatorUploadNotify(session.id, {
-        type: "platform-result",
-        platform: target.platform,
-        result: {
+        creatorUploadNotify(session.id, {
+          type: "platform-result",
           platform: target.platform,
-          status: "cancelled",
-          error:
-            "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
-        },
-      });
+          result: {
+            platform: target.platform,
+            status: "cancelled",
+            error:
+              "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
+          },
+        });
+      } catch (error) {
+        if (!failed) cancelError = error;
+        failed = true;
+      }
     }
+    if (failed) throw cancelError;
   } finally {
     await checkpointCreatorUploadSession(session);
   }

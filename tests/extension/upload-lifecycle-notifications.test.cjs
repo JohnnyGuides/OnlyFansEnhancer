@@ -654,6 +654,107 @@ test("an aborted run keeps the cancelled status when nothing was submitted", asy
   assert.deepEqual(await storedStatuses(env, id), { onlyfans: "cancelled" });
 });
 
+// Starts the ManyVids or Pornhub page run with its adapter call parked, cancels
+// the session, then lets the parked call fail as an aborted page run does.
+async function cancelDuringSiteRun(platform, { submitted } = {}) {
+  const { env, id, target } = siteEnvironment(platform, "none");
+  let failPage;
+  env.context.park = () =>
+    new Promise((_, reject) => {
+      failPage = reject;
+    });
+  env.run(`resolveCreatorUploadAdapterResult = () => park();`);
+  const running = env.run(
+    `runCreatorUploadPlatform(creatorUploadSessions.get("${id}"), "${platform}")`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(failPage, "The page run must be waiting.");
+  if (submitted) {
+    target.submitAttempted = true;
+    target.submitted = true;
+    target.status = "save-clicked";
+  }
+  await env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`);
+  failPage(new Error("Preparation was cancelled."));
+  await running;
+  return { env, id, target };
+}
+
+test("cancelling during the ManyVids page run before any save click stays cancelled", async () => {
+  const { env, id, target } = await cancelDuringSiteRun("manyvids");
+  assert.equal(target.status, "cancelled");
+  assert.deepEqual(await storedStatuses(env, id), { manyvids: "cancelled" });
+});
+
+test("cancelling during the Pornhub page run before its manual result stays cancelled", async () => {
+  const { env, id, target } = await cancelDuringSiteRun("pornhub");
+  assert.equal(target.status, "cancelled");
+  assert.deepEqual(await storedStatuses(env, id), { pornhub: "cancelled" });
+});
+
+test("cancelling during the ManyVids run after save-clicked keeps the uncertain outcome", async () => {
+  const { env, id, target } = await cancelDuringSiteRun("manyvids", {
+    submitted: true,
+  });
+  assert.equal(target.status, "posted-link-unresolved");
+  assert.deepEqual(await storedStatuses(env, id), {
+    manyvids: "posted-link-unresolved",
+  });
+});
+
+test("a failing cancellation step does not stop later platforms and is rethrown", async () => {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans", "fansly", "manyvids"]);
+  env.context.saved = [];
+  env.run(`
+    creatorUploadPost = (sessionId, message) => {
+      if (message.platform === "fansly") throw new TypeError("step failed");
+    };
+    const originalCheckpoint = checkpointCreatorUploadSession;
+    checkpointCreatorUploadSession = (session) => {
+      saved.push([...session.platforms.values()].map((t) => t.status));
+      return originalCheckpoint(session);
+    };
+  `);
+  await assert.rejects(
+    env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`),
+    (error) => error.name === "TypeError" && /step failed/.test(error.message),
+  );
+  assert.deepEqual(
+    [...session.platforms.values()].map((target) => target.status),
+    ["cancelled", "cancelled", "cancelled"],
+  );
+  assert.deepEqual(abortCalls(env.scriptCalls), [100, 101, 102]);
+  assert.equal(env.context.saved.length, 1, "The final checkpoint is written.");
+  assert.deepEqual(await storedStatuses(env, id), {
+    onlyfans: "cancelled",
+    fansly: "cancelled",
+    manyvids: "cancelled",
+  });
+});
+
+test("a platform waiting for a file is cancelled when an earlier step throws", async () => {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans", "fansly", "manyvids"]);
+  const third = session.platforms.get("manyvids");
+  third.status = "uploading-full";
+  third.stage = "upload";
+  env.run(`
+    creatorUploadPost = (sessionId, message) => {
+      if (message.platform === "fansly") throw new TypeError("step failed");
+    };
+  `);
+  await assert.rejects(
+    env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`),
+    /step failed/,
+  );
+  assert.equal(third.status, "cancelled");
+  assert.equal((await storedStatuses(env, id)).manyvids, "cancelled");
+  assert.ok(abortCalls(env.scriptCalls).includes(102));
+});
+
 test("an aborted run keeps the uncertain outcome when a submission was attempted", async () => {
   const { env, id, target } = await cancelDuringFileWait({ submitted: true });
   assert.equal(target.status, "posted-link-unresolved");
