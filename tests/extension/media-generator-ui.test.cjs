@@ -106,6 +106,21 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
         source,
         thumbnail,
       );
+      await CreatorMediaGenerator.saveGeneratedMedia(
+        "a".repeat(48),
+        "media1Teaser",
+        source,
+        teaser,
+      );
+      const rejectedRole = await CreatorMediaGenerator.saveGeneratedMedia(
+        "a".repeat(48),
+        "media9Teaser",
+        source,
+        teaser,
+      ).then(
+        () => "",
+        (error) => error.message,
+      );
       const preview = document.createElement("video");
       const previewUrl = URL.createObjectURL(teaser);
       const duration = await new Promise((resolve, reject) => {
@@ -116,6 +131,7 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
       });
       URL.revokeObjectURL(previewUrl);
       return {
+        rejectedRole,
         thumbnail: thumbnailResult,
         teaser: {
           name: teaser.name,
@@ -125,6 +141,7 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
         },
       };
     });
+    assert.equal(result.rejectedRole, "Invalid generated media session.");
     assert.equal(result.thumbnail.type, "image/png");
     assert.equal(result.thumbnail.width, 640);
     assert.equal(result.thumbnail.height, 360);
@@ -184,10 +201,20 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
         "thumbnail",
         source,
       );
+      const extraTeaser = await CreatorMediaGenerator.loadGeneratedMedia(
+        "a".repeat(48),
+        "media1Teaser",
+        source,
+      );
       await CreatorMediaGenerator.clearGeneratedMedia();
-      return { teaser: teaser?.name, thumbnail: thumbnail?.name };
+      return {
+        teaser: teaser?.name,
+        thumbnail: thumbnail?.name,
+        extraTeaser: extraTeaser?.name,
+      };
     });
     assert.equal(recovered.teaser, result.teaser.name);
+    assert.equal(recovered.extraTeaser, result.teaser.name);
     assert.equal(recovered.thumbnail, result.thumbnail.name);
   } finally {
     await browser.close();
@@ -581,5 +608,128 @@ test("a failing audio context close still releases the teaser source video", asy
   } finally {
     await browser.close();
     fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+async function prepareExtraTeaserRun(fixture, { failOn = "" } = {}) {
+  const { page } = fixture;
+  await page.evaluate((failName) => {
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = (message, callback) => {
+      if (message.type !== "CHECK_CREATOR_UPLOAD_AVAILABILITY")
+        return send(message, callback);
+      callback({ ok: true, availability: { ready: true } });
+    };
+    globalThis.CreatorUploadQueueEvidence = {
+      snapshot: () =>
+        Object.fromEntries(
+          ["onlyfans", "fansly", "manyvids"].map((platform) => [
+            platform,
+            { verified: true, scheduled: [], occupiedFridays: [] },
+          ]),
+        ),
+    };
+    globalThis.teaserSources = [];
+    globalThis.savedRoles = [];
+    const generator = { ...globalThis.CreatorMediaGenerator };
+    generator.teaserFromVideo = async (file) => {
+      teaserSources.push(file.name);
+      if (file.name === failName) throw new Error("Preview recording failed.");
+      return new File(
+        ["neutral teaser " + file.name],
+        `${file.name.replace(/\.[^.]+$/, "")} (teaser).mp4`,
+        { type: "video/mp4", lastModified: 1789812000000 },
+      );
+    };
+    generator.saveGeneratedMedia = async (_sessionId, role) => {
+      savedRoles.push(role);
+    };
+    globalThis.CreatorMediaGenerator = generator;
+  }, failOn);
+  await fixture.ready();
+  await page.locator("#uploadAdditionalMedia").setInputFiles([
+    {
+      name: "extra one.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign extra one"),
+    },
+    {
+      name: "extra two.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign extra two"),
+    },
+    {
+      name: "extra still.png",
+      mimeType: "image/png",
+      buffer: Buffer.from("benign still"),
+    },
+  ]);
+  const fansly = page.locator("#targetFansly");
+  if (!(await fansly.isChecked())) await fansly.locator("..").click();
+  await page.waitForFunction(
+    () => !document.querySelector("#uploadButton").disabled,
+  );
+  await page.locator("#uploadButton").click();
+}
+
+test("Upload Hub generates one Fansly free preview per extra video before preparation", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    await prepareExtraTeaserRun(fixture);
+    let prepare;
+    for (let attempt = 0; attempt < 100 && !prepare; attempt += 1) {
+      prepare = (await fixture.commands()).find(
+        (item) => item.type === "PREPARE_CREATOR_UPLOAD",
+      );
+      if (!prepare) await fixture.page.waitForTimeout(50);
+    }
+    assert.ok(prepare, "the run reached preparation");
+    const proof = prepare.request.draft.fileProof;
+    assert.deepEqual(
+      Object.keys(proof)
+        .filter((role) => /Teaser$/.test(role))
+        .sort(),
+      ["media1Teaser", "media2Teaser"],
+    );
+    assert.equal(proof.media1Teaser.name, "extra one (teaser).mp4");
+    assert.equal(proof.media2Teaser.name, "extra two (teaser).mp4");
+    assert.deepEqual(await fixture.page.evaluate(() => teaserSources), [
+      "benign-new-clip.mp4",
+      "extra one.mp4",
+      "extra two.mp4",
+    ]);
+    assert.deepEqual(await fixture.page.evaluate(() => savedRoles), [
+      "teaser",
+      "media1Teaser",
+      "media2Teaser",
+    ]);
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("a failed extra video teaser stops the run before any platform is prepared", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    await prepareExtraTeaserRun(fixture, { failOn: "extra two.mp4" });
+    await fixture.page.waitForFunction(() =>
+      document
+        .querySelector("#uploadError")
+        .textContent.includes("Could not create the Fansly free preview"),
+    );
+    assert.match(
+      await fixture.page.locator("#uploadError").textContent(),
+      /extra video 2 \(extra two\.mp4\): Preview recording failed\./,
+    );
+    assert.deepEqual(
+      (await fixture.commands()).filter(
+        (item) => item.type === "PREPARE_CREATOR_UPLOAD",
+      ),
+      [],
+    );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
   }
 });

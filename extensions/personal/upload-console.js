@@ -1033,6 +1033,8 @@
     let openingFrame = null;
     let rememberedFrame = null;
     let teaserFile = null;
+    // Fansly free previews for extra videos, keyed by the selected extra file.
+    const extraTeasers = new WeakMap();
     let thumbnailFile = null;
     let thumbnailCatalogueId = null;
     let thumbnailChoicesRevision = 0;
@@ -2492,6 +2494,35 @@
       }
     }
 
+    // Every extra video attached after the first Fansly media slot gets its
+    // own generated teaser as that item's free preview; the first slot keeps
+    // the shared teaser, and images/audio get none.
+    function extraTeaserEligible(file, index) {
+      return (
+        extraMediaKind(file) === "video" && (Boolean(fullFile) || index > 0)
+      );
+    }
+
+    function extraTeaserFiles(targets) {
+      if (!targets.includes("fansly")) return {};
+      return Object.fromEntries(
+        additionalMedia.flatMap((file, index) =>
+          extraTeaserEligible(file, index) && extraTeasers.has(file)
+            ? [[`media${index + 1}Teaser`, extraTeasers.get(file)]]
+            : [],
+        ),
+      );
+    }
+
+    function extraTeaserProof(files) {
+      return Object.fromEntries(
+        Object.entries(files).map(([role, file]) => [
+          role,
+          fileResumeProof(file),
+        ]),
+      );
+    }
+
     // The readiness check sends the same request the run will send, so the
     // worker applies one preflight to both. Only the repeat confirmation is
     // assumed for readiness: Upload always asks for it before preparing.
@@ -2538,6 +2569,7 @@
               ]),
             ),
             teaser: fileResumeProof(teaserFile),
+            ...extraTeaserProof(extraTeaserFiles(targets)),
             thumbnail:
               targets.includes("manyvids") ||
               (targets.includes("pornhub") && value.pornhubMode === "free")
@@ -3937,6 +3969,33 @@
           teaserFile.source = "generated";
           renderFilePickers();
         }
+        if (mediaTargets.includes("fansly")) {
+          for (const [index, file] of additionalMedia.entries()) {
+            if (!extraTeaserEligible(file, index) || extraTeasers.has(file))
+              continue;
+            const label = `extra video ${index + 1} (${file.name})`;
+            matchStatus.textContent = `Creating the Fansly free preview for ${label}…`;
+            let extraTeaser;
+            try {
+              extraTeaser =
+                await globalThis.CreatorMediaGenerator.teaserFromVideo(
+                  file,
+                  (message) => {
+                    matchStatus.textContent = `${label}: ${message}`;
+                  },
+                );
+            } catch (error) {
+              // A missing extra preview fails this preparation before any
+              // platform is touched instead of silently posting without it.
+              throw new Error(
+                `Could not create the Fansly free preview for ${label}: ${error.message}`,
+                { cause: error },
+              );
+            }
+            extraTeaser.source = "generated";
+            extraTeasers.set(file, extraTeaser);
+          }
+        }
         if (
           (mediaTargets.includes("manyvids") ||
             (mediaTargets.includes("pornhub") &&
@@ -3962,6 +4021,20 @@
               role,
               fullFile || pornhubFile,
               file,
+            );
+        }
+        for (const [index, file] of additionalMedia.entries()) {
+          const extraTeaser = extraTeasers.get(file);
+          if (
+            mediaTargets.includes("fansly") &&
+            extraTeaser &&
+            extraTeaserEligible(file, index)
+          )
+            await globalThis.CreatorMediaGenerator.saveGeneratedMedia(
+              sessionId,
+              `media${index + 1}Teaser`,
+              file,
+              extraTeaser,
             );
         }
         value = validate(true);
@@ -4011,6 +4084,7 @@
             additionalMedia.map((file, index) => [`media${index + 1}`, file]),
           ),
           teaser: teaserFile,
+          ...extraTeaserFiles(targets),
           thumbnail: thumbnailFile,
           pornhub: selectedPornhubFile(value.pornhubMode),
           social: socialFile,
@@ -4044,6 +4118,7 @@
                 ]),
               ),
               teaser: fileResumeProof(teaserFile),
+              ...extraTeaserProof(extraTeaserFiles(targets)),
               thumbnail:
                 targets.includes("manyvids") ||
                 (targets.includes("pornhub") && value.pornhubMode === "free")
@@ -4377,6 +4452,9 @@
 
     async function resumeSavedUpload() {
       const expected = resumable.draft;
+      const expectedExtraTeasers = Object.keys(expected.fileProof || {}).filter(
+        (role) => /^media[1-8]Teaser$/.test(role),
+      );
       const previousTeaser = teaserFile;
       const previousThumbnail = thumbnailFile;
       try {
@@ -4400,12 +4478,30 @@
               );
           renderFilePickers();
         }
+        for (const role of expectedExtraTeasers) {
+          const source = additionalMedia[Number(role.slice(5, -6)) - 1];
+          if (!(source instanceof File)) continue;
+          const saved =
+            await globalThis.CreatorMediaGenerator.loadGeneratedMedia(
+              resumable.id,
+              role,
+              source,
+            );
+          if (saved) extraTeasers.set(source, saved);
+        }
       } catch (error) {
         teaserFile = previousTeaser;
         thumbnailFile = previousThumbnail;
         get("#resumeError").textContent = error.message;
         return;
       }
+      const resumedExtraTeasers = Object.fromEntries(
+        expectedExtraTeasers.map((role) => [
+          role,
+          extraTeasers.get(additionalMedia[Number(role.slice(5, -6)) - 1]) ||
+            null,
+        ]),
+      );
       const sharedLegacyPornhubFile =
         expected.pornhubMode !== "paid" &&
         expected.fullFilename &&
@@ -4432,6 +4528,10 @@
         ) ||
         !matchesResumeFile(expected.fileProof?.full, fullFile) ||
         !matchesResumeFile(expected.fileProof?.teaser, teaserFile) ||
+        Object.entries(resumedExtraTeasers).some(
+          ([role, file]) =>
+            !file || !matchesResumeFile(expected.fileProof[role], file),
+        ) ||
         !matchesResumeFile(expected.fileProof?.thumbnail, thumbnailFile) ||
         !matchesResumeFile(expected.fileProof?.pornhub, selectedPornhub)
       ) {
@@ -4498,6 +4598,7 @@
               additionalMedia.map((file, index) => [`media${index + 1}`, file]),
             ),
             teaser: teaserFile,
+            ...resumedExtraTeasers,
             thumbnail: thumbnailFile,
             pornhub: selectedPornhub,
           },
@@ -4518,6 +4619,7 @@
                 ]),
               ),
               teaser: fileResumeProof(teaserFile),
+              ...extraTeaserProof(resumedExtraTeasers),
               thumbnail: fileResumeProof(thumbnailFile),
               pornhub: fileResumeProof(selectedPornhub),
             },

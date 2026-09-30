@@ -150,3 +150,19 @@ test("relay posts no failure ack for supported pairings", () => {
   assert.deepEqual(bridge.forwarded, ["media1", "full"]);
   assert.deepEqual(bridge.acks(), []);
 });
+
+test("relay forwards extra video teaser roles only for Fansly", () => {
+  const fansly = relay("fansly");
+  fansly.send("media1Teaser");
+  fansly.send("media8Teaser");
+  for (const role of ["media0Teaser", "media9Teaser", "media1teaser"])
+    fansly.send(role);
+  assert.deepEqual(fansly.forwarded, ["media1Teaser", "media8Teaser"]);
+  assert.equal(fansly.acks().length, 3);
+  for (const platform of ["onlyfans", "pornhub", "x"]) {
+    const other = relay(platform);
+    other.send("media1Teaser");
+    assert.deepEqual(other.forwarded, []);
+    assert.equal(other.acks()[0].ok, false);
+  }
+});

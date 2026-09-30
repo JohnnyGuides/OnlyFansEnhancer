@@ -146,6 +146,55 @@ async function runLegacyFansly(scenario) {
           });
       });
     }
+    if (scenario.previews) {
+      // Legacy cards offer Add Free Preview; a teaser file lands on the card
+      // of the media role it belongs to instead of creating a new card.
+      await page.evaluate(() => {
+        const menu = document.createElement("div");
+        menu.id = "preview-menu";
+        menu.hidden = true;
+        menu.innerHTML = '<div class="dropdown-item">Upload New</div>';
+        document.body.append(menu);
+        menu.firstChild.addEventListener("click", () => {
+          menu.hidden = true;
+          document.querySelector("#fansly-file").click();
+        });
+        let currentRole = "";
+        const setRole = globalThis.setFanslyUploadRole;
+        globalThis.setFanslyUploadRole = (role) => {
+          currentRole = role;
+          setRole(role);
+        };
+        document.addEventListener(
+          "change",
+          (event) => {
+            if (!/^media[1-8]Teaser$/.test(currentRole)) return;
+            event.stopImmediatePropagation();
+            const card = document.querySelector(
+              `[data-role="${currentRole.slice(0, -6)}"]`,
+            );
+            const marker = document.createElement("div");
+            marker.className = "free-preview";
+            marker.dataset.freePreview = "true";
+            marker.dataset.file = event.target.files[0].name;
+            card.append(marker);
+          },
+          true,
+        );
+        new MutationObserver((records) => {
+          for (const record of records)
+            for (const card of record.addedNodes) {
+              if (card.tagName !== "APP-ACCOUNT-MEDIA-TEMPLATE") continue;
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "btn";
+              button.textContent = "Add Free Preview";
+              button.addEventListener("click", () => (menu.hidden = false));
+              card.append(button);
+            }
+        }).observe(document.querySelector("#media"), { childList: true });
+      });
+    }
     await page.evaluate(() => {
       globalThis.CreatorToolkitMasterRun = true;
     });
@@ -167,6 +216,7 @@ async function runLegacyFansly(scenario) {
           hasTeaser: false,
           publishMode: "manual",
           mediaFiles: scenario.mediaFiles,
+          fileProof: scenario.fileProof,
           title: "Episode",
           description: "Episode description",
           scheduledIso: "2026-08-28T15:00:00.000Z",
@@ -205,6 +255,14 @@ async function runLegacyFansly(scenario) {
         presets: Object.fromEntries(
           [...document.querySelectorAll("app-account-media-template")].map(
             (card) => [card.dataset.role, card.dataset.preset],
+          ),
+        ),
+        previews: Object.fromEntries(
+          [...document.querySelectorAll("[data-free-preview='true']")].map(
+            (marker) => [
+              marker.closest("app-account-media-template").dataset.role,
+              marker.dataset.file,
+            ],
           ),
         ),
       };
@@ -291,4 +349,34 @@ test("legacy Fansly additional media without a Load Preset control uses the name
     status: "manual-submit-required",
   });
   assert.deepEqual(outcome.presets, { full: "defaulT", media1: "defaulT" });
+});
+
+test("legacy Fansly extra video gets its own free preview and an image gets none", async () => {
+  const proof = (name) => ({ name, size: 4, lastModified: 1000, type: "" });
+  const outcome = await runLegacyFansly({
+    previews: true,
+    fanslyPreset: "defaulT",
+    fanslyPresetSelection: "first",
+    mediaFiles: [
+      { role: "media1", name: "clip.mp4", kind: "video" },
+      { role: "media2", name: "photo.jpg", kind: "image" },
+    ],
+    fileProof: {
+      media1: proof("clip.mp4"),
+      media2: proof("photo.jpg"),
+      media1Teaser: proof("clip (teaser).mp4"),
+    },
+  });
+  assert.deepEqual(outcome.result, {
+    platform: "fansly",
+    status: "manual-submit-required",
+  });
+  assert.deepEqual(outcome.presets, {
+    full: "defaulT",
+    media1: "defaulT",
+    media2: "defaulT",
+  });
+  assert.deepEqual(outcome.previews, {
+    media1: "episode-media1Teaser.mp4",
+  });
 });

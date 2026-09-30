@@ -71,9 +71,10 @@
         (!new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
           role,
         ) &&
-          !/^media[1-8]$/.test(role)) ||
+          !/^media[1-8](?:Teaser)?$/.test(role)) ||
         (/^media[1-8]$/.test(role) &&
           !["onlyfans", "fansly"].includes(platform)) ||
+        (/^media[1-8]Teaser$/.test(role) && platform !== "fansly") ||
         (platform === "pornhub"
           ? !["pornhub", "thumbnail"].includes(role)
           : role === "pornhub") ||
@@ -83,7 +84,10 @@
         throw new Error("Unsupported upload file role.");
       }
       const kind = definition?.kind || "video";
-      if (!new Set(["video", "image", "audio"]).has(kind)) {
+      if (
+        !new Set(["video", "image", "audio"]).has(kind) ||
+        (/^media[1-8]Teaser$/.test(role) && kind !== "video")
+      ) {
         throw new Error(`Unsupported ${role} file kind.`);
       }
       assertToken(definition?.token, `${role} file token`);

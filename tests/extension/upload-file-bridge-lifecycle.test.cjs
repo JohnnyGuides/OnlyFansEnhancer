@@ -129,3 +129,39 @@ test("abort during waitFor rejects, clears the timer and removes the listener", 
   // A later dispose has nothing left to reject and must not throw.
   bridge.dispose(sessionId);
 });
+
+test("media{n}Teaser roles install only on Fansly, as video, for n 1 to 8", () => {
+  const { bridge } = load();
+  const install = (platform, role, kind = "video") =>
+    bridge.install({
+      sessionId,
+      platform,
+      bridgeUrl: "chrome-extension://test/bridge.html",
+      bridgeOrigin: "chrome-extension://test",
+      roles: { [role]: { selector: "input[type=file]", token, kind } },
+    });
+  for (const role of ["media1Teaser", "media8Teaser"])
+    assert.doesNotThrow(() => install("fansly", role));
+  for (const role of [
+    "media0Teaser",
+    "media9Teaser",
+    "media1teaser",
+    "mediaTeaser",
+    "media1Teaser2",
+  ])
+    assert.throws(
+      () => install("fansly", role),
+      /Unsupported upload file role/,
+    );
+  for (const platform of ["onlyfans", "manyvids", "pornhub", "x"])
+    assert.throws(
+      () => install(platform, "media1Teaser"),
+      /Unsupported upload file role/,
+    );
+  for (const kind of ["image", "audio"])
+    assert.throws(
+      () => install("fansly", "media2Teaser", kind),
+      /Unsupported media2Teaser file kind/,
+    );
+  bridge.dispose(sessionId);
+});

@@ -3032,6 +3032,7 @@ function creatorUploadSessionProofMatches(session, proof) {
     "thumbnail",
     "pornhub",
     ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
+    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}Teaser`),
   ]) {
     const expected = session.draft.fileProof?.[role];
     if (!expected) continue;
@@ -3070,6 +3071,14 @@ function creatorUploadClean(value, maximum) {
     .slice(0, maximum);
 }
 
+// Fansly free previews for extra videos: one `media{n}Teaser` role per
+// proved, console-generated teaser.
+function creatorUploadExtraTeaserRoles(draft) {
+  return Object.keys(draft?.fileProof || {}).filter((role) =>
+    /^media[1-8]Teaser$/.test(role),
+  );
+}
+
 function creatorUploadResumeFileProof(value) {
   if (value == null) return {};
   if (typeof value !== "object" || Array.isArray(value))
@@ -3081,6 +3090,7 @@ function creatorUploadResumeFileProof(value) {
     "thumbnail",
     "pornhub",
     ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
+    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}Teaser`),
   ]) {
     const item = value[role];
     if (item == null) continue;
@@ -3240,6 +3250,16 @@ async function validateCreatorUploadRequest(message) {
     ) ||
     (draft.mediaFiles.length &&
       !targets.some((target) => ["onlyfans", "fansly"].includes(target))) ||
+    // An extra teaser belongs to a later Fansly extra video; the first media
+    // slot keeps the shared teaser.
+    creatorUploadExtraTeaserRoles(draft).some((role) => {
+      const index = Number(role.slice(5, -6)) - 1;
+      return (
+        !targets.includes("fansly") ||
+        draft.mediaFiles[index]?.kind !== "video" ||
+        (!draft.fullFilename && index === 0)
+      );
+    }) ||
     (!draft.fullFilename &&
       !draft.mediaFiles.length &&
       targets.some((target) => ["onlyfans", "fansly"].includes(target)))
@@ -4025,6 +4045,14 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
           session.draft.hasTeaser !== false
             ? { teaser: creatorUploadRandomToken() }
             : {}),
+          ...(platform === "fansly"
+            ? Object.fromEntries(
+                creatorUploadExtraTeaserRoles(session.draft).map((role) => [
+                  role,
+                  creatorUploadRandomToken(),
+                ]),
+              )
+            : {}),
           ...(platform === "manyvids" && session.draft.manyvidsThumbnail
             ? { thumbnail: creatorUploadRandomToken() }
             : {}),
@@ -4079,6 +4107,16 @@ async function prepareCreatorUploadPlatform(session, platform, tabId = null) {
                     selector: "input[data-creator-fansly-file]",
                     token: tokens[item.role],
                     kind: item.kind,
+                  },
+                ]),
+              ),
+              ...Object.fromEntries(
+                creatorUploadExtraTeaserRoles(session.draft).map((role) => [
+                  role,
+                  {
+                    selector: "input[data-creator-fansly-file]",
+                    token: tokens[role],
+                    kind: "video",
                   },
                 ]),
               ),
@@ -5131,6 +5169,12 @@ async function runCreatorUploadPlatform(session, platform) {
             ...Object.fromEntries(
               (session.draft.mediaFiles || []).map((item) => [
                 item.role,
+                "input[data-creator-fansly-file]",
+              ]),
+            ),
+            ...Object.fromEntries(
+              creatorUploadExtraTeaserRoles(session.draft).map((role) => [
+                role,
                 "input[data-creator-fansly-file]",
               ]),
             ),

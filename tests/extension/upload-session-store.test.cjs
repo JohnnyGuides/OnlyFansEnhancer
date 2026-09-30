@@ -767,3 +767,71 @@ test("a legacy attach-media record still refuses a new attach-media intent", asy
     /existing.*action/i,
   );
 });
+
+test("journal admits select-media{n}Teaser only for valid extra slots", async () => {
+  const { store } = loadStore();
+  await store.recordStep(
+    "extra-teaser-session",
+    journalStep("select-media1Teaser", commandIds[0]),
+  );
+  await store.recordStep(
+    "extra-teaser-session",
+    journalStep("select-media8Teaser", commandIds[1]),
+  );
+  for (const bad of [
+    "select-media0Teaser",
+    "select-media9Teaser",
+    "select-media1teaser",
+    "select-teaser1",
+  ])
+    await assert.rejects(
+      store.recordStep("extra-teaser-session", journalStep(bad, commandIds[2])),
+      /Invalid preparation step journal record/,
+    );
+});
+
+test("saved draft keeps extra video teaser proofs and drops them for images", async () => {
+  const { store } = loadStore();
+  const id = "upload-session-extra-teasers";
+  const proof = (name) => ({
+    name,
+    size: 10,
+    lastModified: 1000,
+    type: "video/mp4",
+  });
+  await store.save({
+    id,
+    createdAt: 100,
+    updatedAt: 200,
+    draft: {
+      title: "Neutral",
+      fullFilename: "full.mp4",
+      mediaFiles: [
+        { role: "media1", name: "one.mp4", kind: "video" },
+        { role: "media2", name: "two.mp4", kind: "video" },
+        { role: "media3", name: "still.png", kind: "image" },
+      ],
+      fileProof: {
+        full: proof("full.mp4"),
+        media1: proof("one.mp4"),
+        media2: proof("two.mp4"),
+        media3: proof("still.png"),
+        media1Teaser: proof("one (teaser).mp4"),
+        media2Teaser: proof("two (teaser).mp4"),
+        media3Teaser: proof("still (teaser).mp4"),
+        media4Teaser: proof("ghost (teaser).mp4"),
+      },
+    },
+    platforms: {},
+  });
+  const restored = plain(await store.load(id));
+  assert.deepEqual(Object.keys(restored.draft.fileProof).sort(), [
+    "full",
+    "media1",
+    "media1Teaser",
+    "media2",
+    "media2Teaser",
+    "media3",
+  ]);
+  assert.equal(restored.draft.fileProof.media2Teaser.name, "two (teaser).mp4");
+});

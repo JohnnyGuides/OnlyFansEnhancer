@@ -32,11 +32,14 @@ internal sealed class GeneratedUploadMediaStore
         long modified = payload.GetProperty("lastModified").GetInt64();
         long offset = payload.GetProperty("offset").GetInt64();
         bool final = payload.GetProperty("final").GetBoolean();
-        if (session.Length != 48 || session.Any(c => !Uri.IsHexDigit(c)) || role is not ("teaser" or "thumbnail") ||
+        // Extra Fansly videos each carry their own generated teaser (media1Teaser..media8Teaser).
+        bool teaser = role == "teaser" || (role.Length == 12 && role.StartsWith("media", StringComparison.Ordinal) &&
+            role[5] is >= '1' and <= '8' && role.EndsWith("Teaser", StringComparison.Ordinal));
+        if (session.Length != 48 || session.Any(c => !Uri.IsHexDigit(c)) || !(teaser || role == "thumbnail") ||
             name.Length is < 1 or > 128 || name != Path.GetFileName(name) || name.Any(c => Path.GetInvalidFileNameChars().Contains(c)) ||
-            Path.GetExtension(name).ToLowerInvariant() != (role == "teaser" ? ".mp4" : ".png") ||
+            Path.GetExtension(name).ToLowerInvariant() != (teaser ? ".mp4" : ".png") ||
             hash.Length != 64 || hash.Any(c => !Uri.IsHexDigit(c)) ||
-            size <= 0 || size >= (role == "teaser" ? 50L * 1024 * 1024 : 2_000_000) ||
+            size <= 0 || size >= (teaser ? 50L * 1024 * 1024 : 2_000_000) ||
             modified <= 0 || offset < 0 || offset >= size)
             throw new InvalidOperationException("Invalid generated upload media.");
         byte[] chunk;
