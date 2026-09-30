@@ -964,6 +964,14 @@
         action: "sync",
         allowDisconnect: true,
       };
+    if (code === "google-sync-incomplete")
+      return {
+        message:
+          "The last sync could not reach Google Sheet. Check your connection, then sync again.",
+        label: "Sync again",
+        action: "sync",
+        allowDisconnect: true,
+      };
     if (code === "google-migration-unresolved")
       return {
         message:
@@ -1143,6 +1151,15 @@
         label: "Verify updates",
       };
     }
+    if (
+      codePresentation &&
+      googleStatusView.errorCode === "google-sync-incomplete" &&
+      googleStatusView.pendingCount
+    )
+      codePresentation = {
+        ...codePresentation,
+        message: `${plural(googleStatusView.pendingCount, "update")} waiting. ${codePresentation.message}`,
+      };
     const errorPresentation =
       codePresentation ||
       (state === "error"

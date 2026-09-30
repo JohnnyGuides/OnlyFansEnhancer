@@ -664,7 +664,9 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                     ? "google-sync-conflict"
                     : summary.Unresolved > 0 || stored.Unresolved > 0 || stored.Attempted > 0
                         ? "google-sync-unresolved"
-                        : null;
+                        : summary.Deferred > 0 && stored.Pending > 0
+                            ? "google-sync-incomplete"
+                            : null;
                 _syncing = false;
                 return StatusLocked();
             }
@@ -847,7 +849,8 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             return View("conflict", counts, "google-sync-conflict");
         if (counts.Attempted > 0 || counts.Unresolved > 0)
             return View("conflict", counts, "google-sync-unresolved");
-        if (_syncIssueCode is not null)
+        // Work a failed run left pending is flagged only while it is still pending.
+        if (_syncIssueCode is not null && (_syncIssueCode != "google-sync-incomplete" || counts.Pending > 0))
             return View("conflict", counts, _syncIssueCode);
         return View(_ready ? "ready" : "migrationReady", counts);
     }

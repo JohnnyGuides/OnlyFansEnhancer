@@ -60,6 +60,7 @@ internal sealed class GoogleCatalogueSyncWorker
         int completed = 0;
         int conflicts = 0;
         int unresolved = 0;
+        int deferred = 0;
         bool remoteVerificationOccurred = false;
         void RecordRemoteVerification() => remoteVerificationOccurred = true;
         foreach (SyncOutboxItem operation in operations)
@@ -88,6 +89,7 @@ internal sealed class GoogleCatalogueSyncWorker
             catch (GoogleCatalogueException)
             {
                 // A read-only preflight failure leaves pending work eligible for a later manual run.
+                deferred++;
             }
             catch (SyncOutboxException)
             {
@@ -95,7 +97,7 @@ internal sealed class GoogleCatalogueSyncWorker
             }
         }
 
-        return new(completed, conflicts, unresolved, pendingCount(), remoteVerificationOccurred);
+        return new(completed, conflicts, unresolved, pendingCount(), remoteVerificationOccurred, deferred);
     }
 
     private async Task<SyncOutcome> ProcessPendingAsync(
@@ -287,5 +289,7 @@ internal sealed record GoogleSyncSummary(
     int Conflicts,
     int Unresolved,
     int Pending,
-    bool RemoteVerificationOccurred = false
+    bool RemoteVerificationOccurred = false,
+    // Pending operations this run could not check or send, left for a later run.
+    int Deferred = 0
 );

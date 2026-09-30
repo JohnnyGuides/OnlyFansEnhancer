@@ -136,6 +136,15 @@ const googleStates = Object.freeze({
     errorCode: "remote-fingerprint-changed",
     sensitiveTitle: "PRIVATE VIDEO TITLE MUST NOT LEAK",
   },
+  syncIncomplete: {
+    state: "conflict",
+    workbookName,
+    sheetName,
+    pendingCount: 2,
+    conflictCount: 0,
+    lastVerifiedSync: "2026-09-04T12:00:00Z",
+    errorCode: "google-sync-incomplete",
+  },
   syncUnresolved: {
     state: "conflict",
     workbookName,
@@ -641,6 +650,20 @@ async function testGoogleStates(browser, port) {
   assert.equal(
     await strip
       .getByRole("button", { name: "Verify updates", exact: true })
+      .count(),
+    1,
+  );
+
+  await setGoogleState(page, googleStates.syncIncomplete);
+  await strip
+    .getByText(
+      "2 updates waiting. The last sync could not reach Google Sheet. Check your connection, then sync again.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(
+    await strip
+      .getByRole("button", { name: "Sync again", exact: true })
       .count(),
     1,
   );
@@ -1522,6 +1545,14 @@ async function testGoogleErrorRecovery(browser, port) {
       code: "google-sync-unresolved",
       message:
         "OFEnhancer could not confirm the last Google Sheet update. Sync again to check it.",
+      action: "Sync again",
+      operation: "syncGoogleCatalogue",
+      disconnect: true,
+    },
+    {
+      code: "google-sync-incomplete",
+      message:
+        "The last sync could not reach Google Sheet. Check your connection, then sync again.",
       action: "Sync again",
       operation: "syncGoogleCatalogue",
       disconnect: true,

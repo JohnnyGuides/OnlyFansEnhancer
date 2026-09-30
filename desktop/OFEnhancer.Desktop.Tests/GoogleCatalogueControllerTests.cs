@@ -98,6 +98,30 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public void SyncThatLeavesPendingWorkUnsentIsNotReportedReady()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Session.Inspection = InspectionWithRows(1, []);
+        harness.Controller.inspectGoogleWorkbook();
+        string itemId = harness.Store.GetCatalogue().Items.Single().ItemId;
+        SyncOutboxItem leftover = harness.Store.EnqueueProjection(Projection(itemId, "leftover", WorkbookId));
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(0, 0, 0, 1, false, Deferred: 1));
+
+        GoogleCatalogueStatusView status = harness.Controller.syncGoogleCatalogue();
+
+        Assert.AreEqual("conflict", status.State);
+        Assert.AreEqual("google-sync-incomplete", status.ErrorCode);
+        Assert.AreEqual(1, status.PendingCount);
+        Assert.IsNull(status.LastVerifiedSync);
+        Assert.AreEqual(SyncOutboxState.Pending, harness.Store.GetSyncOperation(leftover.OperationId).State);
+
+        // A later run that sends it clears the flag.
+        harness.Store.MarkSyncPendingCompleted(leftover.OperationId, DateTimeOffset.UtcNow);
+        harness.Session.SyncAction = _ => Task.FromResult(new GoogleSyncSummary(1, 0, 0, 0, true));
+        Assert.AreEqual("ready", harness.Controller.syncGoogleCatalogue().State);
+    }
+
+    [TestMethod]
     public void ConflictInAnotherWorkbookDoesNotBlockSyncSuccess()
     {
         using ControllerHarness harness = ConnectedHarness();

@@ -103,6 +103,24 @@ public sealed class GoogleCatalogueSyncWorkerTests
     }
 
     [TestMethod]
+    public async Task FailedPreflightLeavesTheOperationPendingAndReportsItDeferred()
+    {
+        using SyncFixture fixture = SyncFixture.Create();
+        string operationId = fixture.Enqueue("ashley", Clock);
+        fixture.Google.SetRow(fixture.ItemId("ashley"), 93);
+        fixture.Google.RejectMetadataSearch = true;
+
+        GoogleSyncSummary summary = await fixture.RunSelectedAsync();
+
+        Assert.AreEqual(1, summary.Deferred);
+        Assert.AreEqual(1, summary.Pending);
+        Assert.AreEqual(0, summary.Completed + summary.Conflicts + summary.Unresolved);
+        Assert.AreEqual(SyncOutboxState.Pending, fixture.Store.GetSyncOperation(operationId).State);
+        AssertNoMutationAttempt(fixture.Store, operationId);
+        Assert.AreEqual(0, fixture.Google.Mutations.Count);
+    }
+
+    [TestMethod]
     public async Task AlreadyAppliedValueCompletesByReadWithoutMutation()
     {
         using SyncFixture fixture = SyncFixture.Create();
@@ -525,6 +543,7 @@ public sealed class GoogleCatalogueSyncWorkerTests
         public Action? BeforeMutation { get; set; }
         public string Header { get; set; } = "OnlyFans";
         public bool ThrowAfterAcceptingMutation { get; set; }
+        public bool RejectMetadataSearch { get; set; }
         public int SheetPropertyReads { get; private set; }
         public Task MetadataSearchPaused => _metadataPaused?.Task
             ?? throw new InvalidOperationException("Metadata search is not paused.");
@@ -561,6 +580,8 @@ public sealed class GoogleCatalogueSyncWorkerTests
                     .GetProperty("metadataValue")
                     .GetString()!;
                 MetadataSearches.Add(itemId);
+                if (RejectMetadataSearch)
+                    return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { RequestMessage = request };
                 if (_metadataRelease is not null)
                 {
                     _metadataPaused!.TrySetResult();
