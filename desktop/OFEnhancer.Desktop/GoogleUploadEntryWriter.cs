@@ -119,7 +119,7 @@ internal sealed class GoogleUploadEntryWriter(
         string range = $"'{sheet}'!{(char)('A' + column - 1)}{item.SourceRow}";
         GoogleProjectionCell cell = await workspace.ReadProjectionCellAsync(workbookId, range, cancellationToken)
             .ConfigureAwait(false);
-        if (cell.Range != range || (cell.Value ?? "") != expected)
+        if (!SameCell(cell.Range, preview.CatalogueSheetTitle, range) || (cell.Value ?? "") != expected)
             throw new GoogleCatalogueException("catalogue-entry-changed");
         return new(range, value);
     }
@@ -133,8 +133,19 @@ internal sealed class GoogleUploadEntryWriter(
         string range = $"'{sheet}'!{(char)('A' + column - 1)}{item.SourceRow}";
         GoogleProjectionCell cell = await workspace.ReadProjectionCellAsync(workbookId, range, cancellationToken)
             .ConfigureAwait(false);
-        if (cell.Range != range) throw new GoogleCatalogueException("catalogue-entry-changed");
+        if (!SameCell(cell.Range, preview.CatalogueSheetTitle, range)) throw new GoogleCatalogueException("catalogue-entry-changed");
         return cell.Value ?? "";
+    }
+
+    // Google quotes a sheet title in a returned range only when the title needs it.
+    private static bool SameCell(string returned, string sheetTitle, string requested)
+    {
+        int separator = returned.LastIndexOf('!');
+        if (separator < 1) return false;
+        string source = returned[..separator];
+        if (source.Length >= 2 && source.StartsWith('\'') && source.EndsWith('\''))
+            source = source[1..^1].Replace("''", "'", StringComparison.Ordinal);
+        return source == sheetTitle && returned[(separator + 1)..] == requested[(requested.LastIndexOf('!') + 1)..];
     }
 
     private async Task<GoogleCatalogueImportPreview> ReadAsync(CancellationToken cancellationToken)

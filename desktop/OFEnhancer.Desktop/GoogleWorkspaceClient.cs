@@ -102,10 +102,12 @@ internal sealed class GoogleWorkspaceClient
             cancellationToken
         ).ConfigureAwait(false);
 
+        // A sheet without a grid (a chart sheet) has no cell range to read.
+        GoogleSheetSnapshot[] gridSheets = metadata.Sheets.Where(sheet => sheet.RowCount > 0 && sheet.ColumnCount > 0).ToArray();
         List<(string Name, string Value)> query =
         [
             ("includeGridData", "true"),
-            .. metadata.Sheets.Select(sheet => ("ranges", $"'{sheet.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:{(char)('A' + Math.Min(24, sheet.ColumnCount) - 1)}{Math.Min(5002, sheet.RowCount)}")),
+            .. gridSheets.Select(sheet => ("ranges", $"'{sheet.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:{(char)('A' + Math.Min(24, sheet.ColumnCount) - 1)}{Math.Min(5002, sheet.RowCount)}")),
             ("fields", WorkbookFields),
         ];
         Uri workbookEndpoint = BuildUri(baseEndpoint, query);
@@ -117,13 +119,19 @@ internal sealed class GoogleWorkspaceClient
         ).ConfigureAwait(false);
         GoogleWorkbookSnapshot snapshot = GoogleWorkbookSnapshot.Parse(workbookBody);
         if (!string.Equals(snapshot.WorkbookId, workbookId, StringComparison.Ordinal)
-            || snapshot.Sheets.Count != metadata.Sheets.Count
+            || snapshot.Sheets.DistinctBy(sheet => sheet.SheetId).Count() != snapshot.Sheets.Count
+            || gridSheets.Any(requested => !snapshot.Sheets.Any(sheet => sheet.SheetId == requested.SheetId))
             || snapshot.Sheets.Any(sheet => !metadata.Sheets.Any(candidate =>
                 candidate.SheetId == sheet.SheetId && string.Equals(candidate.Title, sheet.Title, StringComparison.Ordinal))))
         {
             throw new GoogleCatalogueException("invalid-google-response");
         }
-        return snapshot;
+        // Skipped sheets keep their identity from the metadata read.
+        return snapshot with
+        {
+            Sheets = metadata.Sheets.Select(original =>
+                snapshot.Sheets.SingleOrDefault(sheet => sheet.SheetId == original.SheetId) ?? original).ToArray(),
+        };
     }
 
     internal async Task<GoogleWorkbookSnapshot> ReadImportWorkbookAsync(string fileId, CancellationToken cancellationToken, int? preferredSheetId = null)
@@ -540,12 +548,21 @@ internal sealed class GoogleWorkspaceClient
                 CreateJsonRequest(HttpMethod.Post, endpoint, token, body),
                 cancellationToken
             ).ConfigureAwait(false);
-            _ = await ReadSuccessfulResponseAsync(
-                response,
-                SheetsOrigin,
-                MaximumMutationResponseBytes,
-                cancellationToken
-            ).ConfigureAwait(false);
+            // A redirected or unreadable reply to a dispatched write says nothing about its outcome.
+            Uri? responseUri = response.RequestMessage?.RequestUri;
+            if (responseUri is null || !SameOrigin(responseUri, SheetsOrigin))
+                throw new GoogleMutationUncertainException();
+            if (!response.IsSuccessStatusCode)
+                throw new GoogleCatalogueException("google-request-failed");
+            try
+            {
+                _ = await ReadBoundedAsync(response.Content, MaximumMutationResponseBytes, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (GoogleCatalogueException)
+            {
+                throw new GoogleMutationUncertainException();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -554,6 +571,11 @@ internal sealed class GoogleWorkspaceClient
         }
         catch (HttpRequestException)
         {
+            throw new GoogleMutationUncertainException();
+        }
+        catch (IOException)
+        {
+            // .NET 8 reports a connection lost while reading the body as HttpIOException.
             throw new GoogleMutationUncertainException();
         }
     }

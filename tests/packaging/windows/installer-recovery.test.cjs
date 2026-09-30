@@ -42,8 +42,27 @@ test(
     const transaction = path.join(maintenance, "fresh-reinstall.json");
     const appId = crypto.randomUUID().toUpperCase();
     const key = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{${appId}}_is1`;
+    // Setup resolves {localappdata} from USERPROFILE, which keeps the update
+    // pause marker away from the running application's real one.
+    const profile = path.join(base, "profile");
+    const pauseData = path.join(
+      profile,
+      "AppData",
+      "Local",
+      "OFEnhancer",
+      "data",
+    );
+    const realMarker = path.join(
+      process.env.LOCALAPPDATA,
+      "OFEnhancer",
+      "data",
+      "agent-paused",
+    );
+    const markerBefore = fs.existsSync(realMarker);
+    fs.mkdirSync(profile);
     const env = {
       ...process.env,
+      USERPROFILE: profile,
       OFENHANCER_DATA_ROOT: data,
       OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: webview,
     };
@@ -203,6 +222,12 @@ test(
         fs.existsSync(path.join(data, "keep.txt")),
         "normal updates preserve data",
       );
+      assert.ok(
+        fs.existsSync(pauseData),
+        "update paused under the test profile",
+      );
+      assert.ok(!fs.existsSync(path.join(pauseData, "agent-paused")));
+      assert.equal(fs.existsSync(realMarker), markerBefore);
       assert.ok(!fs.existsSync(transaction));
       journal("Preflight");
       run(setup, [
@@ -269,8 +294,18 @@ test(
       "data",
       "agent-paused",
     );
+    const profile = path.join(base, "profile");
+    const pauseData = path.join(
+      profile,
+      "AppData",
+      "Local",
+      "OFEnhancer",
+      "data",
+    );
+    fs.mkdirSync(profile);
     const env = {
       ...process.env,
+      USERPROFILE: profile,
       OFENHANCER_DATA_ROOT: data,
       OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: webview,
     };
@@ -359,6 +394,29 @@ test(
       const refused = exec(setup, args(foreign, "foreign.log"));
       assert.notEqual(refused.status, 0, "non-empty unverified folder");
       assert.deepEqual(listing(foreign), foreignBefore);
+      assert.equal(fs.existsSync(realMarker), markerBefore);
+      assert.ok(
+        fs.existsSync(pauseData),
+        "update paused under the test profile",
+      );
+      assert.ok(!fs.existsSync(path.join(pauseData, "agent-paused")));
+
+      // A folder that exists but cannot be listed is not known to be empty.
+      const unlistable = path.join(base, "unlistable");
+      fs.mkdirSync(unlistable);
+      const deny = `${process.env.USERDOMAIN}\\${process.env.USERNAME}`;
+      run("icacls.exe", [unlistable, "/deny", `${deny}:(RD)`]);
+      let unlisted;
+      try {
+        assert.throws(() => fs.readdirSync(unlistable), /EPERM|EACCES/);
+        unlisted = exec(setup, args(unlistable, "unlistable.log"));
+      } finally {
+        spawnSync("icacls.exe", [unlistable, "/remove:d", deny], {
+          windowsHide: true,
+        });
+      }
+      assert.notEqual(unlisted.status, 0, "unlistable folder");
+      assert.deepEqual(fs.readdirSync(unlistable), []);
       assert.equal(fs.existsSync(realMarker), markerBefore);
 
       const damaged = path.join(base, "damaged");

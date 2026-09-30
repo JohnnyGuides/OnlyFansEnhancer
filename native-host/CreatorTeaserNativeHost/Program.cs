@@ -701,7 +701,11 @@ internal sealed class TeaserHost
         string temp = StagingPath(path);
         try
         {
-            File.WriteAllText(temp, value, new UTF8Encoding(false));
+            using (FileStream output = new(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                output.Write(new UTF8Encoding(false).GetBytes(value));
+                output.Flush(true);
+            }
             File.Move(temp, path, true);
         }
         finally

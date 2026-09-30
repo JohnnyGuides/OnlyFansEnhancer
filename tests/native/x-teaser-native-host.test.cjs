@@ -756,6 +756,22 @@ test("no temporary files remain after success or a failed move", () => {
   }
 });
 
+// Lost cache writes are not observable from a test process, so this guards the
+// source: an aggregate reaches the disk before it replaces the published file.
+test("aggregate files are flushed to disk before the replacing move", () => {
+  const source = fs.readFileSync(
+    path.join(path.dirname(project), "Program.cs"),
+    "utf8",
+  );
+  const body = source.match(
+    /private static void WriteAtomic\(string path, string value\)\s*\{([\s\S]*?)\n {4}\}/,
+  )?.[1];
+  assert.ok(body, "WriteAtomic not found");
+  const flush = body.indexOf(".Flush(true)");
+  assert.ok(flush >= 0, "WriteAtomic does not flush to disk");
+  assert.ok(flush < body.indexOf("File.Move(temp, path, true)"));
+});
+
 test("a failed aggregate publish removes its temporary file", () => {
   const value = fixture();
   try {

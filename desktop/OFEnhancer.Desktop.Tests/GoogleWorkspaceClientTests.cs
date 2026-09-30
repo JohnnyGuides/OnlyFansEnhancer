@@ -179,6 +179,81 @@ public sealed class GoogleWorkspaceClientTests
         Assert.AreEqual(2, JsonDocument.Parse(mutation.Body).RootElement.GetProperty("data").GetArrayLength());
     }
 
+    [DataTestMethod]
+    [DataRow("Videos!C2", "Videos!D2", true)]
+    [DataRow("'Videos'!C2", "Videos!D2", true)]
+    [DataRow("Other!C2", "Videos!D2", false)]
+    [DataRow("'Other'!C2", "Videos!D2", false)]
+    [DataRow("Videos!C3", "Videos!D2", false)]
+    [DataRow("Videos!D2", "Videos!D2", false)]
+    public async Task UploadEntryWriterAcceptsQuotedOrUnquotedFormOfTheSameCheckedCell(
+        string titleRange, string descriptionRange, bool accepted)
+    {
+        string Rename(JsonObject json) => json.ToJsonString().Replace("2026 Video Catalogue", "Videos", StringComparison.Ordinal);
+        string metadata = WorkbookMetadataJson.Replace("2026 Video Catalogue", "Videos", StringComparison.Ordinal);
+        JsonObject after = UploadWorkbookResponse(null);
+        JsonArray cells = after["sheets"]![0]!["data"]![0]!["rowData"]![1]!["values"]!.AsArray();
+        cells[2]!["formattedValue"] = "Changed video";
+        cells[3]!["formattedValue"] = "Changed description";
+        RecordingHandler handler = new();
+        foreach (string response in new[] { metadata, Rename(UploadWorkbookResponse(null, includeNotes: true)),
+            Rename(UploadWorkbookResponse(null)),
+            $$"""{"range":"{{titleRange}}","values":[["Old video"]]}""",
+            $$"""{"range":"{{descriptionRange}}","values":[["Old description"]]}""",
+            "{}", metadata, Rename(UploadWorkbookResponse(null, includeNotes: true)), Rename(after) })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+        GoogleUploadEntryRequest request = new("update", "Changed video", "Changed description", "2026-09-18",
+            Id: "old-video", ExpectedTitle: "Old video", ExpectedDescription: "Old description");
+
+        if (accepted)
+        {
+            GoogleUploadEntryResult result = await writer.WriteAsync(request, CancellationToken.None);
+            Assert.AreEqual("updated", result.Status);
+            Assert.AreEqual(1, handler.Requests.Count(item => item.Method == HttpMethod.Post));
+            return;
+        }
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            writer.WriteAsync(request, CancellationToken.None));
+        Assert.AreEqual("catalogue-entry-changed", error.Code);
+        Assert.AreEqual(0, handler.Requests.Count(item => item.Method == HttpMethod.Post));
+    }
+
+    [DataTestMethod]
+    [DataRow("Videos!E2", true)]
+    [DataRow("'Videos'!E2", true)]
+    [DataRow("Other!E2", false)]
+    [DataRow("Videos!E3", false)]
+    public async Task UploadEntryWriterAcceptsQuotedOrUnquotedFormOfTheSameReadField(string categoryRange, bool accepted)
+    {
+        JsonObject before = UploadWorkbookResponse(null);
+        JsonArray rows = before["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
+        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Category" }));
+        rows[1]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "GameSync" }));
+        JsonObject discovery = JsonNode.Parse(before.ToJsonString())!.AsObject();
+        discovery["sheets"]!.AsArray().Add(UploadWorkbookResponse(null, includeNotes: true)["sheets"]![1]!.DeepClone());
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(), before.ToJsonString(),
+            $$"""{"range":"{{categoryRange}}","values":[["GameSync"]]}""" })
+            handler.EnqueueJson(HttpStatusCode.OK, response.Replace("2026 Video Catalogue", "Videos", StringComparison.Ordinal));
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+        GoogleUploadEntryRequest request = new("update", "Old video", "Old description", "2026-09-18",
+            Id: "old-video", ExpectedTitle: "Old video", ExpectedDescription: "Old description", Category: "GameSync");
+
+        if (accepted)
+        {
+            Assert.AreEqual("already-updated", (await writer.WriteAsync(request, CancellationToken.None)).Status);
+            return;
+        }
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            writer.WriteAsync(request, CancellationToken.None));
+        Assert.AreEqual("catalogue-entry-changed", error.Code);
+    }
+
     private static JsonObject UploadWorkbookResponse(string? addedId, bool includeNotes = false)
     {
         JsonObject response = ImportWorkbookResponse(["ID", "Release", "Title", "Description"],
@@ -540,6 +615,118 @@ public sealed class GoogleWorkspaceClientTests
 
         Assert.AreEqual(1, handler.Requests.Count(request => request.Method == HttpMethod.Post));
         Assert.AreEqual(1, handler.Requests.Count);
+    }
+
+    [DataTestMethod]
+    [DataRow("reset")]
+    [DataRow("declared-oversize")]
+    [DataRow("streamed-oversize")]
+    [DataRow("wrong-origin")]
+    public async Task FailureToReadOrValidateADispatchedMutationResponseIsUncertain(string failure)
+    {
+        RecordingHandler handler = new();
+        handler.Enqueue(request => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = failure == "wrong-origin"
+                ? new(HttpMethod.Post, "https://example.invalid/v4/spreadsheets/workbook-one/values:batchUpdate")
+                : request,
+            Content = failure switch
+            {
+                "reset" => new StreamContent(new UnseekableStream(16, reset: true)),
+                "declared-oversize" => new ByteArrayContent(new byte[1024 * 1024 + 1]),
+                "streamed-oversize" => new StreamContent(new UnseekableStream(1024 * 1024 + 1, reset: false)),
+                _ => new StringContent("{}", Encoding.UTF8, "application/json"),
+            },
+        }));
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access", "unused"));
+
+        await Assert.ThrowsExceptionAsync<GoogleMutationUncertainException>(() =>
+            client.UpdateValuesBatchAsync(new("workbook-one", [new("Sheet1!A1", "value")]), CancellationToken.None));
+
+        Assert.AreEqual(1, handler.Requests.Count);
+    }
+
+    [TestMethod]
+    public async Task RejectedMutationStatusStaysADefiniteFailure()
+    {
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.BadRequest, "{}");
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.UpdateValuesBatchAsync(new("workbook-one", [new("Sheet1!A1", "value")]), CancellationToken.None));
+
+        Assert.AreEqual("google-request-failed", error.Code);
+    }
+
+    private sealed class UnseekableStream(int length, bool reset) : Stream
+    {
+        private int _position;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(Span<byte> buffer)
+        {
+            int count = Math.Min(buffer.Length, length - _position);
+            if (count == 0 && reset)
+                throw new HttpIOException(HttpRequestError.ResponseEnded, "The connection was reset.");
+            buffer[..count].Clear();
+            _position += count;
+            return count;
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(Read(buffer.Span));
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [DataTestMethod]
+    [DataRow("""{"sheetId":9,"title":"Chart","hidden":false}""")]
+    [DataRow("""{"sheetId":9,"title":"Chart","hidden":false,"gridProperties":{"rowCount":0,"columnCount":5}}""")]
+    [DataRow("""{"sheetId":9,"title":"Chart","hidden":false,"gridProperties":{"rowCount":5,"columnCount":0}}""")]
+    public async Task WorkbookReadSkipsSheetsWithoutAGridAndKeepsTheirIdentity(string properties)
+    {
+        JsonObject metadata = JsonNode.Parse(WorkbookMetadataJson)!.AsObject();
+        metadata["sheets"]!.AsArray().Add(new JsonObject { ["properties"] = JsonNode.Parse(properties) });
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, metadata.ToJsonString());
+        handler.EnqueueJson(HttpStatusCode.OK, EmptyWorkbookJson);
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        GoogleWorkbookSnapshot snapshot = await client.ReadWorkbookAsync("workbook-one", CancellationToken.None);
+
+        CollectionAssert.AreEqual(
+            new[] { "'2026 Video Catalogue'!A1:X5002", "'Creator''s Ledger'!A1:L200" },
+            ParseQuery(handler.Requests[1].Uri)["ranges"].ToArray());
+        CollectionAssert.AreEqual(new[] { 2126708696, 44, 9 }, snapshot.Sheets.Select(sheet => sheet.SheetId).ToArray());
+        Assert.AreEqual("Chart", snapshot.Sheets[2].Title);
+    }
+
+    [TestMethod]
+    public async Task WorkbookReadStillRejectsAResponseMissingARequestedSheet()
+    {
+        JsonObject metadata = JsonNode.Parse(WorkbookMetadataJson)!.AsObject();
+        metadata["sheets"]!.AsArray().Add(JsonNode.Parse("""{"properties":{"sheetId":9,"title":"Chart","hidden":false}}"""));
+        JsonObject data = JsonNode.Parse(EmptyWorkbookJson)!.AsObject();
+        data["sheets"]!.AsArray().RemoveAt(1);
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, metadata.ToJsonString());
+        handler.EnqueueJson(HttpStatusCode.OK, data.ToJsonString());
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.ReadWorkbookAsync("workbook-one", CancellationToken.None));
+
+        Assert.AreEqual("invalid-google-response", error.Code);
     }
 
     [TestMethod]

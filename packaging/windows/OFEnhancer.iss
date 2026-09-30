@@ -247,7 +247,10 @@ begin
     finally
       FindClose(FindRec);
     end;
-  end;
+  end
+  else
+    { An existing folder that cannot be listed is not known to be empty. }
+    Result := False;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
