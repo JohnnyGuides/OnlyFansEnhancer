@@ -246,6 +246,8 @@ for (const pornhubMode of ["paid", "free"])
       pornhubFile,
       value: { pornhubMode },
       teaserFile: new File(["teaser"], "teaser.mp4"),
+      targets: ["pornhub"],
+      extraTeaserFiles: () => ({}),
       thumbnailFile: null,
       socialFile: null,
       setInterval,

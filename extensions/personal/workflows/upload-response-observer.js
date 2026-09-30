@@ -254,7 +254,7 @@
   // Passive watch for a post the owner publishes from a prepared composer.
   // Only requests opened after arming in this document count, and the first
   // matching response settles it. The outcome is announced to the isolated
-  // bridge, which forwards it to the extension worker.
+  // bridge, and from there to the extension worker.
   function watch({ sessionId, platform, watchId, timeoutMs }) {
     if (!/^[a-f0-9]{32}$/.test(String(watchId || ""))) return false;
     cancel(sessionId, platform);
