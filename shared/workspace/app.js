@@ -1643,6 +1643,7 @@
         { planHash: approved.planHash },
       );
       googleMigrationDialog.close();
+      googleStatusRendered = ++googleStatusRequests;
       renderGoogleCatalogue(status);
       await loadCatalogue(true);
     } catch (error) {
@@ -1654,6 +1655,7 @@
           const status = await global.OFEnhancerHost.request(
             "inspectGoogleWorkbook",
           );
+          googleStatusRendered = ++googleStatusRequests;
           renderGoogleCatalogue(
             status,
             status?.state === "migrationReady"
@@ -1662,6 +1664,7 @@
           );
           await loadCatalogue(true);
         } catch (inspectionError) {
+          googleStatusRendered = ++googleStatusRequests;
           renderGoogleCatalogue({
             ...googleStatusView,
             state: "error",
@@ -1670,6 +1673,7 @@
         }
       } else {
         googleMigrationDialog.close();
+        googleStatusRendered = ++googleStatusRequests;
         renderGoogleCatalogue({
           ...googleStatusView,
           state: "error",

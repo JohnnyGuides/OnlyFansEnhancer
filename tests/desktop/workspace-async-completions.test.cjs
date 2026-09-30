@@ -93,6 +93,15 @@ async function installHost(page) {
         });
       if (operation === "getGoogleCatalogueStatus")
         return new Promise((resolve) => globalThis.__held.google.push(resolve));
+      if (operation === "applyGoogleWorkbookMigration")
+        return Promise.resolve({
+          state: "ready",
+          workbookName: "Workbook",
+          sheetName: "Sheet",
+          pendingCount: 0,
+          conflictCount: 0,
+          lastVerifiedSync: "2026-09-04T12:00:00Z",
+        });
       if (operation === "disconnectGoogleCatalogue")
         return Promise.resolve({ state: "disconnected" });
       if (operation === "syncGoogleCatalogue")
@@ -242,20 +251,34 @@ async function testReopenedMatchSendsOneConfirmation(browser, port) {
 
 // Opens the catalogue with a ready status and leaves one newer status poll
 // in flight, so an action result can be followed by that late poll reply.
-async function readyWithPendingPoll(browser, port) {
+const readyStatus = Object.freeze({
+  state: "ready",
+  workbookName: "Workbook",
+  sheetName: "Sheet",
+  pendingCount: 0,
+  conflictCount: 0,
+  lastVerifiedSync: "2026-09-04T12:00:00Z",
+});
+
+const migrationReadyStatus = Object.freeze({
+  state: "migrationReady",
+  workbookName: "Workbook",
+  sheetName: "Sheet",
+  planHash: "a".repeat(64),
+  rowsToBind: 2,
+  migrationChanges: 5,
+  pendingCount: 0,
+  conflictCount: 0,
+  lastVerifiedSync: null,
+});
+
+async function readyWithPendingPoll(browser, port, initial = readyStatus) {
   const { page, errors } = await newPage(browser, port);
   await page.getByRole("button", { name: "Catalogue" }).click();
   await page.waitForFunction(() => __held.google.length >= 1);
-  await page.evaluate(() => {
-    __held.google[0]({
-      state: "ready",
-      workbookName: "Workbook",
-      sheetName: "Sheet",
-      pendingCount: 0,
-      conflictCount: 0,
-      lastVerifiedSync: "2026-09-04T12:00:00Z",
-    });
-  });
+  await page.evaluate((status) => {
+    __held.google[0](status);
+  }, initial);
   await page.locator("#googleDisconnect").waitFor();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator('button[data-view="catalogue"]').click();
@@ -263,17 +286,13 @@ async function readyWithPendingPoll(browser, port) {
   return { page, errors };
 }
 
-async function lateReadyPoll(page) {
-  await page.evaluate(() => {
-    __held.google[__held.google.length - 1]({
-      state: "ready",
-      workbookName: "Workbook",
-      sheetName: "Sheet",
-      pendingCount: 3,
-      conflictCount: 0,
-      lastVerifiedSync: "2026-09-04T12:00:00Z",
-    });
-  });
+async function lateReadyPoll(
+  page,
+  status = { ...readyStatus, pendingCount: 3 },
+) {
+  await page.evaluate((late) => {
+    __held.google[__held.google.length - 1](late);
+  }, status);
   await page.waitForTimeout(150);
 }
 
@@ -307,6 +326,29 @@ async function testLatePollKeepsActionResult(browser, port) {
   await page.close();
 }
 
+async function testLatePollKeepsMigrationResult(browser, port) {
+  const { page, errors } = await readyWithPendingPoll(
+    browser,
+    port,
+    migrationReadyStatus,
+  );
+  await page.getByRole("button", { name: "Review changes" }).click();
+  const dialog = page.getByRole("dialog", { name: "Update Google Sheet?" });
+  await dialog
+    .getByRole("button", { name: "Yes, update the workbook" })
+    .click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.getByText(/No updates waiting\./).waitFor();
+  await lateReadyPoll(page, migrationReadyStatus);
+  assert.match(
+    await page.locator("#googleCatalogueStatus").innerText(),
+    /^No updates waiting\./,
+    "a late status poll replaced the workbook migration result",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
 async function main() {
   await withServer(async (port) => {
     const browser = await chromium.launch({ headless: true });
@@ -317,6 +359,7 @@ async function main() {
       await testReopenedMatchSendsOneConfirmation(browser, port);
       await testLatePollKeepsDisconnectResult(browser, port);
       await testLatePollKeepsActionResult(browser, port);
+      await testLatePollKeepsMigrationResult(browser, port);
     } finally {
       await browser.close();
     }
