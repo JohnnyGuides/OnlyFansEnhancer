@@ -762,3 +762,74 @@ test("an aborted run keeps the uncertain outcome when a submission was attempted
     onlyfans: "posted-link-unresolved",
   });
 });
+
+test("a cancel keeps a platform whose final control was clicked and still aborts its run", async () => {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans", "fansly", "manyvids"]);
+  const second = session.platforms.get("fansly");
+  second.status = "posted-link-unresolved";
+  second.submitAttempted = true;
+  await env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`);
+  assert.deepEqual(
+    [...session.platforms.values()].map((target) => target.status),
+    ["cancelled", "posted-link-unresolved", "cancelled"],
+  );
+  assert.deepEqual(abortCalls(env.scriptCalls), [100, 101, 102]);
+  assert.deepEqual(await storedStatuses(env, id), {
+    onlyfans: "cancelled",
+    fansly: "posted-link-unresolved",
+    manyvids: "cancelled",
+  });
+});
+
+test("a cancel leaves a submitted platform unchanged", async () => {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans", "fansly"]);
+  const second = session.platforms.get("fansly");
+  second.status = "submitted";
+  second.submitted = true;
+  await env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`);
+  assert.equal(second.status, "submitted");
+  assert.equal(session.platforms.get("onlyfans").status, "cancelled");
+  assert.deepEqual(abortCalls(env.scriptCalls), [100, 101]);
+  assert.deepEqual(await storedStatuses(env, id), {
+    onlyfans: "cancelled",
+    fansly: "submitted",
+  });
+});
+
+test("retirement continues past a session whose stop throws and rethrows that error", async () => {
+  const env = load();
+  const ids = [sessionId(), sessionId(), sessionId()];
+  const platforms = ["onlyfans", "manyvids", "fansly"];
+  for (const [index, id] of ids.entries()) {
+    env.context.record = {
+      id,
+      draft: { title: "Stored episode" },
+      platforms: {
+        [platforms[index]]: {
+          platform: platforms[index],
+          tabId: 41 + index,
+          status: "prepared",
+        },
+      },
+    };
+    await env.run(`(async () => {
+      await ensureCreatorUploadRuntimeVersion();
+      await CreatorUploadSessionStore.save(record);
+    })()`);
+  }
+  env.run(`
+    creatorUploadPost = (sessionId, message) => {
+      if (message.platform === "manyvids") throw new TypeError("step failed");
+    };
+  `);
+  await assert.rejects(
+    env.run("retireCreatorUploadSessions()"),
+    (error) => error.name === "TypeError" && /step failed/.test(error.message),
+  );
+  assert.deepEqual(await storedStatuses(env, ids[0]), {});
+  assert.deepEqual(await storedStatuses(env, ids[2]), {});
+});

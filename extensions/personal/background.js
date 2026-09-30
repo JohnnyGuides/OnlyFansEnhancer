@@ -5573,8 +5573,11 @@ async function stopCreatorUploadSession(session) {
     for (const target of session.platforms.values()) {
       if (CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status)) continue;
       try {
-        target.status = "cancelled";
-        target.stage = "cancelled";
+        const attempted = target.submitAttempted || target.submitted;
+        if (!attempted) {
+          target.status = "cancelled";
+          target.stage = "cancelled";
+        }
         if (target.tabId) {
           try {
             await chrome.scripting.executeScript({
@@ -5589,16 +5592,17 @@ async function stopCreatorUploadSession(session) {
             /* A closed document has already stopped its executor. */
           }
         }
-        creatorUploadNotify(session.id, {
-          type: "platform-result",
-          platform: target.platform,
-          result: {
+        if (!attempted)
+          creatorUploadNotify(session.id, {
+            type: "platform-result",
             platform: target.platform,
-            status: "cancelled",
-            error:
-              "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
-          },
-        });
+            result: {
+              platform: target.platform,
+              status: "cancelled",
+              error:
+                "Preparation stopped. The site may continue an upload already started; the draft is preserved.",
+            },
+          });
       } catch (error) {
         if (!failed) cancelError = error;
         failed = true;
@@ -5617,11 +5621,19 @@ async function retireCreatorUploadSessions() {
     await ensureCreatorUploadRuntimeVersion();
     const records = await CREATOR_UPLOAD_SESSION_STORE.list();
     let retired = 0;
+    let retireError = null;
+    let retireFailed = false;
     for (const record of records) {
       if (!record.draft) continue;
       const session = await getCreatorUploadSession(record.id);
       if (session) {
-        await stopCreatorUploadSession(session);
+        try {
+          await stopCreatorUploadSession(session);
+        } catch (error) {
+          if (!retireFailed) retireError = error;
+          retireFailed = true;
+          continue;
+        }
         if (session.execution) {
           let timeout;
           try {
@@ -5649,6 +5661,7 @@ async function retireCreatorUploadSessions() {
       await CREATOR_UPLOAD_SESSION_STORE.remove(record.id);
       retired++;
     }
+    if (retireFailed) throw retireError;
     let superseded = 0;
     for (const surface of ["extension", "desktop"]) {
       const recovery = await CREATOR_UPLOAD_SESSION_STORE.supersedePreparation(
