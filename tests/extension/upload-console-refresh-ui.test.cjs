@@ -194,9 +194,6 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
         .evaluate((element) => getComputedStyle(element).position),
       "sticky",
     );
-    await page.locator("#selectedThumbnailPreview").evaluate((element) => {
-      element.hidden = false;
-    });
     const beforePicker = await page.locator(".pornhub-file-card").boundingBox();
     await page.locator("#catalogueThumbnails").evaluate((element) => {
       element.hidden = false;
@@ -254,16 +251,15 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
     const previewBox = await page
       .locator("#selectedThumbnailPreview")
       .boundingBox();
-    const descriptionBox = await page
-      .locator(".description-field")
-      .boundingBox();
-    assert.ok(Math.abs(previewBox.y - descriptionBox.y) < 2);
+    const editorBox = await page.locator("#uploadDescription").boundingBox();
+    assert.ok(previewBox.x - editorBox.x < 16);
     assert.ok(
-      Math.abs(
-        previewBox.y +
-          previewBox.height -
-          (descriptionBox.y + descriptionBox.height),
-      ) < 2,
+      previewBox.y - editorBox.y < 16,
+      JSON.stringify({ previewBox, editorBox }),
+    );
+    assert.ok(
+      Math.abs(previewBox.width / previewBox.height - 16 / 9) < 0.05,
+      JSON.stringify(previewBox),
     );
     const cardWidths = await page
       .locator(".media-grid .file-picker")
@@ -302,7 +298,11 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
     assert.ok(Math.abs(frameAction.y - moreAction.y) < 3);
     await page.locator('[data-remove-file="uploadManyvidsThumbnail"]').click();
     assert.equal(
-      await page.locator("#selectedThumbnailPreview").isHidden(),
+      await page.locator("#selectedThumbnailPreview").isVisible(),
+      true,
+    );
+    assert.equal(
+      await page.locator("#selectedThumbnailImage").isHidden(),
       true,
     );
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -442,6 +442,77 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
       false,
     );
     assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("description editor keeps a fixed 16:9 placeholder and plain-text value", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 850 },
+  });
+  try {
+    await mount(page);
+    const box = page.locator("#selectedThumbnailPreview");
+    const editor = page.locator("#uploadDescription");
+    assert.equal(await box.isVisible(), true);
+    assert.equal(
+      await page.locator("#selectedThumbnailImage").isHidden(),
+      true,
+    );
+    const empty = await box.boundingBox();
+    assert.ok(Math.abs(empty.width / empty.height - 16 / 9) < 0.05);
+    assert.equal(
+      await editor.evaluate((e) => getComputedStyle(e, "::after").content),
+      '"Add a description…"',
+    );
+    const text = Array.from({ length: 14 }, (_, i) => `Line ${i + 1} 😀`);
+    await editor.fill(text[0]);
+    for (const line of text.slice(1)) {
+      await page.keyboard.press("Enter");
+      await page.keyboard.insertText(line);
+    }
+    assert.equal(await editor.evaluate((e) => e.value), text.join("\n"));
+    const grown = await box.boundingBox();
+    assert.equal(grown.width, empty.width);
+    assert.equal(grown.height, empty.height);
+    assert.ok((await editor.boundingBox()).height > empty.height + 40);
+    await editor.evaluate((e) => {
+      e.value = "";
+    });
+    assert.equal(await editor.getAttribute("data-empty"), "true");
+    await editor.evaluate((e) => {
+      e.focus();
+      const data = new DataTransfer();
+      data.setData("text/html", "<b>bold</b><p>para</p>");
+      data.setData("text/plain", "bold\npara");
+      e.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    assert.equal(await editor.evaluate((e) => e.value), "bold\npara");
+    assert.equal(await editor.locator("b, p").count(), 0);
+    await editor.evaluate((e) => {
+      e.value = "a\r\nb";
+    });
+    assert.equal(await editor.evaluate((e) => e.value), "a\nb");
+    assert.equal(await box.isVisible(), true);
+    for (const selector of ["#loadTemplate", "#uploadButton"])
+      assert.equal(
+        await page
+          .locator(selector)
+          .evaluate((e) => getComputedStyle(e).userSelect),
+        "none",
+      );
+    assert.notEqual(
+      await editor.evaluate((e) => getComputedStyle(e).userSelect),
+      "none",
+    );
   } finally {
     await browser.close();
   }

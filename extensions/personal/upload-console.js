@@ -154,6 +154,49 @@
     return isImageFile(file) ? "image" : isAudioFile(file) ? "audio" : "video";
   }
 
+  function installDescriptionEditor(editor) {
+    const read = () => {
+      const copy = editor.cloneNode(true);
+      for (const lineBreak of copy.querySelectorAll("br"))
+        lineBreak.replaceWith("\n");
+      return copy.textContent.replace(/\r\n?/g, "\n");
+    };
+    const settle = () => {
+      editor.dataset.empty = String(read() === "");
+    };
+    editor.replaceChildren();
+    Object.defineProperty(editor, "value", {
+      configurable: true,
+      get: read,
+      set: (value) => {
+        editor.textContent = String(value ?? "").replace(/\r\n?/g, "\n");
+        settle();
+      },
+    });
+    editor.addEventListener("input", settle);
+    editor.addEventListener("paste", (event) => {
+      const text = event.clipboardData?.getData("text/plain");
+      if (text === undefined) return;
+      event.preventDefault();
+      text
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .forEach((line, index) => {
+          if (index) document.execCommand("insertLineBreak");
+          if (line) document.execCommand("insertText", false, line);
+        });
+    });
+    const focusEditor = () => editor.focus();
+    editor.parentElement?.addEventListener("mousedown", (event) => {
+      if (event.target !== event.currentTarget) return;
+      event.preventDefault();
+      focusEditor();
+    });
+    document
+      .querySelector("#uploadDescriptionLabel")
+      ?.addEventListener("click", focusEditor);
+  }
+
   const normalizedThumbnails = new WeakMap();
   function normalizeThumbnailFile(file) {
     if (!(file instanceof File) || !isImageFile(file))
@@ -904,6 +947,7 @@
     );
     const title = get("#uploadTitle");
     const description = get("#uploadDescription");
+    installDescriptionEditor(description);
     const releaseDate = get("#releaseDate");
     const uploadCategory = get("#uploadCategory");
     const uploadSeason = get("#uploadSeason");
@@ -4931,6 +4975,10 @@
         );
     }
 
+    function setThumbnailPreviewFilled(filled) {
+      selectedThumbnailPreview.dataset.empty = String(!filled);
+    }
+
     function showThumbnailPreview(source) {
       if (selectedThumbnailImage.getAttribute("src") !== source) {
         selectedThumbnailImage.src = source;
@@ -4940,7 +4988,7 @@
             easing: "ease-out",
           });
       }
-      selectedThumbnailPreview.hidden = false;
+      setThumbnailPreviewFilled(true);
     }
 
     function renderSelectedThumbnailPreview() {
@@ -4963,7 +5011,7 @@
         !file.catalogueId ||
         !file.assetId
       ) {
-        selectedThumbnailPreview.hidden = true;
+        setThumbnailPreviewFilled(false);
         selectedThumbnailImage.removeAttribute("src");
         return;
       }
@@ -4971,7 +5019,7 @@
       const show = (dataUrl) => {
         if (revision !== previewRevision || thumbnailFile !== file) return;
         if (!dataUrl) {
-          selectedThumbnailPreview.hidden = true;
+          setThumbnailPreviewFilled(false);
           selectedThumbnailImage.removeAttribute("src");
           return;
         }

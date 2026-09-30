@@ -95,7 +95,9 @@ test("four similar Work entries appear below description and search filters them
         "Update & upload",
     );
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "A new studio tour.",
     );
     await page.locator("#uploadTitle").fill("Another new title");
@@ -256,7 +258,9 @@ for (const desktop of [false, true]) {
           "Benign upload verification",
         );
         assert.equal(
-          await page.locator("#uploadDescription").inputValue(),
+          await page
+            .locator("#uploadDescription")
+            .evaluate((element) => element.value),
           "Unpublished development draft.",
         );
         assert.equal(
@@ -1142,7 +1146,9 @@ test("clicking an auto-matched entry overwrites every field and binds a plain up
     // reading as an edit that would blank the sheet.
     await uploadLabel(page, "Upload");
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "Original description",
     );
     for (const [selector, value] of [
@@ -1188,7 +1194,9 @@ test("clicking an auto-matched entry overwrites every field and binds a plain up
     await page.locator("#catalogueCards .catalogue-card").first().click();
     await uploadLabel(page, "Upload");
     assert.equal(
-      await page.locator("#uploadDescription").inputValue(),
+      await page
+        .locator("#uploadDescription")
+        .evaluate((element) => element.value),
       "Original description",
     );
     await page.locator("#uploadButton").click();
