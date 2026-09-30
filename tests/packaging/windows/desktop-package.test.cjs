@@ -214,6 +214,11 @@ async function main() {
     installer,
     /--fresh-reinstall-remove|--fresh-reinstall-continue/,
   );
+  assert.match(
+    installer,
+    /function PrepareToInstall[\s\S]*?if IsDriveRoot\(\) then[\s\S]*?drive root[\s\S]*?IsGenuineFirstInstall\(\)/,
+    "a drive root must be refused with its own message before any update step",
+  );
   assert.match(installer, /WizardDirValue/);
   assert.doesNotMatch(
     installer.match(/function RunFreshHelper[\s\S]*?end;/)?.[0] ?? "",

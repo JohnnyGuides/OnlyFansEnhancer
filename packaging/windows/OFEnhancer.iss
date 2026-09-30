@@ -253,12 +253,26 @@ begin
     Result := False;
 end;
 
+function IsDriveRoot(): Boolean;
+var
+  Root: String;
+begin
+  Root := RemoveBackslashUnlessRoot(ExpandFileName(WizardDirValue));
+  Result := CompareText(AddBackslash(Root), AddBackslash(ExtractFileDrive(Root))) = 0;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ExitCode: Integer;
   PauseMarker: String;
 begin
   Result := '';
+  { A drive root is never an OFEnhancer folder, empty or not. }
+  if IsDriveRoot() then
+  begin
+    Result := 'OFEnhancer cannot be installed directly in a drive root. Choose a folder instead, for example ' + AddBackslash(ExtractFileDrive(ExpandFileName(WizardDirValue))) + 'OFEnhancer. Nothing was changed.';
+    Exit;
+  end;
   if MaintenanceStatus = 3 then
   begin
     Result := 'The saved installation checkpoint could not be read. ' + MaintenanceError;

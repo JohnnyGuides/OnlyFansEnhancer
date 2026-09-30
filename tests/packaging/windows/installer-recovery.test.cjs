@@ -419,6 +419,29 @@ test(
       assert.deepEqual(fs.readdirSync(unlistable), []);
       assert.equal(fs.existsSync(realMarker), markerBefore);
 
+      // An installation that lost only its manifest is repaired in place.
+      const manifestless = path.join(base, "manifestless");
+      fs.cpSync(stage, manifestless, { recursive: true });
+      fs.rmSync(path.join(manifestless, "package-manifest.json"));
+      fs.writeFileSync(path.join(manifestless, "unins000.dat"), "");
+      run(setup, args(manifestless, "manifestless.log"));
+      assert.ok(
+        fs.existsSync(path.join(manifestless, "package-manifest.json")),
+        "a recognized installation without a manifest is repaired",
+      );
+      assert.equal(fs.existsSync(realMarker), markerBefore);
+
+      // Product files next to foreign content are not recognized as ours.
+      const mixed = path.join(base, "manifestless-foreign");
+      fs.cpSync(stage, mixed, { recursive: true });
+      fs.rmSync(path.join(mixed, "package-manifest.json"));
+      fs.writeFileSync(path.join(mixed, "user-file.txt"), "not ours");
+      const mixedBefore = listing(mixed);
+      const mixedRefused = exec(setup, args(mixed, "manifestless-foreign.log"));
+      assert.notEqual(mixedRefused.status, 0, "manifest-less foreign folder");
+      assert.deepEqual(listing(mixed), mixedBefore);
+      assert.equal(fs.existsSync(realMarker), markerBefore);
+
       const damaged = path.join(base, "damaged");
       fs.mkdirSync(damaged, { recursive: true });
       fs.writeFileSync(path.join(damaged, "package-manifest.json"), "{ nope");

@@ -177,16 +177,86 @@ internal static class FreshReinstallMaintenance
         }
     }
 
+    internal const string DriveRootMessage =
+        "OFEnhancer cannot be installed directly in a drive root. Choose a folder instead, for example C:\\OFEnhancer.";
+
     internal static void VerifyPreviousPackage(string root)
     {
+        root = Path.GetFullPath(root);
+        if (IsDriveRoot(root)) throw new InvalidOperationException(DriveRootMessage);
+        string manifestPath = Path.Combine(root, "package-manifest.json");
+        if (!File.Exists(manifestPath))
+        {
+            // An installation that lost only its manifest is repaired in place,
+            // but only when the folder is recognizably OFEnhancer's.
+            if (!IsRecognizedPackageWithoutManifest(root))
+                throw new InvalidOperationException(
+                    "The selected folder has no OFEnhancer package manifest and is not recognizably an OFEnhancer installation, so nothing was changed. Choose the OFEnhancer folder or an empty folder.");
+            return;
+        }
         // A missing unins000.exe is recoverable only inside a real product
         // package. A filename alone is not evidence of an owned install root.
-        using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "package-manifest.json")));
-        if (manifest.RootElement.GetProperty("product").GetString() != "OFEnhancer"
-            || !Version.TryParse(manifest.RootElement.GetProperty("productVersion").GetString(), out _)
-            || manifest.RootElement.GetProperty("files").ValueKind != JsonValueKind.Array)
-            throw new InvalidOperationException("The previous OFEnhancer installation root could not be verified.");
+        const string unverified = "The previous OFEnhancer installation root could not be verified.";
+        try
+        {
+            using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            if (manifest.RootElement.GetProperty("product").GetString() != "OFEnhancer"
+                || !Version.TryParse(manifest.RootElement.GetProperty("productVersion").GetString(), out _)
+                || manifest.RootElement.GetProperty("files").ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException(unverified);
+        }
+        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new InvalidOperationException(unverified);
+        }
     }
+
+    internal static bool IsDriveRoot(string path)
+    {
+        string full = Path.GetFullPath(path);
+        string? driveRoot = Path.GetPathRoot(full);
+        return driveRoot is not null && string.Equals(Path.TrimEndingDirectorySeparator(full),
+            Path.TrimEndingDirectorySeparator(driveRoot), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static readonly HashSet<string> PackageDirectories = new(StringComparer.OrdinalIgnoreCase)
+        { "desktop", "native", "extension", "extension-keyed", "assets", "tools" };
+    private static readonly HashSet<string> PackageFiles = new(StringComparer.OrdinalIgnoreCase)
+        { "extension-setup.html", "installer-defaults.json", "version.json" };
+
+    // Recognized: the product executable and assembly are present, and every
+    // top-level entry belongs to the package layout or its Inno uninstaller.
+    internal static bool IsRecognizedPackageWithoutManifest(string root)
+    {
+        string desktop = Path.Combine(root, "desktop");
+        string assembly = Path.Combine(desktop, "OFEnhancer.Desktop.dll");
+        if (!File.Exists(Path.Combine(desktop, "OFEnhancer.Desktop.exe")) || !File.Exists(assembly)) return false;
+        try
+        {
+            if (System.Reflection.AssemblyName.GetAssemblyName(assembly).Name != "OFEnhancer.Desktop") return false;
+            foreach (FileSystemInfo entry in new DirectoryInfo(root).EnumerateFileSystemInfos())
+            {
+                if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) return false;
+                bool known = entry is DirectoryInfo
+                    ? PackageDirectories.Contains(entry.Name)
+                    : PackageFiles.Contains(entry.Name) || IsInnoUninstallerFile(entry.Name);
+                if (!known) return false;
+            }
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsInnoUninstallerFile(string name) =>
+        name.Length == 12
+        && name.StartsWith("unins", StringComparison.OrdinalIgnoreCase)
+        && name[5..8].All(char.IsAsciiDigit)
+        && (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".dat", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".msg", StringComparison.OrdinalIgnoreCase));
 
     private static FreshReinstallTransaction LoadMatching(IReadOnlyList<string> args)
     {
