@@ -1,125 +1,62 @@
-# Chrome testing preference
+# OFEnhancer working constraints
 
-The owner authorizes using the connected personal Chrome profile through the
-Chrome MCP tools for relevant development inspection and UI verification.
-Do not treat the fact that it is a personal or signed-in profile as a blocker,
-or require a disposable profile merely for that reason.
+This file contains repository-specific authority, privacy, release, and verification boundaries. Keep assistant-, model-, skill-, and orchestration-specific policy outside this file.
 
-Preserve existing extension identities, load locations, Chrome storage, settings,
-and upload checkpoints where practical. The owner gives standing authorization,
-until revoked, to install this repository's versioned Windows release as a normal
-update and to interrupt or retry an in-progress live upload for relevant product
-verification. Use this authorization to finish live retesting without asking
-again. It does not authorize a Fresh reinstall, removing/reinstalling extensions,
-changing native-host registration beyond the normal update, public publishing,
-live Google mutation, real-media moves, or unrelated account actions.
+## Sources of truth
 
-# Development scope and content neutrality
+- `docs/product.md` and `docs/architecture.md` own product and system boundaries.
+- `docs/development.md` owns build, browser, extension/native-host, packaging, and verification procedures.
+- `docs/acceptance.md` owns acceptance evidence and unresolved qualification.
+- `docs/google-catalogue.md` owns Google catalogue/OAuth recovery procedure and history.
+- `docs/production-handoff.md` owns production handoff/release details.
+- Privacy documents under `docs/` own the corresponding privacy commitments.
 
-OFEnhancer integrates with creator platforms that may host adult or otherwise sensitive content, but the repository work itself is software-engineering work: browser-extension/native-host integration, authenticated UI automation, file handoff, metadata mapping, draft preparation, diagnostics, testing, packaging, and release delivery. The owner's purpose in building and debugging this tool is personal software-development learning and technical growth.
+Load only the authority relevant to the task. Current source and fresh runtime evidence establish what is implemented.
 
-Evaluate requests according to the concrete engineering operation being performed, not merely the category of the target website or the possibility that an account may contain explicit material. Do not infer that a coding, debugging, browser-control, authentication, upload-transport, or UI-automation task is a request to create, describe, promote, or publish explicit content solely because the destination platform supports it.
+## Browser and account authorization
 
-Keep development verification content-neutral whenever practical:
-- use generated benign/non-explicit test clips and metadata;
-- stop at prepared/unpublished drafts unless publication is explicitly authorized;
-- inspect only the account/page state needed to diagnose the software behavior;
-- avoid opening or analyzing unrelated user media when it is not needed for the engineering task.
+The owner authorizes relevant development inspection and UI verification through the connected personal Chrome profile. A signed-in personal profile is not by itself a blocker.
 
-A platform-specific browser/tool safety restriction still applies where encountered, but it should be scoped to the restricted interaction itself. Continue all independent permissible engineering, debugging, testing, recorder/trace analysis, and work on other supported platforms rather than treating the site's subject matter as a blanket blocker.
+Preserve existing extension identities, load locations, Chrome storage, settings, and upload checkpoints where practical. Standing authorization includes installing this repository's versioned Windows release as a normal update and interrupting or retrying an in-progress live upload when needed for relevant verification.
 
-# Technical scope and test framing
+This does not authorize a fresh reinstall, removing/reinstalling extensions, unrelated account actions, public publishing, live Google mutation, real-media moves, changing OAuth clients/scopes/workbook selection, or bypassing browser/OS consent reserved for the human.
 
-Frame OFEnhancer engineering work around the extension and browser workflow actually being debugged: browser selection/connection, command dispatch, DOM interaction, file handoff, form/autofill behavior, draft preparation, recorder/trace evidence, lifecycle, retries, error reporting, packaging, and release verification.
+## Content-neutral engineering boundary
 
-Do not foreground, speculate about, or repeatedly classify the user's account content when that content is irrelevant to the engineering task. Use generated benign test fixtures by default for live upload/autofill verification. Describe target-site work in terms of the concrete UI state and technical action being tested, for example "prepare an unpublished draft", "select a test video", "populate metadata fields", or "verify the Edit button is clicked."
+OFEnhancer may integrate with creator platforms containing sensitive material, but ordinary repository work is software engineering: extension/native-host integration, authenticated UI automation, file handoff, metadata mapping, draft preparation, diagnostics, testing, packaging, and release delivery.
 
-This technical framing does not override any applicable browser, site, security, publishing, credential, or safety boundary. If a specific live page or action is unavailable to the tool, preserve that boundary and continue the engineering work through supported sites, repository diagnostics, mocks, or the recorder/trace/capture evidence path rather than broadening the task into content analysis.
+Use generated benign test media and metadata whenever practical. Inspect only the account/page state needed to diagnose the software behavior. Stop at an unpublished prepared draft unless publication is explicitly authorized.
+A platform-specific browser or site restriction applies only to the restricted interaction. Continue independent permissible engineering, diagnostics, mocks, recorder/trace/capture analysis, and work on other supported platforms.
 
-# End-to-end browser verification
+Treat browser connection state as authoritative. Do not report an upload or preparation as active when the selected Chrome connection is missing, stale, disconnected, or unable to receive commands.
 
-For browser-driven product work, treat successful local/unit/transport tests as supporting evidence, not as proof that the live user workflow works. When the task concerns site automation, exercise the actual flow through OFEnhancer and the connected Chrome profile whenever that access is available: observe the real tabs/pages, confirm required clicks/file handoffs/autofill, and verify the intended prepared state.
+## Protected actions and tooling
 
-If one target site cannot be inspected directly because of a browser/tool safety restriction, continue all independent work on other supported sites. Do not stop the broader task merely because one platform is blocked.
+The owner authorizes review and exact-file unblocking of trusted repository scripts when an Internet-download marker prevents required build/test tooling from running. Review the script first and scope `Unblock-File` to the exact repository file.
 
-For a blocked authenticated site, prefer the repository's recorder/trace/capture/export/diagnostic workflow as the evidence bridge. If owner interaction is genuinely required, give one precise bounded procedure: what to start, the exact actions to perform, where to stop before any consequential action, and what sanitized evidence to return. Consume that evidence and continue diagnosis, implementation, and verification. Do not default final verification back to the owner when an available evidence workflow can support it.
+This does not authorize changing machine-wide execution policy, disabling security protections, public publishing, or unrelated installed integration.
 
-For authorized live testing, use generated benign test media and stop before publication unless publication is explicitly authorized. A prepared unpublished draft is sufficient for upload/autofill verification.
+Google credentials and tokens remain private. Follow `docs/google-catalogue.md`; check the existing DPAPI configuration before requesting replacement credentials. Never commit or log secrets or tokens.
 
-Treat browser connection state as authoritative. Do not present an upload/preparation operation as actively progressing when the selected Chrome connection is missing, stale, disconnected, or unable to receive commands. Diagnose and fix the connection/state mismatch rather than relying on transport tests alone.
+## Verification and release
 
-Carry an authorized fix through root-cause diagnosis, implementation, live retesting, regression coverage, packaging, and release verification. Ask the owner only for genuinely user-only actions such as login, 2FA, credential creation/approval, or a bounded recorder interaction, then resume afterward.
+For browser-driven behavior, local/unit/transport tests are supporting evidence, not proof of the live workflow. Exercise the actual OFEnhancer/Chrome path when authorized access is available, or use the documented recorder/trace/capture evidence bridge when direct inspection is unavailable.
 
-# Standing authorization for repository tooling
+For user-facing UI changes, render the actual proposed interface and obtain the owner's requested visual review before packaging the release. Nonvisual fixes can follow the normal release path.
 
-The owner gives continuing authorization to review and unblock trusted scripts
-in this repository when an Internet-download marker prevents required build or
-test tooling from running. Do not request separate approval for each such file.
-Review the script first, scope `Unblock-File` to the exact repository file, and
-continue verification. This does not authorize changing machine-wide execution
-policy, disabling security protections, public publishing, or changing the
-installed extension/native integration outside the task's existing authority.
+For a completed product release, follow the versioning, packaging, installation, and verification procedure in the owning development/production-handoff documentation. Preserve existing settings, extension identities, load locations, and storage.
 
-# Release delivery
+A source change, passing test, packaged installer, installed update, live-site workflow, and publication are distinct evidence levels. Report only what was actually established.
 
-For user-facing UI changes, implement and render the proposed interface from the
-actual source before building a versioned installer or installing an update.
-Send the owner a screenshot or image preview of the affected screen in the task
-conversation and allow them to review it before release packaging. Prefer a
-working local browser/app preview over a conceptual mockup; label any mockup
-clearly. If a desktop build is needed to render the screen, a development build
-is fine, but defer the installer and normal update until after the preview.
-Apply requested visual revisions to the preview before packaging. This checkpoint
-is for UI changes; nonvisual fixes can follow the normal release flow.
+## GitHub identity
+This repository belongs to the `JohnnyGuides` GitHub account. Use repository-local `JohnnyGuides` authentication and `146333925+JohnnyGuides@users.noreply.github.com` for commits and pushes.
 
-For completed product changes delivered as a release, increment the appropriate
-product version and build a matching Windows installer. Include a direct,
-clickable link to that versioned installer in the final response so the owner
-can install it immediately. Do not merely promise an installer or omit its link.
+Do not replace the machine-wide `O-Marmullaku` credential used by other projects.
 
-Install the release as a normal update and retry the relevant live workflow when
-feasible under the standing authorization above. If installation cannot complete,
-provide the installer link for the owner to run. State clearly whether installation
-and live verification actually occurred, and report any remaining blockers.
-Preserve existing settings, extension identities, load locations, and storage.
+## Concurrent work and shared state
 
-# Google OAuth recovery knowledge
+Concurrent work must not mutate the same Chrome profile state, extension identity, upload/draft state, OAuth/DPAPI state, installed native integration, or release artifact without deliberate isolation and ownership.
 
-Use the existing Google Cloud project `ofenhancer-personal` (OFEnhancer Personal),
-Desktop client **OFEnhancer for Windows**, under `johnnyguides@gmail.com` in the
-Johnny Chrome profile. The exact client link and recovery procedure are in
-`docs/google-catalogue.md`. Before asking the owner for a file, check the existing
-DPAPI configuration at `%LocalAppData%\OFEnhancer\data\google-desktop-client.dat`
-and the existing Cloud client. A public client ID plus PKCE is not sufficient:
-Google requires this Desktop client's secret. Cloud no longer reveals existing
-secrets. Preserve this client and store imported credentials with DPAPI; commit
-recovery knowledge, never secrets or tokens. The owner's test workbook is **Work**.
-The original client JSON dated 2026-09-08 contains a rejected secret. Do not
-re-import it: it replaced a working DPAPI credential on 2026-09-24 and Google
-returned `invalid_client`. Verify any replacement secret before saving it.
-On 2026-09-24, the owner supplied a newly created secret for that same Desktop
-client. OFEnhancer v0.20.65 validated and imported it into DPAPI, completed the
-Google sign-in and Work picker, and imported 136 videos from **2026 Video
-Catalogue**. The Google connection and local catalogue survived an app restart.
-Check the existing DPAPI configuration before requesting another secret.
+## Stop conditions
 
-The owner trusts the existing OFEnhancer Personal Google OAuth application and
-authorizes the agent to complete its routine Google sign-in, consent, and Work
-picker flow when the connected browser tool permits it. Do not ask for separate
-approval merely because this known app shows Google's unverified-app notice.
-If the browser tool reserves a warning or consent screen for the human, respect
-that boundary, give the owner the exact remaining click, and resume verification
-afterward. Do not change the Google Cloud client, scopes, or workbook selection
-without a task-specific reason.
-
-# GitHub identity
-
-This repository belongs to the `JohnnyGuides` GitHub account. For GitHub
-authentication, commits, pushes, releases, and other repository operations,
-use the `JohnnyGuides` identity and the
-`146333925+JohnnyGuides@users.noreply.github.com` commit email.
-
-Keep authentication scoped to this repository. Do not remove, overwrite, or
-replace the `O-Marmullaku` GitHub credential because other projects use that
-account. If both accounts are available, select or configure `JohnnyGuides`
-for this repository explicitly rather than changing the machine-wide default.
+Stop the affected operation and preserve evidence when browser connection, extension identity, upload ownership, OAuth credential state, publication authority, or installed-release identity is uncertain.
