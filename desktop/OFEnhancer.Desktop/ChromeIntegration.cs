@@ -307,14 +307,19 @@ internal sealed class ChromeIntegration
     {
         if (File.Exists(settings.SettingsPath))
         {
-            using var existing = JsonDocument.Parse(ReadBounded(settings.SettingsPath));
+            const string repair = "Existing settings need repair. They were preserved; no new identity was assigned.";
+            JsonDocument parsed;
+            // Truncated or corrupt settings are a settings problem, not a package problem.
+            try { parsed = JsonDocument.Parse(ReadBounded(settings.SettingsPath)); }
+            catch (JsonException) { throw new InvalidOperationException(repair); }
+            using var existing = parsed;
             if (existing.RootElement.ValueKind != JsonValueKind.Object
                 || existing.RootElement.EnumerateObject().Any(property => property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId" or "googleSheetUrl"))
                 || existing.RootElement.TryGetProperty("extensionId", out var oldId) && oldId.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeExtensionId(oldId.GetString()) is null
                 || existing.RootElement.TryGetProperty("googleOAuthClientId", out var google) && google.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeGoogleOAuthClientId(google.GetString()) is null
                 || existing.RootElement.TryGetProperty("browserId", out var browser) && browser.ValueKind != JsonValueKind.Null && BrowserSelection.NormalizeId(browser.GetString()) is null
                 || existing.RootElement.TryGetProperty("googleSheetUrl", out var sheet) && sheet.ValueKind != JsonValueKind.Null && (sheet.ValueKind != JsonValueKind.String || !IsValidGoogleSheetUrl(sheet.GetString())))
-                throw new InvalidOperationException("Existing settings need repair. They were preserved; no new identity was assigned.");
+                throw new InvalidOperationException(repair);
         }
     }
 
@@ -324,10 +329,19 @@ internal sealed class ChromeIntegration
         catch (GoogleSheetReferenceException) { return false; }
     }
 
+    internal const string IncompletePackageMessage =
+        "The installed OFEnhancer package is incomplete. Run the OFEnhancer installer again and choose Update or reinstall; your settings and data are kept.";
+
     private void VerifyPackage()
     {
         // Preparation is only available from a complete staged/installed OFEnhancer package.
-        using var inventory = JsonDocument.Parse(ReadBounded(Path.Combine(root, "package-manifest.json"), 4 * 1024 * 1024));
+        string manifestPath = Path.Combine(root, "package-manifest.json");
+        if (!File.Exists(manifestPath))
+            throw new InvalidOperationException(IncompletePackageMessage);
+        JsonDocument parsed;
+        try { parsed = JsonDocument.Parse(ReadBounded(manifestPath, 4 * 1024 * 1024)); }
+        catch (JsonException) { throw new InvalidOperationException(IncompletePackageMessage); }
+        using var inventory = parsed;
         if (inventory.RootElement.GetProperty("product").GetString() != "OFEnhancer")
             throw new InvalidOperationException("The installed package inventory is invalid.");
         foreach (var entry in inventory.RootElement.GetProperty("files").EnumerateArray())

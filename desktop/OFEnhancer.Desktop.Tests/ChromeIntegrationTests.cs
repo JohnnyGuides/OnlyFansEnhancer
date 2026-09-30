@@ -128,6 +128,30 @@ public sealed class ChromeIntegrationTests
     }
 
     [TestMethod]
+    public void TruncatedSettingsReportSettingsRepairNotAPackageProblem()
+    {
+        using var fixture = new Fixture();
+        fixture.Integration.Prepare();
+        File.WriteAllText(fixture.Settings.SettingsPath, "{\"extensionId\": ");
+
+        ChromeIntegrationView view = fixture.Integration.Get();
+
+        Assert.AreEqual("Existing settings need repair. They were preserved; no new identity was assigned.", view.SetupError);
+    }
+
+    [TestMethod]
+    public void MissingPackageManifestAsksForAnInstallerRepair()
+    {
+        using var fixture = new Fixture();
+        File.Delete(Path.Combine(fixture.Root, "package-manifest.json"));
+
+        var error = Assert.ThrowsException<InvalidOperationException>(() => fixture.Integration.Prepare());
+
+        Assert.AreEqual(ChromeIntegration.IncompletePackageMessage, error.Message);
+        Assert.IsFalse(File.Exists(fixture.Manifest));
+    }
+
+    [TestMethod]
     public void WrongIdentityAndOldSetupGenerationCannotValidateLiveness()
     {
         using var fixture = new Fixture();
