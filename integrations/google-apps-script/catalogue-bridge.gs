@@ -648,17 +648,26 @@ function creatorUploadHandle(action, payload) {
         );
       }
       var ledgerRow = ledgerPlan.row;
-      ledgerSheet.appendRow([
-        ledgerRow.key,
-        ledgerRow.runId,
-        ledgerRow.jobId,
-        ledgerRow.platform,
-        ledgerRow.catalogueRow,
-        ledgerRow.catalogueId,
-        ledgerRow.resultId,
-        ledgerRow.resultUrl,
-        ledgerRow.status,
-        ledgerRow.recordedAt,
+      var ledgerRowNumber = ledgerSheet.getLastRow() + 1;
+      // A full sheet must grow first; a range past its last row throws.
+      if (ledgerRowNumber > ledgerSheet.getMaxRows())
+        ledgerSheet.insertRowsAfter(ledgerSheet.getMaxRows(), 1);
+      var ledgerRange = ledgerSheet.getRange(ledgerRowNumber, 1, 1, 10);
+      // Keep long result ids as text; Sheets would otherwise round them.
+      ledgerRange.setNumberFormat("@");
+      ledgerRange.setValues([
+        [
+          ledgerRow.key,
+          ledgerRow.runId,
+          ledgerRow.jobId,
+          ledgerRow.platform,
+          ledgerRow.catalogueRow,
+          ledgerRow.catalogueId,
+          ledgerRow.resultId,
+          ledgerRow.resultUrl,
+          ledgerRow.status,
+          ledgerRow.recordedAt,
+        ],
       ]);
       SpreadsheetApp.flush();
       var ledgerVerified = creatorUploadPlanLedgerAppend(

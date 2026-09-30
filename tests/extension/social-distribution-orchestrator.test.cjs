@@ -679,3 +679,28 @@ test("a redgifs job in stage prepared without a hash field still proceeds", asyn
   assert.notEqual(job.stage, "failed");
   assert.equal(runtime.calls.filter((c) => c === "submit:redgifs").length, 1);
 });
+
+test("association records every sibling job before rejecting with the first failure", async () => {
+  const runtime = loadRuntime({ behavior: { "sheet:x": "conflict" } });
+  const input = plan({ catalogue: null });
+  await runtime.store.create(input);
+  await runtime.orchestrator.startSocialDistribution(input.id);
+  const published = await runtime.store.load(input.id);
+  for (const jobId of Object.keys(published.jobs))
+    assert.equal(published.jobs[jobId].stage, "result-captured", jobId);
+
+  await assert.rejects(
+    runtime.orchestrator.associateCatalogue(input.id, plan().catalogue),
+    /main append returned conflict/,
+  );
+  const associated = await runtime.store.load(input.id);
+  assert.equal(associated.jobs.x.stage, "result-captured");
+  for (const jobId of ["redgifs", "reddit:gamesgonewild", "reddit:nsfw_gif"])
+    assert.equal(associated.jobs[jobId].stage, "sheet-complete", jobId);
+  assert.deepEqual(
+    runtime.sheetCalls
+      .filter(([kind]) => kind === "ledger")
+      .map(([, payload]) => payload.jobId),
+    ["x", "redgifs", "reddit:gamesgonewild", "reddit:nsfw_gif"],
+  );
+});

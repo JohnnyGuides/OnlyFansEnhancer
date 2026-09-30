@@ -5656,6 +5656,10 @@ async function retireCreatorUploadSessions() {
                 );
               }),
             ]);
+          } catch (error) {
+            if (!retireFailed) retireError = error;
+            retireFailed = true;
+            continue;
           } finally {
             clearTimeout(timeout);
           }

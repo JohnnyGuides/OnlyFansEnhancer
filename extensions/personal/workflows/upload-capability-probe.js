@@ -36,13 +36,24 @@
     "data-test",
   ];
 
+  const PLATFORM_DOMAINS = [
+    ["onlyfans.com", "onlyfans"],
+    ["fansly.com", "fansly"],
+    ["manyvids.com", "manyvids"],
+    ["pornhub.mainhub.com", "pornhub"],
+  ];
+
   function platformFor(origin) {
-    const host = String(origin || "").toLowerCase();
-    if (host.includes("onlyfans.com")) return "onlyfans";
-    if (host.includes("fansly.com")) return "fansly";
-    if (host.includes("manyvids.com")) return "manyvids";
-    if (host.includes("pornhub.mainhub.com")) return "pornhub";
-    return "unknown";
+    let host = "";
+    try {
+      host = new URL(String(origin || "")).hostname.toLowerCase();
+    } catch {
+      return "unknown";
+    }
+    const match = PLATFORM_DOMAINS.find(
+      ([domain]) => host === domain || host.endsWith(`.${domain}`),
+    );
+    return match ? match[1] : "unknown";
   }
 
   function semanticTokens(element) {

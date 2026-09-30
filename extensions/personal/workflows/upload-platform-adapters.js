@@ -3245,6 +3245,28 @@
     );
   }
 
+  // "first" is scoped to the Load Preset menu, as on the current path.
+  function legacyFanslyPreset(draft, load, label) {
+    if (draft.fanslyPresetSelection === "first") {
+      const menu = load?.closest(".transparent-dropdown");
+      if (!menu) throw new Error("Fansly preset menu scope is missing.");
+      const preset = [
+        ...menu.querySelectorAll(".dropdown-list > .dropdown-item"),
+      ].filter(visible)[0];
+      if (!preset) throw new Error("Fansly approved access preset is missing.");
+      if (!preset.textContent.trim())
+        throw new Error("Fansly preset identity is empty.");
+      return preset;
+    }
+    return exactText(
+      ".dropdown-item, [role='option'], button",
+      draft.fanslyPreset || "defaulT",
+      label,
+      document,
+      { caseSensitive: true },
+    );
+  }
+
   async function prepareLegacyFanslyExtra(context, composer, card, role) {
     const { draft, signal } = context;
     const existingCards = new Set(
@@ -3266,22 +3288,19 @@
     if (load.length > 1)
       throw new Error("Fansly access preset control is ambiguous.");
     if (load.length === 1) click(load[0], "Fansly additional media preset");
-    click(
-      exactText(
-        ".dropdown-item, [role='option'], button",
-        draft.fanslyPreset || "defaulT",
-        "Fansly additional media access preset",
-        document,
-        { caseSensitive: true },
-      ),
+    const preset = legacyFanslyPreset(
+      draft,
+      load[0],
       "Fansly additional media access preset",
     );
+    const presetName = preset.textContent.trim();
+    click(preset, "Fansly additional media access preset");
     await waitFor(
       () =>
         card.dataset.locked !== "false" &&
-        (card.dataset.preset === draft.fanslyPreset ||
+        (card.dataset.preset === presetName ||
           card.querySelector(".locked-text-container")?.textContent.trim() ===
-            draft.fanslyPreset),
+            presetName),
       "Fansly additional media access readback",
       DEFAULT_DOM_TIMEOUT,
       signal,
@@ -3388,22 +3407,20 @@
         throw new Error("Fansly Load Preset control is ambiguous.");
       if (loadControls.length === 1)
         click(loadControls[0], "Fansly Load Preset");
-      const preset = exactText(
-        ".dropdown-item, [role='option'], button",
-        draft.fanslyPreset || "defaulT",
+      const preset = legacyFanslyPreset(
+        draft,
+        loadControls[0],
         "Fansly access preset defaulT",
-        document,
-        { caseSensitive: true },
       );
+      const presetName = preset.textContent.trim();
       click(preset, "Fansly access preset defaulT");
       await waitFor(
         () => {
-          const expected = String(draft.fanslyPreset || "defaulT");
           return (
             fullCard.dataset.locked !== "false" &&
-            (fullCard.dataset.preset === expected ||
+            (fullCard.dataset.preset === presetName ||
               [...fullCard.querySelectorAll(".locked-text-container")].some(
-                (control) => control.textContent.trim() === expected,
+                (control) => control.textContent.trim() === presetName,
               ))
           );
         },
@@ -3438,10 +3455,10 @@
             return (
               card &&
               card.dataset.locked !== "false" &&
-              (card.dataset.preset === "defaulT" ||
+              (card.dataset.preset === presetName ||
                 card
                   .querySelector(".locked-text-container")
-                  ?.textContent.trim() === "defaulT") &&
+                  ?.textContent.trim() === presetName) &&
               (draft.hasTeaser === false ||
                 card.querySelector("[data-free-preview='true'], .free-preview"))
             );

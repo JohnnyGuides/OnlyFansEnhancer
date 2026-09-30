@@ -584,12 +584,21 @@
       return serialize(sessionId, async () => {
         let session = await store.associateCatalogue(sessionId, catalogue);
         let fingerprint = await recoverFingerprint(session);
+        let appendError = null;
+        let appendFailed = false;
         for (const [jobId, job] of Object.entries(session.jobs)) {
           if (job.stage !== "result-captured") continue;
-          const result = await appendResult(session, jobId, fingerprint);
-          session = result.session;
-          fingerprint = result.fingerprint;
+          try {
+            const result = await appendResult(session, jobId, fingerprint);
+            session = result.session;
+            fingerprint = result.fingerprint;
+          } catch (error) {
+            if (!appendFailed) appendError = error;
+            appendFailed = true;
+            session = await store.load(sessionId);
+          }
         }
+        if (appendFailed) throw appendError;
         return session;
       });
     }

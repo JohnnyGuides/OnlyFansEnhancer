@@ -276,29 +276,54 @@ const ledgerRequest = {
   recordedAt: 1_788_280_000_000,
 };
 
-function ledgerBridge({ lastRow, existing = {}, sheetExists = true } = {}) {
-  const calls = { insertSheet: 0, appendRow: 0, hideSheet: 0 };
+function ledgerBridge({
+  lastRow,
+  maxRows,
+  existing = {},
+  sheetExists = true,
+} = {}) {
+  const calls = { insertSheet: 0, appendRow: 0, setValues: 0, hideSheet: 0 };
+  // Every sheet mutation in call order, with the row each one targets.
+  const writes = [];
   const byRow = { ...existing };
-  let appended = 0;
   let locks = 0;
-  let base = lastRow ?? 1;
+  let last = lastRow ?? 1;
+  // Apps Script sheets have a fixed row count that only appendRow or an
+  // explicit insert grows; a range starting past it throws.
+  let rowLimit = maxRows ?? Math.max(1000, last);
   const sheet = {
-    getLastRow: () => base + appended,
-    getRange: (row, column, count) => ({
-      getValues: () =>
-        Array.from(
-          { length: count },
-          (_, i) => byRow[row + i] || Array(10).fill(""),
-        ),
-    }),
+    getLastRow: () => last,
+    getMaxRows: () => rowLimit,
+    insertRowsAfter(afterPosition, howMany) {
+      writes.push(["insertRowsAfter", afterPosition, howMany]);
+      rowLimit += howMany;
+    },
+    getRange(row, column, count, columns) {
+      if (row > rowLimit)
+        throw new Error("The starting row of the range is too large.");
+      return {
+        getValues: () =>
+          Array.from(
+            { length: count },
+            (_, i) => byRow[row + i] || Array(10).fill(""),
+          ),
+        setNumberFormat(format) {
+          writes.push(["setNumberFormat", row, column, count, columns, format]);
+        },
+        setValues(values) {
+          calls.setValues++;
+          writes.push(["setValues", row, values[0][0]]);
+          byRow[row] = values[0];
+          last = Math.max(last, row);
+        },
+      };
+    },
     appendRow(cells) {
       calls.appendRow++;
-      if (cells[0] === "Key") {
-        base = 1;
-        return;
-      }
-      appended++;
-      byRow[base + appended] = cells;
+      writes.push(["appendRow", last + 1, cells[0]]);
+      last++;
+      rowLimit = Math.max(rowLimit, last);
+      if (cells[0] !== "Key") byRow[last] = cells;
     },
     hideSheet() {
       calls.hideSheet++;
@@ -318,7 +343,8 @@ function ledgerBridge({ lastRow, existing = {}, sheetExists = true } = {}) {
         insertSheet() {
           calls.insertSheet++;
           created = true;
-          base = 0;
+          last = 0;
+          rowLimit = 1000;
           return sheet;
         },
       }),
@@ -343,7 +369,7 @@ function ledgerBridge({ lastRow, existing = {}, sheetExists = true } = {}) {
     ),
     context,
   );
-  return { context, calls, byRow, locks: () => locks };
+  return { context, calls, writes, byRow, locks: () => locks };
 }
 
 function ledgerRow(request) {
@@ -368,7 +394,8 @@ test("ledger append at the last readable row succeeds and verifies", () => {
     ledgerRequest,
   );
   assert.equal(result.status, "updated");
-  assert.equal(value.calls.appendRow, 1);
+  assert.equal(value.calls.setValues, 1);
+  assert.equal(value.calls.appendRow, 0);
   assert.equal(value.locks(), 0);
 });
 
@@ -383,6 +410,7 @@ test("ledger append beyond the readable range is rejected before writing", () =>
     /ledger is full/,
   );
   assert.equal(value.calls.appendRow, 0);
+  assert.equal(value.calls.setValues, 0);
   assert.equal(value.locks(), 0);
 });
 
@@ -397,6 +425,7 @@ test("ledger retry of an identical existing event stays idempotent at capacity",
   );
   assert.equal(result.status, "idempotent");
   assert.equal(value.calls.appendRow, 0);
+  assert.equal(value.calls.setValues, 0);
   assert.equal(value.locks(), 0);
 });
 
@@ -415,6 +444,7 @@ test("invalid ledger payload creates and hides nothing", () => {
     {
       insertSheet: 0,
       appendRow: 0,
+      setValues: 0,
       hideSheet: 0,
     },
   );
@@ -430,6 +460,76 @@ test("valid ledger request without a sheet creates, hides and appends", () => {
   assert.equal(result.status, "updated");
   assert.equal(value.calls.insertSheet, 1);
   assert.equal(value.calls.hideSheet, 1);
-  assert.equal(value.calls.appendRow, 2);
+  assert.equal(value.calls.appendRow, 1);
+  assert.equal(value.calls.setValues, 1);
   assert.equal(value.locks(), 0);
+});
+
+test("ledger append formats only the new row as text before writing it", () => {
+  const value = ledgerBridge({
+    lastRow: 5,
+    existing: {
+      5: ledgerRow({ ...ledgerRequest, eventId: "earlier" }),
+    },
+  });
+  const result = value.context.creatorUploadHandle(
+    "appendDistributionLedger",
+    ledgerRequest,
+  );
+  assert.equal(result.status, "updated");
+  assert.equal(result.row.resultId, "2094523397057237306");
+  assert.deepEqual(value.writes, [
+    ["setNumberFormat", 6, 1, 1, 10, "@"],
+    ["setValues", 6, "social-distribution-0001:x:published"],
+  ]);
+});
+
+test("ledger append at the sheet's row limit grows it by one row and verifies", () => {
+  const value = ledgerBridge({
+    lastRow: 1000,
+    maxRows: 1000,
+    existing: {
+      1000: ledgerRow({ ...ledgerRequest, eventId: "earlier" }),
+    },
+  });
+  const result = value.context.creatorUploadHandle(
+    "appendDistributionLedger",
+    ledgerRequest,
+  );
+  assert.equal(result.status, "updated");
+  assert.equal(result.row.resultId, "2094523397057237306");
+  assert.deepEqual(value.writes, [
+    ["insertRowsAfter", 1000, 1],
+    ["setNumberFormat", 1001, 1, 1, 10, "@"],
+    ["setValues", 1001, "social-distribution-0001:x:published"],
+  ]);
+  assert.equal(value.byRow[1001][6], "2094523397057237306");
+  assert.equal(value.locks(), 0);
+});
+
+test("ledger append with rows remaining does not grow the sheet", () => {
+  const value = ledgerBridge({ lastRow: 999, maxRows: 1000 });
+  const result = value.context.creatorUploadHandle(
+    "appendDistributionLedger",
+    ledgerRequest,
+  );
+  assert.equal(result.status, "updated");
+  assert.deepEqual(value.writes, [
+    ["setNumberFormat", 1000, 1, 1, 10, "@"],
+    ["setValues", 1000, "social-distribution-0001:x:published"],
+  ]);
+});
+
+test("ledger append on a new sheet formats the first event row, not the header", () => {
+  const value = ledgerBridge({ sheetExists: false });
+  const result = value.context.creatorUploadHandle(
+    "appendDistributionLedger",
+    ledgerRequest,
+  );
+  assert.equal(result.status, "updated");
+  assert.deepEqual(value.writes, [
+    ["appendRow", 1, "Key"],
+    ["setNumberFormat", 2, 1, 1, 10, "@"],
+    ["setValues", 2, "social-distribution-0001:x:published"],
+  ]);
 });

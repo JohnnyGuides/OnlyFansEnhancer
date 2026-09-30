@@ -18,7 +18,7 @@
       // Chrome reports unpacked reloads as "update", not "install". Never
       // manufacture a receipt during startup, update, reload or storage repair.
       if (details.reason !== "install") return;
-      installing = (async () => {
+      const attempt = (async () => {
         await clearOwnedStorage();
         await chrome.storage.local.set({
           [KEY]: {
@@ -28,7 +28,12 @@
           },
         });
       })();
-      return installing;
+      installing = attempt;
+      // A failed initialization must not reject every later lifecycle call.
+      attempt.catch(() => {
+        if (installing === attempt) installing = null;
+      });
+      return attempt;
     }
     chrome.runtime.onInstalled?.addListener(installed);
     async function getInstallation() {

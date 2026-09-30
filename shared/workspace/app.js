@@ -110,7 +110,7 @@
   let googleStatusRequests = 0;
   let googleStatusRendered = 0;
   let matchDialogSerial = 0;
-  let matchPendingSerial = 0;
+  const matchPendingAssets = new Set();
   let frozenMigration = null;
   let browserSettingsView = null;
   let connectionStartPending = false;
@@ -1589,6 +1589,7 @@
     googleCatalogueStatus.textContent = workingCopy[action];
     try {
       const result = await global.OFEnhancerHost.request(operation, payload);
+      googleStatusRendered = ++googleStatusRequests;
       if (action === "import") {
         renderGoogleCatalogue(
           result.status,
@@ -1598,6 +1599,7 @@
       } else renderGoogleCatalogue(result);
       if (action === "inspect") await loadCatalogue(true);
     } catch (error) {
+      googleStatusRendered = ++googleStatusRequests;
       renderGoogleCatalogue({
         ...googleStatusView,
         state: "error",
@@ -1614,10 +1616,13 @@
     googleCatalogueStatus.setAttribute("aria-busy", "true");
     googleCatalogueStatus.textContent = "Disconnecting Google Sheet…";
     try {
-      renderGoogleCatalogue(
-        await global.OFEnhancerHost.request("disconnectGoogleCatalogue"),
+      const status = await global.OFEnhancerHost.request(
+        "disconnectGoogleCatalogue",
       );
+      googleStatusRendered = ++googleStatusRequests;
+      renderGoogleCatalogue(status);
     } catch (error) {
+      googleStatusRendered = ++googleStatusRequests;
       renderGoogleCatalogue({
         ...googleStatusView,
         state: "error",
@@ -1715,7 +1720,7 @@
   }
 
   async function confirmMatch(button, candidate) {
-    if (!currentAsset || matchPendingSerial === matchDialogSerial) return;
+    if (!currentAsset || matchPendingAssets.has(currentAsset.assetId)) return;
     const serial = matchDialogSerial;
     const asset = currentAsset;
     const stillOpen = () =>
@@ -1723,7 +1728,7 @@
       matchDialog.open &&
       currentAsset === asset;
     const choices = [...candidateList.querySelectorAll("button")];
-    matchPendingSerial = serial;
+    matchPendingAssets.add(asset.assetId);
     for (const choice of choices) setBusy(choice, true);
     matchDialogStatus.textContent = "Saving match…";
     let saved = false;
@@ -1742,7 +1747,7 @@
       if (stillOpen())
         matchDialogStatus.textContent = friendlyCatalogueError(error);
     } finally {
-      if (matchPendingSerial === serial) matchPendingSerial = 0;
+      matchPendingAssets.delete(asset.assetId);
       if (!saved) for (const choice of choices) setBusy(choice, false);
     }
   }

@@ -2572,7 +2572,14 @@ test("ledger bridge hides its sheet, appends one bounded row, and verifies readb
   let hidden = false;
   const ledgerSheet = {
     getLastRow: () => rows.length + 1,
-    getRange: () => ({ getValues: () => structuredClone(rows) }),
+    getMaxRows: () => 1000,
+    getRange: () => ({
+      getValues: () => structuredClone(rows),
+      setNumberFormat() {},
+      setValues(values) {
+        rows.push(values[0]);
+      },
+    }),
     appendRow(row) {
       rows.push(row);
     },

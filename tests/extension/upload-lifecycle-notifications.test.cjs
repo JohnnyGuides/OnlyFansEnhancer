@@ -833,3 +833,46 @@ test("retirement continues past a session whose stop throws and rethrows that er
   assert.deepEqual(await storedStatuses(env, ids[0]), {});
   assert.deepEqual(await storedStatuses(env, ids[2]), {});
 });
+
+test("retirement treats a stop timeout like a stop failure and keeps the first error", async () => {
+  const env = load();
+  const ids = [sessionId(), sessionId(), sessionId()];
+  const platforms = ["manyvids", "onlyfans", "fansly"];
+  for (const [index, id] of ids.entries()) {
+    env.context.record = {
+      id,
+      draft: { title: "Stored episode" },
+      platforms: {
+        [platforms[index]]: {
+          platform: platforms[index],
+          tabId: 41 + index,
+          status: "prepared",
+        },
+      },
+    };
+    await env.run(`(async () => {
+      await ensureCreatorUploadRuntimeVersion();
+      await CreatorUploadSessionStore.save(record);
+    })()`);
+  }
+  env.context.hangingId = ids[1];
+  await env.run(`(async () => {
+    const session = await getCreatorUploadSession(hangingId);
+    session.execution = new Promise(() => {});
+    creatorUploadSessions.set(hangingId, session);
+  })()`);
+  // The 15 s stop wait elapses at once; every other timer is unchanged.
+  const workerSetTimeout = env.context.setTimeout;
+  env.context.setTimeout = (callback, delay, ...args) =>
+    workerSetTimeout(callback, delay === 15_000 ? 0 : delay, ...args);
+  env.run(`
+    creatorUploadPost = (sessionId, message) => {
+      if (message.platform === "manyvids") throw new TypeError("step failed");
+    };
+  `);
+  await assert.rejects(
+    env.run("retireCreatorUploadSessions()"),
+    (error) => error.name === "TypeError" && /step failed/.test(error.message),
+  );
+  assert.deepEqual(await storedStatuses(env, ids[2]), {});
+});

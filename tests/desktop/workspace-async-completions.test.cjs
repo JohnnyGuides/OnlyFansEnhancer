@@ -93,6 +93,15 @@ async function installHost(page) {
         });
       if (operation === "getGoogleCatalogueStatus")
         return new Promise((resolve) => globalThis.__held.google.push(resolve));
+      if (operation === "disconnectGoogleCatalogue")
+        return Promise.resolve({ state: "disconnected" });
+      if (operation === "syncGoogleCatalogue")
+        return Promise.resolve({
+          state: "ready",
+          pendingCount: 0,
+          conflictCount: 0,
+          lastVerifiedSync: "2026-09-04T12:00:00Z",
+        });
       if (operation === "confirmAssetBinding") {
         globalThis.__confirmCalls += 1;
         return new Promise((resolve) =>
@@ -205,6 +214,99 @@ async function testPendingMatchSendsOneConfirmation(browser, port) {
   await page.close();
 }
 
+async function testReopenedMatchSendsOneConfirmation(browser, port) {
+  const { page, errors } = await newPage(browser, port);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page.getByRole("button", { name: "Needs thumbnail" }).click();
+  await openMatchDialog(page, 0);
+  const dialog = page.getByRole("dialog", { name: "Match thumbnail" });
+  await dialog.getByRole("button", { name: "Use Video 1" }).click();
+  await page.waitForFunction(() => __confirmCalls === 1);
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await openMatchDialog(page, 0);
+  await dialog
+    .getByRole("button", { name: "Use Video 1" })
+    .evaluate((button) => {
+      button.click();
+    });
+  await page.waitForTimeout(200);
+  assert.equal(
+    await page.evaluate(() => __confirmCalls),
+    1,
+    "a reopened dialog sent a second confirmation for the pending asset",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+// Opens the catalogue with a ready status and leaves one newer status poll
+// in flight, so an action result can be followed by that late poll reply.
+async function readyWithPendingPoll(browser, port) {
+  const { page, errors } = await newPage(browser, port);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page.waitForFunction(() => __held.google.length >= 1);
+  await page.evaluate(() => {
+    __held.google[0]({
+      state: "ready",
+      workbookName: "Workbook",
+      sheetName: "Sheet",
+      pendingCount: 0,
+      conflictCount: 0,
+      lastVerifiedSync: "2026-09-04T12:00:00Z",
+    });
+  });
+  await page.locator("#googleDisconnect").waitFor();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator('button[data-view="catalogue"]').click();
+  await page.waitForFunction(() => __held.google.length >= 3);
+  return { page, errors };
+}
+
+async function lateReadyPoll(page) {
+  await page.evaluate(() => {
+    __held.google[__held.google.length - 1]({
+      state: "ready",
+      workbookName: "Workbook",
+      sheetName: "Sheet",
+      pendingCount: 3,
+      conflictCount: 0,
+      lastVerifiedSync: "2026-09-04T12:00:00Z",
+    });
+  });
+  await page.waitForTimeout(150);
+}
+
+async function testLatePollKeepsDisconnectResult(browser, port) {
+  const { page, errors } = await readyWithPendingPoll(browser, port);
+  await page.locator("#googleDisconnect").click();
+  await page
+    .getByText("Connect the workbook you use for your catalogue.")
+    .waitFor();
+  await lateReadyPoll(page);
+  assert.equal(
+    await page.locator("#googleCatalogueStatus").innerText(),
+    "Connect the workbook you use for your catalogue.",
+    "a late status poll replaced the disconnect result",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
+async function testLatePollKeepsActionResult(browser, port) {
+  const { page, errors } = await readyWithPendingPoll(browser, port);
+  await page.locator("#googlePrimaryAction").click();
+  await page.getByText(/No updates waiting\./).waitFor();
+  await lateReadyPoll(page);
+  assert.match(
+    await page.locator("#googleCatalogueStatus").innerText(),
+    /^No updates waiting\./,
+    "a late status poll replaced the sync result",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
 async function main() {
   await withServer(async (port) => {
     const browser = await chromium.launch({ headless: true });
@@ -212,6 +314,9 @@ async function main() {
       await testReversedGoogleStatus(browser, port);
       await testMatchCompletionKeepsSecondDialog(browser, port);
       await testPendingMatchSendsOneConfirmation(browser, port);
+      await testReopenedMatchSendsOneConfirmation(browser, port);
+      await testLatePollKeepsDisconnectResult(browser, port);
+      await testLatePollKeepsActionResult(browser, port);
     } finally {
       await browser.close();
     }

@@ -116,3 +116,23 @@ test("interrupted initialization resumes the same install identity", async () =>
   assert.equal(receipt.id, pending.id);
   assert.equal(receipt.installedAt, pending.installedAt);
 });
+
+test("a failed initialization does not poison later lifecycle calls", async () => {
+  const f = fixture();
+  const clear = f.chrome.storage.local.clear;
+  f.chrome.storage.local.clear = async () => {
+    throw new Error("storage unavailable");
+  };
+  await assert.rejects(
+    f.installed({ reason: "install" }),
+    /storage unavailable/,
+  );
+  f.chrome.storage.local.clear = clear;
+  assert.equal(await f.lifecycle.getInstallation(), null);
+  assert.equal(await f.lifecycle.needsInitialization(), false);
+  assert.equal(await f.lifecycle.completeInstallation(), false);
+  await f.installed({ reason: "install" });
+  assert.equal(await f.lifecycle.needsInitialization(), true);
+  assert.equal(await f.lifecycle.completeInstallation(), true);
+  assert.match((await f.lifecycle.getInstallation()).id, /^[a-f0-9-]{36}$/);
+});

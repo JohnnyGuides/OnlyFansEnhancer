@@ -437,3 +437,33 @@ test("capability probe rejects profile settings that merely resemble a composer"
     await browser.close();
   }
 });
+
+test("capability probe classes a platform by exact host or subdomain only", () => {
+  const emptyDocument = { querySelectorAll: () => [] };
+  const context = vm.createContext({
+    URL,
+    document: emptyDocument,
+    location: { origin: "https://example.test", pathname: "/" },
+  });
+  vm.runInContext(fs.readFileSync(probePath, "utf8"), context, {
+    filename: "upload-capability-probe.js",
+  });
+  const platform = (origin) =>
+    context.CreatorUploadCapabilityProbe.inspect(emptyDocument, {
+      origin,
+      pathname: "/",
+    }).platform;
+
+  assert.equal(platform("https://onlyfans.com"), "onlyfans");
+  assert.equal(platform("https://www.onlyfans.com"), "onlyfans");
+  assert.equal(platform("https://fansly.com"), "fansly");
+  assert.equal(platform("https://www.manyvids.com"), "manyvids");
+  assert.equal(platform("https://pornhub.mainhub.com"), "pornhub");
+  assert.equal(platform("https://onlyfans.com.example"), "unknown");
+  assert.equal(platform("https://notonlyfans.com"), "unknown");
+  assert.equal(platform("https://fansly.com.attacker.test"), "unknown");
+  assert.equal(platform("https://manyvids.com-upload.test"), "unknown");
+  assert.equal(platform("https://pornhub.mainhub.com.example"), "unknown");
+  assert.equal(platform("https://evil.test/onlyfans.com"), "unknown");
+  assert.equal(platform(""), "unknown");
+});
