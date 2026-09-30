@@ -400,3 +400,264 @@ test("an aborted page run releases a role wait through the adapter context", asy
   `);
   assert.match(await outcome, /aborted|cancelled/i);
 });
+
+// Runs a ManyVids edit-stage or Pornhub upload-stage platform with the page
+// work stubbed and the console closing at the chosen point.
+function siteEnvironment(platform, disconnectAt) {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, [platform], {
+    title: "Episode",
+    publishMode: "autonomous",
+  });
+  const target = session.platforms.get(platform);
+  target.tokens = {};
+  if (platform === "manyvids") target.manyvidsId = "123456";
+  const port = connect(env, id);
+  env.context.disconnectAt = disconnectAt;
+  env.context.disconnect = () => {
+    port.dead = true;
+  };
+  env.context.saves = [];
+  env.chrome.tabs = {
+    get: async () => ({ url: "https://pornhub.mainhub.com/upload/uploader" }),
+  };
+  env.run(`
+    prepareCreatorManyVidsEdit = async () => {};
+    resolveCreatorUploadAdapterResult = async () => {
+      if (disconnectAt === "adapter") disconnect();
+      return ${
+        platform === "manyvids"
+          ? '{ status: "save-clicked", accepted: true }'
+          : '{ status: "manual-submit-required" }'
+      };
+    };
+    commitCreatorUploadResult = async () => {
+      if (disconnectAt === "commit") disconnect();
+      return { status: "updated" };
+    };
+    const originalCheckpoint = checkpointCreatorUploadSession;
+    checkpointCreatorUploadSession = (session) => {
+      saves.push(session.platforms.values().next().value.status);
+      return originalCheckpoint(session);
+    };
+  `);
+  return { env, id, target };
+}
+
+test("ManyVids save-clicked notification failing does not change the recorded outcome", async () => {
+  const { env, id, target } = siteEnvironment("manyvids", "adapter");
+  const result = await env.run(
+    `runCreatorUploadPlatform(creatorUploadSessions.get("${id}"), "manyvids")`,
+  );
+  assert.ok(env.context.saves.includes("save-clicked"));
+  assert.equal(result.status, "catalogue-updated");
+  assert.equal(target.status, "catalogue-updated");
+  assert.equal(env.context.saves.at(-1), "catalogue-updated");
+  // A fully terminal session is retired from the store.
+  assert.equal((await storedStatuses(env, id)).manyvids, undefined);
+});
+
+test("ManyVids final result notification failing keeps the catalogue-updated record", async () => {
+  const { env, id, target } = siteEnvironment("manyvids", "commit");
+  const result = await env.run(
+    `runCreatorUploadPlatform(creatorUploadSessions.get("${id}"), "manyvids")`,
+  );
+  assert.equal(result.status, "catalogue-updated");
+  assert.equal(target.error, undefined);
+  assert.equal(env.context.saves.at(-1), "catalogue-updated");
+  assert.equal((await storedStatuses(env, id)).manyvids, undefined);
+});
+
+test("Pornhub manual result notification failing keeps manual-submit-required", async () => {
+  const { env, id, target } = siteEnvironment("pornhub", "adapter");
+  const result = await env.run(
+    `runCreatorUploadPlatform(creatorUploadSessions.get("${id}"), "pornhub")`,
+  );
+  assert.equal(result.status, "manual-submit-required");
+  assert.equal(target.status, "manual-submit-required");
+  assert.equal(target.error, undefined);
+  assert.equal(env.context.saves.at(-1), "manual-submit-required");
+  assert.deepEqual(await storedStatuses(env, id), {});
+});
+
+test("cancellation still writes its final checkpoint when a platform step throws a non-disconnect error", async () => {
+  const env = load();
+  const id = sessionId();
+  addSession(env, id, ["onlyfans", "fansly", "manyvids"]);
+  env.context.saved = [];
+  env.run(`
+    creatorUploadPost = (sessionId, message) => {
+      if (message.platform === "fansly") throw new TypeError("step failed");
+    };
+    const originalCheckpoint = checkpointCreatorUploadSession;
+    checkpointCreatorUploadSession = (session) => {
+      saved.push([...session.platforms.values()].map((t) => t.status));
+      return originalCheckpoint(session);
+    };
+  `);
+  await assert.rejects(
+    env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`),
+    /step failed/,
+  );
+  assert.equal(env.context.saved.length, 1, "The final checkpoint is written.");
+  // Platforms after the throwing step are not cancelled by this loop; that is
+  // reported as a finding rather than pinned here.
+  const stored = await storedStatuses(env, id);
+  assert.equal(stored.onlyfans, "cancelled");
+  assert.equal(stored.fansly, "cancelled");
+});
+
+test("creatorUploadNotify propagates an error that is not a disconnect", () => {
+  const env = load();
+  env.run(
+    `creatorUploadPost = () => { throw new TypeError("port exploded"); }`,
+  );
+  assert.throws(
+    () => env.run(`creatorUploadNotify("x", { type: "platform-result" })`),
+    /port exploded/,
+  );
+});
+
+test("a file request with a bound port whose postMessage throws rejects", async () => {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans"]);
+  session.platforms.get("onlyfans").tokens = { full: "token".repeat(6) };
+  env.context.transportSession = session;
+  const port = connect(env, id);
+  port.dead = true;
+  const outcome = await Promise.race([
+    env
+      .run(`creatorUploadRequestFile(transportSession, "onlyfans", "full")`)
+      .then(
+        () => "resolved",
+        (error) => error.message,
+      ),
+    new Promise((resolve) => setTimeout(() => resolve("still-pending"), 200)),
+  ]);
+  assert.match(outcome, /disconnected port/);
+});
+
+function relayProgress(env, id, status) {
+  return new Promise((resolve) => {
+    env.context.relayResponse = resolve;
+    env.run(`handleExtensionMessage(
+      { type: "CREATOR_UPLOAD_PLATFORM_PROGRESS", sessionId: "${id}",
+        platform: "onlyfans", sequence: 1, status: "${status}" },
+      { tab: { id: 100 }, documentId: "doc-0", url: "https://onlyfans.com/" },
+      relayResponse,
+    )`);
+  });
+}
+
+test("the progress relay rejects with the console-disconnected code", async () => {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans"]);
+  const target = session.platforms.get("onlyfans");
+  env.run("assertCreatorUploadPageBinding = async () => {};");
+  const missing = await relayProgress(env, id, "configuring");
+  assert.equal(missing.ok, false);
+  assert.equal(missing.rejectionCode, "upload-console-disconnected");
+  assert.equal(target.status, "configuring", "The status is recorded first.");
+  const port = connect(env, id);
+  port.dead = true;
+  target.progressSequence = 0;
+  const dead = await relayProgress(env, id, "upload-ready");
+  assert.equal(dead.ok, false);
+  assert.equal(dead.rejectionCode, "upload-console-disconnected");
+});
+
+test("the page run pauses and resumes observation when the console disconnects", async () => {
+  const env = load();
+  const revision = fs
+    .readFileSync(
+      path.resolve(
+        path.dirname(backgroundPath),
+        "workflows/upload-platform-adapters.js",
+      ),
+      "utf8",
+    )
+    .match(/revision: "([^"]+)"/)[1];
+  const sent = [];
+  env.context.sent = sent;
+  env.context.revision = revision;
+  env.run(`
+    globalThis.CreatorUploadRuns = undefined;
+    globalThis.CreatorUploadPlatformAdapters = {
+      revision,
+      runOnlyFans: (context) => context.checkpointStep("select-full", "command-1", "intent"),
+    };
+    chrome.runtime.sendMessage = (message, callback) => {
+      sent.push(message);
+      callback(
+        message.type === "CHECKPOINT_CREATOR_UPLOAD_STEP"
+          ? { ok: false, rejectionCode: "upload-console-disconnected" }
+          : { ok: true },
+      );
+    };
+  `);
+  env.context.args = {
+    sessionId: sessionId(),
+    platform: "onlyfans",
+    selectors: { full: "#file_upload_input" },
+    draft: {},
+  };
+  const outcome = env.run("invokeCreatorUploadAdapter(args)").then(
+    () => "resolved",
+    (error) => error.message,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(
+    sent.map((message) => message.type),
+    ["CHECKPOINT_CREATOR_UPLOAD_STEP", "CREATOR_UPLOAD_PLATFORM_PROGRESS"],
+  );
+  assert.equal(sent[1].status, "upload-attention-required");
+  env.run(`
+    for (const run of globalThis.CreatorUploadRuns.values())
+      run.controller.abort();
+  `);
+  assert.match(await outcome, /cancelled/i);
+});
+
+// Runs the generic platform to its page run, cancels the session while the
+// page run is still waiting, then lets the aborted page run fail.
+async function cancelDuringFileWait({ submitted }) {
+  const env = load();
+  const id = sessionId();
+  const session = addSession(env, id, ["onlyfans"], { title: "Episode" });
+  const target = session.platforms.get("onlyfans");
+  connect(env, id);
+  let failPage;
+  env.chrome.scripting.onExecute = (details) =>
+    details.func?.name === "invokeCreatorUploadAdapter"
+      ? new Promise((_, reject) => {
+          failPage = reject;
+        })
+      : undefined;
+  const running = env.run(
+    `runCreatorUploadPlatform(creatorUploadSessions.get("${id}"), "onlyfans")`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(failPage, "The page run must be waiting.");
+  if (submitted) target.submitAttempted = true;
+  await env.run(`stopCreatorUploadSession(creatorUploadSessions.get("${id}"))`);
+  failPage(new Error("Preparation was cancelled."));
+  await running;
+  return { env, id, target };
+}
+
+test("an aborted run keeps the cancelled status when nothing was submitted", async () => {
+  const { env, id, target } = await cancelDuringFileWait({ submitted: false });
+  assert.equal(target.status, "cancelled");
+  assert.deepEqual(await storedStatuses(env, id), { onlyfans: "cancelled" });
+});
+
+test("an aborted run keeps the uncertain outcome when a submission was attempted", async () => {
+  const { env, id, target } = await cancelDuringFileWait({ submitted: true });
+  assert.equal(target.status, "posted-link-unresolved");
+  assert.deepEqual(await storedStatuses(env, id), {
+    onlyfans: "posted-link-unresolved",
+  });
+});

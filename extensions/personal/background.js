@@ -3521,13 +3521,16 @@ function creatorSocialPort(sessionId) {
   );
 }
 
+const CREATOR_UPLOAD_CONSOLE_MISSING = "The upload console is not connected.";
+const CREATOR_UPLOAD_PORT_CLOSED = "The upload port disconnected.";
+
 function creatorUploadPost(sessionId, message) {
   const port = creatorUploadPort(sessionId);
-  if (!port) throw new Error("The upload console is not connected.");
+  if (!port) throw new Error(CREATOR_UPLOAD_CONSOLE_MISSING);
   try {
     port.postMessage({ sessionId, ...message });
   } catch {
-    throw new Error("The upload port disconnected.");
+    throw new Error(CREATOR_UPLOAD_PORT_CLOSED);
   }
 }
 
@@ -3539,8 +3542,8 @@ function creatorUploadNotify(sessionId, message) {
     return true;
   } catch (error) {
     if (
-      error.message === "The upload console is not connected." ||
-      error.message === "The upload port disconnected."
+      error.message === CREATOR_UPLOAD_CONSOLE_MISSING ||
+      error.message === CREATOR_UPLOAD_PORT_CLOSED
     )
       return false;
     throw error;
@@ -5193,6 +5196,9 @@ async function runCreatorUploadPlatform(session, platform) {
       session.id,
       platform,
     );
+    // A cancel that ended this run before any submission keeps its status.
+    if (session.cancelled && !target.submitAttempted && !target.submitted)
+      return target;
     const result = {
       platform,
       status: target.postUrl
@@ -6237,9 +6243,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
               "preparation-progress-unauthorized",
             "Invalid creator upload progress state.":
               "preparation-progress-state-invalid",
-            "The upload console is not connected.":
-              "upload-console-disconnected",
-            "The upload port disconnected.": "upload-console-disconnected",
+            [CREATOR_UPLOAD_CONSOLE_MISSING]: "upload-console-disconnected",
+            [CREATOR_UPLOAD_PORT_CLOSED]: "upload-console-disconnected",
           }[error.message] ||
           "preparation-request-rejected",
         ...(error.bindingFacts ? { bindingFacts: error.bindingFacts } : {}),
