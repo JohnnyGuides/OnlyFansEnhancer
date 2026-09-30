@@ -208,7 +208,12 @@ function host(
           data: {
             requestId: request.requestId,
             ok: false,
-            error: { code: error.message },
+            error: {
+              code: error.message,
+              ...(error.uploadAdmission
+                ? { uploadAdmission: error.uploadAdmission }
+                : {}),
+            },
           },
         }),
     );
@@ -379,6 +384,45 @@ test("host Chrome callback storage reports native failure via runtime.lastError"
   await flush();
   assert.equal(callbackError, "browser-unavailable");
   assert.equal(fixture.context.chrome.runtime.lastError, undefined);
+});
+
+test("a browser request the desktop refused before queuing reports not-started", async () => {
+  const refused = host(() =>
+    Promise.reject(
+      Object.assign(
+        new Error(
+          "The selected browser disconnected. Reopen it before continuing.",
+        ),
+        { uploadAdmission: "not-started" },
+      ),
+    ),
+  );
+  let refusal;
+  refused.context.chrome.runtime.sendMessage(
+    { type: "PREPARE_CREATOR_UPLOAD" },
+    () => {
+      refusal = { ...refused.context.chrome.runtime.lastError };
+    },
+  );
+  await flush();
+  await flush();
+  assert.equal(refusal.uploadAdmission, "not-started");
+
+  // A failure after queuing carries no admission claim and stays uncertain.
+  const failed = host(() =>
+    Promise.reject(new Error("upload-connection-failed")),
+  );
+  let failure;
+  failed.context.chrome.runtime.sendMessage(
+    { type: "PREPARE_CREATOR_UPLOAD" },
+    () => {
+      failure = { ...failed.context.chrome.runtime.lastError };
+    },
+  );
+  await flush();
+  await flush();
+  assert.equal(failure.message, "upload-connection-failed");
+  assert.equal(failure.uploadAdmission, undefined);
 });
 
 test("host delivers virtual port progress and files through the actual desktop runtime", async () => {

@@ -818,9 +818,15 @@
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
+          const { message: reason, uploadAdmission } = chrome.runtime.lastError;
           reject(
-            Object.assign(new Error(chrome.runtime.lastError.message), {
-              uploadAdmission: chrome.runtime.lastError.uploadAdmission,
+            Object.assign(new Error(reason), {
+              // Chrome found no receiver, so the worker never got the message.
+              uploadAdmission:
+                uploadAdmission ||
+                (/^Could not establish connection\b/.test(reason || "")
+                  ? "not-started"
+                  : undefined),
             }),
           );
           return;

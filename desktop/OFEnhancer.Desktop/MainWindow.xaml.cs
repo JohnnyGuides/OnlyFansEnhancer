@@ -336,7 +336,10 @@ public partial class MainWindow : Window, IDisposable
         }
         catch (Exception error)
         {
-            return JsonSerializer.Serialize(new { requestId, ok = false, error = new { code = error is InvalidOperationException ? error.Message : "upload-connection-failed" } });
+            object failure = error is UploadCommandNotQueuedException
+                ? (object)new { code = error.Message, uploadAdmission = "not-started" }
+                : new { code = error is InvalidOperationException ? error.Message : "upload-connection-failed" };
+            return JsonSerializer.Serialize(new { requestId, ok = false, error = failure });
         }
     }
 

@@ -29,7 +29,7 @@ public class UploadRuntimeVersionTests
         Assert.IsFalse(status.GetProperty("connected").GetBoolean());
         Assert.AreEqual(0, status.GetProperty("browsers").GetArrayLength());
         Assert.IsTrue(status.GetProperty("updateRequired").GetBoolean(), "An incompatible live extension must report reload-required, not connected.");
-        var error = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(new { kind = "message" })).WaitAsync(TimeSpan.FromSeconds(1)));
+        var error = await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(new { kind = "message" })).WaitAsync(TimeSpan.FromSeconds(1)));
         StringAssert.Contains(error.Message.ToLowerInvariant(), "reload");
     }
 

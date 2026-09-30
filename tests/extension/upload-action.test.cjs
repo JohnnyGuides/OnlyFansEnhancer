@@ -395,6 +395,66 @@ test("a confirmed pre-admission failure re-enables Upload only after another suc
   }
 });
 
+test("a PREPARE message Chrome could not deliver keeps the draft editable", async () => {
+  const fixture = await createUploadFixture();
+  const { page } = fixture;
+  try {
+    await fixture.ready();
+    await page.evaluate(() => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let refused = false;
+      chrome.runtime.sendMessage = (message, callback) => {
+        if (message?.type !== "PREPARE_CREATOR_UPLOAD" || refused)
+          return send(message, callback);
+        refused = true;
+        const runtime = chrome.runtime;
+        const descriptor = Object.getOwnPropertyDescriptor(
+          runtime,
+          "lastError",
+        );
+        Object.defineProperty(runtime, "lastError", {
+          configurable: true,
+          value: {
+            message:
+              "Could not establish connection. Receiving end does not exist.",
+          },
+        });
+        try {
+          callback(undefined);
+        } finally {
+          if (descriptor)
+            Object.defineProperty(runtime, "lastError", descriptor);
+          else delete runtime.lastError;
+        }
+      };
+    });
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#uploadError")
+        .textContent.includes("Could not establish connection"),
+    );
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.doesNotMatch(
+      await page.locator("#uploadError").textContent(),
+      /may already have started/,
+    );
+    assert.equal(await page.locator("#uploadTitle").isEnabled(), true);
+    assert.equal(await page.locator("#preparationControls").isVisible(), false);
+    assert.equal(
+      (await fixture.commands()).filter(
+        (item) => item.type === "PREPARE_CREATOR_UPLOAD",
+      ).length,
+      0,
+    );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("uncertain START transport never unlocks or silently repeats an accepted run", async () => {
   const fixture = await createUploadFixture();
   try {

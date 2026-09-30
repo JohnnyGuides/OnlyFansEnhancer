@@ -257,7 +257,7 @@ public sealed class BrowserUploadChannel : IDisposable
             || kind.ValueKind != JsonValueKind.String
             || kind.GetString() is not ("message" or "storageGet" or "storageSet" or "permissions" or "port" or "disconnect")
             || ContainsAttachment(command))
-            throw new InvalidOperationException("invalid-upload-command");
+            throw new UploadCommandNotQueuedException("invalid-upload-command");
         return QueueAsync(command);
     }
 
@@ -283,24 +283,24 @@ public sealed class BrowserUploadChannel : IDisposable
     private async Task<JsonElement> QueueAsync(JsonElement command, CancellationToken cancellationToken = default)
     {
         if (System.Text.Encoding.UTF8.GetByteCount(command.GetRawText()) > 64 * 1024)
-            throw new InvalidOperationException("upload-command-too-large");
+            throw new UploadCommandNotQueuedException("upload-command-too-large");
         string id = Guid.NewGuid().ToString();
         TaskCompletionSource<JsonElement> waiting = new(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (gate)
         {
-            if (disposed) throw new InvalidOperationException("The desktop upload window closed.");
+            if (disposed) throw new UploadCommandNotQueuedException("The desktop upload window closed.");
             Expire();
-            if (Reset?.Pending == true) throw new InvalidOperationException(Reset.Message);
+            if (Reset?.Pending == true) throw new UploadCommandNotQueuedException(Reset.Message);
             var live = browsers.Where(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)).ToArray();
             if (selected is null && live.Length == 1 && !selectionRequired) selected = live[0].Key;
             if (selected is null && live.Length == 0 && versionMismatches.Any(pair => clock.GetUtcNow() - pair.Value < TimeSpan.FromSeconds(10)))
-                throw new InvalidOperationException(ExtensionReloadMessage);
-            if (selected is null) throw new InvalidOperationException(live.Length > 1 ? "choose-upload-browser" : "Open Chrome with the OFEnhancer extension to connect uploads.");
-            if (!live.Any(pair => pair.Key == selected)) throw new InvalidOperationException("The selected browser disconnected. Reopen it before continuing.");
-            if (pending.Count >= 64) throw new InvalidOperationException("browser-busy");
+                throw new UploadCommandNotQueuedException(ExtensionReloadMessage);
+            if (selected is null) throw new UploadCommandNotQueuedException(live.Length > 1 ? "choose-upload-browser" : "Open Chrome with the OFEnhancer extension to connect uploads.");
+            if (!live.Any(pair => pair.Key == selected)) throw new UploadCommandNotQueuedException("The selected browser disconnected. Reopen it before continuing.");
+            if (pending.Count >= 64) throw new UploadCommandNotQueuedException("browser-busy");
             if (System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(commands.Values).Length
                 + System.Text.Encoding.UTF8.GetByteCount(command.GetRawText()) > 512 * 1024)
-                throw new InvalidOperationException("browser-busy");
+                throw new UploadCommandNotQueuedException("browser-busy");
             pending.Add(id, waiting);
             commands.Add(id, new { id, command = command.Clone() });
         }
@@ -308,3 +308,7 @@ public sealed class BrowserUploadChannel : IDisposable
         finally { lock (gate) { pending.Remove(id); commands.Remove(id); } }
     }
 }
+
+// Refused before the command was queued for the browser, so the browser
+// never received it and the caller may report the attempt as not started.
+internal sealed class UploadCommandNotQueuedException(string message) : InvalidOperationException(message);

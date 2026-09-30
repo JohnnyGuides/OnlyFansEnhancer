@@ -42,7 +42,7 @@ public class BrowserUploadChannelTests
         Assert.IsFalse(status.GetProperty("connected").GetBoolean());
         Assert.IsTrue(status.GetProperty("selectionRequired").GetBoolean());
         await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => pending);
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(new { kind = "message" })));
+        await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(new { kind = "message" })));
         Assert.AreEqual(0, Json(channel.Exchange(Json(new { browserId = second }))).GetProperty("commands").GetArrayLength());
     }
 
@@ -72,7 +72,7 @@ public class BrowserUploadChannelTests
             new { kind = "port", message = new { type = "file-response", filePath = "C:\\private\\inert.mp4" } }
         })
         {
-            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(command)).WaitAsync(TimeSpan.FromMilliseconds(500)));
+            await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(command)).WaitAsync(TimeSpan.FromMilliseconds(500)));
             Assert.AreEqual(0, Json(channel.Exchange(Json(new { browserId = browser }))).GetProperty("commands").GetArrayLength());
         }
     }
@@ -129,7 +129,7 @@ public class BrowserUploadChannelTests
     public async Task RequestsRequireLiveBrowserAndRepliesStayBound()
     {
         var channel = new BrowserUploadChannel();
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(new { kind = "message" })));
+        await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(new { kind = "message" })));
         string first = Guid.NewGuid().ToString(), second = Guid.NewGuid().ToString();
         channel.Exchange(Json(new { browserId = first }));
         var request = channel.RequestAsync(Json(new { kind = "storageGet", keys = new[] { "creatorToolkitV2" } }));
@@ -148,7 +148,7 @@ public class BrowserUploadChannelTests
         string first = Guid.NewGuid().ToString(), second = Guid.NewGuid().ToString();
         channel.Exchange(Json(new { browserId = first }));
         channel.Exchange(Json(new { browserId = second }));
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(new { kind = "message" })));
+        await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(new { kind = "message" })));
         channel.Select(first);
         var request = channel.RequestAsync(Json(new { kind = "message" }));
         Assert.ThrowsException<InvalidOperationException>(() => channel.Select(second));
@@ -246,13 +246,31 @@ public class BrowserUploadChannelTests
     }
 
     [TestMethod]
+    public async Task RefusalBeforeQueuingIsDistinctFromLossAfterQueuing()
+    {
+        var clock = new Clock();
+        using var channel = new BrowserUploadChannel(clock);
+        string browser = Guid.NewGuid().ToString();
+        channel.Exchange(Json(new { browserId = browser }));
+        var queued = channel.RequestAsync(Json(new { kind = "message", message = new { type = "PREPARE_CREATOR_UPLOAD" } }));
+        Assert.AreEqual(1, Json(channel.Exchange(Json(new { browserId = browser }))).GetProperty("commands").GetArrayLength());
+        clock.Now += TimeSpan.FromSeconds(11);
+        channel.Status();
+        // The queued command may have reached the browser, so its loss is not a refusal.
+        var lost = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => queued.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.IsNotInstanceOfType(lost, typeof(UploadCommandNotQueuedException));
+        // A new command against the disconnected browser is refused before queuing.
+        await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(new { kind = "message", message = new { type = "PREPARE_CREATOR_UPLOAD" } })));
+    }
+
+    [TestMethod]
     public async Task RequestsAfterDisposeFailAtOnce()
     {
         var channel = new BrowserUploadChannel();
         string browser = Guid.NewGuid().ToString();
         channel.Exchange(Json(new { browserId = browser }));
         channel.Dispose();
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.RequestAsync(Json(new { kind = "message" })).WaitAsync(TimeSpan.FromSeconds(2)));
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => channel.OpenChromePageAsync("extensions", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2)));
+        await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.RequestAsync(Json(new { kind = "message" })).WaitAsync(TimeSpan.FromSeconds(2)));
+        await Assert.ThrowsExceptionAsync<UploadCommandNotQueuedException>(() => channel.OpenChromePageAsync("extensions", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2)));
     }
 }

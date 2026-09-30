@@ -154,7 +154,17 @@
     clearTimeout(waiting.timeout);
     if (value.ok) waiting.resolve(value.result);
     else
-      waiting.reject(new Error(value.error?.code || "Desktop request failed."));
+      waiting.reject(
+        Object.assign(
+          new Error(value.error?.code || "Desktop request failed."),
+          // The desktop refused a browser request before queuing it, so the
+          // browser never received it.
+          waiting.operation === "browserRequest" &&
+            value.error?.uploadAdmission === "not-started"
+            ? { uploadAdmission: "not-started" }
+            : {},
+        ),
+      );
   });
   async function refreshBrowsers() {
     if (refreshing) return refreshing;
@@ -223,7 +233,8 @@
     try {
       await ensureBrowser();
     } catch (error) {
-      // No browserRequest was sent. Later transport failures remain uncertain.
+      // No browserRequest was sent. Later transport failures remain uncertain
+      // unless the desktop reports that it refused the request unqueued.
       error.uploadAdmission = "not-started";
       throw error;
     }
