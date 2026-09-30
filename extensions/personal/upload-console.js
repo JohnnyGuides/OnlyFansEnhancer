@@ -1106,6 +1106,7 @@
     let uploadWithoutSheet = false;
     let catalogueFallback = false;
     let lastPrefilledCatalogueRow = null;
+    let adjustedSheetDate = null;
     let catalogueBaseline = null;
     let activeSession = null;
     let resumable = null;
@@ -1801,6 +1802,15 @@
       return JSON.stringify(profilesForDraft());
     }
 
+    // The next Friday on or after a future sheet date; past dates are kept.
+    function schedulableSheetDate(isoDate) {
+      const day = new Date(`${isoDate}T15:00:00.000Z`);
+      if (Number.isNaN(day.getTime()) || day.getTime() < Date.now())
+        return isoDate;
+      day.setUTCDate(day.getUTCDate() + ((5 - day.getUTCDay() + 7) % 7));
+      return day.toISOString().slice(0, 10);
+    }
+
     function refreshReleaseSummary() {
       const releaseInstant = new Date(`${releaseDate.value}T15:00:00.000Z`);
       if (
@@ -1823,6 +1833,8 @@
         " ",
       );
       releaseSummary.textContent = `15:00 UTC · ${local} ${timeZone}`;
+      if (adjustedSheetDate?.scheduled === releaseDate.value)
+        releaseSummary.textContent += ` · sheet date ${adjustedSheetDate.sheet} is not a Friday`;
     }
 
     function fileSummary(file, emptyText) {
@@ -2554,16 +2566,28 @@
             .filter(Boolean),
         ),
       ];
-      // A deliberate click on an entry takes its sheet date exactly; a past
-      // date then prepares unscheduled posts (see draft()).
-      if (newlySelected)
-        releaseDate.value =
+      // A deliberate click on an entry takes its sheet date; a past date then
+      // prepares unscheduled posts (see draft()). A future date that is not a
+      // Friday moves to the next Friday, the only schedulable day.
+      if (newlySelected) {
+        const sheetDate =
           explicit &&
           /^\d{4}-\d{2}-\d{2}$/.test(String(candidate.releaseDate || ""))
             ? candidate.releaseDate
-            : executableDates.length === 1
-              ? executableDates[0]
-              : candidate.releaseDate || releaseDate.value;
+            : "";
+        const scheduledSheetDate = sheetDate
+          ? schedulableSheetDate(sheetDate)
+          : "";
+        adjustedSheetDate =
+          scheduledSheetDate && scheduledSheetDate !== sheetDate
+            ? { sheet: sheetDate, scheduled: scheduledSheetDate }
+            : null;
+        releaseDate.value =
+          scheduledSheetDate ||
+          (executableDates.length === 1
+            ? executableDates[0]
+            : candidate.releaseDate || releaseDate.value);
+      }
       refreshReleaseSummary();
       pornhubRecommendation.textContent = proposal.targets.recommended.includes(
         "pornhub",

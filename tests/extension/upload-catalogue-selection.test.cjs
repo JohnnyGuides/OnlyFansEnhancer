@@ -5,10 +5,12 @@ const { createUploadFixture } = require("../support/upload-action-fixture.cjs");
 
 const PAST = "2020-01-03";
 const FUTURE = "2099-01-02";
+// A Tuesday; the next schedulable Friday is 2099-01-09.
+const FUTURE_TUESDAY = "2099-01-06";
 
 function installCatalogue(page) {
   return page.evaluate(
-    ([past, future]) => {
+    ([past, future, tuesday]) => {
       const send = chrome.runtime.sendMessage.bind(chrome.runtime);
       globalThis.readinessRequests = [];
       chrome.runtime.sendMessage = (message, callback) => {
@@ -21,7 +23,7 @@ function installCatalogue(page) {
       const rows = [
         ["Studio tour", past],
         ["Studio tour recap", future],
-        ["Studio tour outtakes", future],
+        ["Studio tour outtakes", tuesday],
       ].map(([title, releaseDate], index) => ({
         row: 42 + index,
         id: `studio-${index}`,
@@ -55,7 +57,7 @@ function installCatalogue(page) {
           ),
       };
     },
-    [PAST, FUTURE],
+    [PAST, FUTURE, FUTURE_TUESDAY],
   );
 }
 
@@ -100,6 +102,29 @@ test("explicit selection takes the sheet date; auto-match keeps the computed Fri
       await page.locator("#releaseTimeSummary").textContent(),
       /Past date/,
     );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("a future sheet date that is not a Friday moves to the next Friday with a note", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const page = await matched(fixture);
+    await page
+      .locator("#catalogueCards .catalogue-card", {
+        hasText: "Studio tour outtakes",
+      })
+      .click();
+    await settled(page, "2099-01-09");
+    assert.match(
+      await page.locator("#releaseTimeSummary").textContent(),
+      /sheet date 2099-01-06 is not a Friday/,
+    );
+    const scheduled = await page.evaluate(() => readinessRequests.at(-1).draft);
+    assert.equal(scheduled.scheduleIntent, "friday");
+    assert.equal(scheduled.scheduledIso, "2099-01-09T15:00:00.000Z");
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();
