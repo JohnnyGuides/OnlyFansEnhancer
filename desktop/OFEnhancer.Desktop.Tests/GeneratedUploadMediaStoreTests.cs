@@ -68,4 +68,36 @@ public sealed class GeneratedUploadMediaStoreTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
+
+    [TestMethod]
+    public void StagesExtraVideoTeaserRolesOnlyForValidSlots()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ofenhancer-generated-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            GeneratedUploadMediaStore store = new(root);
+            byte[] bytes = Encoding.UTF8.GetBytes("neutral extra preview bytes");
+            string hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            long modified = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            JsonElement Payload(string role, string name) => JsonSerializer.SerializeToElement(new {
+                sessionId = new string('c', 48), role, name, size = bytes.Length,
+                lastModified = modified, sha256 = hash, offset = 0, final = true,
+                chunk = Convert.ToBase64String(bytes),
+            });
+            foreach (string role in new[] { "media0Teaser", "media9Teaser", "mediaXTeaser", "media1teaser", "media1", "media12Teaser" })
+                Assert.ThrowsException<InvalidOperationException>(() => store.Append(Payload(role, "extra (teaser).mp4")));
+            Assert.ThrowsException<InvalidOperationException>(() => store.Append(Payload("media2Teaser", "extra (teaser).png")));
+            FileInfo first = store.Append(Payload("media1Teaser", "one (teaser).mp4"))!;
+            FileInfo last = store.Append(Payload("media8Teaser", "eight (teaser).mp4"))!;
+            Assert.AreEqual(first.FullName, store.Resolve(JsonSerializer.SerializeToElement(new {
+                sessionId = new string('c', 48), role = "media1Teaser", name = first.Name, size = first.Length,
+                lastModified = modified,
+            })).FullName);
+            Assert.AreEqual("eight (teaser).mp4", last.Name);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 }

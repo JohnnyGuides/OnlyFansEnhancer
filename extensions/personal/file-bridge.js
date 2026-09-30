@@ -54,9 +54,10 @@
       (!new Set(["full", "teaser", "thumbnail", "pornhub", "social"]).has(
         role,
       ) &&
-        !/^media[1-8]$/.test(role)) ||
+        !/^media[1-8](?:Teaser)?$/.test(role)) ||
       (/^media[1-8]$/.test(role) &&
         !["onlyfans", "fansly"].includes(platform)) ||
+      (/^media[1-8]Teaser$/.test(role) && platform !== "fansly") ||
       (platform === "pornhub"
         ? !["pornhub", "thumbnail"].includes(role)
         : role === "pornhub") ||

@@ -2896,7 +2896,12 @@
     );
   }
 
-  async function attachFanslyPreview(context, composer, fullCard) {
+  async function attachFanslyPreview(
+    context,
+    composer,
+    fullCard,
+    previewRole = "teaser",
+  ) {
     click(fullCard, "Fansly full media card for free preview");
     click(
       exactText(
@@ -2931,7 +2936,7 @@
         ),
     );
     await fanslyFileScope(context, composer, selection);
-    await context.attachFile("teaser", "input[data-creator-fansly-file]");
+    await context.attachFile(previewRole, "input[data-creator-fansly-file]");
     return waitFor(
       () => {
         const markers = [
@@ -3041,10 +3046,17 @@
     composer,
     modal,
     fullCard,
-    { preview = true, role = "full" } = {},
+    { preview = true, role = "full", previewRole = "teaser" } = {},
   ) {
     const { draft, signal } = context;
-    if (preview && draft.hasTeaser !== false) {
+    // The shared teaser follows hasTeaser; an extra video's own teaser role is
+    // only requested when the console generated and proved that file.
+    const withPreview =
+      preview &&
+      (previewRole === "teaser"
+        ? draft.hasTeaser !== false
+        : Boolean(draft.fileProof?.[previewRole]));
+    if (withPreview) {
       await context.progress?.("waiting-for-teaser");
       const input = await preparationBoundary(
         "Fansly",
@@ -3102,7 +3114,7 @@
       for (const old of document.querySelectorAll("[data-creator-fansly-file]"))
         old.removeAttribute("data-creator-fansly-file");
       input.setAttribute("data-creator-fansly-file", "");
-      await context.attachFile("teaser", "input[data-creator-fansly-file]");
+      await context.attachFile(previewRole, "input[data-creator-fansly-file]");
       await waitFor(
         () => fullCard.querySelector(".preview-image"),
         "Fansly selected free preview",
@@ -3134,11 +3146,7 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    if (
-      preview &&
-      draft.hasTeaser !== false &&
-      !fullCard.querySelector(".preview-image")
-    )
+    if (withPreview && !fullCard.querySelector(".preview-image"))
       throw new Error(
         "Fansly free preview disappeared after applying permissions.",
       );
@@ -3216,9 +3224,7 @@
     );
     if (
       fanslyPermissionState(review) !== permissions ||
-      (preview &&
-        draft.hasTeaser !== false &&
-        !reviewCard.querySelector(".preview-image"))
+      (withPreview && !reviewCard.querySelector(".preview-image"))
     )
       throw new Error(
         "Fansly attachment permissions or free preview did not persist.",
@@ -3271,6 +3277,13 @@
 
   async function prepareLegacyFanslyExtra(context, composer, card, role) {
     const { draft, signal } = context;
+    const previewRole = `${role}Teaser`;
+    const withPreview = Boolean(draft.fileProof?.[previewRole]);
+    if (withPreview) {
+      await context.progress?.("waiting-for-teaser");
+      await attachFanslyPreview(context, composer, card, previewRole);
+      await context.progress?.("configuring");
+    }
     const existingCards = new Set(
       composer.querySelectorAll("app-account-media-template"),
     );
@@ -3330,7 +3343,12 @@
         ].filter((item) => !existingCards.has(item) && !modal.contains(item));
         if (added.length > 1)
           throw new Error("Fansly additional composer media is ambiguous.");
-        return added.length === 1 && added[0].dataset.locked !== "false";
+        return (
+          added.length === 1 &&
+          added[0].dataset.locked !== "false" &&
+          (!withPreview ||
+            added[0].querySelector("[data-free-preview='true'], .free-preview"))
+        );
       },
       "Fansly additional composer media",
       UPLOAD_TIMEOUT,
@@ -3482,8 +3500,8 @@
       const modal = card.closest("app-account-media-upload.active-modal");
       if (modal)
         await prepareCurrentFanslyMedia(context, composer, modal, card, {
-          preview: false,
           role,
+          previewRole: `${role}Teaser`,
         });
       else await prepareLegacyFanslyExtra(context, composer, card, role);
     }

@@ -769,6 +769,118 @@ function send(message) {
       `${name} as ${kind} must stay rejected`,
     );
   }
+  // Extra Fansly videos carry their own generated teaser as media{n}Teaser.
+  const teaserProof = (name) => ({
+    name,
+    size: 10,
+    lastModified: 1,
+    type: "video/mp4",
+  });
+  const extraTeaserRequest = (extraProof, overrides = {}) => ({
+    ...validatedUpload,
+    targets: ["onlyfans", "fansly"],
+    ...overrides,
+    draft: {
+      ...validatedUpload.draft,
+      manyvidsThumbnail: false,
+      mediaFiles: [
+        { role: "media1", name: "one.mp4", kind: "video" },
+        { role: "media2", name: "two.mp4", kind: "video" },
+        { role: "media3", name: "still.png", kind: "image" },
+      ],
+      fileProof: {
+        full: teaserProof(validatedUpload.draft.fullFilename),
+        media1: teaserProof("one.mp4"),
+        media2: teaserProof("two.mp4"),
+        media3: { name: "still.png", size: 10, lastModified: 1, type: "" },
+        ...extraProof,
+      },
+      ...overrides.draft,
+    },
+  });
+  context.extraRequest = extraTeaserRequest({
+    media1Teaser: teaserProof("one (teaser).mp4"),
+    media2Teaser: teaserProof("two (teaser).mp4"),
+    media9Teaser: teaserProof("nine (teaser).mp4"),
+  });
+  const acceptedTeasers = await vm.runInContext(
+    "validateCreatorUploadRequest(extraRequest)",
+    context,
+  );
+  assert.deepEqual(
+    Object.keys(acceptedTeasers.draft.fileProof).filter((role) =>
+      role.endsWith("Teaser"),
+    ),
+    ["media1Teaser", "media2Teaser"],
+  );
+  context.teaserDraft = acceptedTeasers.draft;
+  assert.deepEqual(
+    Array.from(
+      vm.runInContext("creatorUploadExtraTeaserRoles(teaserDraft)", context),
+    ),
+    ["media1Teaser", "media2Teaser"],
+  );
+  for (const [label, request] of [
+    [
+      "an image extra",
+      extraTeaserRequest({ media3Teaser: teaserProof("still (teaser).mp4") }),
+    ],
+    [
+      "a missing extra",
+      extraTeaserRequest({ media4Teaser: teaserProof("four (teaser).mp4") }),
+    ],
+    [
+      "a run without Fansly",
+      extraTeaserRequest(
+        { media1Teaser: teaserProof("one (teaser).mp4") },
+        { targets: ["onlyfans"] },
+      ),
+    ],
+    [
+      "the first media slot without a full video",
+      extraTeaserRequest(
+        { media1Teaser: teaserProof("one (teaser).mp4"), full: undefined },
+        { draft: { fullFilename: "" } },
+      ),
+    ],
+  ]) {
+    context.extraRequest = request;
+    await assert.rejects(
+      vm.runInContext("validateCreatorUploadRequest(extraRequest)", context),
+      /Additional upload media does not match/,
+      `an extra teaser for ${label} must be rejected`,
+    );
+  }
+  context.teaserSession = { draft: acceptedTeasers.draft };
+  context.teaserProof = {
+    fullFilename: acceptedTeasers.draft.fullFilename,
+    mediaFiles: acceptedTeasers.draft.mediaFiles,
+    pornhubFilename: acceptedTeasers.draft.pornhubFilename,
+    pornhubMode: acceptedTeasers.draft.pornhubMode,
+    profileSignature: acceptedTeasers.draft.profileSignature,
+    fileProof: acceptedTeasers.draft.fileProof,
+  };
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(teaserSession, teaserProof)",
+      context,
+    ),
+    true,
+  );
+  context.teaserProof = {
+    ...context.teaserProof,
+    fileProof: {
+      ...acceptedTeasers.draft.fileProof,
+      media2Teaser: teaserProof("other (teaser).mp4"),
+    },
+  };
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(teaserSession, teaserProof)",
+      context,
+    ),
+    false,
+  );
   context.proofSession = {
     draft: validatedUpload.draft,
   };

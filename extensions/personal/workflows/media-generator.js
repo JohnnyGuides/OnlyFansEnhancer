@@ -315,7 +315,8 @@ globalThis.CreatorMediaGenerator = (() => {
   async function saveGeneratedMedia(sessionId, role, source, file) {
     if (
       !/^[a-f0-9]{48}$/.test(sessionId) ||
-      !["teaser", "thumbnail"].includes(role)
+      (!["teaser", "thumbnail"].includes(role) &&
+        !/^media[1-8]Teaser$/.test(role))
     )
       throw new Error("Invalid generated media session.");
     const db = await mediaStore();

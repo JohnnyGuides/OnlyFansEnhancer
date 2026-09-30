@@ -244,6 +244,14 @@
     "select-media6",
     "select-media7",
     "select-media8",
+    "select-media1Teaser",
+    "select-media2Teaser",
+    "select-media3Teaser",
+    "select-media4Teaser",
+    "select-media5Teaser",
+    "select-media6Teaser",
+    "select-media7Teaser",
+    "select-media8Teaser",
     "start-upload",
     "open-editor",
     "attach-media",
@@ -635,6 +643,9 @@
         "thumbnail",
         "pornhub",
         ...(output.mediaFiles || []).map((item) => item.role),
+        ...(output.mediaFiles || [])
+          .filter((item) => item.kind === "video")
+          .map((item) => `${item.role}Teaser`),
       ]) {
         const item = value.fileProof[role];
         if (item == null) continue;
