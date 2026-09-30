@@ -225,6 +225,31 @@ begin
     (Name[8] >= '0') and (Name[8] <= '9') and (Copy(Name, 9, 4) = '.exe');
 end;
 
+function IsGenuineFirstInstall(): Boolean;
+var
+  Root: String;
+  FindRec: TFindRec;
+begin
+  Result := not ExistingInstall() and not ResumeFresh;
+  if not Result then Exit;
+  Root := RemoveBackslashUnlessRoot(ExpandFileName(WizardDirValue));
+  if not DirExists(Root) then Exit;
+  if FindFirst(Root + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        begin
+          Result := False;
+          Exit;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ExitCode: Integer;
@@ -234,6 +259,11 @@ begin
   if MaintenanceStatus = 3 then
   begin
     Result := 'The saved installation checkpoint could not be read. ' + MaintenanceError;
+    Exit;
+  end;
+  if IsGenuineFirstInstall() then
+  begin
+    Log('First installation: no previous package to stop, guard or pause.');
     Exit;
   end;
   if not IsFreshReset() then

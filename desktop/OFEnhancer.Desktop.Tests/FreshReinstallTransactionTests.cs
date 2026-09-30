@@ -124,6 +124,33 @@ public sealed class FreshReinstallTransactionTests
     }
 
     [TestMethod]
+    public void Update_guard_ends_at_its_bound_when_the_guard_file_is_left_behind()
+    {
+        using var fixture = new Fixture();
+        string guardFile = Path.Combine(fixture.Root, "guard");
+        File.WriteAllText(guardFile, "running");
+        long now = 0;
+        int stops = 0;
+        FreshReinstallMaintenance.RunUpdateGuard(guardFile, () => stops++, TimeSpan.FromMinutes(30), () => now, ms => now += ms);
+        Assert.IsTrue(now >= TimeSpan.FromMinutes(30).TotalMilliseconds);
+        Assert.IsTrue(now < TimeSpan.FromMinutes(30).TotalMilliseconds + 1000);
+        Assert.IsTrue(stops > 0);
+    }
+
+    [TestMethod]
+    public void Update_guard_ends_when_the_guard_file_is_removed()
+    {
+        using var fixture = new Fixture();
+        string guardFile = Path.Combine(fixture.Root, "guard");
+        File.WriteAllText(guardFile, "running");
+        long now = 0;
+        int stops = 0;
+        FreshReinstallMaintenance.RunUpdateGuard(guardFile, () => { if (++stops == 3) File.Delete(guardFile); }, TimeSpan.FromMinutes(30), () => now, ms => now += ms);
+        Assert.AreEqual(3, stops);
+        Assert.IsTrue(now < 1000);
+    }
+
+    [TestMethod]
     public void Shared_data_siblings_survive_and_ambiguous_webview_fails_closed()
     {
         using var fixture = new Fixture(sharedData: true, webViewExclusive: false);

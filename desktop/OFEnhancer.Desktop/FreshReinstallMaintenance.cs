@@ -50,11 +50,8 @@ internal static class FreshReinstallMaintenance
                 string installRoot = Path.GetFullPath(Argument(args, "--install-root"));
                 VerifyPreviousPackage(installRoot);
                 string guardFile = Path.GetFullPath(Argument(args, "--guard-file"));
-                while (File.Exists(guardFile))
-                {
-                    InstalledApplicationShutdown.StopNativeBridges(installRoot);
-                    Thread.Sleep(100);
-                }
+                RunUpdateGuard(guardFile, () => InstalledApplicationShutdown.StopNativeBridges(installRoot),
+                    UpdateGuardBound, () => Environment.TickCount64, Thread.Sleep);
                 return true;
             }
             if (args.Contains("--fresh-reinstall-plan", StringComparer.Ordinal))
@@ -165,6 +162,19 @@ internal static class FreshReinstallMaintenance
             reset.Begin(transaction.ExtensionIds[0]);
         if (!reset.Pending && transaction.Phase < FreshReinstallPhase.ChromeObligationAcknowledged)
             throw new InvalidOperationException("The durable Chrome reset obligation could not be established.");
+    }
+
+    // A killed Setup leaves its guard file behind; the loop must not outlive it.
+    internal static readonly TimeSpan UpdateGuardBound = TimeSpan.FromMinutes(30);
+
+    internal static void RunUpdateGuard(string guardFile, Action stopNativeBridges, TimeSpan bound, Func<long> nowMilliseconds, Action<int> sleepMilliseconds)
+    {
+        long deadline = nowMilliseconds() + (long)bound.TotalMilliseconds;
+        while (File.Exists(guardFile) && nowMilliseconds() < deadline)
+        {
+            stopNativeBridges();
+            sleepMilliseconds(100);
+        }
     }
 
     internal static void VerifyPreviousPackage(string root)

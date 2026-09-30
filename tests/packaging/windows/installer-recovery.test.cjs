@@ -235,3 +235,159 @@ test(
     }
   },
 );
+
+// A genuine first installation has no previous package to stop, guard or
+// pause. Every other target keeps the manifest verification and fails closed.
+test(
+  "compiled Setup installs first into an absent or empty folder and fails closed on unverified targets",
+  { timeout: 360_000 },
+  (t) => {
+    if (process.platform !== "win32")
+      return t.skip("Windows installer integration");
+    const stage = path.join(root, "dist", `ofenhancer-desktop-v${version}`);
+    const compiler = [
+      process.env.LOCALAPPDATA &&
+        path.join(process.env.LOCALAPPDATA, "Programs"),
+      process.env["ProgramFiles(x86)"],
+      process.env.ProgramFiles,
+    ]
+      .filter(Boolean)
+      .map((base) => path.join(base, "Inno Setup 6", "ISCC.exe"))
+      .find(fs.existsSync);
+    if (!compiler || !fs.existsSync(path.join(stage, "package-manifest.json")))
+      return t.skip(
+        "Build the desktop package and install Inno Setup before this integration gate.",
+      );
+    const base = fs.mkdtempSync(path.join(root, ".local", "installer-first-"));
+    const data = path.join(base, "data");
+    const webview = path.join(base, "webview");
+    const appId = crypto.randomUUID().toUpperCase();
+    const key = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{${appId}}_is1`;
+    const realMarker = path.join(
+      process.env.LOCALAPPDATA,
+      "OFEnhancer",
+      "data",
+      "agent-paused",
+    );
+    const env = {
+      ...process.env,
+      OFENHANCER_DATA_ROOT: data,
+      OFENHANCER_WEBVIEW2_USER_DATA_FOLDER: webview,
+    };
+    function exec(executable, args) {
+      const result = spawnSync(executable, args, {
+        cwd: base,
+        env,
+        encoding: "utf8",
+        timeout: 120_000,
+        windowsHide: true,
+      });
+      assert.equal(result.error, undefined, result.error?.message);
+      return result;
+    }
+    function run(executable, args) {
+      const result = exec(executable, args);
+      assert.equal(
+        result.status,
+        0,
+        `${executable}: ${result.stdout}\n${result.stderr}\nEvidence: ${base}`,
+      );
+    }
+    function listing(dir) {
+      return fs
+        .readdirSync(dir, { recursive: true })
+        .sort()
+        .map((name) => {
+          const full = path.join(dir, name);
+          return `${name}:${fs.statSync(full).isFile() ? fs.readFileSync(full, "utf8") : ""}`;
+        });
+    }
+    function args(dir, log) {
+      return [
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        `/DIR=${dir}`,
+        `/LOG=${path.join(base, log)}`,
+      ];
+    }
+    const source = fs
+      .readFileSync(path.join(root, "packaging/windows/OFEnhancer.iss"), "utf8")
+      .replaceAll("D4702E08-310F-477A-91DA-DC45603DD6AF", appId)
+      .replace(/^Compression=.*$/m, "Compression=none")
+      .replace(/^SolidCompression=.*$/m, "SolidCompression=no")
+      .replace(/\[(?:Icons|Registry|Run|UninstallRun)\][\s\S]*?(?=\[|$)/g, "");
+    fs.writeFileSync(path.join(base, "Fixture.iss"), source);
+    const markerBefore = fs.existsSync(realMarker);
+    try {
+      run(compiler, [
+        `/DStageSource=${stage}`,
+        `/DOutputRoot=${base}`,
+        path.join(base, "Fixture.iss"),
+      ]);
+      const setup = path.join(base, `OFEnhancer-Setup-${version}.exe`);
+      for (const dir of [data, webview]) fs.mkdirSync(dir, { recursive: true });
+
+      for (const [name, prepare] of [
+        ["absent", () => {}],
+        ["empty", (dir) => fs.mkdirSync(dir, { recursive: true })],
+      ]) {
+        const dir = path.join(base, `first-${name}`);
+        prepare(dir);
+        run(setup, args(dir, `first-${name}.log`));
+        assert.ok(
+          fs.existsSync(path.join(dir, "package-manifest.json")),
+          `${name}: first install must lay down the package`,
+        );
+        assert.equal(fs.existsSync(realMarker), markerBefore, name);
+        const log = fs.readFileSync(
+          path.join(base, `first-${name}.log`),
+          "utf8",
+        );
+        assert.doesNotMatch(log, /--update-stop-applications|--update-guard/);
+        run(path.join(dir, "unins000.exe"), [
+          "/VERYSILENT",
+          "/SUPPRESSMSGBOXES",
+          "/NORESTART",
+        ]);
+      }
+
+      const foreign = path.join(base, "foreign");
+      fs.mkdirSync(foreign, { recursive: true });
+      fs.writeFileSync(path.join(foreign, "user-file.txt"), "not ours");
+      const foreignBefore = listing(foreign);
+      const refused = exec(setup, args(foreign, "foreign.log"));
+      assert.notEqual(refused.status, 0, "non-empty unverified folder");
+      assert.deepEqual(listing(foreign), foreignBefore);
+      assert.equal(fs.existsSync(realMarker), markerBefore);
+
+      const damaged = path.join(base, "damaged");
+      fs.mkdirSync(damaged, { recursive: true });
+      fs.writeFileSync(path.join(damaged, "package-manifest.json"), "{ nope");
+      fs.writeFileSync(path.join(damaged, "app.txt"), "keep");
+      for (const [name, value] of [
+        ["InstallLocation", damaged + "\\"],
+        ["UninstallString", `"${path.join(damaged, "unins000.exe")}"`],
+      ])
+        run("reg.exe", [
+          "add",
+          key,
+          "/v",
+          name,
+          "/t",
+          "REG_SZ",
+          "/d",
+          value,
+          "/f",
+        ]);
+      const damagedBefore = listing(damaged);
+      const failed = exec(setup, args(damaged, "damaged.log"));
+      assert.notEqual(failed.status, 0, "registered corrupt manifest");
+      assert.deepEqual(listing(damaged), damagedBefore);
+      assert.equal(fs.existsSync(realMarker), markerBefore);
+      t.diagnostic(`Compiled installer evidence: ${base}`);
+    } finally {
+      spawnSync("reg.exe", ["delete", key, "/f"], { windowsHide: true });
+    }
+  },
+);
