@@ -140,6 +140,28 @@ uninstall defaults to keeping data and routes explicit cleanup through the same
 owned-root/reparse protections, including configured roots. Silent uninstall
 keeps data. External media and Chrome profiles are outside installer ownership.
 
+### Release and normal-update procedure
+
+1. Fast-forward `main` to `origin/main` and confirm a clean tree.
+2. Bump the product version in every version-bearing file: replace the old
+   version across `git grep -l '<old>' -- . ':!docs' ':!*.md'` (23 files as of
+   0.20.87: package/lock, manifest, csproj, protocol, `.iss`, build script, tests).
+   No old-version occurrence may remain outside `docs/`.
+3. Run `npm run check` with the `.local` toolchains. If MSBuild reports
+   `OutOfMemoryException`, check commit headroom (`FreeVirtualMemory`), run
+   `dotnet build-server shutdown`, and rerun `dotnet test desktop/OFEnhancer.sln -c Release -m:1`
+   followed by the remaining `check:windows` steps.
+4. `npm run build:desktop`, then rerun the stage-dependent tests alone:
+   `node --test tests/packaging/windows/installer-recovery.test.cjs tests/browser/fresh-reinstall-lifecycle.test.cjs`.
+5. Fingerprint `%LocalAppData%\OFEnhancer` settings/data files, then install as a
+   silent normal update:
+   `dist\OFEnhancer-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=.local\OFEnhancer-<version>-install.log`.
+6. Confirm exit 0, `Installation process succeeded` in the log, installed
+   `version.json`, installed desktop binary hash equal to the staged one, the
+   desktop restarted from the install folder, and unchanged data fingerprints.
+7. The owner reloads the existing extension entry in Chrome. Record the release
+   in [acceptance](acceptance.md) and commit the bump with the record.
+
 For a manual desktop relay registration, use `tools/register-native-host.ps1`
 with the actual extension ID and permanent install root. `tools/unregister-native-host.ps1`
 removes only the matching owned registration. These are explicit installation
