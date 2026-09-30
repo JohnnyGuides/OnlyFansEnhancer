@@ -647,6 +647,39 @@ public sealed class GoogleWorkspaceClientTests
         Assert.AreEqual(1, handler.Requests.Count);
     }
 
+    [DataTestMethod]
+    [DataRow(HttpRequestError.NameResolutionError)]
+    [DataRow(HttpRequestError.ConnectionError)]
+    [DataRow(HttpRequestError.SecureConnectionError)]
+    [DataRow(HttpRequestError.ProxyTunnelError)]
+    public async Task ConnectionFailureBeforeAMutationIsSentIsADefiniteFailure(HttpRequestError failure)
+    {
+        RecordingHandler handler = new();
+        handler.Enqueue(_ => throw new HttpRequestException(failure, "connection not established"));
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.UpdateValuesBatchAsync(new("workbook-one", [new("Sheet1!A1", "value")]), CancellationToken.None));
+
+        Assert.AreEqual("google-request-failed", error.Message);
+        Assert.AreEqual(1, handler.Requests.Count);
+    }
+
+    [DataTestMethod]
+    [DataRow(HttpRequestError.ResponseEnded)]
+    [DataRow(HttpRequestError.Unknown)]
+    public async Task TransportFailureAfterAConnectionExistsStaysUncertain(HttpRequestError failure)
+    {
+        RecordingHandler handler = new();
+        handler.Enqueue(_ => throw new HttpRequestException(failure, "connection lost"));
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        await Assert.ThrowsExceptionAsync<GoogleMutationUncertainException>(() =>
+            client.UpdateValuesBatchAsync(new("workbook-one", [new("Sheet1!A1", "value")]), CancellationToken.None));
+    }
+
     [TestMethod]
     public async Task RejectedMutationStatusStaysADefiniteFailure()
     {

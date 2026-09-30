@@ -569,6 +569,12 @@ internal sealed class GoogleWorkspaceClient
             // Once dispatched, a deadline or caller cancellation leaves the outcome unknown.
             throw new GoogleMutationUncertainException();
         }
+        catch (HttpRequestException error) when (error.HttpRequestError is HttpRequestError.NameResolutionError
+            or HttpRequestError.ConnectionError or HttpRequestError.SecureConnectionError or HttpRequestError.ProxyTunnelError)
+        {
+            // No connection was established, so the write was never sent.
+            throw new GoogleCatalogueException("google-request-failed");
+        }
         catch (HttpRequestException)
         {
             throw new GoogleMutationUncertainException();
