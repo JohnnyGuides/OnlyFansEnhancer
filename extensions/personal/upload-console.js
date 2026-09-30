@@ -3052,6 +3052,9 @@
           "waiting-for-redgifs": "Draft prepared · add the Redgifs link",
           "ready-for-review": "Draft ready for your review",
           "manual-submit-required": "Prepared · review and publish manually",
+          "awaiting-manual-publish":
+            "Prepared · publish on the site; the link will be recorded",
+          "manual-link-watch-ended": "Prepared · link not recorded",
           "already-linked": "Already linked",
           idempotent: "Catalogue already current",
           conflict: "Catalogue link conflict",
