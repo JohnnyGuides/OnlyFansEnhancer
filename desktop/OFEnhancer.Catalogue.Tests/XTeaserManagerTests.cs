@@ -525,6 +525,10 @@ public sealed class XTeaserManagerTests
         Assert.IsNull(queue.Items[2].PaidUrl, "no OnlyFans link on the row");
         Assert.IsNull(queue.Items[3].PaidUrl, "two different OnlyFans posts are ambiguous");
 
+        // A non-teaser never qualifies, even with an owner binding.
+        Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('406','item-c','ep-c','owner','high','x')");
+        Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('4031','item-c','ep-c','owner','high','x')");
+        CollectionAssert.AreEqual(new[] { "401", "402", "409", "410" }, store.GetXTeaserReplyQueue(Now).Items.Select(item => item.StatusId).ToArray());
         // An owner binding with a recorded conflict is not exactly one episode.
         Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('404','item-a','ep-a','owner','high','x')");
         Assert.IsTrue(store.GetXTeaserReplyQueue(Now).Items.Any(item => item.StatusId == "404"));
