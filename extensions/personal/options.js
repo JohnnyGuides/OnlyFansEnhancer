@@ -237,6 +237,9 @@ function renderXFirstReply(view) {
   const counts = Object.entries(view.counters || {})
     .filter(([, count]) => count > 0)
     .map(([outcome, count]) => `${outcome} ${count}`);
+  // Neutral status text; only a desktop error is coloured.
+  if (view.lastError) $("#xFirstReplyStatus").dataset.tone = "error";
+  else delete $("#xFirstReplyStatus").dataset.tone;
   $("#xFirstReplyStatus").textContent = [
     `Status: ${view.label}.`,
     `${view.pending} pending.`,

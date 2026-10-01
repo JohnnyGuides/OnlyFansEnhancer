@@ -3,7 +3,10 @@
 
   // One-page X teaser dashboard shared by the desktop workspace's Twitter view
   // and the extension's teaser-dashboard page. It reads the desktop teaser
-  // overview and the owner-local plan; it never posts or schedules on X.
+  // overview (including the owner's X scheduled posts and the background
+  // scan status) and the owner-local plan; it never posts or schedules on X.
+  // "Scan now" only asks Chrome's background scanner to read the owner's
+  // own profile.
   const DAY_MS = 86400000;
   const ABOVE_USUAL = 1.15;
   const BELOW_USUAL = 0.8;
@@ -41,6 +44,21 @@
     ["rate", "engagement rate"],
   ];
   const POSTER_PATTERN = /^https:\/\/pbs\.twimg\.com\//;
+  const SCAN_FINISHED = [
+    "complete",
+    "window-reached",
+    "no-new-posts",
+    "page-cap",
+  ];
+  const SCAN_PROBLEMS = {
+    "owner-unknown": "waiting for your own X posts",
+    "owner-mismatch": "another X account is signed in",
+    "signed-out": "signed out of X",
+    "no-timeline": "profile did not load",
+    timeout: "took too long",
+    "user-took-over": "stopped, you opened the scan tab",
+    error: "X error",
+  };
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -100,6 +118,22 @@
       day: "numeric",
       month: "short",
     }).format(parseDate(value));
+  }
+
+  function timeLabel(value) {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  }
+
+  function stampLabel(value) {
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
   }
 
   function compact(value) {
@@ -183,6 +217,7 @@
       active: true,
       overview: null,
       slots: [],
+      scanMessage: "",
       period: "30",
       worstFirst: false,
       picking: null,
@@ -235,6 +270,18 @@
 
     function slotOn(date) {
       return state.slots.find((slot) => slot.date === date);
+    }
+
+    // The owner's X scheduled posts falling on a local calendar day.
+    function scheduledOn(date) {
+      return (state.overview?.scheduled || []).filter(
+        (post) => localDate(new Date(post.scheduledUtc)) === date,
+      );
+    }
+
+    function applyOverview(overview, fallback) {
+      state.active = overview?.active !== false;
+      state.overview = overview?.overview || fallback;
     }
 
     // Today joins the plan while nothing was posted today.
@@ -296,12 +343,11 @@
           request("getTeaserPlan", {}),
         ]);
         if (current !== generation) return;
-        state.active = overview?.active !== false;
-        state.overview = overview?.overview || {
+        applyOverview(overview, {
           episodes: [],
           posts: [],
           recentMoves: [],
-        };
+        });
         state.slots = plan?.slots || [];
         state.phase = "ready";
       } catch (error) {
@@ -359,15 +405,80 @@
       try {
         await request("undoTeaserClipMove", { moveId: move.moveId });
         state.message = "Clip moved back.";
-        const overview = await request("getTeaserOverview", {});
-        state.active = overview?.active !== false;
-        state.overview = overview?.overview || state.overview;
+        applyOverview(await request("getTeaserOverview", {}), state.overview);
       } catch (error) {
         state.message = `Undo was refused (${error?.message || "unknown"}).`;
       } finally {
         state.busy = false;
       }
       render("history-period");
+    }
+
+    async function scanNow() {
+      if (state.busy) return;
+      state.busy = true;
+      try {
+        const result = await request("requestXScan", {});
+        state.scanMessage = result?.started
+          ? "Scan started…"
+          : result?.reason === "busy"
+            ? "A scan is already running…"
+            : result?.reason === "too-soon"
+              ? "A scan just ran…"
+              : "";
+        if (result?.requestedUtc && state.overview)
+          state.overview.scan = {
+            ...(state.overview.scan || { last: null }),
+            requestedUtc: result.requestedUtc,
+          };
+      } catch (error) {
+        state.scanMessage = `Scan could not be requested (${error?.message || "unknown"}).`;
+      } finally {
+        state.busy = false;
+      }
+      render("scan-now");
+    }
+
+    function renderScan() {
+      const bar = element("div", "xt-scan");
+      const scan = state.overview?.scan;
+      const last = scan?.last;
+      // One line: when, then the counts, or what stopped it.
+      const parts = [];
+      const finished = last && SCAN_FINISHED.includes(last.outcome);
+      if (last) {
+        parts.push(
+          `Last scan ${stampLabel(last.finishedUtc || last.startedUtc)}`,
+        );
+        if (finished) {
+          parts.push(`${last.rows} posts`);
+          if (typeof last.scheduled === "number")
+            parts.push(`${last.scheduled} scheduled`);
+        } else
+          parts.push(
+            `${SCAN_PROBLEMS[last.outcome] || last.outcome}${
+              last.detail ? ` (${last.detail})` : ""
+            }`,
+          );
+        const backoff = Date.parse(String(last.backoffUntilUtc || ""));
+        if (Number.isFinite(backoff) && backoff > now().getTime())
+          parts.push(`automatic scans paused until ${stampLabel(backoff)}`);
+      } else parts.push("No scan yet");
+      const text = element("p", "xt-scan-text", parts.join(" · "));
+      text.setAttribute("role", "status");
+      if (last && !finished) text.dataset.tone = "warn";
+      const pending = element(
+        "span",
+        "xt-scan-state",
+        state.scanMessage || (scan?.requestedUtc ? "Scan requested…" : ""),
+      );
+      pending.setAttribute("role", "status");
+      pending.hidden = !pending.textContent;
+      const action = button("xt-action", "", "Scan now");
+      action.dataset.key = "scan-now";
+      action.addEventListener("click", () => void scanNow());
+      bar.append(text, pending, action);
+      return bar;
     }
 
     function numbers(post) {
@@ -460,24 +571,39 @@
 
     function planTile(date) {
       const slot = slotOn(date);
+      const scheduled = scheduledOn(date);
       const episode = slot ? episodeByKey(slot.episodeKey) : null;
-      const title = episode?.title || slot?.episodeKey || "";
-      const kind = slot ? (slot.scheduled ? "scheduled" : "planned") : "empty";
+      // A post already scheduled on X outlines the day; the plan's episode
+      // title, else the post's own text, labels it.
+      const title =
+        episode?.title ||
+        slot?.episodeKey ||
+        scheduled[0]?.text ||
+        (scheduled.length ? "Scheduled post" : "");
+      const kind = scheduled.length ? "scheduled" : slot ? "planned" : "empty";
+      const times = scheduled
+        .map((post) => timeLabel(post.scheduledUtc))
+        .join(", ");
+      const reEdit = slot?.reEdit ? " (re-edit)" : "";
       const tile = button(
         "xt-tile",
-        slot
-          ? `${longDayLabel(date)}: ${kind} ${title}${
-              slot.reEdit ? " (re-edit)" : ""
-            }. Pick another episode`
-          : `${longDayLabel(date)}: nothing planned. Pick an episode`,
+        scheduled.length
+          ? `${longDayLabel(date)}: scheduled on X at ${times}, ${title}${reEdit}. Pick another episode`
+          : slot
+            ? `${longDayLabel(date)}: ${kind} ${title}${reEdit}. Pick another episode`
+            : `${longDayLabel(date)}: nothing planned. Pick an episode`,
       );
       tile.dataset.kind = kind;
       tile.dataset.key = `day-${date}`;
       tile.dataset.date = date;
       if (state.picking?.date === date) tile.dataset.target = "true";
-      if (slot) {
+      if (scheduled.length)
+        tile.append(
+          element("span", "xt-tile-time", timeLabel(scheduled[0].scheduledUtc)),
+        );
+      if (slot || scheduled.length) {
         tile.append(element("span", "xt-tile-label", title));
-        if (slot.reEdit) {
+        if (slot?.reEdit) {
           const mark = element("span", "xt-scissors");
           mark.append(icon("scissors"));
           tile.dataset.reEdit = "true";
@@ -824,6 +950,7 @@
       const detail = element("p", "xt-detail", state.detail);
       detail.setAttribute("role", "status");
       root.append(
+        renderScan(),
         renderStrip(),
         renderPicking(),
         renderFlow(),

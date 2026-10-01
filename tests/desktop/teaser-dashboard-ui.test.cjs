@@ -243,7 +243,12 @@ after(async () => {
   await new Promise((resolve) => server?.close(resolve));
 });
 
-async function openDashboard({ area = "desktop", viewport, slots } = {}) {
+async function openDashboard({
+  area = "desktop",
+  viewport,
+  slots,
+  overviewExtra = {},
+} = {}) {
   const context = await browser.newContext({
     viewport: viewport || { width: 1200, height: 900 },
     timezoneId: "UTC",
@@ -263,10 +268,11 @@ async function openDashboard({ area = "desktop", viewport, slots } = {}) {
       body: posterSvg(new URL(route.request().url()).pathname.split("/")[2]),
     }),
   );
-  await page.exposeFunction("__teaserFixture", () => ({
-    overview: fixture(),
-    slots: slots || initialSlots,
-  }));
+  await page.exposeFunction("__teaserFixture", () => {
+    const overview = fixture();
+    Object.assign(overview.overview, overviewExtra);
+    return { overview, slots: slots || initialSlots };
+  });
   await page.addInitScript(() => {
     const calls = [];
     let data;
@@ -314,6 +320,12 @@ async function openDashboard({ area = "desktop", viewport, slots } = {}) {
         case "clearTeaserPlanSlot":
           data.slots = data.slots.filter((slot) => slot.date !== payload.date);
           return { date: payload.date, cleared: true };
+        case "requestXScan":
+          return {
+            requested: true,
+            started: false,
+            requestedUtc: "2026-10-01T12:00:00Z",
+          };
         case "undoTeaserClipMove":
           return {
             moveId: 42,
@@ -808,6 +820,176 @@ test("the extension page mounts the same dashboard and the console links to it",
         .includes(`"${operation}"`),
       operation,
     );
+});
+
+test("X scheduled posts outline their day in row 2 and Scan now asks for a scan", async () => {
+  const scheduled = [
+    {
+      scheduledId: "7001",
+      scheduledUtc: "2026-10-03T18:30:00.000Z",
+      text: "benign scheduled teaser",
+      mediaSummary: "1 video",
+      observedUtc: NOW,
+    },
+    // Same day as the planned re-edit slot: the plan's title labels it.
+    {
+      scheduledId: "7002",
+      scheduledUtc: "2026-10-04T09:15:00.000Z",
+      text: "another benign post",
+      mediaSummary: "",
+      observedUtc: NOW,
+    },
+  ];
+  for (const area of ["desktop", "extension"]) {
+    const { page, context, errors } = await openDashboard({
+      area,
+      overviewExtra: {
+        scheduled,
+        scan: {
+          requestedUtc: null,
+          last: {
+            trigger: "routine",
+            mode: "routine",
+            startedUtc: "2026-10-01T11:00:00.000Z",
+            finishedUtc: "2026-10-01T11:01:00.000Z",
+            outcome: "complete",
+            detail: "",
+            pages: 3,
+            rows: 41,
+            scheduled: 2,
+          },
+        },
+      },
+    });
+    try {
+      const day3 = page.locator(
+        '[data-row="next"] [data-key="day-2026-10-03"]',
+      );
+      assert.equal(await day3.getAttribute("data-kind"), "scheduled");
+      assert.match(
+        await day3.getAttribute("aria-label"),
+        /scheduled on X at 18:30, benign scheduled teaser/,
+      );
+      assert.equal(await day3.locator(".xt-tile-time").textContent(), "18:30");
+      assert.equal(
+        await day3.locator(".xt-tile-label").textContent(),
+        "benign scheduled teaser",
+      );
+      const day4 = page.locator(
+        '[data-row="next"] [data-key="day-2026-10-04"]',
+      );
+      assert.equal(await day4.getAttribute("data-kind"), "scheduled");
+      assert.equal(
+        await day4.locator(".xt-tile-label").textContent(),
+        "Series A E1",
+      );
+      assert.equal(await day4.getAttribute("data-re-edit"), "true");
+      const outlined = await day3.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return `${style.borderTopWidth} ${style.borderTopStyle}`;
+      });
+      assert.equal(outlined, "2px solid");
+      const empty = page.locator(
+        '[data-row="next"] [data-key="day-2026-10-05"]',
+      );
+      assert.equal(await empty.getAttribute("data-kind"), "empty");
+
+      const scan = page.locator(".xt-scan-text");
+      assert.equal(
+        await scan.textContent(),
+        "Last scan 1 Oct, 11:01 · 41 posts · 2 scheduled",
+      );
+      const pending = page.locator(".xt-scan-state");
+      assert.equal(await pending.isVisible(), false);
+      // Text, muted pending state and a right-aligned button share one row.
+      const button = page.getByRole("button", { name: "Scan now" });
+      await button.click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".xt-scan-state")?.textContent ===
+          "Scan requested…",
+      );
+      assert.equal(await pending.isVisible(), true);
+      const [textBox, pendingBox, buttonBox, barBox] = await Promise.all([
+        scan.boundingBox(),
+        pending.boundingBox(),
+        button.boundingBox(),
+        page.locator(".xt-scan").boundingBox(),
+      ]);
+      assert.ok(
+        Math.abs(
+          textBox.y + textBox.height / 2 - (buttonBox.y + buttonBox.height / 2),
+        ) < 4,
+      );
+      assert.ok(
+        Math.abs(
+          pendingBox.y +
+            pendingBox.height / 2 -
+            (buttonBox.y + buttonBox.height / 2),
+        ) < 4,
+      );
+      assert.ok(
+        Math.abs(buttonBox.x + buttonBox.width - (barBox.x + barBox.width)) < 2,
+      );
+      assert.equal(
+        await pending.evaluate((node) => getComputedStyle(node).color),
+        "rgb(143, 153, 168)",
+      );
+      assert.deepEqual(
+        (await calls(page, "requestXScan")).map((call) => call.payload),
+        [{}],
+      );
+      if (area === "desktop") await screenshot(page, "M4-scheduled-scan.png");
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
+  const background = fs.readFileSync(
+    path.join(repositoryRoot, "extensions/personal/background.js"),
+    "utf8",
+  );
+  assert.match(
+    background.slice(
+      background.indexOf("async function routeOFEnhancerAppRequest"),
+    ),
+    /if \(operation === "requestXScan"\) return xScanner\(\)\.requestNow\(\);/,
+  );
+});
+
+test("a failed scan is shown plainly", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      scheduled: [],
+      scan: {
+        requestedUtc: null,
+        last: {
+          trigger: "checkpoint",
+          mode: "routine",
+          startedUtc: "2026-10-01T11:00:00.000Z",
+          finishedUtc: "2026-10-01T11:00:20.000Z",
+          outcome: "error",
+          detail: "http-429",
+          pages: 2,
+          rows: 20,
+          scheduled: null,
+          backoffUntilUtc: "2026-10-01T17:00:20.000Z",
+        },
+      },
+    },
+  });
+  try {
+    const scan = page.locator(".xt-scan-text");
+    assert.equal(
+      await scan.textContent(),
+      "Last scan 1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
+    );
+    assert.equal(await page.locator(".xt-scan-state").isVisible(), false);
+    assert.equal(await scan.getAttribute("data-tone"), "warn");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
 });
 
 test("a failed load offers a retry", async () => {

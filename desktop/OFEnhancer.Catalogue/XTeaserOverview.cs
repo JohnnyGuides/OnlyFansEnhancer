@@ -33,7 +33,8 @@ public sealed record XTeaserMove(long MoveId, long ClipId, string FromRelPath, s
 
 public sealed record XTeaserOverview(IReadOnlyList<XTeaserEpisode> Episodes, IReadOnlyList<XTeaserPost> Posts,
     IReadOnlyList<XTeaserClip> UnpairedClips, IReadOnlyList<XTeaserPost> UnboundPosts, IReadOnlyList<XTeaserMove> RecentMoves,
-    bool Truncated, XSheetWritebackStatus? SheetWriteback = null);
+    bool Truncated, XSheetWritebackStatus? SheetWriteback = null,
+    IReadOnlyList<XScheduledPost>? Scheduled = null, XScanStatus? Scan = null);
 
 public sealed partial class CatalogueStore
 {
@@ -130,7 +131,8 @@ public sealed partial class CatalogueStore
         bool truncated = episodes.Count > MaxOverviewEpisodes || posts.Count > MaxOverviewPosts
             || unpaired.Count > MaxOverviewClips || unbound.Count > MaxOverviewPosts;
         return new([.. episodes.Take(MaxOverviewEpisodes)], [.. posts.Take(MaxOverviewPosts)], [.. unpaired.Take(MaxOverviewClips)],
-            [.. unbound.Take(MaxOverviewPosts)], moves, truncated, GetXSheetWritebackStatus(DateTimeOffset.UtcNow));
+            [.. unbound.Take(MaxOverviewPosts)], moves, truncated, GetXSheetWritebackStatus(DateTimeOffset.UtcNow),
+            GetXScheduledPosts(), GetXScanStatus());
 
         static long? Nullable(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetInt64(index);
     }

@@ -141,6 +141,52 @@
   background: #142330;
 }
 
+.xt-tile-time {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-start: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(9, 11, 16, 0.8);
+  color: var(--xt-accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.xt-scan {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.xt-scan-text {
+  min-width: 0;
+  margin: 0;
+  color: #aeb6c3;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.xt-scan-state {
+  color: var(--xt-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.xt-scan-state[hidden] {
+  display: none;
+}
+
+.xt-scan .xt-action {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+.xt-scan-text[data-tone="warn"] {
+  color: var(--xt-amber);
+}
+
 .xt-tile[data-target="true"] {
   opacity: 1;
   border: 2px solid var(--xt-amber);

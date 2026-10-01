@@ -107,6 +107,7 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
     internal static readonly IReadOnlySet<string> Operations = new HashSet<string>(StringComparer.Ordinal)
     {
         "getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
+        "requestXScan",
     };
 
     internal const int MaxPlanDaysAhead = 60;
@@ -121,8 +122,19 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
         "getTeaserPlan" => await dispatcher.EnqueueAsync<object>(() => GetPlan(payload)).ConfigureAwait(false),
         "setTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => SetPlanSlot(payload)).ConfigureAwait(false),
         "clearTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => ClearPlanSlot(payload)).ConfigureAwait(false),
+        "requestXScan" => await dispatcher.EnqueueAsync<object>(() => RequestScan(payload)).ConfigureAwait(false),
         _ => throw new GoogleCatalogueControllerException("unsupported-operation"),
     };
+
+    // "Scan now" in the desktop workspace: Chrome's background scanner picks
+    // the request up on its next check (every few minutes).
+    internal object RequestScan(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        XScanStatus status = store.RequestXScan(Now);
+        return new { requested = true, started = false, requestedUtc = status.RequestedUtc };
+    }
 
     // Plan dates are the owner's local calendar days; one day of slack either
     // side of UTC covers every time zone.

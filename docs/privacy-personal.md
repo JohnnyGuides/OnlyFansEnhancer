@@ -51,6 +51,15 @@ separated from an embedded quote, no text or media is kept for it. Media bytes,
 cookies and request headers are not stored. The catalogue keeps the first
 recorded X account and refuses posts from any other account.
 
+Background scans read only the recorded owner's own pages: the owner's profile
+(posts and replies) and the owner's scheduled-post list, in one inactive tab of
+the user's Chrome, using X's own request for the owner's timeline. No other
+account is opened, nothing is clicked, typed or posted, and a scan stops if a
+different account is signed in. Request headers are reused only inside that page
+and are never stored or sent anywhere else. For scheduled posts the desktop keeps
+the scheduled time, a short text excerpt and a media count; scan outcomes keep
+only counts and times.
+
 ## Network destinations
 
 OFEnhancer has no developer-operated telemetry, analytics, advertising, or data

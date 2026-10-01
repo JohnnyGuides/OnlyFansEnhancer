@@ -150,6 +150,16 @@ can be undone. The app moves a clip at most once; after that the owner's
 placement (undo or by hand) wins. Failed teasers no longer count
 as used, so their episode returns to rotation.
 
+The extension keeps the owner's X numbers fresh without the owner browsing: it
+scans the owner's own profile in one inactive background tab every 6 hours,
+when a recent post reaches 24 hours, 3 days, 7 days or 30 days of age, and on
+**Scan now** in the Twitter dashboard. A scan only reads: it pages back through
+the owner's posts and replies with short pauses (the full history once, capped,
+then the last 35 days), stops at the first error or if another X account is
+signed in, reads the owner's scheduled posts and closes the tab. Scheduled posts
+appear outlined on their day in the dashboard's next-7-days row, and the last
+scan's time and result are shown above it.
+
 The optional **Auto first reply** (extension settings) replies once under each of
 the owner's X teasers, whether posted through OFEnhancer or by hand, at a random
 time 15–60 minutes after the teaser went live. Only a video post that is neither

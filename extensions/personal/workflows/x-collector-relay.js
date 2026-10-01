@@ -9,11 +9,15 @@
 
   const DOM_FALLBACK_DELAY_MS = 10_000;
   const DOM_SCAN_DEBOUNCE_MS = 2_000;
+  const SCAN_COMMAND_TIMEOUT_MS = 45_000;
+  const SCAN_COMMAND_TYPE = "CREATOR_X_SCAN_COMMAND";
   let port = null;
   let networkSeen = false;
   let scanTimer = null;
   let fallbackReady = false;
   const domSent = new Map();
+  const pendingCommands = new Map();
+  let commandCounter = 0;
 
   function send(message) {
     try {
@@ -32,6 +36,12 @@
     if (detail.kind === "batch") {
       networkSeen = true;
       send({ batch: detail.batch });
+    } else if (detail.kind === "scheduled") {
+      send({ scheduled: detail.batch });
+    } else if (detail.kind === "scan-reply") {
+      const resolve = pendingCommands.get(detail.id);
+      pendingCommands.delete(detail.id);
+      resolve?.(detail.reply);
     } else if (detail.kind === "diagnostic") {
       send({
         diagnostic: {
@@ -92,6 +102,37 @@
       fallbackReady = true;
       scheduleScan();
     }, DOM_FALLBACK_DELAY_MS);
+  }
+
+  // A background scan's worker asks the page, through this relay and the
+  // private port, for its status or one older page.
+  function relayScanCommand(command) {
+    if (!port) return Promise.resolve({ ok: false, reason: "not-ready" });
+    const id = `scan-${++commandCounter}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingCommands.delete(id);
+        resolve({ ok: false, reason: "page-timeout" });
+      }, SCAN_COMMAND_TIMEOUT_MS);
+      pendingCommands.set(id, (reply) => {
+        clearTimeout(timer);
+        resolve(reply);
+      });
+      port.postMessage({ kind: "scan-command", id, command });
+    });
+  }
+
+  try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message?.type !== SCAN_COMMAND_TYPE) return false;
+      // Only the extension's own worker (never a tab) may command a scan.
+      if (sender?.id !== chrome.runtime.id || sender.tab) return false;
+      if (!new Set(["status", "page"]).has(message.command)) return false;
+      void relayScanCommand(message.command).then(sendResponse);
+      return true;
+    });
+  } catch {
+    // Without the runtime the relay only reports.
   }
 
   document.addEventListener(contract.PAGE_EVENT, onPageEvent);
