@@ -153,7 +153,7 @@ internal sealed class DesktopSettingsStore
 
     // Local folders/files for the X teaser manager: fully qualified, no drive
     // root, normalized without a trailing separator.
-    private static string? NormalizeLocalPath(string? value)
+    internal static string? NormalizeLocalPath(string? value)
     {
         if (value is null || value.Length > 1_024 || !Path.IsPathFullyQualified(value)) return null;
         try

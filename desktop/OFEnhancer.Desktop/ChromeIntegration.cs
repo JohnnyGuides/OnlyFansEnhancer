@@ -314,14 +314,21 @@ internal sealed class ChromeIntegration
             catch (JsonException) { throw new InvalidOperationException(repair); }
             using var existing = parsed;
             if (existing.RootElement.ValueKind != JsonValueKind.Object
-                || existing.RootElement.EnumerateObject().Any(property => property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId" or "googleSheetUrl"))
+                || existing.RootElement.EnumerateObject().Any(property => property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId" or "googleSheetUrl" or "xTeaserRoot" or "xTeaserRevertListPath"))
                 || existing.RootElement.TryGetProperty("extensionId", out var oldId) && oldId.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeExtensionId(oldId.GetString()) is null
                 || existing.RootElement.TryGetProperty("googleOAuthClientId", out var google) && google.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeGoogleOAuthClientId(google.GetString()) is null
                 || existing.RootElement.TryGetProperty("browserId", out var browser) && browser.ValueKind != JsonValueKind.Null && BrowserSelection.NormalizeId(browser.GetString()) is null
-                || existing.RootElement.TryGetProperty("googleSheetUrl", out var sheet) && sheet.ValueKind != JsonValueKind.Null && (sheet.ValueKind != JsonValueKind.String || !IsValidGoogleSheetUrl(sheet.GetString())))
+                || existing.RootElement.TryGetProperty("googleSheetUrl", out var sheet) && sheet.ValueKind != JsonValueKind.Null && (sheet.ValueKind != JsonValueKind.String || !IsValidGoogleSheetUrl(sheet.GetString()))
+                || !IsValidOptionalLocalPath(existing.RootElement, "xTeaserRoot")
+                || !IsValidOptionalLocalPath(existing.RootElement, "xTeaserRevertListPath"))
                 throw new InvalidOperationException(repair);
         }
     }
+
+    // Teaser folder settings are optional local paths validated like the settings store does.
+    private static bool IsValidOptionalLocalPath(JsonElement root, string name)
+        => !root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null
+            || value.ValueKind == JsonValueKind.String && DesktopSettingsStore.NormalizeLocalPath(value.GetString()) is not null;
 
     private static bool IsValidGoogleSheetUrl(string? value)
     {

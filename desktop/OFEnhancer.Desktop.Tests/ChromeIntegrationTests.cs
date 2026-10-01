@@ -140,6 +140,32 @@ public sealed class ChromeIntegrationTests
     }
 
     [TestMethod]
+    public void TeaserFolderSettingsKeepChromeIntegrationPrepared()
+    {
+        using var fixture = new Fixture();
+        fixture.Integration.Prepare();
+        DesktopSettings prepared = fixture.Settings.Load();
+        string teaserRoot = Path.Combine(fixture.Root, "teasers");
+        fixture.Settings.Save(prepared with
+        {
+            XTeaserRoot = teaserRoot,
+            XTeaserRevertListPath = Path.Combine(fixture.Root, "revert.csv"),
+        });
+
+        ChromeIntegrationView view = fixture.Integration.Get();
+        Assert.IsTrue(view.Prepared, view.SetupError);
+        Assert.AreNotEqual("repair", view.State);
+
+        string json = File.ReadAllText(fixture.Settings.SettingsPath);
+        File.WriteAllText(fixture.Settings.SettingsPath, json.Replace(
+            JsonSerializer.Serialize(teaserRoot), "\"relative\\\\folder\""));
+        Assert.AreEqual("repair", fixture.Integration.Get().State);
+
+        File.WriteAllText(fixture.Settings.SettingsPath, json.TrimEnd().TrimEnd('}') + ",\"unknownSetting\":true}");
+        Assert.AreEqual("repair", fixture.Integration.Get().State);
+    }
+
+    [TestMethod]
     public void MissingPackageManifestAsksForAnInstallerRepair()
     {
         using var fixture = new Fixture();
