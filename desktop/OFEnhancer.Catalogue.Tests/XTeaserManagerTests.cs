@@ -228,11 +228,11 @@ public sealed class XTeaserManagerTests
         using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
         // Ten peers with rates 0.10 (median 0.10).
         for (int index = 0; index < 10; index++)
-            AddTeaser(store, $"6{index:00}", Now.AddDays(-8), (168, 1000, 60, 20, 20));
-        AddTeaser(store, "700", Now.AddDays(-8), (150, 1000, 50, 15, 15));   // 0.080 = 0.8 x median -> good
-        AddTeaser(store, "701", Now.AddDays(-8), (200, 1000, 50, 15, 14));   // 0.079 -> failed
-        AddTeaser(store, "702", Now.AddDays(-6.5), (156, 1000, 1, 0, 0));    // younger than 7 days
-        AddTeaser(store, "703", Now.AddDays(-9), (100, 1000, 1, 0, 0), (250, 1000, 1, 0, 0)); // no sample at 6-10 days
+            AddTeaser(store, $"6{index:00}", Now.AddDays(-8), (168, 1000, 60, 20, 10, 10));
+        AddTeaser(store, "700", Now.AddDays(-8), (150, 1000, 50, 15, 5, 10));   // 0.080 = 0.8 x median -> good
+        AddTeaser(store, "701", Now.AddDays(-8), (200, 1000, 50, 15, 5, 9));    // 0.079 -> failed
+        AddTeaser(store, "702", Now.AddDays(-6.5), (156, 1000, 1, 0, 0, 0));    // younger than 7 days
+        AddTeaser(store, "703", Now.AddDays(-9), (100, 1000, 1, 0, 0, 0), (250, 1000, 1, 0, 0, 0)); // no sample at 6-10 days
         XVerdictResult result = store.DecideXVerdicts(Now);
         Assert.AreEqual(12, result.Decided);
         Assert.AreEqual("good", Scalar(store, "SELECT verdict FROM x_teaser_verdicts WHERE status_id='700'"));
@@ -251,10 +251,10 @@ public sealed class XTeaserManagerTests
         using TempDirectory temp = new();
         using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
         for (int index = 0; index < 10; index++)
-            AddTeaser(store, $"8{index:00}", Now.AddDays(-8), (168, 1000, 60, 20, 20));
+            AddTeaser(store, $"8{index:00}", Now.AddDays(-8), (168, 1000, 60, 20, 10, 10));
         XVerdictResult nine = store.DecideXVerdicts(Now);
         Assert.AreEqual(new XVerdictResult(0, 10), nine, "each teaser has only nine peers");
-        AddTeaser(store, "899", Now.AddDays(-8), (168, 1000, 60, 20, 20));
+        AddTeaser(store, "899", Now.AddDays(-8), (168, 1000, 60, 20, 10, 10));
         Assert.AreEqual(11, store.DecideXVerdicts(Now).Decided);
     }
 
@@ -415,7 +415,7 @@ public sealed class XTeaserManagerTests
     }
 
     private static void AddTeaser(CatalogueStore store, string statusId, DateTimeOffset posted,
-        params (double Age, long Views, long Likes, long Reposts, long Bookmarks)[] samples)
+        params (double Age, long Views, long Likes, long Reposts, long Replies, long Bookmarks)[] samples)
     {
         store.RecordXObservations(new(Owner, [Post(statusId, posted)]), Now);
         int minute = 0;
@@ -423,7 +423,7 @@ public sealed class XTeaserManagerTests
             Exec(store, $"""
                 INSERT INTO x_metric_samples(status_id,observed_utc,age_hours,views,likes,reposts,replies,quotes,bookmarks,source)
                 VALUES ('{statusId}','2026-09-{10 + minute++:00}T00:00:00Z',{sample.Age.ToString(CultureInfo.InvariantCulture)},
-                        {sample.Views},{sample.Likes},{sample.Reposts},99,0,{sample.Bookmarks},'network')
+                        {sample.Views},{sample.Likes},{sample.Reposts},{sample.Replies},0,{sample.Bookmarks},'network')
                 """);
     }
 

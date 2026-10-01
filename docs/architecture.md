@@ -175,7 +175,7 @@ that episode was posted within three days after the file's modification time
 and no other clip claims it. The optional `xTeaserRevertListPath` CSV is imported
 once for its owner-made `x_status_id` pairings; a status listed twice is
 skipped. `x_teaser_verdicts` records each teaser's 7-day verdict once: the rate
-(likes + reposts + bookmarks) / views from the sample closest to 168 h within
+(likes + reposts + replies + bookmarks) / views from the sample closest to 168 h within
 ages 144–240 h is compared, in exact decimal arithmetic, with the median of the
 other teasers' rates in that window; fewer than 10 peers means no verdict. A
 paired clip still in `Done\` then moves to `Done\Good` or `Done\Failed` after

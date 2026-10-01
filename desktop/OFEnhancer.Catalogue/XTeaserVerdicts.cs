@@ -16,7 +16,7 @@ public sealed partial class CatalogueStore
     internal const decimal XVerdictFailedFactor = 0.8m;
 
     // Takes the 7-day verdict once per teaser: engagement (likes + reposts +
-    // bookmarks) / views at the sample closest to 7 days within ages 6–10 days,
+    // replies + bookmarks) / views at the sample closest to 7 days within ages 6–10 days,
     // against the median of other teasers' samples in the same window.
     public XVerdictResult DecideXVerdicts(DateTimeOffset now)
     {
@@ -26,9 +26,9 @@ public sealed partial class CatalogueStore
         using (SqliteCommand read = connection.CreateCommand())
         {
             read.CommandText = """
-                SELECT status_id, age_hours, views, likes, reposts, bookmarks FROM x_metric_samples
+                SELECT status_id, age_hours, views, likes, reposts, replies, bookmarks FROM x_metric_samples
                 WHERE age_hours >= $start AND age_hours <= $end AND views > 0
-                  AND likes IS NOT NULL AND reposts IS NOT NULL AND bookmarks IS NOT NULL
+                  AND likes IS NOT NULL AND reposts IS NOT NULL AND replies IS NOT NULL AND bookmarks IS NOT NULL
                 ORDER BY status_id, ABS(age_hours - 168), observed_utc
                 """;
             read.Parameters.AddWithValue("$start", XVerdictWindowStartHours);
@@ -38,7 +38,8 @@ public sealed partial class CatalogueStore
             {
                 string statusId = reader.GetString(0);
                 if (rates.ContainsKey(statusId)) continue;
-                decimal rate = (reader.GetInt64(3) + reader.GetInt64(4) + reader.GetInt64(5)) / (decimal)reader.GetInt64(2);
+                decimal rate = (reader.GetInt64(3) + reader.GetInt64(4) + reader.GetInt64(5) + reader.GetInt64(6))
+                    / (decimal)reader.GetInt64(2);
                 rates[statusId] = (rate, reader.GetDouble(1));
             }
         }
