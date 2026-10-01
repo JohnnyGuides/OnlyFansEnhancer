@@ -24,6 +24,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly BrowserUploadChannel uploads = new();
     private readonly DevelopmentFixtureSource developmentFixtures = new();
     private readonly UploadCatalogueController uploadCatalogue;
+    private readonly XObservationController xObservations;
     private readonly UploadThumbnailCatalogue uploadThumbnails;
     private readonly GeneratedUploadMediaStore generatedUploadMedia = new();
     private readonly ProductionHandoffCoordinator productionHandoffs;
@@ -73,6 +74,7 @@ public partial class MainWindow : Window, IDisposable
         );
         queuedRouter = router;
         uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets);
+        xObservations = new XObservationController(catalogue);
         uploadThumbnails = new UploadThumbnailCatalogue(catalogue);
         uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>
         {
@@ -175,6 +177,11 @@ public partial class MainWindow : Window, IDisposable
                 FileInfo file = await dispatcher.EnqueueAsync(() => uploadThumbnails.ConvertSelected(WithoutTransportMetadata(payload)));
                 return AgentResponse.SuccessResult(request, new { filePath = file.FullName, name = file.Name,
                     size = file.Length, lastModified = new DateTimeOffset(file.LastWriteTimeUtc).ToUnixTimeMilliseconds() });
+            }
+            if (request.Operation == "recordXObservations")
+            {
+                object recorded = await dispatcher.EnqueueAsync(() => xObservations.Record(WithoutTransportMetadata(payload)));
+                return AgentResponse.SuccessResult(request, recorded);
             }
             if (request.Operation == "writeUploadCatalogueEntry")
             {

@@ -3,7 +3,7 @@
 Applies to the personal Creator Workflow Toolkit extension and Windows workspace.
 The store edition has its separate [public policy](https://johnnyguides.github.io/OnlyFansEnhancer/privacy.html).
 This policy describes the current source, not an assurance about third-party
-websites or separately deployed services. Last updated: September 12, 2026.
+websites or separately deployed services. Last updated: October 1, 2026.
 
 ## Local processing and storage
 
@@ -40,6 +40,12 @@ The separate X host writes three representative JPEG frames, audit records and
 receipts under the configured local audit root, then performs a validated Done
 move only after the preceding audit and catalogue stages. It does not upload the
 audit to a developer service.
+
+While the user browses x.com, the extension passively reads X's responses for the
+signed-in account's own posts (and, as a fallback, the rendered posts) and stores
+their IDs, timestamps, text, links, media type/duration and public counters in the
+desktop catalogue. The account id is read from X's own data; other accounts'
+posts, reposted content, media bytes, cookies and request headers are not stored.
 
 ## Network destinations
 

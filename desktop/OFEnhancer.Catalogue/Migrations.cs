@@ -130,5 +130,49 @@ internal static class Migrations
         "ALTER TABLE catalogue_items ADD COLUMN category TEXT;"
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive];
+    // Passive X collection: the owner's own posts and point-in-time metric samples.
+    internal static readonly MigrationStep VersionSix = new(
+        6,
+        """
+        CREATE TABLE x_owner (
+            singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+            account_id TEXT,
+            handle TEXT NOT NULL,
+            first_seen_utc TEXT NOT NULL,
+            updated_utc TEXT NOT NULL
+        );
+
+        CREATE TABLE x_posts (
+            status_id TEXT PRIMARY KEY NOT NULL,
+            author_id TEXT,
+            posted_utc TEXT NOT NULL,
+            text TEXT NOT NULL DEFAULT '',
+            in_reply_to TEXT,
+            conversation_id TEXT,
+            is_retweet INTEGER NOT NULL DEFAULT 0 CHECK (is_retweet IN (0, 1)),
+            media_json TEXT NOT NULL DEFAULT '[]',
+            urls_json TEXT NOT NULL DEFAULT '[]',
+            first_seen_utc TEXT NOT NULL,
+            last_seen_utc TEXT NOT NULL
+        );
+        CREATE INDEX x_posts_posted_utc ON x_posts(posted_utc);
+
+        CREATE TABLE x_metric_samples (
+            sample_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status_id TEXT NOT NULL REFERENCES x_posts(status_id) ON DELETE CASCADE,
+            observed_utc TEXT NOT NULL,
+            age_hours REAL NOT NULL,
+            views INTEGER CHECK (views IS NULL OR views >= 0),
+            likes INTEGER CHECK (likes IS NULL OR likes >= 0),
+            reposts INTEGER CHECK (reposts IS NULL OR reposts >= 0),
+            replies INTEGER CHECK (replies IS NULL OR replies >= 0),
+            quotes INTEGER CHECK (quotes IS NULL OR quotes >= 0),
+            bookmarks INTEGER CHECK (bookmarks IS NULL OR bookmarks >= 0),
+            source TEXT NOT NULL CHECK (source IN ('network', 'dom')),
+            UNIQUE (status_id, observed_utc)
+        );
+        """
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix];
 }

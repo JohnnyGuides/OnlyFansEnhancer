@@ -15,6 +15,8 @@ importScripts(
   "workflows/x-teaser-session-store.js",
   "workflows/x-teaser-reconcile.js",
   "workflows/x-teaser-tab-binding.js",
+  "workflows/x-collector-contract.js",
+  "workflows/x-collector-forwarder.js",
 );
 
 ("use strict");
@@ -46,6 +48,27 @@ const X_TEASER_SESSION_STORE = globalThis.CreatorXTeaserSessionStore;
 const X_TEASER_BINDING_KEY = "creatorXTeaserChromeBindingV1";
 const X_TEASER_NATIVE_HOST = "com.johnnyguides.creator_x_teaser";
 const DESKTOP_NATIVE_HOST = "com.johnnyguides.ofenhancer";
+const X_COLLECTOR_CONTRACT = globalThis.CreatorXCollectorContract;
+const X_COLLECTOR_DIAGNOSTICS_KEY = "creatorXCollectorDiagnosticsV1";
+// Passive capture of the owner's own X posts: a main-world observer that must
+// run before X's code, plus the isolated relay that reports to this worker.
+const X_COLLECTOR_SCRIPTS = Object.freeze([
+  {
+    id: "creator-x-collector-page",
+    world: "MAIN",
+    js: ["workflows/x-collector-contract.js", "workflows/x-collector-page.js"],
+  },
+  // Chrome injects one script URL once per document across worlds, so the
+  // relay loads the same contract source under its own packaged name.
+  {
+    id: "creator-x-collector-relay",
+    world: "ISOLATED",
+    js: [
+      "workflows/x-collector-relay-contract.js",
+      "workflows/x-collector-relay.js",
+    ],
+  },
+]);
 const extensionLifecycle = globalThis.CreatorExtensionLifecycle?.create({
   chrome,
 });
@@ -146,6 +169,49 @@ async function sendDesktopRequest(operation, payload = {}) {
       },
     ),
   );
+}
+
+const xCollectorForwarder = globalThis.CreatorXCollectorForwarder?.create({
+  contract: X_COLLECTOR_CONTRACT,
+  send: (batch) => sendDesktopRequest("recordXObservations", batch),
+  persist: (diagnostics) =>
+    chrome.storage.session.set({ [X_COLLECTOR_DIAGNOSTICS_KEY]: diagnostics }),
+});
+
+function acceptXCollectorMessage(message, sender) {
+  let origin;
+  try {
+    origin = new URL(String(sender?.url || "")).origin;
+  } catch {
+    origin = "";
+  }
+  if (!sender?.tab?.id || sender.frameId !== 0 || origin !== "https://x.com")
+    throw new Error("X observations are accepted only from an x.com page.");
+  if (!xCollectorForwarder) throw new Error("X collector is unavailable.");
+  return xCollectorForwarder.accept(message);
+}
+
+async function syncXCollectorRegistration() {
+  const ids = X_COLLECTOR_SCRIPTS.map((entry) => entry.id);
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
+  if (existing.length) {
+    await chrome.scripting.unregisterContentScripts({
+      ids: existing.map((entry) => entry.id),
+    });
+  }
+  if (!(await hasAllOrigins(["https://x.com/*"]))) return false;
+  await chrome.scripting.registerContentScripts(
+    X_COLLECTOR_SCRIPTS.map((entry) => ({
+      id: entry.id,
+      matches: ["https://x.com/*"],
+      js: [...entry.js],
+      runAt: "document_start",
+      allFrames: false,
+      persistAcrossSessions: true,
+      world: entry.world,
+    })),
+  );
+  return true;
 }
 
 function sendXTeaserNative(request) {
@@ -2590,6 +2656,11 @@ async function performCreatorToolRegistrationSync(settings = null) {
   }
   if (registrations.length) {
     await chrome.scripting.registerContentScripts(registrations);
+  }
+  try {
+    await syncXCollectorRegistration();
+  } catch (error) {
+    console.warn("Could not register the passive X collector.", error);
   }
   for (const definition of activeDefinitions.filter((entry) =>
     entry.toolIds.includes("uploadTraceRecorder"),
@@ -5887,6 +5958,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
         return { uploadConsole: await openUploadConsole() };
       case "SHOW_UPLOAD_TRACE_RECORDER":
         return { traceRecorder: await showUploadTraceRecorder() };
+      case "CREATOR_X_COLLECTOR_BATCH":
+        return acceptXCollectorMessage(message, sender);
       case "GET_UPLOAD_TRACE_CONTEXT":
         return { ownerId: sender.tab?.id ? `tab-${sender.tab.id}` : "" };
       case "GET_CREATOR_UPLOAD_RECOVERY": {

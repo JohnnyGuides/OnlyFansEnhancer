@@ -249,6 +249,8 @@ const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), "fim-load-test-"));
       "creator-toolkit-onlyfans-lists",
       "creator-toolkit-pornhub",
       "creator-toolkit-sheer",
+      "creator-x-collector-page",
+      "creator-x-collector-relay",
     ]);
     assert.equal(toolkitState.parsedRealbooruId, "321");
     assert.equal(toolkitState.hasUploadSessionStore, true);

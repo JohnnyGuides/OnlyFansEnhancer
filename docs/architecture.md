@@ -114,6 +114,37 @@ Retries accept identical existing artifacts; conflicting files or destinations
 stop. The receipt, hash/root checks, and audit → Sheet → move ordering are all
 required. Neither native host owns Chrome cookies or authenticated site sessions.
 
+## X collection
+
+The personal extension passively records the owner's own X posts while the owner
+browses x.com; it never clicks, types, scrolls or navigates there. The worker
+registers two dynamic `https://x.com/*` scripts at `document_start`:
+`x-collector-page.js` in the main world wraps `fetch` and `XMLHttpRequest` before
+X's code captures them, returns X's original responses unchanged, and reads a
+clone of responses from the GraphQL operation allowlist in
+`x-collector-contract.js` only. The account id comes from X's own `twid` cookie
+or `Viewer` response; posts by any other author are dropped. A response whose
+shape no longer parses is discarded whole and counted as `schema-drift`. Batches
+reach the isolated `x-collector-relay.js` over a page event bound to a nonce
+exchanged before X's scripts run. Chrome injects one script URL once per
+document across worlds, so the relay loads the same contract source as
+`x-collector-relay-contract.js`. When no network batch arrives, the relay reads
+rendered owner articles (status link, `time`, text, video, metrics `aria-label`)
+and tags them `dom`. The worker validates every batch strictly
+(`x-collector-forwarder.js`), keeps a bounded queue, forwards at most 25 rows per
+`recordXObservations` desktop request, drops undeliverable batches without
+retrying, and keeps counters in session storage
+(`creatorXCollectorDiagnosticsV1`).
+
+Catalogue migration 6 adds `x_owner` (the single recorded account; a different
+account is refused with `x-owner-mismatch`), `x_posts` (one row per status;
+network rows own the content, DOM rows only refresh sightings) and
+`x_metric_samples` (actual age in hours, at most one sample per status and
+minute, near-identical samples within 10 minutes skipped). The desktop repeats
+shape, size and author checks and stores reposts without their foreign text,
+media, links or counters. Only IDs, timestamps, counters, links and the text of
+the owner's own posts are stored; no media, other accounts or cookies.
+
 ## Source and generated boundaries
 
 [The composition recipe](../packaging/extensions.json) maps runtime paths to

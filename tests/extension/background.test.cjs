@@ -1740,6 +1740,29 @@ function send(message) {
     assert.deepEqual(registration.js, ["workflows/upload-trace-recorder.js"]);
     assert.equal(registration.runAt, "document_start");
   }
+  for (const [id, world, js] of [
+    [
+      "creator-x-collector-page",
+      "MAIN",
+      ["workflows/x-collector-contract.js", "workflows/x-collector-page.js"],
+    ],
+    [
+      "creator-x-collector-relay",
+      "ISOLATED",
+      [
+        "workflows/x-collector-relay-contract.js",
+        "workflows/x-collector-relay.js",
+      ],
+    ],
+  ]) {
+    const registration = registeredContentScripts.get(id);
+    assert.ok(registration, `${id} should register for passive X collection.`);
+    assert.deepEqual(registration.matches, ["https://x.com/*"]);
+    assert.deepEqual(registration.js, js);
+    assert.equal(registration.runAt, "document_start");
+    assert.equal(registration.world, world);
+    assert.equal(registration.allFrames, false);
+  }
   const redgifsTrace = registeredContentScripts.get(
     "creator-toolkit-upload-trace-redgifs",
   );
