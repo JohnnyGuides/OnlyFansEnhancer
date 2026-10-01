@@ -1,15 +1,15 @@
 (() => {
   "use strict";
 
-  // Isolated-world half of the passive X collector. Relays nonce-bound
-  // batches from the main-world observer to the extension worker, and reads
+  // Isolated-world half of the passive X collector. Relays batches from the
+  // main-world observer's private port to the extension worker, and reads
   // rendered owner posts as a fallback when no network data arrived.
   const contract = globalThis.CreatorXCollectorContract;
   if (!contract || globalThis.CreatorXCollectorRelay) return;
 
   const DOM_FALLBACK_DELAY_MS = 10_000;
   const DOM_SCAN_DEBOUNCE_MS = 2_000;
-  let nonce = null;
+  let port = null;
   let networkSeen = false;
   let scanTimer = null;
   let fallbackReady = false;
@@ -26,26 +26,9 @@
     }
   }
 
-  function onPageEvent(event) {
-    let detail;
-    try {
-      detail = JSON.parse(String(event.detail || ""));
-    } catch {
-      return;
-    }
+  function onPortMessage(event) {
+    const detail = event.data;
     if (!detail || typeof detail !== "object") return;
-    if (detail.kind === "hello") {
-      if (nonce === null && /^[a-f0-9]{32}$/.test(String(detail.nonce || ""))) {
-        nonce = detail.nonce;
-        document.dispatchEvent(
-          new CustomEvent(contract.PAGE_EVENT, {
-            detail: JSON.stringify({ kind: "locked" }),
-          }),
-        );
-      }
-      return;
-    }
-    if (nonce === null || detail.nonce !== nonce) return;
     if (detail.kind === "batch") {
       networkSeen = true;
       send({ batch: detail.batch });
@@ -57,6 +40,21 @@
         },
       });
     }
+  }
+
+  // Accept exactly one port, offered before X's scripts run.
+  function onPageEvent(event) {
+    if (port !== null || event.data !== JSON.stringify({ kind: "hello" }))
+      return;
+    const offered = event.ports?.[0];
+    if (!offered || typeof offered.postMessage !== "function") return;
+    port = offered;
+    port.onmessage = onPortMessage;
+    document.dispatchEvent(
+      new CustomEvent(contract.PAGE_EVENT, {
+        detail: JSON.stringify({ kind: "locked" }),
+      }),
+    );
   }
 
   function scanDocument() {

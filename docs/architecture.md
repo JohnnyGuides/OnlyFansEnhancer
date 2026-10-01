@@ -124,21 +124,28 @@ X's code captures them, returns X's original responses unchanged, and reads a
 clone of responses from the GraphQL operation allowlist in
 `x-collector-contract.js` only. The account id comes from X's own `twid` cookie
 or `Viewer` response; posts by any other author are dropped. A response whose
-shape no longer parses is discarded whole and counted as `schema-drift`. Batches
-reach the isolated `x-collector-relay.js` over a page event bound to a nonce
-exchanged before X's scripts run. Chrome injects one script URL once per
+shape no longer parses is discarded whole and counted as `schema-drift`; quoted
+and reposted posts nested in a response are not parsed. Before X's scripts run,
+the page script hands a `MessageChannel` port to the isolated
+`x-collector-relay.js` over a synchronous DOM event, at most once; batches then
+travel only over that port, which page scripts never see. Chrome injects one script URL once per
 document across worlds, so the relay loads the same contract source as
 `x-collector-relay-contract.js`. When no network batch arrives, the relay reads
 rendered owner articles (status link, `time`, text, video, metrics `aria-label`)
-and tags them `dom`. The worker validates every batch strictly
+and tags them `dom`. Text and video come only from the outer post: anything
+inside an embedded quote block (nested `article`, `div[role="link"]` or
+`quoteTweet`) is ignored, and when the outer post's text cannot be isolated (more
+than one remaining timestamp or text block) the row keeps no text or media. The worker validates every batch strictly
 (`x-collector-forwarder.js`), keeps a bounded queue, forwards at most 25 rows per
 `recordXObservations` desktop request, drops undeliverable batches without
 retrying, and keeps counters in session storage
-(`creatorXCollectorDiagnosticsV1`).
+(`creatorXCollectorDiagnosticsV1`), including `ownerMismatchRows` with the time
+and handle of the last batch the desktop refused for a different account.
 
 Catalogue migration 6 adds `x_owner` (the single recorded account; a different
 account is refused with `x-owner-mismatch`), `x_posts` (one row per status;
-network rows own the content, DOM rows only refresh sightings) and
+the first sighting inserts the row from either source; afterwards network rows
+own the content and DOM rows only refresh sightings) and
 `x_metric_samples` (actual age in hours, at most one sample per status and
 minute, near-identical samples within 10 minutes skipped). The desktop repeats
 shape, size and author checks and stores reposts without their foreign text,

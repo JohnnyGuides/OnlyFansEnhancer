@@ -344,48 +344,7 @@ test("owner identity comes from X's own cookie or viewer response", () => {
   );
 });
 
-function fakeElement({ attrs = {}, text = "", children = {}, closest = null }) {
-  return {
-    textContent: text,
-    getAttribute: (name) => attrs[name] ?? null,
-    querySelector: (selector) => children[selector] || null,
-    closest: () => closest,
-  };
-}
-
-function fakeArticle({
-  href,
-  datetime = "2026-09-27T18:04:11.000Z",
-  label,
-  video = true,
-  social = false,
-}) {
-  const anchor = fakeElement({ attrs: { href } });
-  const time = fakeElement({ attrs: { datetime }, closest: anchor });
-  return fakeElement({
-    children: {
-      "time[datetime]": time,
-      'div[role="group"][aria-label]': fakeElement({
-        attrs: { "aria-label": label },
-      }),
-      'div[data-testid="tweetText"]': fakeElement({
-        text: "benign dom teaser",
-      }),
-      ...(video
-        ? { 'div[data-testid="videoPlayer"], video': fakeElement({}) }
-        : {}),
-      ...(social
-        ? {
-            '[data-testid="socialContext"]': fakeElement({
-              text: "You reposted",
-            }),
-          }
-        : {}),
-    },
-  });
-}
-
-test("DOM fallback reads metrics labels from owner articles only", () => {
+test("metric labels and the owner profile link parse without page access", () => {
   const contract = loadContract();
   assert.deepEqual(
     JSON.parse(
@@ -405,51 +364,33 @@ test("DOM fallback reads metrics labels from owner articles only", () => {
     },
   );
   assert.equal(contract.parseMetricLabel("Reply"), null);
-  const row = contract.extractDomArticle(
-    fakeArticle({
-      href: "/owner_handle/status/401",
-      label: "1 reply, 0 reposts, 2 likes, 0 bookmarks, 30 views",
-    }),
+  const link = { getAttribute: () => "/Owner_Handle" };
+  assert.equal(
+    contract.ownerHandleFromDocument({ querySelector: () => link }),
     "Owner_Handle",
   );
-  assert.equal(row.statusId, "401");
-  assert.equal(row.source, "dom");
-  assert.equal(row.authorId, null);
-  assert.equal(row.metrics.views, 30);
-  assert.equal(row.media[0].type, "video");
-  assert.equal(
-    contract.validateBatch({
-      owner: { accountId: null, handle: "Owner_Handle" },
-      observations: [row],
-    }).observations.length,
-    1,
-  );
-  assert.equal(
-    contract.extractDomArticle(
-      fakeArticle({ href: "/Someone_Else/status/402", label: "1 reply" }),
-      "Owner_Handle",
-    ),
-    null,
-  );
-  assert.equal(
-    contract.extractDomArticle(
-      fakeArticle({
-        href: "/Owner_Handle/status/403",
-        label: "1 reply",
-        social: true,
-      }),
-      "Owner_Handle",
-    ),
-    null,
-  );
-  const doc = fakeElement({
-    children: {
-      'a[data-testid="AppTabBar_Profile_Link"]': fakeElement({
-        attrs: { href: "/Owner_Handle" },
-      }),
-    },
-  });
-  assert.equal(contract.ownerHandleFromDocument(doc), "Owner_Handle");
+});
+
+test("text is capped on a code-point boundary", () => {
+  const contract = loadContract();
+  const emoji = "\u{1F600}";
+  const note = tweet("106");
+  note.note_tweet = {
+    note_tweet_results: { result: { text: "a".repeat(1999) + emoji + "b" } },
+  };
+  const [row] = contract.extractOwnerTweets(
+    userTweets([note]),
+    OWNER_ID,
+  ).tweets;
+  assert.equal(row.text, "a".repeat(1999));
+  assert.doesNotMatch(row.text, /[\uD800-\uDFFF]/);
+  const exact = tweet("107", { full_text: "a".repeat(1998) + emoji + "b" });
+  const [kept] = contract.extractOwnerTweets(
+    userTweets([exact]),
+    OWNER_ID,
+  ).tweets;
+  assert.equal(kept.text, "a".repeat(1998) + emoji);
+  assert.equal(kept.text.length, contract.MAX_TEXT);
 });
 
 function validRow(overrides = {}) {
@@ -545,12 +486,25 @@ test("worker batch validation is strict and drops foreign authors", () => {
     assert.throws(() => contract.validateBatch(batch), /invalid-x-batch/);
 });
 
+const channels = [];
+class TrackedChannel extends MessageChannel {
+  constructor() {
+    super();
+    channels.push(this);
+  }
+}
+test.afterEach(() => {
+  for (const channel of channels.splice(0)) channel.port1.close();
+});
+
 function pageWorld({ document, fetchImpl, XMLHttpRequest }) {
   const context = vm.createContext({
     URL,
     crypto,
     document,
     CustomEvent,
+    MessageEvent,
+    MessageChannel: TrackedChannel,
     fetch: fetchImpl,
     XMLHttpRequest,
     Symbol,
@@ -588,7 +542,7 @@ function fakeDocument() {
   return document;
 }
 
-const flush = () => new Promise((resolve) => setImmediate(resolve));
+const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 test("main-world fetch wrapper returns X's own response untouched and relays owner posts", async () => {
   const document = fakeDocument();
@@ -702,12 +656,25 @@ test("main-world XHR wrapper reads json and text responses without altering them
     response: userTweets([broken]),
   });
   drifted.dispatchEvent(new Event("load"));
+  // A reused object first opened for an unwatched URL is still observed on a
+  // later watched open, and each load is read once.
+  const reused = new page.XMLHttpRequest();
+  reused.open("GET", "https://x.com/i/api/graphql/q/SearchTimeline");
+  reused.open("GET", "https://x.com/i/api/graphql/q/UserTweets");
+  reused.open("GET", "https://x.com/i/api/graphql/q/UserTweets");
+  Object.assign(reused, {
+    status: 200,
+    responseType: "json",
+    response: userTweets([tweet("705")]),
+  });
+  reused.dispatchEvent(new Event("load"));
+  reused.dispatchEvent(new Event("load"));
   await flush();
   assert.deepEqual(
     sent
       .filter((message) => message.batch)
       .map((message) => message.batch.observations[0].statusId),
-    ["701", "702"],
+    ["701", "702", "705"],
   );
   assert.deepEqual(
     sent
@@ -717,30 +684,54 @@ test("main-world XHR wrapper reads json and text responses without altering them
   );
 });
 
-test("relay locks onto one nonce and ignores spoofed page events", () => {
+test("relay takes exactly one private port and ignores page-visible events", async () => {
   const document = fakeDocument();
   const sent = [];
   relayWorld({ document, sent });
-  const emit = (detail) =>
-    document.dispatchEvent(
-      new CustomEvent("creator-x-collector", {
-        detail: JSON.stringify(detail),
-      }),
-    );
   const batch = {
     owner: { accountId: OWNER_ID, handle: "Owner_Handle" },
     observations: [JSON.parse(JSON.stringify(validRow()))],
   };
-  emit({ kind: "batch", nonce: "a".repeat(32), batch });
-  assert.equal(sent.length, 0, "No batch is relayed before the handshake.");
-  emit({ kind: "hello", nonce: "a".repeat(32) });
-  emit({ kind: "hello", nonce: "b".repeat(32) });
-  emit({ kind: "batch", nonce: "b".repeat(32), batch });
-  emit({ kind: "batch", batch });
-  assert.equal(sent.length, 0, "A second hello cannot replace the nonce.");
-  emit({ kind: "batch", nonce: "a".repeat(32), batch });
-  assert.equal(sent.length, 1);
+  const locked = [];
+  document.addEventListener("creator-x-collector", (event) => {
+    if (event.detail && JSON.parse(event.detail).kind === "locked")
+      locked.push(true);
+  });
+  const offer = () => {
+    const channel = new TrackedChannel();
+    document.dispatchEvent(
+      new MessageEvent("creator-x-collector", {
+        data: JSON.stringify({ kind: "hello" }),
+        ports: [channel.port2],
+      }),
+    );
+    return channel.port1;
+  };
+  // Page-visible events never carry batches any more.
+  document.dispatchEvent(
+    new CustomEvent("creator-x-collector", {
+      detail: JSON.stringify({ kind: "batch", batch }),
+    }),
+  );
+  const first = offer();
+  const second = offer();
+  assert.equal(locked.length, 1);
+  second.postMessage({ kind: "batch", batch });
+  await flush();
+  assert.equal(sent.length, 0, "A later port cannot replace the first.");
+  first.postMessage({ kind: "batch", batch });
+  first.postMessage({
+    kind: "diagnostic",
+    operation: "UserTweets",
+    reason: "schema-drift",
+  });
+  await flush();
+  assert.equal(sent.length, 2);
   assert.equal(sent[0].batch.observations[0].statusId, "501");
+  assert.deepEqual(sent[1].diagnostic, {
+    operation: "UserTweets",
+    reason: "schema-drift",
+  });
 });
 
 test("page and relay complete the handshake in either load order", async () => {
@@ -760,10 +751,10 @@ test("page and relay complete the handshake in either load order", async () => {
       relayWorld({ document, sent });
       page = pageWorld({ document, fetchImpl, XMLHttpRequest: undefined });
     }
-    // A late spoofed "ready" cannot make the page reveal its nonce again.
+    // A late spoofed "ready" cannot make the page offer its port again.
     const hellos = [];
     document.addEventListener("creator-x-collector", (event) => {
-      if (JSON.parse(event.detail).kind === "hello") hellos.push(event);
+      if (event.ports?.length) hellos.push(event);
     });
     document.dispatchEvent(
       new CustomEvent("creator-x-collector", {
@@ -802,8 +793,9 @@ test("worker forwarder validates, bounds and forwards small desktop batches", as
     contract,
     send: async (batch) => {
       if (failNext) {
+        const code = failNext === true ? "desktop-unavailable" : failNext;
         failNext = false;
-        throw new Error("desktop-unavailable");
+        throw new Error(code);
       }
       forwarded.push(JSON.parse(JSON.stringify(batch)));
       return {};
@@ -856,7 +848,13 @@ test("worker forwarder validates, bounds and forwards small desktop batches", as
   failNext = true;
   forwarder.accept({ batch: { owner, observations: rows.slice(0, 1) } });
   await forwarder.flush();
+  failNext = "x-owner-mismatch";
+  forwarder.accept({ batch: { owner, observations: rows.slice(0, 2) } });
+  await forwarder.flush();
   const diagnostics = forwarder.diagnostics();
+  assert.equal(diagnostics.ownerMismatchRows, 2);
+  assert.equal(diagnostics.lastOwnerMismatchHandle, "Owner_Handle");
+  assert.match(diagnostics.lastOwnerMismatchUtc, /^\d{4}-/);
   assert.equal(diagnostics.rowsForwarded, 60);
   assert.equal(diagnostics.desktopFailures, 1);
   assert.equal(diagnostics.batchesRejected, 1);
@@ -886,90 +884,4 @@ test("the collector is registered dynamically: main world at document_start plus
     fs.readFileSync(path.join(repositoryRoot, "manifest.json"), "utf8"),
   );
   assert.equal(JSON.stringify(manifest).includes("x-collector"), false);
-});
-
-test("relay DOM fallback reports owner articles once and stops after network data", () => {
-  const document = fakeDocument();
-  const articles = [
-    fakeArticle({
-      href: "/Owner_Handle/status/901",
-      label: "1 reply, 0 reposts, 2 likes, 0 bookmarks, 30 views",
-    }),
-    fakeArticle({ href: "/Someone_Else/status/902", label: "5 likes" }),
-  ];
-  document.documentElement = {};
-  document.querySelector = (selector) =>
-    selector === 'a[data-testid="AppTabBar_Profile_Link"]'
-      ? fakeElement({ attrs: { href: "/Owner_Handle" } })
-      : null;
-  document.querySelectorAll = (selector) =>
-    selector === "article" ? articles : [];
-  const timers = [];
-  let mutationCallback = null;
-  const sent = [];
-  const context = vm.createContext({
-    URL,
-    document,
-    CustomEvent,
-    setTimeout: (callback) => timers.push(callback),
-    MutationObserver: class {
-      constructor(callback) {
-        mutationCallback = callback;
-      }
-      observe() {}
-    },
-    chrome: {
-      runtime: {
-        sendMessage(message, callback) {
-          sent.push(JSON.parse(JSON.stringify(message)));
-          callback?.();
-        },
-      },
-    },
-  });
-  run(context, "workflows/x-collector-relay-contract.js");
-  run(context, "workflows/x-collector-relay.js");
-  mutationCallback();
-  assert.equal(timers.length, 1, "No DOM scan before the fallback delay.");
-  timers.shift()();
-  timers.shift()();
-  assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].batch.owner, {
-    accountId: null,
-    handle: "Owner_Handle",
-  });
-  assert.deepEqual(
-    sent[0].batch.observations.map((row) => [
-      row.statusId,
-      row.source,
-      row.metrics.likes,
-    ]),
-    [["901", "dom", 2]],
-  );
-  mutationCallback();
-  timers.shift()();
-  assert.equal(sent.length, 1, "Unchanged articles are not re-sent.");
-  const nonce = "c".repeat(32);
-  const emit = (detail) =>
-    document.dispatchEvent(
-      new CustomEvent("creator-x-collector", {
-        detail: JSON.stringify(detail),
-      }),
-    );
-  emit({ kind: "hello", nonce });
-  emit({
-    kind: "batch",
-    nonce,
-    batch: {
-      owner: { accountId: OWNER_ID, handle: "Owner_Handle" },
-      observations: [],
-    },
-  });
-  articles[0] = fakeArticle({
-    href: "/Owner_Handle/status/901",
-    label: "9 likes",
-  });
-  mutationCallback();
-  assert.equal(timers.length, 0, "Network data disables the DOM fallback.");
-  assert.equal(sent.length, 2);
 });

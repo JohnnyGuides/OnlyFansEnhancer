@@ -33,6 +33,9 @@
       rowsDroppedQueueFull: 0,
       batchesRejected: 0,
       desktopFailures: 0,
+      ownerMismatchRows: 0,
+      lastOwnerMismatchUtc: "",
+      lastOwnerMismatchHandle: "",
       lastDesktopError: "",
       lastForwardedUtc: "",
       pageReasons: {},
@@ -112,6 +115,14 @@
             diagnostics.rowsForwarded += batch.observations.length;
             diagnostics.lastForwardedUtc = new Date().toISOString();
           } catch (error) {
+            // The desktop keeps the first recorded account and refuses any
+            // other; surface that plainly instead of as a generic failure.
+            if (error?.message === "x-owner-mismatch") {
+              diagnostics.ownerMismatchRows += batch.observations.length;
+              diagnostics.lastOwnerMismatchUtc = new Date().toISOString();
+              diagnostics.lastOwnerMismatchHandle = batch.owner.handle;
+              continue;
+            }
             diagnostics.desktopFailures += 1;
             diagnostics.lastDesktopError = String(
               error?.message || "desktop-unavailable",

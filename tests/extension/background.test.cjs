@@ -1763,6 +1763,34 @@ function send(message) {
     assert.equal(registration.world, world);
     assert.equal(registration.allFrames, false);
   }
+  const xCollectorReply = (sender) =>
+    new Promise((resolve) =>
+      messageListener(
+        {
+          type: "CREATOR_X_COLLECTOR_BATCH",
+          diagnostic: { operation: "UserTweets", reason: "schema-drift" },
+        },
+        sender,
+        resolve,
+      ),
+    );
+  const xPage = { tab: { id: 77 }, frameId: 0, url: "https://x.com/Owner" };
+  for (const sender of [
+    {},
+    { ...xPage, tab: undefined },
+    { ...xPage, frameId: 1 },
+    { ...xPage, url: "https://onlyfans.com/my/home" },
+    { ...xPage, url: "https://x.com.evil.example/Owner" },
+    { ...xPage, url: "http://x.com/Owner" },
+    { ...xPage, url: "not a url" },
+  ]) {
+    const reply = await xCollectorReply(sender);
+    assert.equal(reply.ok, false, JSON.stringify(sender));
+    assert.match(reply.error, /only from an x\.com page/);
+  }
+  const accepted = await xCollectorReply(xPage);
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.queued, 0);
   const redgifsTrace = registeredContentScripts.get(
     "creator-toolkit-upload-trace-redgifs",
   );

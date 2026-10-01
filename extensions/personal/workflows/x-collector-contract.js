@@ -97,8 +97,12 @@
     return Number.isFinite(time) ? new Date(time).toISOString() : null;
   }
 
+  // Cut at MAX_TEXT UTF-16 units without leaving half a surrogate pair.
   function capText(value) {
-    return String(value || "").slice(0, MAX_TEXT);
+    const text = String(value || "");
+    if (text.length <= MAX_TEXT) return text;
+    const cut = text.slice(0, MAX_TEXT);
+    return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
   }
 
   function safeUrl(value, hosts = null) {
@@ -350,33 +354,47 @@
     return match ? match[1] : null;
   }
 
+  // Quoted posts render inside the article as their own block; anything in
+  // such a block belongs to another post (usually another author).
+  const NESTED_POST = 'article, div[role="link"], [data-testid="quoteTweet"]';
+
+  function ownElements(article, selector) {
+    return [...article.querySelectorAll(selector)].filter(
+      (element) => element.closest(NESTED_POST) === article,
+    );
+  }
+
   // DOM fallback: read one rendered article. Returns null unless it is a
-  // post authored by the owner handle.
+  // post authored by the owner handle. Text and media come only from the
+  // outer post; when they cannot be isolated from an embedded quote, none
+  // are kept.
   function extractDomArticle(article, ownerHandle) {
     if (!article || !HANDLE.test(String(ownerHandle || ""))) return null;
-    if (article.querySelector('[data-testid="socialContext"]')) return null;
-    const time = article.querySelector("time[datetime]");
-    const anchor = time?.closest?.("a[href]");
-    const status = statusFromHref(anchor?.getAttribute?.("href"));
-    const createdAt = isoDate(time?.getAttribute?.("datetime"));
+    if (ownElements(article, '[data-testid="socialContext"]').length)
+      return null;
+    const times = ownElements(article, "time[datetime]");
+    const time = times[0];
+    const anchor = time?.closest("a[href]");
+    const status = statusFromHref(anchor?.getAttribute("href"));
+    const createdAt = isoDate(time?.getAttribute("datetime"));
     if (
       !status ||
       !createdAt ||
       status.handle.toLowerCase() !== String(ownerHandle).toLowerCase()
     )
       return null;
-    const group = article.querySelector('div[role="group"][aria-label]');
-    const hasVideo = Boolean(
-      article.querySelector('div[data-testid="videoPlayer"], video'),
-    );
+    const texts = ownElements(article, 'div[data-testid="tweetText"]');
+    const isolated = times.length === 1 && texts.length <= 1;
+    const hasVideo =
+      isolated &&
+      ownElements(article, 'div[data-testid="videoPlayer"], video').length > 0;
+    const group = ownElements(article, 'div[role="group"][aria-label]')[0];
     return {
       statusId: status.statusId,
       authorId: null,
       authorHandle: status.handle,
       createdAt,
-      text: capText(
-        article.querySelector('div[data-testid="tweetText"]')?.textContent,
-      ),
+      text: isolated && texts.length ? capText(texts[0].textContent) : "",
       inReplyToStatusId: null,
       conversationId: null,
       isRetweet: false,
@@ -384,7 +402,7 @@
         ? [{ type: "video", mediaKey: null, durationMs: null, posterUrl: null }]
         : [],
       urls: [],
-      metrics: parseMetricLabel(group?.getAttribute?.("aria-label")),
+      metrics: parseMetricLabel(group?.getAttribute("aria-label")),
       source: "dom",
     };
   }

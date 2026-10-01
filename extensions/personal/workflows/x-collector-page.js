@@ -4,24 +4,22 @@
   // Main-world half of the passive X collector. Injected at document_start,
   // before X's own code captures fetch/XMLHttpRequest, so X keeps calling the
   // wrappers below. The wrappers never alter requests or responses; they read
-  // a clone of allowlisted GraphQL responses and announce the owner's own
-  // posts to the isolated relay over a nonce-bound page event.
+  // a clone of allowlisted GraphQL responses and send the owner's own posts
+  // to the isolated relay over a private MessageChannel port.
   const contract = globalThis.CreatorXCollectorContract;
   const marker = Symbol.for("creator.x-collector.page");
   if (!contract || globalThis[marker]) return;
   Object.defineProperty(globalThis, marker, { value: true });
 
   const MAX_RESPONSE_CHARS = 8_000_000;
-  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  const channel = new MessageChannel();
   const owner = { accountId: null, handle: null };
-  let answeredReady = false;
+  let handedOver = false;
 
+  // Messages queue on the port until the relay starts it; page scripts never
+  // see the port, so they can neither read nor forge collector messages.
   function announce(detail) {
-    document.dispatchEvent(
-      new CustomEvent(contract.PAGE_EVENT, { detail: JSON.stringify(detail) }),
-    );
+    channel.port1.postMessage(detail);
   }
 
   function currentOwnerId() {
@@ -34,7 +32,7 @@
   }
 
   function diagnostic(operation, reason) {
-    announce({ kind: "diagnostic", nonce, operation, reason });
+    announce({ kind: "diagnostic", operation, reason });
   }
 
   function inspect(operation, payload) {
@@ -64,7 +62,6 @@
     ) {
       announce({
         kind: "batch",
-        nonce,
         operation,
         batch: {
           owner: { accountId: ownerId, handle: owner.handle },
@@ -122,9 +119,8 @@
   const XhrPrototype = globalThis.XMLHttpRequest?.prototype;
   if (XhrPrototype && typeof XhrPrototype.open === "function") {
     const nativeOpen = XhrPrototype.open;
-    const readXhr = (xhr) => {
-      const operation = xhrOperations.get(xhr);
-      if (!operation || xhr.status < 200 || xhr.status >= 300) return;
+    const readXhr = (xhr, operation) => {
+      if (xhr.status < 200 || xhr.status >= 300) return;
       let payload;
       if (xhr.responseType === "json") payload = xhr.response;
       else if (xhr.responseType === "" || xhr.responseType === "text") {
@@ -139,13 +135,22 @@
       } else return;
       safeInspect(operation, payload);
     };
+    // Every open() of a watched URL gets its own one-shot listener; a token
+    // ties it to that open so a reused object is read once per request.
     XhrPrototype.open = function creatorObservedOpen(...args) {
       try {
         const operation = watchedOperation(args[1]);
-        const known = xhrOperations.has(this);
-        xhrOperations.set(this, operation);
-        if (operation && !known)
-          this.addEventListener("load", () => readXhr(this));
+        const token = {};
+        xhrOperations.set(this, { operation, token });
+        if (operation)
+          this.addEventListener(
+            "load",
+            () => {
+              if (xhrOperations.get(this)?.token === token)
+                readXhr(this, operation);
+            },
+            { once: true },
+          );
       } catch {
         // Observation must never affect X's own request.
       }
@@ -153,8 +158,17 @@
     };
   }
 
-  // Handshake: in either load order, the relay locks onto exactly one
-  // nonce before X's scripts run; later page events without it are ignored.
+  // Handshake over synchronous DOM events before X's scripts run: in either
+  // load order the relay receives the port exactly once, then announces
+  // "locked" and the port is never offered again.
+  function offerPort() {
+    document.dispatchEvent(
+      new MessageEvent(contract.PAGE_EVENT, {
+        data: JSON.stringify({ kind: "hello" }),
+        ports: [channel.port2],
+      }),
+    );
+  }
   document.addEventListener(contract.PAGE_EVENT, (event) => {
     let detail;
     try {
@@ -162,11 +176,10 @@
     } catch {
       return;
     }
-    // Once the relay holds the nonce, never reveal it again.
-    if (detail?.kind === "locked") answeredReady = true;
-    if (detail?.kind !== "ready" || answeredReady) return;
-    answeredReady = true;
-    announce({ kind: "hello", nonce });
+    if (detail?.kind === "locked") handedOver = true;
+    if (detail?.kind !== "ready" || handedOver) return;
+    handedOver = true;
+    offerPort();
   });
-  announce({ kind: "hello", nonce });
+  offerPort();
 })();

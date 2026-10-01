@@ -44,8 +44,12 @@ audit to a developer service.
 While the user browses x.com, the extension passively reads X's responses for the
 signed-in account's own posts (and, as a fallback, the rendered posts) and stores
 their IDs, timestamps, text, links, media type/duration and public counters in the
-desktop catalogue. The account id is read from X's own data; other accounts'
-posts, reposted content, media bytes, cookies and request headers are not stored.
+desktop catalogue. The account id is read from X's own data. Other accounts'
+posts, reposted content and posts quoted inside the owner's posts (their text,
+media and counters) are excluded; when a rendered post's own text cannot be
+separated from an embedded quote, no text or media is kept for it. Media bytes,
+cookies and request headers are not stored. The catalogue keeps the first
+recorded X account and refuses posts from any other account.
 
 ## Network destinations
 
