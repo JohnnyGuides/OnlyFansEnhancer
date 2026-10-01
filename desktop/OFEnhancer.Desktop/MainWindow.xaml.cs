@@ -193,7 +193,7 @@ public partial class MainWindow : Window, IDisposable
             }
             if (request.Operation == "undoTeaserClipMove")
             {
-                object undone = await dispatcher.EnqueueAsync(() => xTeasers.Undo(WithoutTransportMetadata(payload)));
+                object undone = await xTeasers.UndoAsync(WithoutTransportMetadata(payload));
                 return AgentResponse.SuccessResult(request, undone);
             }
             if (request.Operation == "writeUploadCatalogueEntry")

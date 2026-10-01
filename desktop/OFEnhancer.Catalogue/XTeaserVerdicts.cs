@@ -7,6 +7,10 @@ public sealed record XVerdictResult(int Decided, int WithoutCohort);
 
 public sealed record XClipMoveOutcome(long MoveId, long ClipId, string FromRelPath, string ToRelPath, string Reason, string Outcome);
 
+public sealed record XClipMoveCandidate(long ClipId, string RelPath, long SizeBytes, string Sha256, string Verdict);
+
+public sealed record XClipUndoPlan(long MoveId, long ClipId, string OriginalRelPath, string CurrentRelPath, long SizeBytes, string Sha256);
+
 public sealed partial class CatalogueStore
 {
     internal static readonly TimeSpan XVerdictAge = TimeSpan.FromDays(7);
@@ -17,7 +21,8 @@ public sealed partial class CatalogueStore
 
     // Takes the 7-day verdict once per teaser: engagement (likes + reposts +
     // replies + bookmarks) / views at the sample closest to 7 days within ages 6–10 days,
-    // against the median of other teasers' samples in the same window.
+    // against the median of other teasers' samples in the same window. The
+    // owner's own first reply, once posted, is not counted as a reply.
     public XVerdictResult DecideXVerdicts(DateTimeOffset now)
     {
         DateTimeOffset utc = now.ToUniversalTime();
@@ -26,10 +31,11 @@ public sealed partial class CatalogueStore
         using (SqliteCommand read = connection.CreateCommand())
         {
             read.CommandText = """
-                SELECT status_id, age_hours, views, likes, reposts, replies, bookmarks FROM x_metric_samples
-                WHERE age_hours >= $start AND age_hours <= $end AND views > 0
-                  AND likes IS NOT NULL AND reposts IS NOT NULL AND replies IS NOT NULL AND bookmarks IS NOT NULL
-                ORDER BY status_id, ABS(age_hours - 168), observed_utc
+                SELECT s.status_id, s.age_hours, s.views, s.likes, s.reposts, s.replies, s.bookmarks, s.observed_utc, f.replied_utc
+                FROM x_metric_samples s LEFT JOIN x_first_replies f ON f.status_id = s.status_id
+                WHERE s.age_hours >= $start AND s.age_hours <= $end AND s.views > 0
+                  AND s.likes IS NOT NULL AND s.reposts IS NOT NULL AND s.replies IS NOT NULL AND s.bookmarks IS NOT NULL
+                ORDER BY s.status_id, ABS(s.age_hours - 168), s.observed_utc
                 """;
             read.Parameters.AddWithValue("$start", XVerdictWindowStartHours);
             read.Parameters.AddWithValue("$end", XVerdictWindowEndHours);
@@ -38,7 +44,9 @@ public sealed partial class CatalogueStore
             {
                 string statusId = reader.GetString(0);
                 if (rates.ContainsKey(statusId)) continue;
-                decimal rate = (reader.GetInt64(3) + reader.GetInt64(4) + reader.GetInt64(5) + reader.GetInt64(6))
+                bool ownReply = !reader.IsDBNull(8) && ParseUtc(reader.GetString(8)) <= ParseUtc(reader.GetString(7));
+                long replies = Math.Max(0, reader.GetInt64(5) - (ownReply ? 1 : 0));
+                decimal rate = (reader.GetInt64(3) + reader.GetInt64(4) + replies + reader.GetInt64(6))
                     / (decimal)reader.GetInt64(2);
                 rates[statusId] = (rate, reader.GetDouble(1));
             }
@@ -79,44 +87,70 @@ public sealed partial class CatalogueStore
         return new(count, withoutCohort);
     }
 
-    // Moves each posted clip (in Done\) whose paired teaser has a verdict into
-    // Done\Good\ or Done\Failed\. Every move needs a fresh hash match, never
-    // overwrites, stays inside the root and is logged; refusals are logged once.
-    // A clip whose earlier move was undone is left where the owner put it.
+    // Posted clips (in Done\) whose paired teaser has a verdict and that were
+    // never moved by a verdict before. The app moves a clip at most once: after
+    // that, wherever the owner puts it (by undo or by hand) wins.
+    public IReadOnlyList<XClipMoveCandidate> GetXClipMoveCandidates()
+    {
+        List<XClipMoveCandidate> candidates = [];
+        Query("""
+            SELECT c.clip_id, c.rel_path, c.size_bytes, c.sha256, v.verdict FROM x_local_clips c
+            JOIN x_teaser_verdicts v ON v.status_id = c.status_id
+            WHERE c.missing = 0 AND c.state = 'posted'
+              AND NOT EXISTS (SELECT 1 FROM x_clip_moves m WHERE m.clip_id = c.clip_id AND m.outcome = 'moved'
+                              AND m.reason IN ('verdict-good', 'verdict-failed'))
+            ORDER BY c.clip_id
+            """, reader => candidates.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3),
+            reader.GetString(4))));
+        return candidates;
+    }
+
+    // Moves each candidate into Done\Good\ or Done\Failed\. Every move needs a
+    // fresh hash match, never overwrites, stays inside the root and is logged;
+    // consecutive identical refusals are logged once. One clip's failure is
+    // logged and the next clip is still tried.
     public IReadOnlyList<XClipMoveOutcome> ApplyXClipVerdictMoves(string root, DateTimeOffset now)
     {
         string normalizedRoot = XTeaserFolder.NormalizeRoot(root);
-        List<(long ClipId, string RelPath, long Size, string Sha, string Verdict)> candidates = [];
-        using (SqliteCommand read = connection.CreateCommand())
-        {
-            read.CommandText = """
-                SELECT c.clip_id, c.rel_path, c.size_bytes, c.sha256, v.verdict FROM x_local_clips c
-                JOIN x_teaser_verdicts v ON v.status_id = c.status_id
-                WHERE c.missing = 0 AND c.state = 'posted'
-                  AND NOT EXISTS (SELECT 1 FROM x_clip_moves m WHERE m.clip_id = c.clip_id AND m.undone_utc IS NOT NULL)
-                ORDER BY c.clip_id
-                """;
-            using SqliteDataReader reader = read.ExecuteReader();
-            while (reader.Read())
-                candidates.Add((reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4)));
-        }
         List<XClipMoveOutcome> outcomes = [];
-        foreach (var clip in candidates)
-        {
-            string folder = clip.Verdict == "good" ? XTeaserFolder.GoodFolder : XTeaserFolder.FailedFolder;
-            string targetRel = Path.Combine(folder, Path.GetFileName(clip.RelPath));
-            XClipMoveOutcome? outcome = MoveXClip(normalizedRoot, clip.ClipId, clip.RelPath, targetRel, clip.Size, clip.Sha,
-                clip.Verdict == "good" ? "verdict-good" : "verdict-failed", clip.Verdict == "good" ? "good" : "failed", now);
-            if (outcome is not null) outcomes.Add(outcome);
-        }
+        foreach (XClipMoveCandidate candidate in GetXClipMoveCandidates())
+            if (ApplyXClipVerdictMoveCore(normalizedRoot, candidate,
+                () => XTeaserFolder.FreshFingerprint(normalizedRoot, candidate.RelPath), now) is { } outcome)
+                outcomes.Add(outcome);
         return outcomes;
     }
 
-    // Moves a verdict move back when the clip is still where the move put it,
-    // its hash still matches and the original path is free.
-    public XClipMoveOutcome UndoXClipMove(string root, long moveId, DateTimeOffset now)
+    // Applies one candidate with a fingerprint taken beside the request queue.
+    // The candidate is re-checked here, so a clip changed meanwhile is skipped.
+    public XClipMoveOutcome? ApplyXClipVerdictMove(string root, XClipMoveCandidate candidate, XClipFreshFingerprint fresh,
+        DateTimeOffset now) =>
+        ApplyXClipVerdictMoveCore(XTeaserFolder.NormalizeRoot(root), candidate, () => fresh, now);
+
+    public static string XClipVerdictTarget(XClipMoveCandidate candidate) =>
+        Path.Combine(candidate.Verdict == "good" ? XTeaserFolder.GoodFolder : XTeaserFolder.FailedFolder,
+            Path.GetFileName(candidate.RelPath));
+
+    private XClipMoveOutcome? ApplyXClipVerdictMoveCore(string root, XClipMoveCandidate candidate,
+        Func<XClipFreshFingerprint> fresh, DateTimeOffset now)
     {
-        string normalizedRoot = XTeaserFolder.NormalizeRoot(root);
+        if (!GetXClipMoveCandidates().Contains(candidate)) return null;
+        string targetRel = XClipVerdictTarget(candidate);
+        string reason = candidate.Verdict == "good" ? "verdict-good" : "verdict-failed";
+        try
+        {
+            return MoveXClip(root, candidate.ClipId, candidate.RelPath, targetRel, candidate.SizeBytes, candidate.Sha256,
+                reason, candidate.Verdict, now, fresh);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return RefuseXMove(candidate.ClipId, candidate.RelPath, targetRel, reason, "error", now, logRepeated: false);
+        }
+    }
+
+    // Validates that a verdict move can still be undone: the clip is where the
+    // move put it. Read on the request queue before hashing beside it.
+    public XClipUndoPlan PlanXClipUndo(long moveId)
+    {
         using SqliteCommand read = connection.CreateCommand();
         read.CommandText = """
             SELECT m.clip_id, m.from_rel_path, m.to_rel_path, m.reason, m.outcome, m.undone_utc,
@@ -124,23 +158,31 @@ public sealed partial class CatalogueStore
             FROM x_clip_moves m JOIN x_local_clips c ON c.clip_id = m.clip_id WHERE m.move_id = $id
             """;
         read.Parameters.AddWithValue("$id", moveId);
-        long clipId, size;
-        string from, to, sha;
-        using (SqliteDataReader reader = read.ExecuteReader())
-        {
-            if (!reader.Read()) throw new XTeaserException("x-move-not-found");
-            if (reader.GetString(4) != "moved" || reader.GetString(3) == "undo") throw new XTeaserException("x-move-not-undoable");
-            if (!reader.IsDBNull(5)) throw new XTeaserException("x-move-already-undone");
-            if (reader.GetInt64(9) == 1 || !string.Equals(reader.GetString(6), reader.GetString(2), StringComparison.OrdinalIgnoreCase))
-                throw new XTeaserException("x-clip-moved-since");
-            (clipId, from, to, size, sha) = (reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(7), reader.GetString(8));
-        }
-        string state = XTeaserFolder.StateForRelPath(from) ?? throw new XTeaserException("x-move-not-undoable");
-        return MoveXClip(normalizedRoot, clipId, to, from, size, sha, "undo", state, now, moveId, logRepeatedRefusal: true)!;
+        using SqliteDataReader reader = read.ExecuteReader();
+        if (!reader.Read()) throw new XTeaserException("x-move-not-found");
+        if (reader.GetString(4) != "moved" || reader.GetString(3) == "undo") throw new XTeaserException("x-move-not-undoable");
+        if (!reader.IsDBNull(5)) throw new XTeaserException("x-move-already-undone");
+        if (reader.GetInt64(9) == 1 || !string.Equals(reader.GetString(6), reader.GetString(2), StringComparison.OrdinalIgnoreCase))
+            throw new XTeaserException("x-clip-moved-since");
+        if (XTeaserFolder.StateForRelPath(reader.GetString(1)) is null) throw new XTeaserException("x-move-not-undoable");
+        return new(moveId, reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(7), reader.GetString(8));
+    }
+
+    // Moves a verdict move back when the clip is still where the move put it,
+    // its hash still matches and the original path is free.
+    public XClipMoveOutcome UndoXClipMove(string root, long moveId, DateTimeOffset now, XClipFreshFingerprint? fresh = null)
+    {
+        string normalizedRoot = XTeaserFolder.NormalizeRoot(root);
+        XClipUndoPlan plan = PlanXClipUndo(moveId);
+        string state = XTeaserFolder.StateForRelPath(plan.OriginalRelPath)!;
+        return MoveXClip(normalizedRoot, plan.ClipId, plan.CurrentRelPath, plan.OriginalRelPath, plan.SizeBytes, plan.Sha256,
+            "undo", state, now, () => fresh ?? XTeaserFolder.FreshFingerprint(normalizedRoot, plan.CurrentRelPath), moveId,
+            logRepeatedRefusal: true)!;
     }
 
     private XClipMoveOutcome? MoveXClip(string root, long clipId, string fromRel, string toRel, long size, string sha,
-        string reason, string state, DateTimeOffset now, long? undoes = null, bool logRepeatedRefusal = false)
+        string reason, string state, DateTimeOffset now, Func<XClipFreshFingerprint> fresh, long? undoes = null,
+        bool logRepeatedRefusal = false)
     {
         string nowText = now.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         string? from = XTeaserFolder.ResolveInside(root, fromRel);
@@ -151,16 +193,27 @@ public sealed partial class CatalogueStore
             refusal = "unsafe-path";
         else if (File.Exists(to) || Directory.Exists(to))
             refusal = "collision";
-        else if (!FreshFingerprintMatches(from, size, sha))
-            refusal = "fingerprint-mismatch";
-        if (refusal is not null)
+        else
         {
-            if (!logRepeatedRefusal && LatestXMoveIs(clipId, toRel, reason, refusal)) return null;
-            return new(InsertXMove(null, clipId, fromRel, toRel, reason, refusal, nowText), clipId, fromRel, toRel, reason, refusal);
+            XClipFreshFingerprint fingerprint = fresh();
+            if (fingerprint.Failure == XClipFreshFingerprint.NotRead) return null;
+            refusal = fingerprint.Failure;
+            if (refusal is null && (!string.Equals(fingerprint.RelPath, fromRel, StringComparison.OrdinalIgnoreCase)
+                || fingerprint.SizeBytes != size || !string.Equals(fingerprint.Sha256, sha, StringComparison.Ordinal)))
+                refusal = "fingerprint-mismatch";
+            if (refusal is null)
+            {
+                // The file must still be the one that was hashed.
+                FileInfo current = new(from);
+                if (!current.Exists || current.Length != fingerprint.SizeBytes
+                    || XTeaserFolder.MtimeText(current.LastWriteTimeUtc) != fingerprint.MtimeUtc)
+                    refusal = "fingerprint-mismatch";
+            }
         }
+        if (refusal is not null) return RefuseXMove(clipId, fromRel, toRel, reason, refusal, now, logRepeatedRefusal);
         Directory.CreateDirectory(Path.GetDirectoryName(to!)!);
         if (XTeaserFolder.ResolveInside(root, toRel) is null)
-            return new(InsertXMove(null, clipId, fromRel, toRel, reason, "unsafe-path", nowText), clipId, fromRel, toRel, reason, "unsafe-path");
+            return RefuseXMove(clipId, fromRel, toRel, reason, "unsafe-path", now, logRepeatedRefusal);
         using SqliteTransaction transaction = connection.BeginTransaction();
         long moveId = InsertXMove(transaction, clipId, fromRel, toRel, reason, "moved", nowText);
         ExecuteX(transaction, "UPDATE x_local_clips SET rel_path = $path, state = $state WHERE clip_id = $id",
@@ -171,11 +224,13 @@ public sealed partial class CatalogueStore
         {
             File.Move(from!, to!, overwrite: false);
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             transaction.Rollback();
-            string outcome = File.Exists(to) ? "collision" : "fingerprint-mismatch";
-            return new(InsertXMove(null, clipId, fromRel, toRel, reason, outcome, nowText), clipId, fromRel, toRel, reason, outcome);
+            string outcome = File.Exists(to) ? "collision"
+                : XTeaserFolder.IsSharingViolation(exception) ? "locked"
+                : !File.Exists(from) ? "fingerprint-mismatch" : "error";
+            return RefuseXMove(clipId, fromRel, toRel, reason, outcome, now, logRepeatedRefusal);
         }
         try
         {
@@ -189,16 +244,12 @@ public sealed partial class CatalogueStore
         return new(moveId, clipId, fromRel, toRel, reason, "moved");
     }
 
-    private static bool FreshFingerprintMatches(string path, long size, string sha)
+    private XClipMoveOutcome? RefuseXMove(long clipId, string fromRel, string toRel, string reason, string outcome,
+        DateTimeOffset now, bool logRepeated)
     {
-        try
-        {
-            FileInfo file = new(path);
-            return file.Exists && !file.Attributes.HasFlag(FileAttributes.ReparsePoint) && file.Length == size
-                && string.Equals(XTeaserFolder.Sha256(path), sha, StringComparison.Ordinal);
-        }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
+        if (!logRepeated && LatestXMoveIs(clipId, toRel, reason, outcome)) return null;
+        string nowText = now.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        return new(InsertXMove(null, clipId, fromRel, toRel, reason, outcome, nowText), clipId, fromRel, toRel, reason, outcome);
     }
 
     private bool LatestXMoveIs(long clipId, string toRel, string reason, string outcome)

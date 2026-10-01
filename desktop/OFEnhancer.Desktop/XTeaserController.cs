@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using OFEnhancer.Catalogue;
 
@@ -44,8 +45,17 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
                 ? await dispatcher.EnqueueAsync(() => store.ImportXClipRevertList(root, revertList, Now)).ConfigureAwait(false)
                 : 0;
             XVerdictResult verdicts = await dispatcher.EnqueueAsync(() => store.DecideXVerdicts(Now)).ConfigureAwait(false);
-            IReadOnlyList<XClipMoveOutcome> moves = await dispatcher.EnqueueAsync(() => store.ApplyXClipVerdictMoves(root, Now))
-                .ConfigureAwait(false);
+            List<XClipMoveOutcome> moves = [];
+            foreach (XClipMoveCandidate candidate in await dispatcher.EnqueueAsync(store.GetXClipMoveCandidates).ConfigureAwait(false))
+            {
+                // Hash beside the request queue; a target that already exists is refused without reading the clip.
+                XClipFreshFingerprint fresh = File.Exists(Path.Combine(root, CatalogueStore.XClipVerdictTarget(candidate)))
+                    ? new(candidate.RelPath, -1, "", null, XClipFreshFingerprint.NotRead)
+                    : await Task.Run(() => XTeaserFolder.FreshFingerprint(root, candidate.RelPath)).ConfigureAwait(false);
+                if (await dispatcher.EnqueueAsync(() => store.ApplyXClipVerdictMove(root, candidate, fresh, Now)).ConfigureAwait(false)
+                    is { } outcome)
+                    moves.Add(outcome);
+            }
             return new(true, scan, revert, verdicts, moves);
         }
         finally
@@ -61,14 +71,20 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
         return new(settings().XTeaserRoot is not null, store.GetXTeaserOverview());
     }
 
-    internal XClipMoveOutcome Undo(JsonElement payload)
+    internal async Task<XClipMoveOutcome> UndoAsync(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Count() != 1
             || !payload.TryGetProperty("moveId", out JsonElement id) || id.ValueKind != JsonValueKind.Number
             || !id.TryGetInt64(out long moveId) || moveId <= 0)
             throw new GoogleCatalogueControllerException("invalid-teaser-request");
         string root = settings().XTeaserRoot ?? throw new GoogleCatalogueControllerException("x-teaser-inactive");
-        try { return store.UndoXClipMove(root, moveId, Now); }
+        try
+        {
+            XClipUndoPlan plan = await dispatcher.EnqueueAsync(() => store.PlanXClipUndo(moveId)).ConfigureAwait(false);
+            XClipFreshFingerprint fresh = await Task.Run(() => XTeaserFolder.FreshFingerprint(root, plan.CurrentRelPath))
+                .ConfigureAwait(false);
+            return await dispatcher.EnqueueAsync(() => store.UndoXClipMove(root, moveId, Now, fresh)).ConfigureAwait(false);
+        }
         catch (XTeaserException exception) { throw new GoogleCatalogueControllerException(exception.Code); }
     }
 

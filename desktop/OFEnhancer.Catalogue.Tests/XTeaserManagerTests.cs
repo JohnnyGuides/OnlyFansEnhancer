@@ -205,13 +205,16 @@ public sealed class XTeaserManagerTests
         WriteClip(root, @"Done\ep-b__t1.mp4", "b1");
         WriteClip(root, @"Done\ep-b__t2.mp4", "b2");
         WriteClip(root, "ep-c__t1.mp4", "c");
+        WriteClip(root, @"Done\ep-d__t1.mp4", "d");
         string csv = Path.Combine(temp.Path, "revert.csv");
         File.WriteAllText(csv, "\uFEFFnew_path,original_path,episode_key,x_status_id,applied_utc\r\n"
             + $"{Path.Combine(root, @"Done\ep-a__t1.mp4")},\"{Path.Combine(root, "old, name.mp4")}\",ep-a,501,2026-10-01\r\n"
             + $"{Path.Combine(root, @"Done\ep-b__t1.mp4")},x,ep-b,502,2026-10-01\r\n"
             + $"{Path.Combine(root, @"Done\ep-b__t2.mp4")},x,ep-b,502,2026-10-01\r\n"
             + $"{Path.Combine(root, "ep-c__t1.mp4")},x,ep-c,,2026-10-01\r\n"
-            + $"{Path.Combine(temp.Path, "outside.mp4")},x,ep-z,503,2026-10-01\r\n");
+            + $"{Path.Combine(temp.Path, "outside.mp4")},x,ep-z,503,2026-10-01\r\n"
+            + $"{Path.Combine(root, @"Done\ep-d__t1.mp4")},x,ep-d,504,2026-10-01\r\n"
+            + $"{Path.Combine(root, @"Done\ep-d__t1.mp4")},x,ep-d,505,2026-10-01\r\n");
         Assert.AreEqual(0, store.ImportXClipRevertList(root, csv, Now), "nothing indexed yet: not consumed");
         store.ApplyXClipScan(XTeaserFolder.Scan(root, []), Now);
         Assert.AreEqual(1, store.ImportXClipRevertList(root, csv, Now));
@@ -230,7 +233,10 @@ public sealed class XTeaserManagerTests
         for (int index = 0; index < 10; index++)
             AddTeaser(store, $"6{index:00}", Now.AddDays(-8), (168, 1000, 60, 20, 10, 10));
         AddTeaser(store, "700", Now.AddDays(-8), (150, 1000, 50, 15, 5, 10));   // 0.080 = 0.8 x median -> good
-        AddTeaser(store, "701", Now.AddDays(-8), (200, 1000, 50, 15, 5, 9));    // 0.079 -> failed
+        // 0.079 -> failed: one of the five replies is the owner's own first reply.
+        AddTeaser(store, "701", Now.AddDays(-8), (200, 1000, 50, 15, 5, 10));
+        store.RecordXObservations(new(Owner, [Post("7011", Now.AddDays(-8).AddMinutes(30), "-> onlyfans.com/77/x", "701", "701",
+            video: false)]), Now);
         AddTeaser(store, "702", Now.AddDays(-6.5), (156, 1000, 1, 0, 0, 0));    // younger than 7 days
         AddTeaser(store, "703", Now.AddDays(-9), (100, 1000, 1, 0, 0, 0), (250, 1000, 1, 0, 0, 0)); // no sample at 6-10 days
         XVerdictResult result = store.DecideXVerdicts(Now);
@@ -286,6 +292,78 @@ public sealed class XTeaserManagerTests
         Assert.AreEqual("x-move-already-undone",
             Assert.ThrowsException<XTeaserException>(() => store.UndoXClipMove(root, move.MoveId, Now)).Code);
         Assert.AreEqual(0, store.ApplyXClipVerdictMoves(root, Now.AddHours(1)).Count, "an undone clip stays where the owner put it");
+    }
+
+    [TestMethod]
+    public void OwnersManualMoveBackWinsOverTheVerdict()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        string root = Path.Combine(temp.Path, "TWEETS");
+        long clip = PairedClipWithVerdict(store, root, "ep-a__t1.mp4", "failed");
+        Assert.AreEqual("moved", store.ApplyXClipVerdictMoves(root, Now).Single().Outcome);
+        File.Move(Path.Combine(root, @"Done\Failed\ep-a__t1.mp4"), Path.Combine(root, @"Done\ep-a__t1.mp4"));
+        store.ApplyXClipScan(XTeaserFolder.Scan(root, store.GetXClipFingerprints()), Now.AddHours(1));
+        Assert.AreEqual("posted", Scalar(store, $"SELECT state FROM x_local_clips WHERE clip_id={clip}"));
+
+        Assert.AreEqual(0, store.GetXClipMoveCandidates().Count);
+        Assert.AreEqual(0, store.ApplyXClipVerdictMoves(root, Now.AddHours(1)).Count);
+        Assert.AreEqual(0, store.ApplyXClipVerdictMoves(root, Now.AddHours(2)).Count);
+        Assert.IsTrue(File.Exists(Path.Combine(root, @"Done\ep-a__t1.mp4")));
+        Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_clip_moves"));
+    }
+
+    [TestMethod]
+    public void JunctionedFoldersAreNeitherScannedNorUsedAsMoveTargets()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        string root = Path.Combine(temp.Path, "TWEETS");
+        string outside = Path.Combine(temp.Path, "outside");
+        PairedClipWithVerdict(store, root, "ep-a__t1.mp4", "good");
+        WriteClip(outside, "ep-z__t1.mp4", "outside clip");
+        Junction(Path.Combine(root, @"Done\Good"), outside);
+        try
+        {
+            Assert.IsNull(XTeaserFolder.ResolveInside(root, @"Done\Good\ep-a__t1.mp4"));
+            Assert.IsFalse(XTeaserFolder.Scan(root, []).Any(file => file.RelPath.StartsWith(@"Done\Good", StringComparison.OrdinalIgnoreCase)));
+            Assert.AreEqual("unsafe-path", store.ApplyXClipVerdictMoves(root, Now).Single().Outcome);
+            Assert.IsTrue(File.Exists(Path.Combine(root, @"Done\ep-a__t1.mp4")));
+            CollectionAssert.AreEqual(new[] { "ep-z__t1.mp4" }, Directory.GetFiles(outside).Select(Path.GetFileName).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(root, @"Done\Good"));
+        }
+    }
+
+    [TestMethod]
+    public void LockedClipIsLoggedOnceAndOtherClipsStillMove()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        string root = Path.Combine(temp.Path, "TWEETS");
+        PairedClipWithVerdict(store, root, "ep-a__t1.mp4", "good");
+        AddItem(store, "item-ep-b", "ep-b", "ep-b", sheetX: ["https://x.com/Owner_Handle/status/901"]);
+        AddItem(store, "item-ep-c", "ep-c", "ep-c", sheetX: ["https://x.com/Owner_Handle/status/902"]);
+        DateTimeOffset mtime = Now.AddDays(-9);
+        store.RecordXObservations(new(Owner, [Post("901", mtime.AddDays(1)), Post("902", mtime.AddDays(1))]), Now);
+        WriteClip(root, @"Done\ep-b__t1.mp4", "clip-b", mtime);
+        WriteClip(root, @"Done\ep-c__t1.mp4", "clip-c", mtime);
+        Assert.AreEqual(2, store.ApplyXClipScan(XTeaserFolder.Scan(root, store.GetXClipFingerprints()), Now).Paired);
+        Exec(store, "INSERT INTO x_teaser_verdicts VALUES ('901','failed',0.05,0.1,10,168,'x'), ('902','failed',0.05,0.1,10,168,'x')");
+        File.WriteAllText(Path.Combine(root, @"Done\Failed"), "a file where the folder should be");
+
+        using (new FileStream(Path.Combine(root, @"Done\ep-a__t1.mp4"), FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            IReadOnlyList<XClipMoveOutcome> first = store.ApplyXClipVerdictMoves(root, Now);
+            CollectionAssert.AreEqual(new[] { "locked", "error", "error" }, first.Select(move => move.Outcome).ToArray());
+            Assert.AreEqual(0, store.ApplyXClipVerdictMoves(root, Now.AddHours(1)).Count, "identical refusals are not repeated");
+        }
+        File.Delete(Path.Combine(root, @"Done\Failed"));
+        CollectionAssert.AreEqual(new[] { "moved", "moved", "moved" },
+            store.ApplyXClipVerdictMoves(root, Now.AddHours(2)).Select(move => move.Outcome).ToArray());
+        Assert.AreEqual(6L, Scalar(store, "SELECT COUNT(*) FROM x_clip_moves"));
     }
 
     [TestMethod]
@@ -418,11 +496,11 @@ public sealed class XTeaserManagerTests
         params (double Age, long Views, long Likes, long Reposts, long Replies, long Bookmarks)[] samples)
     {
         store.RecordXObservations(new(Owner, [Post(statusId, posted)]), Now);
-        int minute = 0;
         foreach (var sample in samples)
             Exec(store, $"""
                 INSERT INTO x_metric_samples(status_id,observed_utc,age_hours,views,likes,reposts,replies,quotes,bookmarks,source)
-                VALUES ('{statusId}','2026-09-{10 + minute++:00}T00:00:00Z',{sample.Age.ToString(CultureInfo.InvariantCulture)},
+                VALUES ('{statusId}','{posted.AddHours(sample.Age).ToString("yyyy-MM-dd'T'HH:mm':00Z'", CultureInfo.InvariantCulture)}',
+                        {sample.Age.ToString(CultureInfo.InvariantCulture)},
                         {sample.Views},{sample.Likes},{sample.Reposts},{sample.Replies},0,{sample.Bookmarks},'network')
                 """);
     }
@@ -448,6 +526,15 @@ public sealed class XTeaserManagerTests
         command.Parameters.AddWithValue("$links", System.Text.Json.JsonSerializer.Serialize(links));
         command.Parameters.AddWithValue("$cells", cells);
         command.ExecuteNonQuery();
+    }
+
+    private static void Junction(string link, string target)
+    {
+        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
+        process.WaitForExit();
+        Assert.AreEqual(0, process.ExitCode, "junction creation");
+        Assert.IsTrue(new DirectoryInfo(link).Attributes.HasFlag(FileAttributes.ReparsePoint));
     }
 
     private static void WriteClip(string root, string relPath, string content, DateTimeOffset? mtime = null)

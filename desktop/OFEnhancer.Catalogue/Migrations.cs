@@ -239,7 +239,7 @@ internal static class Migrations
             from_rel_path TEXT NOT NULL,
             to_rel_path TEXT NOT NULL,
             reason TEXT NOT NULL CHECK (reason IN ('verdict-good', 'verdict-failed', 'undo')),
-            outcome TEXT NOT NULL CHECK (outcome IN ('moved', 'collision', 'fingerprint-mismatch', 'unsafe-path')),
+            outcome TEXT NOT NULL CHECK (outcome IN ('moved', 'collision', 'fingerprint-mismatch', 'locked', 'error', 'unsafe-path')),
             occurred_utc TEXT NOT NULL,
             undone_utc TEXT
         );

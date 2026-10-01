@@ -36,8 +36,8 @@ public sealed class XTeaserControllerTests
         Assert.IsNull(inactive.Scan);
         Assert.AreEqual(0L, Count(store, "x_local_clips"));
         Assert.IsFalse(controller.Overview(JsonDocument.Parse("{}").RootElement).Active);
-        Assert.AreEqual("x-teaser-inactive", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
-            controller.Undo(JsonDocument.Parse("""{"moveId":1}""").RootElement)).Code);
+        Assert.AreEqual("x-teaser-inactive", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.UndoAsync(JsonDocument.Parse("""{"moveId":1}""").RootElement))).Code);
     }
 
     [TestMethod]
@@ -61,10 +61,10 @@ public sealed class XTeaserControllerTests
         Assert.AreEqual(@"Done\ep-a__t1.mp4", overview.Overview.UnpairedClips.Single().RelPath);
         Assert.AreEqual("invalid-teaser-request", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
             controller.Overview(JsonDocument.Parse("""{"limit":5}""").RootElement)).Code);
-        Assert.AreEqual("invalid-teaser-request", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
-            controller.Undo(JsonDocument.Parse("""{"moveId":"1"}""").RootElement)).Code);
-        Assert.AreEqual("x-move-not-found", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
-            controller.Undo(JsonDocument.Parse("""{"moveId":7}""").RootElement)).Code);
+        Assert.AreEqual("invalid-teaser-request", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.UndoAsync(JsonDocument.Parse("""{"moveId":"1"}""").RootElement))).Code);
+        Assert.AreEqual("x-move-not-found", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.UndoAsync(JsonDocument.Parse("""{"moveId":7}""").RootElement))).Code);
     }
 
     [TestMethod]

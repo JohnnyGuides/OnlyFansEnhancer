@@ -15,6 +15,13 @@ public sealed record XClipFingerprint(string RelPath, long SizeBytes, string Mti
 
 public sealed record XClipScanResult(int Present, int Added, int Moved, int Missing, int Paired);
 
+// A clip's hash taken just before a move. Failure is a refusal outcome
+// (`locked`, `error`, `fingerprint-mismatch`, `unsafe-path`) or NotRead.
+public sealed record XClipFreshFingerprint(string RelPath, long SizeBytes, string MtimeUtc, string? Sha256, string? Failure)
+{
+    public const string NotRead = "not-read";
+}
+
 // The owner's local teaser folder: `<root>\` ready, `Done\` posted awaiting a
 // verdict, `Done\Good\` and `Done\Failed\`. Other folders (for example Ideas)
 // and non-video files are never indexed or touched.
@@ -76,6 +83,27 @@ public static class XTeaserFolder
     {
         using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
         return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
+
+    public static bool IsSharingViolation(Exception exception) =>
+        exception is IOException && (exception.HResult & 0xFFFF) is 32 or 33;
+
+    // Hashes one indexed clip for a move; safe to run beside the request queue.
+    public static XClipFreshFingerprint FreshFingerprint(string root, string relPath)
+    {
+        string? full = ResolveInside(root, relPath);
+        if (full is null) return new(relPath, -1, "", null, "unsafe-path");
+        try
+        {
+            FileInfo file = new(full);
+            if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                return new(relPath, -1, "", null, "fingerprint-mismatch");
+            string mtime = MtimeText(file.LastWriteTimeUtc);
+            return new(relPath, file.Length, mtime, Sha256(full), null);
+        }
+        catch (IOException exception) when (IsSharingViolation(exception)) { return new(relPath, -1, "", null, "locked"); }
+        catch (IOException) { return new(relPath, -1, "", null, "error"); }
+        catch (UnauthorizedAccessException) { return new(relPath, -1, "", null, "error"); }
     }
 
     public static string MtimeText(DateTime lastWriteUtc) =>
@@ -244,7 +272,8 @@ public sealed partial class CatalogueStore
 
     // Imports the owner's 2026-10-01 rename revert list once: a row's
     // x_status_id pairs the renamed file. A status listed for more than one
-    // file is skipped (never guessed).
+    // file, or a file listed under more than one status, is skipped (never
+    // guessed).
     public int ImportXClipRevertList(string root, string csvPath, DateTimeOffset now)
     {
         string normalizedRoot = XTeaserFolder.NormalizeRoot(root);
@@ -267,9 +296,14 @@ public sealed partial class CatalogueStore
         }
         using SqliteTransaction transaction = connection.BeginTransaction();
         int paired = 0;
-        foreach (var group in rows.GroupBy(row => row.StatusId, StringComparer.Ordinal).Where(group => group.Count() == 1))
+        List<(string RelPath, string StatusId)> distinct = [.. rows.DistinctBy(row => (row.RelPath.ToUpperInvariant(), row.StatusId))];
+        HashSet<string> sharedStatuses = [.. distinct.GroupBy(row => row.StatusId, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1).Select(group => group.Key)];
+        HashSet<string> sharedPaths = new(distinct.GroupBy(row => row.RelPath, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1).Select(group => group.Key), StringComparer.OrdinalIgnoreCase);
+        foreach ((string relPath, string statusId) in distinct.Where(row => !sharedStatuses.Contains(row.StatusId)
+            && !sharedPaths.Contains(row.RelPath)))
         {
-            (string relPath, string statusId) = group.Single();
             using SqliteCommand update = connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText = """

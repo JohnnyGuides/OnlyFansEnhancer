@@ -173,15 +173,21 @@ are flagged missing. The episode key comes from the `<key>__t<N>[-variant]`
 name. A posted clip pairs with a teaser only when exactly one teaser bound to
 that episode was posted within three days after the file's modification time
 and no other clip claims it. The optional `xTeaserRevertListPath` CSV is imported
-once for its owner-made `x_status_id` pairings; a status listed twice is
-skipped. `x_teaser_verdicts` records each teaser's 7-day verdict once: the rate
-(likes + reposts + replies + bookmarks) / views from the sample closest to 168 h within
-ages 144–240 h is compared, in exact decimal arithmetic, with the median of the
-other teasers' rates in that window; fewer than 10 peers means no verdict. A
-paired clip still in `Done\` then moves to `Done\Good` or `Done\Failed` after
-path, collision and fresh-hash checks; `x_clip_moves` logs moves and refusals
-(`collision`, `fingerprint-mismatch`, `unsafe-path`, each logged once).
-Agent operations `getTeaserOverview` (bounded: 500 episodes, 200 teasers, 200
+once for its owner-made `x_status_id` pairings; a status listed for two files or
+a file listed under two statuses is skipped. `x_teaser_verdicts` records each
+teaser's 7-day verdict once: the rate (likes + reposts + replies + bookmarks) /
+views from the sample closest to 168 h within ages 144–240 h, not counting the
+owner's own first reply once it was posted, is compared, in exact decimal
+arithmetic, with the median of the other teasers' rates in that window; fewer
+than 10 peers means no verdict. A paired clip still in `Done\` that was never
+moved by a verdict then moves to `Done\Good` or `Done\Failed` after path,
+collision and fresh-hash checks. The hash is taken beside the request queue and
+the file's size and modification time are re-checked at the move. Each clip is
+moved at most once: after a successful verdict move, wherever the owner puts it
+(undo or by hand) stays. `x_clip_moves` logs moves and refusals (`collision`,
+`fingerprint-mismatch`, `locked`, `error`, `unsafe-path`); a refusal identical to
+the clip's last log row is not logged again, and one clip's failure does not
+stop the others. Agent operations `getTeaserOverview` (bounded: 500 episodes, 200 teasers, 200
 unpaired clips, 50 moves) and `undoTeaserClipMove` (moves back only when the
 clip and its hash are unchanged and the original path is free) serve the future
 dashboard.

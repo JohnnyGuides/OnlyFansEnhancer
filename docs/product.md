@@ -146,7 +146,8 @@ pairing. Seven days after posting, a teaser whose engagement is below 0.8 × the
 median of at least 10 comparable teasers at the same age is Failed, otherwise
 Good, and its paired clip moves from `Done\` automatically. A move needs a fresh
 hash match, never overwrites, never deletes, stays inside the root, is logged and
-can be undone; an undone clip is not moved again. Failed teasers no longer count
+can be undone. The app moves a clip at most once; after that the owner's
+placement (undo or by hand) wins. Failed teasers no longer count
 as used, so their episode returns to rotation.
 
 ## Accessibility, privacy, and lifecycle
