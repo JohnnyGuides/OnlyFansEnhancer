@@ -247,5 +247,19 @@ internal static class Migrations
         """
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix, VersionSeven];
+    // Owner-local teaser plan: at most one planned episode per calendar day.
+    internal static readonly MigrationStep VersionEight = new(
+        8,
+        """
+        CREATE TABLE x_planned_slots (
+            slot_date TEXT PRIMARY KEY NOT NULL CHECK (length(slot_date) = 10),
+            episode_key TEXT NOT NULL,
+            clip_id INTEGER REFERENCES x_local_clips(clip_id) ON DELETE SET NULL,
+            created_utc TEXT NOT NULL
+        );
+        """
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix, VersionSeven,
+        VersionEight];
 }

@@ -15,6 +15,9 @@ public sealed class XTeaserControllerTests
     [DataRow("getTeaserOverview")]
     [DataRow("undoTeaserClipMove")]
     [DataRow("getTeaserReplyQueue")]
+    [DataRow("getTeaserPlan")]
+    [DataRow("setTeaserPlanSlot")]
+    [DataRow("clearTeaserPlanSlot")]
     public void TeaserOperationsAreAllowedAgentOperations(string operation)
     {
         AgentRequest request = AgentRequest.Parse(
@@ -101,6 +104,61 @@ public sealed class XTeaserControllerTests
         Assert.IsTrue(store.TryLoad(out DesktopSettings relative));
         Assert.IsNull(relative.XTeaserRoot);
     }
+
+    [TestMethod]
+    public async Task PlanOperationsValidatePayloadsAndPersistThroughTheSharedEntry()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        using (SqliteCommand command = store.Connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO catalogue_items(item_id,source_key,title,description,series,episode,category,updated_utc)
+                VALUES ('item-1','series-a-e3','Series A E3','','Series A','3','Games','2026-09-01T00:00:00Z')
+                """;
+            command.ExecuteNonQuery();
+        }
+        using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
+        Assert.IsTrue(XTeaserController.Operations.SetEquals(["getTeaserOverview", "undoTeaserClipMove", "getTeaserPlan",
+            "setTeaserPlanSlot", "clearTeaserPlanSlot"]));
+
+        var slot = (XTeaserPlanSlot)await controller.HandleAsync("setTeaserPlanSlot",
+            Json("""{"date":"2026-09-29","episodeKey":"series-a-e3"}"""));
+        Assert.AreEqual("item-1", slot.ItemId);
+        await controller.HandleAsync("setTeaserPlanSlot", Json("""{"date":"2026-09-30","episodeKey":"series-a-e3","clipId":null}"""));
+        var plan = (XTeaserPlan)await controller.HandleAsync("getTeaserPlan", Json("{}"));
+        CollectionAssert.AreEqual(new[] { "2026-09-29", "2026-09-30" }, plan.Slots.Select(item => item.Date).ToArray());
+        var overview = (XTeaserOverviewResult)await controller.HandleAsync("getTeaserOverview", Json("{}"));
+        Assert.AreEqual("Games", overview.Overview.Episodes.Single().Category);
+
+        foreach (string bad in new[]
+        {
+            """{"date":"2026-09-29"}""",
+            """{"date":"2026-09-29","episodeKey":"  "}""",
+            """{"date":"2026-09-29","episodeKey":"series-a-e3","extra":1}""",
+            """{"date":"2026-09-29","episodeKey":"series-a-e3","clipId":"7"}""",
+            """{"date":"2026-09-29","episodeKey":"series-a-e3","clipId":0}""",
+            """{"date":"29-09-2026","episodeKey":"series-a-e3"}""",
+            """{"date":"2026-09-26","episodeKey":"series-a-e3"}""",
+            """{"date":"2026-11-29","episodeKey":"series-a-e3"}""",
+        })
+            Assert.AreEqual("invalid-teaser-plan", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+                controller.HandleAsync("setTeaserPlanSlot", Json(bad)))).Code, bad);
+        Assert.AreEqual("x-plan-episode-not-found", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("setTeaserPlanSlot", Json("""{"date":"2026-10-01","episodeKey":"unknown"}""")))).Code);
+        Assert.AreEqual("invalid-teaser-request", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("getTeaserPlan", Json("""{"from":"2026-01-01"}""")))).Code);
+        Assert.AreEqual("invalid-teaser-plan", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("clearTeaserPlanSlot", Json("""{"date":"2026-09-29","episodeKey":"x"}""")))).Code);
+        Assert.AreEqual("unsupported-operation", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("deleteTeaserPlan", Json("{}")))).Code);
+
+        await controller.HandleAsync("clearTeaserPlanSlot", Json("""{"date":"2026-09-29"}"""));
+        Assert.AreEqual("2026-09-30", ((XTeaserPlan)await controller.HandleAsync("getTeaserPlan", Json("{}"))).Slots.Single().Date);
+        Assert.AreEqual(1L, Count(store, "x_planned_slots"));
+    }
+
+    private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement;
 
     private static long Count(CatalogueStore store, string table)
     {

@@ -372,6 +372,10 @@
       refreshGoogleCatalogue();
     } else stopGooglePolling();
     if (name === "settings") loadBrowserSettings();
+    if (name === "twitter")
+      global.OFEnhancerTeaserDashboard?.mount(
+        document.querySelector("#teaserDashboard"),
+      );
   }
 
   function thumbnailUrl(assetId) {
