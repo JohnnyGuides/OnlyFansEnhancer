@@ -119,8 +119,8 @@ public sealed class XTeaserControllerTests
             command.ExecuteNonQuery();
         }
         using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
-        Assert.IsTrue(XTeaserController.Operations.SetEquals(["getTeaserOverview", "undoTeaserClipMove", "getTeaserPlan",
-            "setTeaserPlanSlot", "clearTeaserPlanSlot"]));
+        Assert.IsTrue(XTeaserController.Operations.SetEquals(["getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue",
+            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot"]));
 
         var slot = (XTeaserPlanSlot)await controller.HandleAsync("setTeaserPlanSlot",
             Json("""{"date":"2026-09-29","episodeKey":"series-a-e3"}"""));
