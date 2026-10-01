@@ -152,6 +152,40 @@ shape, size and author checks and stores reposts without their foreign text,
 media, links or counters. Only IDs, timestamps, counters, links and the text of
 the owner's own posts are stored; no media, other accounts or cookies.
 
+Catalogue migration 7 adds the teaser manager tables. After each
+`recordXObservations` batch and each catalogue import the desktop recomputes
+`x_first_replies` (per teaser — an owner post with video that is neither a reply
+nor a repost — the earliest owner reply in its conversation carrying an
+OnlyFans or Fansly post link) and `x_post_bindings`: a status linked from exactly
+one row's `Twitter Teaser(s)` cell binds as `sheet-link`; otherwise a first-reply
+link matching exactly one row's OnlyFans/Fansly link binds as `reply-link`;
+`owner` bindings are never replaced. Disagreements and ambiguous matches are
+recorded in `x_binding_conflicts`, and an ambiguous match binds nothing; titles
+are never compared.
+
+When the `xTeaserRoot` setting is set, `XTeaserController` runs two minutes after
+start and then hourly. It lists video files in the root, `Done`, `Done\Good`
+and `Done\Failed` (no other folders, no reparse points), hashes them beside the
+serial request dispatcher (reusing the hash while size and modification time are
+unchanged) and applies the result to `x_local_clips`: a known hash keeps its row
+and pairing wherever it moves, changed content is a new clip, and absent clips
+are flagged missing. The episode key comes from the `<key>__t<N>[-variant]`
+name. A posted clip pairs with a teaser only when exactly one teaser bound to
+that episode was posted within three days after the file's modification time
+and no other clip claims it. The optional `xTeaserRevertListPath` CSV is imported
+once for its owner-made `x_status_id` pairings; a status listed twice is
+skipped. `x_teaser_verdicts` records each teaser's 7-day verdict once: the rate
+(likes + reposts + bookmarks) / views from the sample closest to 168 h within
+ages 144–240 h is compared, in exact decimal arithmetic, with the median of the
+other teasers' rates in that window; fewer than 10 peers means no verdict. A
+paired clip still in `Done\` then moves to `Done\Good` or `Done\Failed` after
+path, collision and fresh-hash checks; `x_clip_moves` logs moves and refusals
+(`collision`, `fingerprint-mismatch`, `unsafe-path`, each logged once).
+Agent operations `getTeaserOverview` (bounded: 500 episodes, 200 teasers, 200
+unpaired clips, 50 moves) and `undoTeaserClipMove` (moves back only when the
+clip and its hash are unchanged and the original path is free) serve the future
+dashboard.
+
 ## Source and generated boundaries
 
 [The composition recipe](../packaging/extensions.json) maps runtime paths to

@@ -36,7 +36,8 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
         if (request.Operation is not (AgentProtocol.GetStatusOperation or "getCatalogue" or "getUploadCatalogueSnapshot"
             or "getUploadThumbnailOptions" or "getUploadThumbnailPreview" or "resolveUploadThumbnail" or "getCatalogueThumbnailPreviews"
             or "recordUploadResult" or "writeUploadCatalogueEntry" or "getSubredditPresets" or "browserExchange" or "showChromeSetup"
-            or "loadDevelopmentFixtures" or "resolveDevelopmentFixture" or "recordXObservations"))
+            or "loadDevelopmentFixtures" or "resolveDevelopmentFixture" or "recordXObservations"
+            or "getTeaserOverview" or "undoTeaserClipMove"))
             throw new AgentProtocolException(
                 "unsupported-operation",
                 "The desktop request uses an unsupported operation."

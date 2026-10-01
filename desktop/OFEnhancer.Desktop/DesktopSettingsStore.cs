@@ -54,7 +54,9 @@ internal sealed class DesktopSettingsStore
                 AppConfiguration.NormalizeExtensionId(payload.ExtensionId),
                 AppConfiguration.NormalizeGoogleOAuthClientId(payload.GoogleOAuthClientId),
                 BrowserSelection.NormalizeId(payload.BrowserId),
-                NormalizeGoogleSheetUrl(payload.GoogleSheetUrl)
+                NormalizeGoogleSheetUrl(payload.GoogleSheetUrl),
+                NormalizeLocalPath(payload.XTeaserRoot),
+                NormalizeLocalPath(payload.XTeaserRevertListPath)
             );
             return true;
         }
@@ -72,8 +74,10 @@ internal sealed class DesktopSettingsStore
         string? googleClientId = NullOrValidatedGoogleClientId(settings.GoogleOAuthClientId);
         string? browserId = NullOrValidatedBrowserId(settings.BrowserId);
         string? googleSheetUrl = NullOrValidatedGoogleSheetUrl(settings.GoogleSheetUrl);
+        string? teaserRoot = NullOrValidatedLocalPath(settings.XTeaserRoot, "invalid-x-teaser-root");
+        string? revertList = NullOrValidatedLocalPath(settings.XTeaserRevertListPath, "invalid-x-teaser-revert-list");
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(
-            new DesktopSettingsPayload(extensionId, googleClientId, browserId, googleSheetUrl),
+            new DesktopSettingsPayload(extensionId, googleClientId, browserId, googleSheetUrl, teaserRoot, revertList),
             JsonOptions
         );
         string? directory = Path.GetDirectoryName(_path);
@@ -147,6 +151,29 @@ internal sealed class DesktopSettingsStore
             ?? throw new DesktopSettingsException("invalid-google-sheet-url");
     }
 
+    // Local folders/files for the X teaser manager: fully qualified, no drive
+    // root, normalized without a trailing separator.
+    private static string? NormalizeLocalPath(string? value)
+    {
+        if (value is null || value.Length > 1_024 || !Path.IsPathFullyQualified(value)) return null;
+        try
+        {
+            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value));
+            string root = Path.TrimEndingDirectorySeparator(Path.GetPathRoot(full) ?? "");
+            return string.Equals(full, root, StringComparison.OrdinalIgnoreCase) ? null : full;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
+
+    private static string? NullOrValidatedLocalPath(string? value, string code)
+    {
+        if (value is null) return null;
+        return NormalizeLocalPath(value) ?? throw new DesktopSettingsException(code);
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -163,7 +190,9 @@ internal sealed class DesktopSettingsStore
         [property: JsonPropertyName("extensionId")] string? ExtensionId,
         [property: JsonPropertyName("googleOAuthClientId")] string? GoogleOAuthClientId,
         [property: JsonPropertyName("browserId")] string? BrowserId,
-        [property: JsonPropertyName("googleSheetUrl")] string? GoogleSheetUrl
+        [property: JsonPropertyName("googleSheetUrl")] string? GoogleSheetUrl,
+        [property: JsonPropertyName("xTeaserRoot")] string? XTeaserRoot = null,
+        [property: JsonPropertyName("xTeaserRevertListPath")] string? XTeaserRevertListPath = null
     );
 }
 
@@ -171,7 +200,9 @@ internal sealed record DesktopSettings(
     string? ExtensionId,
     string? GoogleOAuthClientId,
     string? BrowserId = null,
-    string? GoogleSheetUrl = null
+    string? GoogleSheetUrl = null,
+    string? XTeaserRoot = null,
+    string? XTeaserRevertListPath = null
 )
 {
     internal static DesktopSettings Empty { get; } = new(null, null);

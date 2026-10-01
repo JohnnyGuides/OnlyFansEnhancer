@@ -16,12 +16,13 @@ public static partial class AppConfiguration
         DesktopSettingsStore settings = new(settingsPath);
         DesktopSettings current = DesktopSettings.Empty;
         if (File.Exists(settingsPath) && !settings.TryLoad(out current)) return;
-        DesktopSettings merged = new(
-            current.ExtensionId ?? installerValues.ExtensionId,
-            current.GoogleOAuthClientId ?? installerValues.GoogleOAuthClientId,
-            current.BrowserId ?? installerValues.BrowserId,
-            current.GoogleSheetUrl ?? installerValues.GoogleSheetUrl
-        );
+        DesktopSettings merged = current with
+        {
+            ExtensionId = current.ExtensionId ?? installerValues.ExtensionId,
+            GoogleOAuthClientId = current.GoogleOAuthClientId ?? installerValues.GoogleOAuthClientId,
+            BrowserId = current.BrowserId ?? installerValues.BrowserId,
+            GoogleSheetUrl = current.GoogleSheetUrl ?? installerValues.GoogleSheetUrl,
+        };
         if (merged != current) settings.Save(merged);
     }
     private const string DataRootEnvironmentVariable = "OFENHANCER_DATA_ROOT";
