@@ -150,6 +150,18 @@ can be undone. The app moves a clip at most once; after that the owner's
 placement (undo or by hand) wins. Failed teasers no longer count
 as used, so their episode returns to rotation.
 
+The optional **Auto first reply** (extension settings) replies once under each of
+the owner's X teasers, whether posted through OFEnhancer or by hand, at a random
+time 15–60 minutes after the teaser went live. Only a video post that is neither
+a reply nor a repost, bound to exactly one catalogue episode whose only OnlyFans
+link is the canonical `https://onlyfans.com/<post id>/johnny_guides`, qualifies;
+no link means no reply. The text rotates through "full vid (no ppv)", "full
+session" and "full vid :)", then a new line and `-> <link>`. It is posted live,
+not scheduled, so the link card can be removed and confirmed gone first. Any
+existing owner reply skips the teaser, a reply is attempted at most once, and a
+teaser not replied to within 24 hours is given up. The setting defaults to off
+until the owner's live check is recorded (see [acceptance](acceptance.md)).
+
 ## Accessibility, privacy, and lifecycle
 
 Chrome readiness separates desktop-agent availability, standard-path Chrome

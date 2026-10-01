@@ -191,6 +191,11 @@ public partial class MainWindow : Window, IDisposable
                 object overview = await dispatcher.EnqueueAsync(() => xTeasers.Overview(WithoutTransportMetadata(payload)));
                 return AgentResponse.SuccessResult(request, overview);
             }
+            if (request.Operation == "getTeaserReplyQueue")
+            {
+                object queue = await dispatcher.EnqueueAsync(() => xTeasers.ReplyQueue(WithoutTransportMetadata(payload)));
+                return AgentResponse.SuccessResult(request, queue);
+            }
             if (request.Operation == "undoTeaserClipMove")
             {
                 object undone = await xTeasers.UndoAsync(WithoutTransportMetadata(payload));

@@ -11,3 +11,10 @@ globalThis.CreatorSocialDistributionRuntimeReady = Object.freeze({
   redgifs: false,
   reddit: false,
 });
+
+// SHA-256 of the sanitized record of one owner-verified live automatic first
+// reply (tests/fixtures/social-traces/x-first-reply.json). Empty until the
+// owner's live check: the Auto first reply setting then defaults to off.
+globalThis.CreatorXFirstReplyEvidence = Object.freeze({
+  liveCheck: "",
+});

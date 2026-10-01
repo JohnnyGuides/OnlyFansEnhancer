@@ -17,6 +17,8 @@ importScripts(
   "workflows/x-teaser-tab-binding.js",
   "workflows/x-collector-contract.js",
   "workflows/x-collector-forwarder.js",
+  "workflows/social-trace-evidence.js",
+  "workflows/x-first-reply.js",
 );
 
 ("use strict");
@@ -212,6 +214,48 @@ async function syncXCollectorRegistration() {
     })),
   );
   return true;
+}
+
+// Automatic delayed first reply under the owner's X teasers: a periodic alarm
+// polls the desktop queue and runs at most one due reply per tick.
+const X_FIRST_REPLY = globalThis.CreatorXFirstReply;
+let xFirstReplyScheduler = null;
+
+function xFirstReply() {
+  xFirstReplyScheduler ||= X_FIRST_REPLY.create({
+    storage: chrome.storage.local,
+    fetchQueue: () => sendDesktopRequest("getTeaserReplyQueue"),
+    runner: X_FIRST_REPLY.createChromeRunner({ chrome }),
+    evidence: globalThis.CreatorXFirstReplyEvidence,
+  });
+  return xFirstReplyScheduler;
+}
+
+async function ensureXFirstReplyAlarm() {
+  if (!X_FIRST_REPLY || !chrome.alarms) return;
+  if (await chrome.alarms.get(X_FIRST_REPLY.ALARM_NAME)) return;
+  await chrome.alarms.create(X_FIRST_REPLY.ALARM_NAME, {
+    delayInMinutes: 1,
+    periodInMinutes: X_FIRST_REPLY.ALARM_PERIOD_MINUTES,
+  });
+}
+
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name !== X_FIRST_REPLY?.ALARM_NAME) return;
+  xFirstReply()
+    .tick()
+    .catch((error) => {
+      console.warn("The automatic X first reply tick failed.", error);
+    });
+});
+
+ensureXFirstReplyAlarm().catch((error) =>
+  console.warn("Could not schedule the automatic X first reply.", error),
+);
+
+function assertExtensionPage(sender) {
+  if (!String(sender?.url || "").startsWith(chrome.runtime.getURL("")))
+    throw new Error("This setting is available only on extension pages.");
 }
 
 function sendXTeaserNative(request) {
@@ -5960,6 +6004,14 @@ function handleExtensionMessage(message, sender, sendResponse) {
         return { traceRecorder: await showUploadTraceRecorder() };
       case "CREATOR_X_COLLECTOR_BATCH":
         return acceptXCollectorMessage(message, sender);
+      case "GET_X_FIRST_REPLY_STATUS":
+        assertExtensionPage(sender);
+        return { xFirstReply: await xFirstReply().status() };
+      case "SET_X_FIRST_REPLY_ENABLED":
+        assertExtensionPage(sender);
+        return {
+          xFirstReply: await xFirstReply().setEnabled(message.enabled),
+        };
       case "GET_UPLOAD_TRACE_CONTEXT":
         return { ownerId: sender.tab?.id ? `tab-${sender.tab.id}` : "" };
       case "GET_CREATOR_UPLOAD_RECOVERY": {

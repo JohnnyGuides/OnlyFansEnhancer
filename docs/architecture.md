@@ -192,6 +192,29 @@ unpaired clips, 50 moves) and `undoTeaserClipMove` (moves back only when the
 clip and its hash are unchanged and the original path is free) serve the future
 dashboard.
 
+The automatic first reply uses the agent operation `getTeaserReplyQueue` (empty
+payload; at most 50 items): the owner handle and each teaser posted in the last
+24 hours that is bound without a recorded conflict and has no owner post replying
+in its conversation, with the episode's canonical OnlyFans URL only when every
+OnlyFans link on the row is that form for one post. A five-minute
+`chrome.alarms` tick in the extension polls it while the setting is on and
+keeps one record per status in `chrome.storage.local`
+(`creatorXFirstReplyV1`; the setting is `creatorXFirstReplySettingsV1`): the
+random due time, variant, attempts, and an outcome log (`posted`,
+`skipped-existing-reply`, `no-link`, `card-not-removed`, `mismatch`,
+`late-given-up`, `unconfirmed`, `error`) with counters shown in the settings
+page. A status already recorded is never scheduled again. One due item per tick
+opens the status in a new background tab, checks it is the owner's exact teaser
+shown once with no newer owner status, pastes the text, removes a link card with
+the reply heuristic and re-pastes at most three times, and requires the exact text
+with no card in the composer. The record is then durably marked
+`submit-attempted`; the page repeats the gate in the same turn as the Reply
+click, and the reply is confirmed by a new owner status on the page. Nothing is
+retried after the checkpoint, including after a worker restart (`unconfirmed`);
+failures before it retry at most three times. Replies over two hours past their
+due time are marked late. The default follows
+`CreatorXFirstReplyEvidence.liveCheck` in the evidence registry.
+
 ## Source and generated boundaries
 
 [The composition recipe](../packaging/extensions.json) maps runtime paths to

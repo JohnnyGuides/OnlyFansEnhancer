@@ -71,6 +71,14 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
         return new(settings().XTeaserRoot is not null, store.GetXTeaserOverview());
     }
 
+    // The automatic first-reply queue is independent of the teaser folder setting.
+    internal XTeaserReplyQueue ReplyQueue(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        return store.GetXTeaserReplyQueue(Now);
+    }
+
     internal async Task<XClipMoveOutcome> UndoAsync(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Count() != 1
