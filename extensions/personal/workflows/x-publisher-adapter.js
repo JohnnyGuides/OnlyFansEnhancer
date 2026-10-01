@@ -167,8 +167,8 @@
     }
   }
 
-  function visibleOnlyFansAnchors() {
-    return [...document.querySelectorAll("a[href]")].filter((anchor) => {
+  function visibleOnlyFansAnchors(root = document) {
+    return [...root.querySelectorAll("a[href]")].filter((anchor) => {
       try {
         return (
           anchor instanceof HTMLAnchorElement &&
@@ -181,8 +181,8 @@
     });
   }
 
-  function onlyFansPreview() {
-    const cards = visibleOnlyFansAnchors()
+  function onlyFansPreview(root = document) {
+    const cards = visibleOnlyFansAnchors(root)
       .map((anchor) => anchor.parentElement)
       .filter(
         (card) =>
@@ -392,6 +392,264 @@
     });
   }
 
+  // Automatic first reply on an already posted teaser's status page. The
+  // composer must hold exactly the reply text with no link card before the
+  // background records its durable checkpoint and asks for the click.
+  const FIRST_REPLY_TIMING = Object.freeze({
+    elementWaitMs: 20_000,
+    conversationSettleMs: 2_000,
+    cardWaitMs: 8_000,
+    removalWaitMs: 5_000,
+    settleMs: 1_500,
+    confirmWaitMs: 20_000,
+  });
+  const FIRST_REPLY_ATTEMPTS = 3;
+
+  function firstReplyTiming(value) {
+    const timing = { ...FIRST_REPLY_TIMING };
+    for (const key of Object.keys(timing)) {
+      const number = Number(value?.[key]);
+      if (Number.isFinite(number) && number >= 0 && number <= 60_000)
+        timing[key] = number;
+    }
+    return timing;
+  }
+
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function ownerTeaser({ statusId, ownerHandle }) {
+    const main = statusIdentity(location.href);
+    if (
+      !main ||
+      main.resultId !== String(statusId || "") ||
+      main.handle !== String(ownerHandle || "").toLowerCase()
+    )
+      throw new Error("not-owner-teaser: this is not the owner's teaser page.");
+    return main;
+  }
+
+  // The signed-in account, read from X's own profile tab link (the same
+  // source as the collector's owner check); every such link must agree.
+  function signedInHandle() {
+    const handles = new Set(
+      [
+        ...document.querySelectorAll('a[data-testid="AppTabBar_Profile_Link"]'),
+      ].map((link) => {
+        const match = String(link.getAttribute("href") || "").match(
+          /^\/([A-Za-z0-9_]{1,15})$/,
+        );
+        return match ? match[1].toLowerCase() : "";
+      }),
+    );
+    return handles.size === 1 ? [...handles][0] : "";
+  }
+
+  function requireOwnerAccount(ownerHandle) {
+    const owner = String(ownerHandle || "").toLowerCase();
+    if (!owner || signedInHandle() !== owner)
+      throw new Error("wrong-account: X is not signed in as the owner.");
+  }
+
+  function ownerArticles(main) {
+    return [...document.querySelectorAll("article")].filter(
+      (article) =>
+        visible(article) &&
+        [...article.querySelectorAll('a[href*="/status/"]')].some((anchor) => {
+          const identity = statusIdentity(anchor.getAttribute("href"));
+          return (
+            identity?.handle === main.handle &&
+            identity.resultId === main.resultId
+          );
+        }),
+    );
+  }
+
+  // Owner statuses newer than the teaser are treated as replies in its
+  // conversation; any of them stops the automatic reply.
+  function ownerRepliesAfter(main) {
+    return sameAuthorStatuses(main).filter(
+      (identity) => BigInt(identity.resultId) > BigInt(main.resultId),
+    );
+  }
+
+  function composerRoot(editor) {
+    for (let node = editor.parentElement; node; node = node.parentElement) {
+      if (node.querySelector(REPLY_POST)) return node;
+    }
+    throw new Error("composer-missing: the X reply composer has no Reply.");
+  }
+
+  function composerText(editor) {
+    return String(editor.innerText ?? editor.textContent ?? "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\u00a0/g, " ")
+      .replace(/\n+$/, "");
+  }
+
+  function linkCards(root) {
+    return [
+      ...[...root.querySelectorAll('[data-testid="card.wrapper"]')].filter(
+        visible,
+      ),
+      ...visibleOnlyFansAnchors(root),
+    ];
+  }
+
+  function firstReplyGate(editor, root, text, paidUrl) {
+    if (
+      !/^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/.test(
+        String(paidUrl || ""),
+      ) ||
+      !text.endsWith(`\n-> ${paidUrl}`)
+    )
+      throw new Error("mismatch: the reply does not carry the episode link.");
+    if (linkCards(root).length)
+      throw new Error("card-not-removed: a link card is still attached.");
+    if (composerText(editor) !== text)
+      throw new Error("mismatch: the composer does not hold the reply text.");
+  }
+
+  function pasteText(editor, text) {
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const data = new DataTransfer();
+    data.setData("text/plain", text);
+    const handled = !editor.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    if (!handled) fillEditor(editor, text);
+  }
+
+  async function prepareFirstReply({
+    statusId,
+    ownerHandle,
+    text,
+    paidUrl,
+    timing,
+  }) {
+    const limits = firstReplyTiming(timing);
+    const expected = String(text || "");
+    if (!expected) throw new Error("mismatch: the reply text is missing.");
+    const main = ownerTeaser({ statusId, ownerHandle });
+    await waitFor(
+      () => signedInHandle(),
+      "The signed-in X account",
+      limits.elementWaitMs,
+    ).catch(() => {});
+    requireOwnerAccount(ownerHandle);
+    await waitFor(
+      () => ownerArticles(main).length > 0,
+      "The teaser post",
+      limits.elementWaitMs,
+    ).catch(() => {
+      throw new Error("not-owner-teaser: the teaser post was not shown.");
+    });
+    const editor = await waitFor(
+      () => one(MAIN_COMPOSER, "The X reply composer"),
+      "The X reply composer",
+      limits.elementWaitMs,
+    ).catch(() => {
+      throw new Error("composer-missing: the X reply composer was not shown.");
+    });
+    await pause(limits.conversationSettleMs);
+    if (ownerArticles(main).length !== 1)
+      throw new Error("not-owner-teaser: the teaser post is ambiguous.");
+    const existing = ownerRepliesAfter(main);
+    if (existing.length)
+      return { status: "existing-reply", replyId: existing[0].resultId };
+    replyBaselines.set(
+      main.resultId,
+      new Set(sameAuthorStatuses(main).map((item) => item.resultId)),
+    );
+    const root = composerRoot(editor);
+    let failure = null;
+    const removeCard = async () => {
+      const preview = onlyFansPreview(root);
+      preview.dismiss.click();
+      await waitFor(
+        () => !preview.card.isConnected || !visible(preview.card),
+        "Link card removal",
+        limits.removalWaitMs,
+      );
+    };
+    for (let attempt = 0; attempt < FIRST_REPLY_ATTEMPTS; attempt += 1) {
+      try {
+        // A card left by the previous attempt goes before the re-paste.
+        if (linkCards(root).length) await removeCard();
+        pasteText(editor, expected);
+        const appeared = await waitFor(
+          () => linkCards(root).length > 0,
+          "The link card",
+          limits.cardWaitMs,
+        ).catch(() => false);
+        if (appeared) await removeCard();
+        await pause(limits.settleMs);
+        firstReplyGate(editor, root, expected, paidUrl);
+        requireOwnerAccount(ownerHandle);
+        one(REPLY_POST, "The X Reply button", enabled);
+        return {
+          status: "ready",
+          resultId: main.resultId,
+          attempts: attempt + 1,
+        };
+      } catch (error) {
+        if (/^wrong-account:/.test(String(error?.message))) throw error;
+        failure = error;
+      }
+    }
+    if (linkCards(root).length)
+      throw new Error("card-not-removed: the link card could not be removed.");
+    throw /^mismatch:/.test(String(failure?.message))
+      ? failure
+      : new Error(
+          `mismatch: ${String(failure?.message || "the reply was not prepared.")}`,
+        );
+  }
+
+  async function submitFirstReply({
+    statusId,
+    ownerHandle,
+    text,
+    paidUrl,
+    timing,
+  }) {
+    const limits = firstReplyTiming(timing);
+    const expected = String(text || "");
+    const main = ownerTeaser({ statusId, ownerHandle });
+    if (!expected || !replyBaselines.has(main.resultId))
+      throw new Error("mismatch: the reply was not prepared in this page.");
+    if (ownerRepliesAfter(main).length)
+      throw new Error("existing-reply: an owner reply appeared.");
+    const editor = one(MAIN_COMPOSER, "The X reply composer");
+    const root = composerRoot(editor);
+    // No await between the final gate and the click.
+    requireOwnerAccount(ownerHandle);
+    firstReplyGate(editor, root, expected, paidUrl);
+    one(REPLY_POST, "The X Reply button", enabled).click();
+    const reply = await waitFor(
+      () => replyFor(main),
+      "The posted X reply",
+      limits.confirmWaitMs,
+    ).catch((error) => {
+      throw new Error(
+        `unconfirmed: ${String(error?.message || "the reply was not observed.")}`,
+      );
+    });
+    return {
+      resultId: main.resultId,
+      replyId: reply.resultId,
+      replyUrl: reply.resultUrl,
+    };
+  }
+
   globalThis.CreatorXPublisherAdapter = Object.freeze({
     prepare,
     prepareReply,
@@ -399,5 +657,7 @@
     submitReply,
     captureResult,
     mainIdentity,
+    prepareFirstReply,
+    submitFirstReply,
   });
 })();

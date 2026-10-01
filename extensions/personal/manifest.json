@@ -11,7 +11,8 @@
     "nativeMessaging",
     "debugger",
     "offscreen",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "alarms"
   ],
   "optional_host_permissions": [
     "https://gelbooru.com/*",

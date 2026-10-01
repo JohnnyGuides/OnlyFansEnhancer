@@ -644,6 +644,32 @@ coverage rejects expanding those match patterns to physical paths.
 - Gate on the 0.20.89 source: lint, type check, format, portable suite 762 (761 pass, 1 stage-dependent skip), .NET 452 + 65, native 31, Windows packaging 18 (16 pass, 2 stage-dependent skips), teaser host and installer builds. After staging, the fresh-reinstall lifecycle test passed and one installer-recovery case failed once (uninstaller absent right after compile) and passed on an isolated rerun (2/2); recorded as intermittent. `dist/OFEnhancer-Setup-0.20.89.exe` is 78,799,148 bytes, SHA-256 `4ea997d35c06b315915cdbcc7eb3ba85aa9cd29d7f5d18fd1f8b8ddda20f2198`; stage manifest SHA-256 `3dac0796df1e8e5e80101baff1b9a38898b816ab94f950d21e2ad652b2b9a379`.
 - Installed as a silent normal update (exit 0, `.local/OFEnhancer-0.20.89-install.log`). The installed desktop reports `0.20.89+6505c0e`, matches the staged binary, and restarted with the native bridge. Settings and Google client/token files were byte-identical. Live manual-publish link capture, Fansly previews on extra videos, audio extras on the platforms and the extension reload were not exercised by the agent.
 
+## Automatic X first reply — owner live check required
+
+Source, fixture and real-Chrome tests do not establish the live X composer
+behaviour, so `CreatorXFirstReplyEvidence.liveCheck` is empty and **Auto first
+reply** defaults to off ("needs one live check"). One real reply, by the owner:
+
+1. With the desktop running and the extension reloaded, post a teaser (or use one
+   posted within 24 hours) whose catalogue row links it in `Twitter Teaser(s)`
+   and holds the canonical OnlyFans link, with no reply yet. Open the own X
+   profile once so the collector records it.
+2. In the extension settings, turn on **Auto first reply**. Within five minutes
+   of the due time (15–60 minutes after posting, or at once when already past) a
+   background tab opens the teaser, replies and closes.
+3. On X, confirm exactly one owner reply reading the variant, a new line and
+   `-> <link>`, with no link card. The settings log should show
+   `posted reply <id>`.
+4. Record `tests/fixtures/social-traces/x-first-reply.json` with no account
+   data, for example
+   `{"schemaVersion":1,"platform":"X","flow":"automatic-first-reply","outcome":"posted","cardAbsentOnX":true,"checkedOn":"YYYY-MM-DD"}`,
+   and set `liveCheck` to the SHA-256 of that file's bytes. The default then
+   becomes on.
+
+Any other logged outcome (`card-not-removed`, `mismatch`, `unconfirmed`) or
+a visible card on the posted reply fails the check: turn the setting off and keep
+the log.
+
 ## X collector — installed 0.20.90 check, 1 October 2026
 
 - 0.20.90 adds passive collection of the owner's own X posts and metrics (`699ead8`, `0f9d34a`): a document-start page script on x.com reads copies of allowlisted X timeline/detail responses, keeps only the signed-in owner's posts, and hands batches to the extension over a private MessageChannel port; a page-reading fallback takes only the outer post (quoted cards excluded). The desktop stores posts and dated metric samples through the new `recordXObservations` operation (Migration 6: `x_owner`, `x_posts`, `x_metric_samples`); other accounts are refused. Nothing is clicked, typed or scrolled by the collector.

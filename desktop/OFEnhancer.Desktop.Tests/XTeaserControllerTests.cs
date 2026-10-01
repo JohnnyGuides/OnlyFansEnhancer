@@ -14,6 +14,7 @@ public sealed class XTeaserControllerTests
     [DataTestMethod]
     [DataRow("getTeaserOverview")]
     [DataRow("undoTeaserClipMove")]
+    [DataRow("getTeaserReplyQueue")]
     public void TeaserOperationsAreAllowedAgentOperations(string operation)
     {
         AgentRequest request = AgentRequest.Parse(
@@ -65,6 +66,19 @@ public sealed class XTeaserControllerTests
             controller.UndoAsync(JsonDocument.Parse("""{"moveId":"1"}""").RootElement))).Code);
         Assert.AreEqual("x-move-not-found", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
             controller.UndoAsync(JsonDocument.Parse("""{"moveId":7}""").RootElement))).Code);
+    }
+
+    [TestMethod]
+    public void ReplyQueueWorksWithoutTheTeaserRootAndRejectsPayloads()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
+        XTeaserReplyQueue queue = controller.ReplyQueue(JsonDocument.Parse("{}").RootElement);
+        Assert.IsNull(queue.OwnerHandle);
+        Assert.AreEqual(0, queue.Items.Count);
+        Assert.AreEqual("invalid-teaser-request", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+            controller.ReplyQueue(JsonDocument.Parse("""{"since":1}""").RootElement)).Code);
     }
 
     [TestMethod]

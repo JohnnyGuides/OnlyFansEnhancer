@@ -481,6 +481,73 @@ public sealed class XTeaserManagerTests
         Assert.IsFalse(overview.Truncated);
     }
 
+    [TestMethod]
+    public void ReplyQueueListsOnlyRecentBoundUnrepliedTeasersWithTheCanonicalOnlyFansLink()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        Assert.IsNull(store.GetXTeaserReplyQueue(Now).OwnerHandle, "no owner recorded yet");
+        AddItem(store, "item-a", "ep-a", "A", onlyFans: "https://onlyfans.com/111/johnny_guides",
+            sheetX: ["https://x.com/Owner_Handle/status/401", "https://x.com/Owner_Handle/status/407"]);
+        AddItem(store, "item-b", "ep-b", "B", onlyFans: "https://onlyfans.com/222/someone_else", sheetX: ["https://x.com/Owner_Handle/status/402"]);
+        AddItem(store, "item-c", "ep-c", "C", onlyFans: "https://onlyfans.com/333/johnny_guides",
+            sheetX: ["https://x.com/Owner_Handle/status/403", "https://x.com/Owner_Handle/status/405", "https://x.com/Owner_Handle/status/406"]);
+        AddItem(store, "item-d", "ep-d", "D", sheetX: ["https://x.com/Owner_Handle/status/409"]);
+        AddItem(store, "item-e", "ep-e", "E", onlyFans: "https://onlyfans.com/555/johnny_guides", sheetX: ["https://x.com/Owner_Handle/status/407"]);
+        AddItem(store, "item-f", "ep-f", "F", onlyFans: "https://onlyfans.com/666/johnny_guides", sheetX: ["https://x.com/Owner_Handle/status/410"]);
+        string cells = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, CatalogueSourceLinkCell>
+        {
+            ["onlyfans"] = new("x", null, ["https://onlyfans.com/667/johnny_guides"]),
+            ["x"] = new("x", null, ["https://x.com/Owner_Handle/status/410"]),
+        });
+        Exec(store, $"UPDATE catalogue_items SET source_link_cells_json = '{cells}' WHERE item_id = 'item-f'");
+
+        store.RecordXObservations(new(Owner, [
+            Post("401", Now.AddMinutes(-30)),
+            Post("402", Now.AddHours(-2)),
+            Post("403", Now.AddHours(-3)), Post("4031", Now.AddHours(-2), "thanks", "403", "403", video: false),
+            Post("404", Now.AddHours(-1)),
+            Post("405", Now.AddHours(-25)),
+            Post("406", Now.AddHours(-1), "photo", video: false),
+            Post("407", Now.AddHours(-1)),
+            Post("409", Now.AddHours(-4)),
+            Post("410", Now.AddHours(-5)),
+        ]), Now);
+
+        XTeaserReplyQueue queue = store.GetXTeaserReplyQueue(Now);
+        Assert.AreEqual("Owner_Handle", queue.OwnerHandle);
+        CollectionAssert.AreEqual(new[] { "401", "402", "409", "410" }, queue.Items.Select(item => item.StatusId).ToArray());
+        XTeaserReplyCandidate first = queue.Items[0];
+        Assert.AreEqual("https://onlyfans.com/111/johnny_guides", first.PaidUrl);
+        Assert.AreEqual("item-a|ep-a", $"{first.ItemId}|{first.SourceKey}");
+        Assert.IsTrue(first.HasVideo && !first.IsReply && !first.IsRepost && !first.OwnerReplyExists);
+        Assert.IsNull(queue.Items[1].PaidUrl, "a foreign or non-canonical OnlyFans link is never used");
+        Assert.IsNull(queue.Items[2].PaidUrl, "no OnlyFans link on the row");
+        Assert.IsNull(queue.Items[3].PaidUrl, "two different OnlyFans posts are ambiguous");
+
+        // A non-teaser never qualifies, even with an owner binding.
+        Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('406','item-c','ep-c','owner','high','x')");
+        Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('4031','item-c','ep-c','owner','high','x')");
+        CollectionAssert.AreEqual(new[] { "401", "402", "409", "410" }, store.GetXTeaserReplyQueue(Now).Items.Select(item => item.StatusId).ToArray());
+        // An owner binding with a recorded conflict is not exactly one episode.
+        Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('404','item-a','ep-a','owner','high','x')");
+        Assert.IsTrue(store.GetXTeaserReplyQueue(Now).Items.Any(item => item.StatusId == "404"));
+        Exec(store, "INSERT INTO x_binding_conflicts(status_id,candidates_json,detected_utc) VALUES ('404','[]','x')");
+        Assert.IsFalse(store.GetXTeaserReplyQueue(Now).Items.Any(item => item.StatusId == "404"));
+        Assert.AreEqual(0, store.GetXTeaserReplyQueue(Now.AddHours(30)).Items.Count, "older than 24 h");
+    }
+
+    [TestMethod]
+    public void CanonicalOnlyFansLinkAcceptsTheTrailingSlashFormOnly()
+    {
+        static CatalogueItemSummary Item(string link) => new("i", "k", null, "t", "", null, null, null, 0, 0,
+            new Dictionary<string, string> { ["onlyfans"] = link }, false);
+        Assert.AreEqual("https://onlyfans.com/42/johnny_guides", CatalogueStore.CanonicalOnlyFansUrl(Item("https://onlyfans.com/42/johnny_guides/")));
+        Assert.IsNull(CatalogueStore.CanonicalOnlyFansUrl(Item("https://onlyfans.com/42")));
+        Assert.IsNull(CatalogueStore.CanonicalOnlyFansUrl(Item("https://onlyfans.com/42/johnny_guides?x=1")));
+        Assert.IsNull(CatalogueStore.CanonicalOnlyFansUrl(Item("http://onlyfans.com/42/johnny_guides")));
+    }
+
     private static long PairedClipWithVerdict(CatalogueStore store, string root, string name, string verdict)
     {
         AddItem(store, "item-ep-a", "ep-a", "ep-a", sheetX: ["https://x.com/Owner_Handle/status/900"]);

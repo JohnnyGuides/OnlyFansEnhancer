@@ -232,8 +232,48 @@ async function loadAvatarManagementView() {
   $("#retiredAvatarEmpty").hidden = avatarView.retired.length > 0;
 }
 
+function renderXFirstReply(view) {
+  $("#xFirstReplyEnabled").checked = view.enabled;
+  const counts = Object.entries(view.counters || {})
+    .filter(([, count]) => count > 0)
+    .map(([outcome, count]) => `${outcome} ${count}`);
+  $("#xFirstReplyStatus").textContent = [
+    `Status: ${view.label}.`,
+    `${view.pending} pending.`,
+    view.lastError ? `Last desktop error: ${view.lastError}.` : "",
+    counts.length ? `Outcomes: ${counts.join(", ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  $("#xFirstReplyLog").replaceChildren(
+    ...(view.log || []).slice(0, 10).map((entry) => {
+      const row = document.createElement("li");
+      row.textContent = `${entry.at} ${entry.statusId}: ${entry.outcome}${
+        entry.late ? " (late)" : ""
+      }${entry.replyId ? ` reply ${entry.replyId}` : ""}`;
+      return row;
+    }),
+  );
+}
+
+async function loadXFirstReply() {
+  const { xFirstReply } = await sendMessage({
+    type: "GET_X_FIRST_REPLY_STATUS",
+  });
+  renderXFirstReply(xFirstReply);
+}
+
+async function setXFirstReply(enabled) {
+  const { xFirstReply } = await sendMessage({
+    type: "SET_X_FIRST_REPLY_ENABLED",
+    enabled,
+  });
+  renderXFirstReply(xFirstReply);
+}
+
 async function load() {
   const results = await Promise.allSettled([
+    loadXFirstReply(),
     loadCatalogueBridge(),
     loadIdentitySettings(),
     loadIdentityStats(),
@@ -556,6 +596,12 @@ async function resetMappings() {
 }
 
 $("#avatarMode").addEventListener("change", toggleGelbooruFields);
+$("#xFirstReplyEnabled").addEventListener("change", (event) => {
+  setXFirstReply(event.target.checked).catch((error) => {
+    showStatus(error.message, true);
+    loadXFirstReply().catch(() => {});
+  });
+});
 $("#save").addEventListener("click", () => {
   save().catch((error) => showStatus(error.message, true));
 });
