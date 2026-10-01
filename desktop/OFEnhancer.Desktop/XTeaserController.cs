@@ -88,6 +88,76 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
         catch (XTeaserException exception) { throw new GoogleCatalogueControllerException(exception.Code); }
     }
 
+    internal static readonly IReadOnlySet<string> Operations = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "getTeaserOverview", "undoTeaserClipMove", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
+    };
+
+    internal const int MaxPlanDaysAhead = 60;
+
+    // Shared entry for the agent pipe and the desktop workspace; catalogue
+    // access runs on the serial request dispatcher.
+    internal async Task<object> HandleAsync(string operation, JsonElement payload) => operation switch
+    {
+        "getTeaserOverview" => await dispatcher.EnqueueAsync<object>(() => Overview(payload)).ConfigureAwait(false),
+        "undoTeaserClipMove" => await UndoAsync(payload).ConfigureAwait(false),
+        "getTeaserPlan" => await dispatcher.EnqueueAsync<object>(() => GetPlan(payload)).ConfigureAwait(false),
+        "setTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => SetPlanSlot(payload)).ConfigureAwait(false),
+        "clearTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => ClearPlanSlot(payload)).ConfigureAwait(false),
+        _ => throw new GoogleCatalogueControllerException("unsupported-operation"),
+    };
+
+    // Plan dates are the owner's local calendar days; one day of slack either
+    // side of UTC covers every time zone.
+    internal XTeaserPlan GetPlan(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        return store.GetXTeaserPlan(PlanDay(-1));
+    }
+
+    internal XTeaserPlanSlot SetPlanSlot(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || payload.EnumerateObject().Any(property => property.Name is not ("date" or "episodeKey" or "clipId"))
+            || !payload.TryGetProperty("episodeKey", out JsonElement key) || key.ValueKind != JsonValueKind.String
+            || key.GetString() is not { Length: > 0 and <= 200 } episodeKey || string.IsNullOrWhiteSpace(episodeKey))
+            throw new GoogleCatalogueControllerException("invalid-teaser-plan");
+        string date = PlanDate(payload);
+        if (string.CompareOrdinal(date, PlanDay(-1)) < 0 || string.CompareOrdinal(date, PlanDay(MaxPlanDaysAhead + 1)) > 0)
+            throw new GoogleCatalogueControllerException("invalid-teaser-plan");
+        long? clipId = null;
+        if (payload.TryGetProperty("clipId", out JsonElement clip) && clip.ValueKind != JsonValueKind.Null)
+        {
+            if (clip.ValueKind != JsonValueKind.Number || !clip.TryGetInt64(out long id) || id <= 0)
+                throw new GoogleCatalogueControllerException("invalid-teaser-plan");
+            clipId = id;
+        }
+        try { return store.SetXTeaserPlanSlot(date, episodeKey, clipId, Now); }
+        catch (XTeaserException exception) { throw new GoogleCatalogueControllerException(exception.Code); }
+    }
+
+    internal object ClearPlanSlot(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any(property => property.Name != "date"))
+            throw new GoogleCatalogueControllerException("invalid-teaser-plan");
+        string date = PlanDate(payload);
+        return new { date, cleared = store.ClearXTeaserPlanSlot(date) };
+    }
+
+    private static string PlanDate(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("date", out JsonElement value) || value.ValueKind != JsonValueKind.String)
+            throw new GoogleCatalogueControllerException("invalid-teaser-plan");
+        string date = value.GetString()!;
+        try { CatalogueStore.ParsePlanDate(date); }
+        catch (XTeaserException exception) { throw new GoogleCatalogueControllerException(exception.Code); }
+        return date;
+    }
+
+    private string PlanDay(int offset) =>
+        DateOnly.FromDateTime(Now.UtcDateTime).AddDays(offset).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
     public void Dispose()
     {
         timer?.Dispose();

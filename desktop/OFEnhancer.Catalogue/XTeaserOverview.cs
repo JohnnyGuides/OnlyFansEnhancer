@@ -5,7 +5,8 @@ using Microsoft.Data.Sqlite;
 namespace OFEnhancer.Catalogue;
 
 public sealed record XTeaserEpisode(string ItemId, string SourceKey, string Title, int UsedCount, int FailedCount,
-    int ReadyClips, int PostedClips, int GoodClips, int FailedClips);
+    int ReadyClips, int PostedClips, int GoodClips, int FailedClips, string? Category = null, string? Series = null,
+    string? Episode = null);
 
 public sealed record XTeaserMetrics(string ObservedUtc, double AgeHours, long? Views, long? Likes, long? Reposts,
     long? Replies, long? Bookmarks);
@@ -15,9 +16,14 @@ public sealed record XTeaserVerdict(string Verdict, double EngagementRate, doubl
 
 public sealed record XTeaserFirstReply(string StatusId, string Link, string Kind, string RepliedUtc);
 
+// Medians of the other teasers' samples taken at an age comparable to this
+// post's latest sample; a null field had too few comparable values.
+public sealed record XTeaserUsual(double AgeHours, int Peers, double? Views, double? Likes, double? Reposts,
+    double? EngagementRate);
+
 public sealed record XTeaserPost(string StatusId, string PostedUtc, string? ItemId, string? SourceKey, string? Evidence,
     IReadOnlyList<XBindingCandidate>? Conflict, XTeaserMetrics? Latest, XTeaserVerdict? Verdict, XTeaserFirstReply? FirstReply,
-    long? ClipId);
+    long? ClipId, string? PosterUrl = null, XTeaserUsual? Usual = null);
 
 public sealed record XTeaserClip(long ClipId, string RelPath, string? EpisodeKey, string State, string? StatusId,
     string? PairingEvidence, bool Missing);
@@ -35,6 +41,7 @@ public sealed partial class CatalogueStore
     internal const int MaxOverviewPosts = 200;
     internal const int MaxOverviewClips = 200;
     internal const int MaxOverviewMoves = 50;
+    internal const int MinimumUsualPeers = 3;
 
     // Bounded read model for the teaser dashboard: newest teasers first.
     public XTeaserOverview GetXTeaserOverview()
@@ -66,6 +73,19 @@ public sealed partial class CatalogueStore
             """, reader => clips.Add(new(reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2),
             reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5),
             reader.GetInt64(6) == 1)));
+        Dictionary<string, string> posters = new(StringComparer.Ordinal);
+        Query("SELECT status_id, media_json FROM x_posts", reader =>
+        {
+            if (PosterUrl(reader.GetString(1)) is { } poster) posters[reader.GetString(0)] = poster;
+        });
+        Dictionary<string, List<XUsualSample>> samples = new(StringComparer.Ordinal);
+        Query("SELECT status_id, age_hours, views, likes, reposts, replies, bookmarks FROM x_metric_samples", reader =>
+        {
+            if (!samples.TryGetValue(reader.GetString(0), out List<XUsualSample>? list))
+                samples[reader.GetString(0)] = list = [];
+            list.Add(new(reader.GetDouble(1), Nullable(reader, 2), Nullable(reader, 3), Nullable(reader, 4),
+                Nullable(reader, 5), Nullable(reader, 6)));
+        });
         Dictionary<string, long> clipByStatus = clips.Where(clip => clip.StatusId is not null)
             .ToDictionary(clip => clip.StatusId!, clip => clip.ClipId, StringComparer.Ordinal);
 
@@ -76,8 +96,13 @@ public sealed partial class CatalogueStore
             posts.Add(new(teaser.StatusId, teaser.PostedUtc.ToString("O", CultureInfo.InvariantCulture), isBound ? binding.ItemId : null,
                 isBound ? binding.SourceKey : null, isBound ? binding.Evidence : null, conflicts.GetValueOrDefault(teaser.StatusId),
                 latest.GetValueOrDefault(teaser.StatusId), verdicts.GetValueOrDefault(teaser.StatusId),
-                replies.GetValueOrDefault(teaser.StatusId), clipByStatus.TryGetValue(teaser.StatusId, out long clipId) ? clipId : null));
+                replies.GetValueOrDefault(teaser.StatusId), clipByStatus.TryGetValue(teaser.StatusId, out long clipId) ? clipId : null,
+                posters.GetValueOrDefault(teaser.StatusId)));
         }
+        HashSet<string> teaserIds = [.. posts.Select(post => post.StatusId)];
+        for (int index = 0; index < Math.Min(posts.Count, MaxOverviewPosts); index++)
+            if (posts[index].Latest is { } own)
+                posts[index] = posts[index] with { Usual = Usual(posts[index].StatusId, own.AgeHours, teaserIds, samples) };
 
         List<XTeaserEpisode> episodes = [];
         foreach (CatalogueItemSummary item in GetItems())
@@ -85,11 +110,12 @@ public sealed partial class CatalogueStore
             string key = item.SourceKey.ToLowerInvariant();
             List<XTeaserPost> used = [.. posts.Where(post => post.ItemId == item.ItemId)];
             List<XTeaserClip> own = [.. clips.Where(clip => clip.EpisodeKey == key)];
-            if (used.Count == 0 && own.Count == 0) continue;
             int failed = used.Count(post => post.Verdict?.Verdict == "failed");
+            // Every active episode is listed so the dashboard shows uncovered ones too.
             episodes.Add(new(item.ItemId, item.SourceKey, item.Title, used.Count - failed, failed,
                 own.Count(clip => clip.State == "ready"), own.Count(clip => clip.State == "posted"),
-                own.Count(clip => clip.State == "good"), own.Count(clip => clip.State == "failed")));
+                own.Count(clip => clip.State == "good"), own.Count(clip => clip.State == "failed"),
+                item.Category, item.Series, item.Episode));
         }
 
         List<XTeaserMove> moves = [];
@@ -107,6 +133,48 @@ public sealed partial class CatalogueStore
             [.. unbound.Take(MaxOverviewPosts)], moves, truncated);
 
         static long? Nullable(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetInt64(index);
+    }
+
+    private sealed record XUsualSample(double AgeHours, long? Views, long? Likes, long? Reposts, long? Replies, long? Bookmarks);
+
+    // Comparable age: 0.8x-1.25x of the post's age, and at least +/-2 h.
+    // Each other teaser contributes its one sample closest to that age.
+    private static XTeaserUsual? Usual(string statusId, double age, HashSet<string> teaserIds,
+        Dictionary<string, List<XUsualSample>> samples)
+    {
+        double low = Math.Min(age * 0.8, age - 2), high = Math.Max(age * 1.25, age + 2);
+        List<XUsualSample> peers = [];
+        foreach ((string peerId, List<XUsualSample> list) in samples)
+        {
+            if (peerId == statusId || !teaserIds.Contains(peerId)) continue;
+            XUsualSample? closest = list.Where(sample => sample.AgeHours >= low && sample.AgeHours <= high)
+                .OrderBy(sample => Math.Abs(sample.AgeHours - age)).FirstOrDefault();
+            if (closest is not null) peers.Add(closest);
+        }
+        if (peers.Count < MinimumUsualPeers) return null;
+        return new(age, peers.Count, Median(peers.Select(peer => (double?)peer.Views)),
+            Median(peers.Select(peer => (double?)peer.Likes)), Median(peers.Select(peer => (double?)peer.Reposts)),
+            Median(peers.Select(peer => peer.Views > 0 && peer.Likes is not null && peer.Reposts is not null
+                && peer.Replies is not null && peer.Bookmarks is not null
+                ? (double)(peer.Likes + peer.Reposts + peer.Replies + peer.Bookmarks).Value / peer.Views.Value : (double?)null)));
+
+        static double? Median(IEnumerable<double?> values)
+        {
+            double[] sorted = [.. values.Where(value => value is not null).Select(value => value!.Value).Order()];
+            if (sorted.Length < MinimumUsualPeers) return null;
+            return sorted.Length % 2 == 1 ? sorted[sorted.Length / 2] : (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2;
+        }
+    }
+
+    // Only X's own image host is passed to the dashboard.
+    private static string? PosterUrl(string mediaJson)
+    {
+        List<XObservedMedia>? media;
+        try { media = JsonSerializer.Deserialize<List<XObservedMedia>>(mediaJson, XJson); }
+        catch (JsonException) { return null; }
+        string? poster = media?.FirstOrDefault(item => item.Type == "video" && item.PosterUrl is not null)?.PosterUrl;
+        return Uri.TryCreate(poster, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps
+            && uri.Host == "pbs.twimg.com" && uri.IsDefaultPort && string.IsNullOrEmpty(uri.UserInfo) ? uri.AbsoluteUri : null;
     }
 
     private void Query(string sql, Action<SqliteDataReader> row)

@@ -7,8 +7,10 @@
     <title>OFEnhancer</title>
     <link rel="icon" href="finalLogo.png" />
     <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="teaser-dashboard.css" />
     <script src="host-bridge.js" defer></script>
     <script src="legacy-thumbnails/ids.js" defer></script>
+    <script src="teaser-dashboard.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -29,6 +31,7 @@
             Uploads
           </button>
           <button type="button" data-view="teasers">Teasers</button>
+          <button type="button" data-view="twitter">Twitter</button>
           <button type="button" data-view="attention">Attention</button>
           <button type="button" data-view="settings">Settings</button>
         </nav>
@@ -237,6 +240,13 @@
           <button type="button" class="secondary-button chrome-setup-trigger">
             Check Chrome setup
           </button>
+        </section>
+
+        <section data-panel="twitter" hidden>
+          <header class="page-heading twitter-heading">
+            <h1 tabindex="-1">Twitter</h1>
+          </header>
+          <div id="teaserDashboard"></div>
         </section>
 
         <section data-panel="attention" hidden>

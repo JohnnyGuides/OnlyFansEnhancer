@@ -32,7 +32,7 @@ public sealed class XObservationsTests
             Assert.AreEqual(5, oldStore.SchemaVersion);
         }
         using CatalogueStore store = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(7, store.SchemaVersion);
+        Assert.AreEqual(8, store.SchemaVersion);
         Assert.AreEqual("Review", store.GetItems().Single().Category);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v5-*.sqlite").Length);
         Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_posts"));

@@ -131,6 +131,11 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
       "recordUploadResult",
       "writeUploadCatalogueEntry",
       "getSubredditPresets",
+      "getTeaserOverview",
+      "undoTeaserClipMove",
+      "getTeaserPlan",
+      "setTeaserPlanSlot",
+      "clearTeaserPlanSlot",
     ]).has(operation)
   )
     return sendDesktopRequest(operation, payload);

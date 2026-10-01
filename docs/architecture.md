@@ -189,8 +189,19 @@ moved at most once: after a successful verdict move, wherever the owner puts it
 the clip's last log row is not logged again, and one clip's failure does not
 stop the others. Agent operations `getTeaserOverview` (bounded: 500 episodes, 200 teasers, 200
 unpaired clips, 50 moves) and `undoTeaserClipMove` (moves back only when the
-clip and its hash are unchanged and the original path is free) serve the future
-dashboard.
+clip and its hash are unchanged and the original path is free) serve the teaser
+dashboard. The overview lists every active catalogue episode with its category,
+series and episode, each teaser's X poster image (only `pbs.twimg.com`) and a
+"usual": the medians of the other teasers' samples at a comparable age
+(0.8–1.25 times the latest sample's age, at least ±2 h, one sample per teaser,
+at least 3 teasers). `x_planned_slots` holds the owner-local plan, one episode
+(and optionally one of its clips; a failed clip marks a re-edit) per calendar
+day, through `getTeaserPlan`, `setTeaserPlanSlot` (UTC yesterday to 61 days ahead)
+and `clearTeaserPlanSlot`; nothing is sent to X. The shared
+`shared/workspace/teaser-dashboard.js` renders it in the desktop workspace's
+Twitter view and on the extension's `teaser-dashboard.html` page, which the
+upload console links to; the desktop serves the same operations to its
+workspace directly.
 
 ## Source and generated boundaries
 

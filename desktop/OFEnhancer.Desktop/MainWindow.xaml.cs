@@ -186,16 +186,8 @@ public partial class MainWindow : Window, IDisposable
                 object recorded = await dispatcher.EnqueueAsync(() => xObservations.Record(WithoutTransportMetadata(payload)));
                 return AgentResponse.SuccessResult(request, recorded);
             }
-            if (request.Operation == "getTeaserOverview")
-            {
-                object overview = await dispatcher.EnqueueAsync(() => xTeasers.Overview(WithoutTransportMetadata(payload)));
-                return AgentResponse.SuccessResult(request, overview);
-            }
-            if (request.Operation == "undoTeaserClipMove")
-            {
-                object undone = await xTeasers.UndoAsync(WithoutTransportMetadata(payload));
-                return AgentResponse.SuccessResult(request, undone);
-            }
+            if (XTeaserController.Operations.Contains(request.Operation))
+                return AgentResponse.SuccessResult(request, await xTeasers.HandleAsync(request.Operation, WithoutTransportMetadata(payload)));
             if (request.Operation == "writeUploadCatalogueEntry")
             {
                 object written = await dispatcher.EnqueueAsync(() => googleCatalogue.WriteUploadEntry(WithoutTransportMetadata(payload)));
@@ -210,11 +202,31 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    // The desktop workspace's Twitter view uses the same teaser operations as the agent pipe.
+    private async Task<string> HandleTeaserMessage(JsonElement root, string operation)
+    {
+        string requestId = root.TryGetProperty("requestId", out JsonElement id) && id.ValueKind == JsonValueKind.String
+            ? id.GetString() ?? "" : "";
+        try
+        {
+            if (!Guid.TryParse(requestId, out _)) throw new GoogleCatalogueControllerException("invalid-request");
+            JsonElement payload = root.TryGetProperty("payload", out JsonElement value) ? value : JsonSerializer.SerializeToElement(new { });
+            object result = await xTeasers.HandleAsync(operation, payload);
+            return JsonSerializer.Serialize(new { requestId, ok = true, result }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        }
+        catch (Exception error)
+        {
+            string code = error is GoogleCatalogueControllerException teaserError ? teaserError.Code : "desktop-operation-failed";
+            return JsonSerializer.Serialize(new { requestId, ok = false, error = new { code } });
+        }
+    }
+
     private async Task<string?> HandleUploadMessage(string json, IReadOnlyList<object> additionalObjects)
     {
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
+        if (XTeaserController.Operations.Contains(operation)) return await HandleTeaserMessage(root, operation);
         if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "prepareOpeningFrame", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try

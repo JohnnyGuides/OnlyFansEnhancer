@@ -3008,3 +3008,27 @@ a {
   background: #00aff0;
   color: #041118;
 }
+
+/* Link to the extension's teaser dashboard page beside the workspace tabs. */
+.workspace-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #aeb6c3;
+  font-size: 0.85rem;
+  text-decoration: none;
+  user-select: none;
+}
+
+.workspace-link:hover {
+  background: #151a23;
+  color: #f4f5f7;
+}
+
+.workspace-link:focus-visible {
+  outline: 3px solid #65cfff;
+  outline-offset: 2px;
+}
