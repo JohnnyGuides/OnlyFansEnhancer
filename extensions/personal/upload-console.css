@@ -2206,6 +2206,10 @@ a {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.description-editor[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .description-editor[data-empty="true"]::after {
   content: attr(data-placeholder);
   color: #9da8b8;

@@ -399,6 +399,57 @@ test("a confirmed pre-admission failure re-enables Upload only after another suc
   }
 });
 
+test("the description editor is locked while a run is in flight", async () => {
+  const fixture = await createUploadFixture();
+  const { page } = fixture;
+  try {
+    await fixture.ready();
+    await page.evaluate(() => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = (message, callback) => {
+        if (message?.type !== "PREPARE_CREATOR_UPLOAD")
+          return send(message, callback);
+        // Release as an undelivered message, which unlocks the draft.
+        globalThis.releasePrepare = () => {
+          Object.defineProperty(chrome.runtime, "lastError", {
+            configurable: true,
+            value: {
+              message:
+                "Could not establish connection. Receiving end does not exist.",
+            },
+          });
+          try {
+            callback(undefined);
+          } finally {
+            delete chrome.runtime.lastError;
+          }
+        };
+      };
+    });
+    const editorState = () =>
+      page.evaluate(() => {
+        const editor = document.querySelector("#uploadDescription");
+        return [
+          editor.getAttribute("contenteditable"),
+          editor.getAttribute("aria-disabled"),
+        ];
+      });
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(
+      () => typeof globalThis.releasePrepare === "function",
+    );
+    assert.equal(await page.locator("#uploadTitle").isEnabled(), false);
+    assert.deepEqual(await editorState(), ["false", "true"]);
+    await page.evaluate(() => globalThis.releasePrepare());
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
+    assert.deepEqual(await editorState(), ["plaintext-only", "false"]);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("a PREPARE message Chrome could not deliver keeps the draft editable", async () => {
   const fixture = await createUploadFixture();
   const { page } = fixture;

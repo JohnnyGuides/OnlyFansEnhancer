@@ -173,6 +173,18 @@
         settle();
       },
     });
+    // Mirrors a form control so lockDraft can freeze the editor during runs.
+    Object.defineProperty(editor, "disabled", {
+      configurable: true,
+      get: () => editor.getAttribute("contenteditable") === "false",
+      set: (disabled) => {
+        editor.setAttribute(
+          "contenteditable",
+          disabled ? "false" : "plaintext-only",
+        );
+        editor.setAttribute("aria-disabled", String(Boolean(disabled)));
+      },
+    });
     editor.addEventListener("input", settle);
     editor.addEventListener("paste", (event) => {
       const text = event.clipboardData?.getData("text/plain");
@@ -2855,7 +2867,7 @@
     function lockDraft(locked) {
       if (locked) {
         for (const control of document.querySelectorAll(
-          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #refreshCatalogue",
+          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #uploadDescription, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #refreshCatalogue",
         )) {
           if (control.closest("#uploadRecovery")) continue;
           if (!lockedControls.has(control))
