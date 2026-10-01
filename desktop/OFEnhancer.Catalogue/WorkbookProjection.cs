@@ -274,8 +274,11 @@ internal static class WorkbookProjectionImporter
 
 public sealed partial class CatalogueStore
 {
-    public void ImportWorkbookProjection(WorkbookProjection projection, bool updateGoogleBindings = true) =>
+    public void ImportWorkbookProjection(WorkbookProjection projection, bool updateGoogleBindings = true)
+    {
         WorkbookProjectionImporter.Import(connection, projection, updateGoogleBindings);
+        RefreshXBindings(DateTimeOffset.UtcNow);
+    }
 
     public void ReplaceGoogleBindings(string workbookId, IReadOnlyList<GoogleRowBinding> bindings)
     {

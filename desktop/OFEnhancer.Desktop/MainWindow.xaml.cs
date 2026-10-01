@@ -25,6 +25,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly DevelopmentFixtureSource developmentFixtures = new();
     private readonly UploadCatalogueController uploadCatalogue;
     private readonly XObservationController xObservations;
+    private readonly XTeaserController xTeasers;
     private readonly UploadThumbnailCatalogue uploadThumbnails;
     private readonly GeneratedUploadMediaStore generatedUploadMedia = new();
     private readonly ProductionHandoffCoordinator productionHandoffs;
@@ -75,6 +76,8 @@ public partial class MainWindow : Window, IDisposable
         queuedRouter = router;
         uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets);
         xObservations = new XObservationController(catalogue);
+        xTeasers = new XTeaserController(catalogue, dispatcher, settings.Load);
+        xTeasers.Start();
         uploadThumbnails = new UploadThumbnailCatalogue(catalogue);
         uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>
         {
@@ -182,6 +185,16 @@ public partial class MainWindow : Window, IDisposable
             {
                 object recorded = await dispatcher.EnqueueAsync(() => xObservations.Record(WithoutTransportMetadata(payload)));
                 return AgentResponse.SuccessResult(request, recorded);
+            }
+            if (request.Operation == "getTeaserOverview")
+            {
+                object overview = await dispatcher.EnqueueAsync(() => xTeasers.Overview(WithoutTransportMetadata(payload)));
+                return AgentResponse.SuccessResult(request, overview);
+            }
+            if (request.Operation == "undoTeaserClipMove")
+            {
+                object undone = await xTeasers.UndoAsync(WithoutTransportMetadata(payload));
+                return AgentResponse.SuccessResult(request, undone);
             }
             if (request.Operation == "writeUploadCatalogueEntry")
             {
@@ -376,6 +389,7 @@ public partial class MainWindow : Window, IDisposable
         if (disposed)
             return;
         disposed = true;
+        xTeasers.Dispose();
         uploads.Dispose();
         windowSource?.RemoveHook(HandleWindowMessage);
         windowSource = null;

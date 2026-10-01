@@ -32,7 +32,7 @@ public sealed class CatalogueStoreTests
         Assert.AreEqual("kept-id", item.ItemId);
         Assert.AreEqual("Kept title", item.Title);
         Assert.AreEqual(0, item.SourceLinkCells!.Count);
-        Assert.AreEqual(6, store.SchemaVersion);
+        Assert.AreEqual(7, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v2-*.sqlite").Length);
     }
 
@@ -49,7 +49,7 @@ public sealed class CatalogueStoreTests
             command.ExecuteNonQuery();
         }
         using CatalogueStore store = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(6, store.SchemaVersion);
+        Assert.AreEqual(7, store.SchemaVersion);
         Assert.IsNull(store.GetItems().Single().Category);
         Assert.AreEqual("", store.GetUploadCatalogueSnapshot().Rows.Single().Category);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v4-*.sqlite").Length);
@@ -68,7 +68,7 @@ public sealed class CatalogueStoreTests
 
         using CatalogueStore store = CatalogueStore.Open(databasePath);
 
-        Assert.AreEqual(6, store.SchemaVersion);
+        Assert.AreEqual(7, store.SchemaVersion);
         CollectionAssert.AreEqual(
             new[]
             {
@@ -80,9 +80,15 @@ public sealed class CatalogueStoreTests
                 "production_handoffs",
                 "settings",
                 "sync_outbox",
+                "x_binding_conflicts",
+                "x_clip_moves",
+                "x_first_replies",
+                "x_local_clips",
                 "x_metric_samples",
                 "x_owner",
+                "x_post_bindings",
                 "x_posts",
+                "x_teaser_verdicts",
             },
             ReadUserTables(databasePath)
         );
@@ -102,7 +108,7 @@ public sealed class CatalogueStoreTests
         }
 
         using CatalogueStore migrated = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(6, ReadVersion(databasePath));
+        Assert.AreEqual(7, ReadVersion(databasePath));
         Assert.AreEqual("kept", ReadSetting(databasePath, "sentinel"));
         Assert.AreEqual("ok", ReadIntegrity(databasePath));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v1-*.sqlite").Length);

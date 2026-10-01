@@ -174,5 +174,78 @@ internal static class Migrations
         """
     );
 
-    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix];
+    // X teaser management: post-to-episode bindings, first self-replies, the
+    // local teaser clip index, 7-day verdicts and the clip move log.
+    internal static readonly MigrationStep VersionSeven = new(
+        7,
+        """
+        CREATE TABLE x_post_bindings (
+            status_id TEXT PRIMARY KEY NOT NULL REFERENCES x_posts(status_id) ON DELETE CASCADE,
+            item_id TEXT NOT NULL REFERENCES catalogue_items(item_id) ON DELETE RESTRICT,
+            source_key TEXT NOT NULL,
+            evidence TEXT NOT NULL CHECK (evidence IN ('sheet-link', 'reply-link', 'owner')),
+            confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium')),
+            bound_utc TEXT NOT NULL
+        );
+        CREATE INDEX x_post_bindings_item_id ON x_post_bindings(item_id);
+
+        CREATE TABLE x_binding_conflicts (
+            status_id TEXT PRIMARY KEY NOT NULL REFERENCES x_posts(status_id) ON DELETE CASCADE,
+            candidates_json TEXT NOT NULL,
+            detected_utc TEXT NOT NULL
+        );
+
+        CREATE TABLE x_first_replies (
+            status_id TEXT PRIMARY KEY NOT NULL REFERENCES x_posts(status_id) ON DELETE CASCADE,
+            reply_status_id TEXT NOT NULL REFERENCES x_posts(status_id) ON DELETE CASCADE,
+            reply_link TEXT NOT NULL,
+            link_kind TEXT NOT NULL CHECK (link_kind IN ('onlyfans', 'fansly')),
+            link_post_id TEXT NOT NULL,
+            replied_utc TEXT NOT NULL
+        );
+
+        CREATE TABLE x_local_clips (
+            clip_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rel_path TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+            mtime_utc TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            episode_key TEXT,
+            state TEXT NOT NULL CHECK (state IN ('ready', 'posted', 'good', 'failed')),
+            status_id TEXT,
+            pairing_evidence TEXT CHECK (pairing_evidence IS NULL OR pairing_evidence IN ('owner', 'revert-list', 'time-window')),
+            first_seen_utc TEXT NOT NULL,
+            last_seen_utc TEXT NOT NULL,
+            missing INTEGER NOT NULL DEFAULT 0 CHECK (missing IN (0, 1)),
+            CHECK ((status_id IS NULL) = (pairing_evidence IS NULL))
+        );
+        CREATE INDEX x_local_clips_sha256 ON x_local_clips(sha256);
+        CREATE UNIQUE INDEX x_local_clips_present_path ON x_local_clips(rel_path COLLATE NOCASE) WHERE missing = 0;
+        CREATE UNIQUE INDEX x_local_clips_status ON x_local_clips(status_id) WHERE status_id IS NOT NULL;
+
+        CREATE TABLE x_teaser_verdicts (
+            status_id TEXT PRIMARY KEY NOT NULL REFERENCES x_posts(status_id) ON DELETE CASCADE,
+            verdict TEXT NOT NULL CHECK (verdict IN ('good', 'failed')),
+            engagement_rate REAL NOT NULL,
+            cohort_median REAL NOT NULL,
+            cohort_size INTEGER NOT NULL CHECK (cohort_size >= 10),
+            sample_age_hours REAL NOT NULL,
+            decided_utc TEXT NOT NULL
+        );
+
+        CREATE TABLE x_clip_moves (
+            move_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            clip_id INTEGER NOT NULL REFERENCES x_local_clips(clip_id) ON DELETE CASCADE,
+            from_rel_path TEXT NOT NULL,
+            to_rel_path TEXT NOT NULL,
+            reason TEXT NOT NULL CHECK (reason IN ('verdict-good', 'verdict-failed', 'undo')),
+            outcome TEXT NOT NULL CHECK (outcome IN ('moved', 'collision', 'fingerprint-mismatch', 'locked', 'error', 'unsafe-path')),
+            occurred_utc TEXT NOT NULL,
+            undone_utc TEXT
+        );
+        CREATE INDEX x_clip_moves_clip ON x_clip_moves(clip_id, move_id);
+        """
+    );
+
+    internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix, VersionSeven];
 }

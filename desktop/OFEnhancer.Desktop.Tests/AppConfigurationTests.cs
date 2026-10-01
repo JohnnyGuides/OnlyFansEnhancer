@@ -222,7 +222,7 @@ public sealed class AppConfigurationTests
         );
         File.WriteAllText(
             settingsPath,
-            $$"""{"extensionId":"{{ExtensionId}}","browserId":"firefox","googleSheetUrl":"https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696"}"""
+            $$"""{"extensionId":"{{ExtensionId}}","browserId":"firefox","googleSheetUrl":"https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696","xTeaserRoot":"D:\\Teasers"}"""
         );
         try
         {
@@ -236,6 +236,7 @@ public sealed class AppConfigurationTests
                 "https://docs.google.com/spreadsheets/d/workbook-123/edit#gid=2126708696",
                 saved.GoogleSheetUrl
             );
+            Assert.AreEqual(@"D:\Teasers", saved.XTeaserRoot);
         }
         finally
         {

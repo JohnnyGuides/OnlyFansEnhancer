@@ -59,6 +59,7 @@ public sealed partial class CatalogueStore
             else skipped++;
         }
         transaction.Commit();
+        RefreshXBindings(now);
         return new(posts, added, skipped, foreign);
     }
 

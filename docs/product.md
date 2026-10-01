@@ -137,6 +137,19 @@ or implement perceptual matching. Disconnecting Google preserves local data,
 history, and pending work. Google operation/recovery semantics are owned by
 [Google catalogue](google-catalogue.md).
 
+The local X teaser folder is managed only when the desktop setting
+`xTeaserRoot` names it (unset means inactive). `<root>\` holds ready clips,
+`Done\` posted clips awaiting a verdict, `Done\Good\` and `Done\Failed\` the
+verdicts; other folders such as `Ideas` and non-video files are ignored. Clips are
+identified by size, modification time and SHA-256, so renames and moves keep their
+pairing. Seven days after posting, a teaser whose engagement is below 0.8 × the
+median of at least 10 comparable teasers at the same age is Failed, otherwise
+Good, and its paired clip moves from `Done\` automatically. A move needs a fresh
+hash match, never overwrites, never deletes, stays inside the root, is logged and
+can be undone. The app moves a clip at most once; after that the owner's
+placement (undo or by hand) wins. Failed teasers no longer count
+as used, so their episode returns to rotation.
+
 ## Accessibility, privacy, and lifecycle
 
 Chrome readiness separates desktop-agent availability, standard-path Chrome

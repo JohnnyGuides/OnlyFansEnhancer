@@ -492,8 +492,12 @@ internal static class CatalogueSnapshotImporter
 
 public sealed partial class CatalogueStore
 {
-    public CatalogueImportSummary ImportSnapshot(string json) =>
-        CatalogueSnapshotImporter.Import(connection, json);
+    public CatalogueImportSummary ImportSnapshot(string json)
+    {
+        CatalogueImportSummary summary = CatalogueSnapshotImporter.Import(connection, json);
+        RefreshXBindings(DateTimeOffset.UtcNow);
+        return summary;
+    }
 
     public IReadOnlyList<CatalogueItemSummary> GetItems(bool includeArchived = false) => ReadItems(includeArchived, null);
 
