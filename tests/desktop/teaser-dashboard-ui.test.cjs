@@ -277,7 +277,7 @@ async function openDashboard({ area = "desktop", viewport, slots } = {}) {
       switch (operation) {
         case "getStatus":
           return {
-            productVersion: "0.20.91",
+            productVersion: "0.20.92",
             protocolVersion: 1,
             capabilities: [
               "desktop-shell",
@@ -831,7 +831,7 @@ test("a failed load offers a retry", async () => {
         if (operation === "getTeaserPlan") return { slots: [] };
         if (operation === "getStatus")
           return {
-            productVersion: "0.20.91",
+            productVersion: "0.20.92",
             protocolVersion: 1,
             capabilities: [],
           };
