@@ -13,7 +13,7 @@ const desktopExe = path.join(
   "OFEnhancer.Desktop",
   "bin",
   "Release",
-  "net8.0-windows",
+  "net10.0-windows",
   "OFEnhancer.Desktop.exe",
 );
 const bridgeExe = path.join(
@@ -22,7 +22,7 @@ const bridgeExe = path.join(
   "OFEnhancerNativeBridge",
   "bin",
   "Release",
-  "net8.0-windows",
+  "net10.0-windows",
   "OFEnhancerNativeBridge.exe",
 );
 

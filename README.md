@@ -26,7 +26,7 @@ location. Preserve the current profile and load location; replace its generated
 runtime files deliberately rather than loading a new path and assuming settings
 or native registrations will migrate. See [development and release](docs/development.md).
 
-Windows desktop development additionally needs the .NET 8 SDK, WebView2 Runtime,
+Windows desktop development additionally needs the .NET 10 SDK, WebView2 Runtime,
 and Windows PowerShell. The full installer build uses Inno Setup 6.
 
 ```sh

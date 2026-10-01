@@ -6,7 +6,7 @@ const { spawnSync } = require("node:child_process");
 const root = require("../support/paths.cjs").repositoryRoot;
 const exe = path.join(
   root,
-  "native-host/OFEnhancerNativeBridge/bin/Release/net8.0-windows/OFEnhancerNativeBridge.exe",
+  "native-host/OFEnhancerNativeBridge/bin/Release/net10.0-windows/OFEnhancerNativeBridge.exe",
 );
 const origin = `chrome-extension://${"a".repeat(32)}/`;
 test("Chrome Windows invocation accepts handles and clean EOF", () => {

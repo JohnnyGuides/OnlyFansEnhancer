@@ -6,16 +6,18 @@ Use Node.js 22.13+ (22.x) or 24+ and the exact dev dependency versions in `packa
 `npm ci` installs them locally; `npx playwright install chromium` installs the
 matching test browser.
 
-Windows work requires .NET 8 SDK, Windows PowerShell, and the WebView2 Runtime.
+Windows work requires the .NET 10 SDK, Windows PowerShell, and the WebView2 Runtime.
 Inno Setup 6 is needed to compile the installer; StageOnly does not require it.
-The X teaser host is framework-dependent and needs the .NET 8 Windows runtime;
+The X teaser host is framework-dependent and needs the .NET 10 runtime (win-x64);
 the desktop installer stages a self-contained win-x64 desktop and relay.
 
-If supported tools are installed in this checkout's ignored `.local` directory,
-select them for the current PowerShell process before running checks:
+The .NET 10 SDK is the system installation under `C:\Program Files\dotnet`;
+the ignored `.local/toolchains/dotnet` holds only the retired .NET 8 SDK, so do
+not select it and do not install SDKs into `.local`. Select the system SDK and
+the other `.local` tools for the current PowerShell process before running checks:
 
 ```powershell
-$env:DOTNET_ROOT = Join-Path $PWD '.local/toolchains/dotnet'
+$env:DOTNET_ROOT = 'C:\Program Files\dotnet'
 $env:PATH = $env:DOTNET_ROOT + ';' + $env:PATH
 $env:DOTNET_CLI_HOME = Join-Path $PWD '.local/toolchains/cli'
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD '.local/playwright'
@@ -147,7 +149,7 @@ keeps data. External media and Chrome profiles are outside installer ownership.
    version across `git grep -l '<old>' -- . ':!docs' ':!*.md'` (23 files as of
    0.20.87: package/lock, manifest, csproj, protocol, `.iss`, build script, tests).
    No old-version occurrence may remain outside `docs/`.
-3. Run `npm run check` with the `.local` toolchains. If MSBuild reports
+3. Run `npm run check` with the toolchains selected above. If MSBuild reports
    `OutOfMemoryException`, check commit headroom (`FreeVirtualMemory`), run
    `dotnet build-server shutdown`, and rerun `dotnet test desktop/OFEnhancer.sln -c Release -m:1`
    followed by the remaining `check:windows` steps.
@@ -237,7 +239,7 @@ Synthetic browser tests do not establish authenticated upload acceptance.
 
 The stabilization fixtures cover actual Pornhub uploader activation when its hidden input already exists or is replaced, one-shot ManyVids upload initiation, the readonly `#dp1` calendar and `#available_time`, OnlyFans' scoped time tab while Next remains present, and Fansly's first Schedule boundary without a global Post fallback. The recorder captures bounded click ancestry, label source, hidden/directory file controls and disabled/busy state; unknown labels, identifiers and classes use document-local opaque tokens.
 
-Release 0.20.21 uses Node 24.19.0, the locked npm dependencies, .NET SDK 8.0.425/runtime 8.0.31, and SQLitePCLRaw.lib.e_sqlite3 2.1.13. Current npm and transitive NuGet audits were clean on September 14, 2026. The native SQLite regression executes `sqlite_version()` and requires the aggregate-memory-corruption fix (3.50.2 or later). .NET 8 is in maintenance and reaches end of support November 10, 2026; migrate to a supported major before then. Verify the actual self-contained runtime and native library again in the release stage.
+The desktop, relay, and X teaser host target .NET 10 (`net10.0`/`net10.0-windows`), built with .NET SDK 10.0.401; the self-contained stage carries runtime 10.0.12. Dependencies are Microsoft.Data.Sqlite 10.0.12 and SQLitePCLRaw.lib.e_sqlite3 2.1.13; DPAPI comes from the Windows Desktop shared framework. The transitive NuGet audit was clean on October 1, 2026. The native SQLite regression executes `sqlite_version()` and requires the aggregate-memory-corruption fix (3.50.2 or later). Verify the actual self-contained runtime and native library again in the release stage.
 
 Use the sidebar Chrome action or Start menu **Connect Chrome**. Preparation is
 restricted to a permanent current-user installation with a verified package

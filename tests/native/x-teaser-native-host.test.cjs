@@ -21,7 +21,7 @@ const dll = path.join(
   "CreatorTeaserNativeHost",
   "bin",
   "Release",
-  "net8.0",
+  "net10.0",
   "CreatorTeaserNativeHost.dll",
 );
 const frameDataUrl = `data:image/jpeg;base64,${Buffer.from([
