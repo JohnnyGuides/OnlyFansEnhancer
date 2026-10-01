@@ -21,8 +21,10 @@ public sealed record XScanOwner(string AccountId, string Handle);
 // What the extension's background scanner needs to decide whether a scan is due.
 public sealed record XScanPlan(XScanOwner? Owner, string? RequestedUtc, IReadOnlyList<string> RecentPostsUtc);
 
+// BackoffUntilUtc: automatic scans are paused until then after a rate-limit or
+// authorization answer ("" when not paused).
 public sealed record XScanReport(string Trigger, string Mode, string StartedUtc, string FinishedUtc, string Outcome,
-    string Detail, int Pages, int Rows, int? Scheduled);
+    string Detail, int Pages, int Rows, int? Scheduled, string BackoffUntilUtc = "");
 
 public sealed record XScanStatus(string? RequestedUtc, XScanReport? Last);
 
@@ -43,7 +45,7 @@ public sealed partial class CatalogueStore
     private static readonly HashSet<string> XScanOutcomes = new(StringComparer.Ordinal)
     {
         "complete", "window-reached", "no-new-posts", "page-cap", "owner-unknown", "owner-mismatch", "signed-out",
-        "no-timeline", "timeout", "error",
+        "no-timeline", "timeout", "user-took-over", "error",
     };
 
     // Replaces the owner's scheduled-post list with X's current one: listed
@@ -141,14 +143,16 @@ public sealed partial class CatalogueStore
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO x_scan_state (singleton, requested_utc, last_trigger, last_mode, last_started_utc, last_finished_utc,
-                                      last_outcome, last_detail, last_pages, last_rows, last_scheduled)
-            VALUES (1, NULL, $trigger, $mode, $started, $finished, $outcome, $detail, $pages, $rows, $scheduled)
+                                      last_outcome, last_detail, last_pages, last_rows, last_scheduled,
+                                      last_backoff_until_utc)
+            VALUES (1, NULL, $trigger, $mode, $started, $finished, $outcome, $detail, $pages, $rows, $scheduled, $backoff)
             ON CONFLICT(singleton) DO UPDATE SET
                 requested_utc = CASE WHEN $answered = 1 THEN NULL ELSE x_scan_state.requested_utc END,
                 last_trigger = excluded.last_trigger, last_mode = excluded.last_mode,
                 last_started_utc = excluded.last_started_utc, last_finished_utc = excluded.last_finished_utc,
                 last_outcome = excluded.last_outcome, last_detail = excluded.last_detail, last_pages = excluded.last_pages,
-                last_rows = excluded.last_rows, last_scheduled = excluded.last_scheduled
+                last_rows = excluded.last_rows, last_scheduled = excluded.last_scheduled,
+                last_backoff_until_utc = excluded.last_backoff_until_utc
             """;
         command.Parameters.AddWithValue("$trigger", report.Trigger);
         command.Parameters.AddWithValue("$mode", report.Mode);
@@ -160,6 +164,8 @@ public sealed partial class CatalogueStore
         command.Parameters.AddWithValue("$rows", report.Rows);
         command.Parameters.AddWithValue("$scheduled", report.Scheduled is { } scheduled ? scheduled : DBNull.Value);
         command.Parameters.AddWithValue("$answered", answered ? 1 : 0);
+        command.Parameters.AddWithValue("$backoff", report.BackoffUntilUtc.Length == 0 ? ""
+            : ParseXUtc(report.BackoffUntilUtc).ToString("O", CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
         return GetXScanStatus();
     }
@@ -169,7 +175,7 @@ public sealed partial class CatalogueStore
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT requested_utc, last_trigger, last_mode, last_started_utc, last_finished_utc, last_outcome, last_detail,
-                   last_pages, last_rows, last_scheduled
+                   last_pages, last_rows, last_scheduled, last_backoff_until_utc
             FROM x_scan_state WHERE singleton = 1
             """;
         using SqliteDataReader reader = command.ExecuteReader();
@@ -177,7 +183,7 @@ public sealed partial class CatalogueStore
         string? requested = reader.IsDBNull(0) ? null : reader.GetString(0);
         XScanReport? last = reader.IsDBNull(5) ? null : new(reader.GetString(1), reader.GetString(2), reader.GetString(3),
             reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetInt32(7), reader.GetInt32(8),
-            reader.IsDBNull(9) ? null : reader.GetInt32(9));
+            reader.IsDBNull(9) ? null : reader.GetInt32(9), reader.IsDBNull(10) ? "" : reader.GetString(10));
         return new(requested, last);
     }
 
@@ -241,5 +247,6 @@ public sealed partial class CatalogueStore
         Require(ValidXUtc(report.StartedUtc) && ValidXUtc(report.FinishedUtc));
         Require(report.Pages is >= 0 and <= 1000 && report.Rows is >= 0 and <= 100_000);
         Require(report.Scheduled is null or (>= 0 and <= MaxXScheduled));
+        Require(report.BackoffUntilUtc is not null && (report.BackoffUntilUtc.Length == 0 || ValidXUtc(report.BackoffUntilUtc)));
     }
 }

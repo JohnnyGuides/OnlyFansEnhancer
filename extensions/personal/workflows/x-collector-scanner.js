@@ -40,6 +40,15 @@
   const MAX_SCAN_MS = 8 * MINUTE;
   const LOG_LIMIT = 20;
   const SCHEDULED_URL = "https://x.com/compose/post/unsent/scheduled";
+  // Rate-limit and authorization answers pause automatic scans: 6 h after
+  // the first, doubling per consecutive one up to 48 h. "Scan now" still runs.
+  const BACKOFF_BASE_MS = 6 * HOUR;
+  const BACKOFF_MAX_MS = 48 * HOUR;
+  const BACKOFF_DETAILS = Object.freeze(["http-401", "http-403", "http-429"]);
+  // The scan tab's URL carries this run's marker so a restarted worker can
+  // recognise its own leftover tab and nothing else.
+  const MARKER_PREFIX = "#creator-scan=";
+  const MARKER = /^[0-9a-f]{32}$/;
   const SUCCESS = Object.freeze([
     "complete",
     "window-reached",
@@ -53,6 +62,7 @@
     "signed-out",
     "no-timeline",
     "timeout",
+    "user-took-over",
     "error",
   ]);
   const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
@@ -77,7 +87,24 @@
       last: null,
       log: [],
       lastError: "",
+      backoffErrors: 0,
+      backoffUntil: 0,
     };
+  }
+
+  function makeMarker() {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return [...bytes]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function backoffMs(errors) {
+    return Math.min(
+      BACKOFF_BASE_MS * 2 ** Math.max(errors - 1, 0),
+      BACKOFF_MAX_MS,
+    );
   }
 
   function validOwner(plan) {
@@ -98,6 +125,7 @@
     if (Number.isFinite(requested) && requested > last) {
       return at - last >= MANUAL_MIN_GAP_MS ? "requested" : "";
     }
+    if ((Number(state.backoffUntil) || 0) > at) return "";
     if (last && at - last < MIN_GAP_MS) return "";
     if (!last || at - last >= ROUTINE_INTERVAL_MS) return "routine";
     const posts = Array.isArray(plan?.recentPostsUtc)
@@ -124,6 +152,7 @@
     now = Date.now,
     random = Math.random,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    marker = makeMarker,
   }) {
     if (
       !storage ||
@@ -156,10 +185,18 @@
         throw new ScanStop("owner-mismatch");
     }
 
+    // The owner switched to the scan tab (or closed it): stop at once and
+    // leave the tab alone.
+    async function guard(handle) {
+      if (await runner.takenOver?.(handle))
+        throw new ScanStop("user-took-over");
+    }
+
     async function waitReady(handle, owner) {
       const startedAt = now();
       let lastReason = "";
       for (;;) {
+        await guard(handle);
         const status = await runner.command(handle, "status");
         if (status?.ok) {
           checkOwner(status, owner);
@@ -193,9 +230,11 @@
     // a stopped worker, so its tab is closed and the record cleared.
     async function clearStaleRun(state, ownRun = false) {
       if (!state.running || (!ownRun && active !== null)) return;
-      if (state.running.tabId)
+      if (state.running.tabId && state.running.marker)
         await Promise.resolve()
-          .then(() => runner.closeStale?.(state.running.tabId))
+          .then(() =>
+            runner.closeStale?.(state.running.tabId, state.running.marker),
+          )
           .catch(() => {});
       state.running = null;
       await save(state);
@@ -226,20 +265,32 @@
         pages: 0,
         rows: 0,
         scheduled: null,
+        backoffUntilUtc: "",
       };
       state.lastAttemptAt = at;
       state.lastError = "";
       let handle = null;
+      let leaveTab = false;
       try {
         if (!owner) throw new ScanStop("owner-unknown");
-        state.running = { startedAt: at, trigger, tabId: null };
+        const runMarker = marker();
+        state.running = {
+          startedAt: at,
+          trigger,
+          tabId: null,
+          marker: runMarker,
+        };
         await save(state);
         const cutoff = backfill ? -Infinity : at - ROUTINE_WINDOW_MS;
         const cap = backfill ? BACKFILL_PAGE_CAP : ROUTINE_PAGE_CAP;
-        handle = await runner.open(owner.handle, async (tabId) => {
-          state.running.tabId = tabId;
-          await save(state);
-        });
+        handle = await runner.open(
+          owner.handle,
+          async (tabId) => {
+            state.running.tabId = tabId;
+            await save(state);
+          },
+          runMarker,
+        );
         const first = await waitReady(handle, owner);
         const seen = new Set(first.statusIds || []);
         result.pages = 1;
@@ -251,7 +302,9 @@
             break;
           }
           if (now() - at >= MAX_SCAN_MS) throw new ScanStop("timeout");
+          await guard(handle);
           await sleep(pageDelay());
+          await guard(handle);
           const page = await runner.command(handle, "page");
           if (!page?.ok)
             throw new ScanStop(
@@ -268,9 +321,14 @@
         }
         result.outcome = stop;
         if (typeof runner.scheduled === "function") {
+          await guard(handle);
           const count = await Promise.resolve()
             .then(() => runner.scheduled(handle))
-            .catch(() => null);
+            .catch((error) => {
+              if (error instanceof ScanStop && error.code === "user-took-over")
+                throw error;
+              return null;
+            });
           result.scheduled = Number.isSafeInteger(count) ? count : null;
         }
       } catch (error) {
@@ -283,8 +341,9 @@
         );
         if (!(error instanceof ScanStop))
           state.lastError = String(error?.message || error).slice(0, 200);
+        leaveTab = result.outcome === "user-took-over";
       } finally {
-        if (handle)
+        if (handle && !leaveTab)
           await Promise.resolve()
             .then(() => runner.close(handle))
             .catch(() => {});
@@ -293,7 +352,17 @@
         if (SUCCESS.includes(result.outcome)) {
           state.lastSuccessAt = at;
           if (backfill) state.backfillDone = true;
+          state.backoffErrors = 0;
+          state.backoffUntil = 0;
+        } else if (
+          result.outcome === "error" &&
+          BACKOFF_DETAILS.includes(result.detail)
+        ) {
+          state.backoffErrors = (Number(state.backoffErrors) || 0) + 1;
+          state.backoffUntil = now() + backoffMs(state.backoffErrors);
         }
+        if ((Number(state.backoffUntil) || 0) > now())
+          result.backoffUntilUtc = new Date(state.backoffUntil).toISOString();
         state.last = result;
         state.log.unshift(result);
         state.log.length = Math.min(state.log.length, LOG_LIMIT);
@@ -362,6 +431,10 @@
         last: state.last,
         log: state.log,
         lastError: state.lastError,
+        backoffUntilUtc:
+          (Number(state.backoffUntil) || 0) > now()
+            ? new Date(state.backoffUntil).toISOString()
+            : "",
       };
     }
 
@@ -399,11 +472,25 @@
     pollMs = 250,
   }) {
     const scheduledWaiters = new Map();
+    const activated = new Set();
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    // Any activation of a scan tab, even a brief one, hands it to the owner.
+    chrome.tabs.onActivated?.addListener(({ tabId }) => activated.add(tabId));
+
+    async function takenOver(tabId) {
+      if (activated.has(tabId)) return true;
+      try {
+        return Boolean((await chrome.tabs.get(tabId)).active);
+      } catch {
+        // The owner closed it.
+        return true;
+      }
+    }
 
     async function waitLoaded(tabId, handle) {
       const startedAt = Date.now();
       while (Date.now() - startedAt < loadTimeoutMs) {
+        if (await takenOver(tabId)) throw new ScanStop("user-took-over");
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === "complete" && tab.url && tab.url !== "about:blank") {
           if (profileMatches(tab.url, handle)) return;
@@ -416,28 +503,31 @@
     }
 
     return Object.freeze({
-      async open(handle, onTab = async (_tabId) => {}) {
+      async open(handle, onTab = async (_tabId) => {}, marker = "") {
         // A blank background tab first, then an ordinary navigation of it,
         // so observers attached to the new tab also see the profile load.
         const tab = await chrome.tabs.create({
           url: "about:blank",
           active: false,
         });
+        const suffix = MARKER.test(marker) ? `${MARKER_PREFIX}${marker}` : "";
         try {
           await onTab(tab.id);
           for (let attempt = 0; attempt < 40; attempt += 1) {
             if ((await chrome.tabs.get(tab.id)).status === "complete") break;
             await wait(50);
           }
+          if (await takenOver(tab.id)) throw new ScanStop("user-took-over");
           await chrome.tabs.update(tab.id, {
-            url: `https://x.com/${handle}/with_replies`,
+            url: `https://x.com/${handle}/with_replies${suffix}`,
           });
           await waitLoaded(tab.id, handle);
         } catch (error) {
-          await chrome.tabs.remove(tab.id).catch(() => {});
+          if (!(error instanceof ScanStop && error.code === "user-took-over"))
+            await chrome.tabs.remove(tab.id).catch(() => {});
           throw error;
         }
-        return { tabId: tab.id };
+        return { tabId: tab.id, suffix };
       },
       async command(handle, command) {
         try {
@@ -463,11 +553,16 @@
           done = true;
         });
         try {
-          await chrome.tabs.update(handle.tabId, { url: SCHEDULED_URL });
+          if (await takenOver(handle.tabId))
+            throw new ScanStop("user-took-over");
+          await chrome.tabs.update(handle.tabId, {
+            url: `${SCHEDULED_URL}${handle.suffix || ""}`,
+          });
           const startedAt = Date.now();
           while (!done && Date.now() - startedAt < scheduledTimeoutMs) {
             await wait(pollMs);
-            await chrome.tabs.get(handle.tabId);
+            if (await takenOver(handle.tabId))
+              throw new ScanStop("user-took-over");
           }
           return received;
         } finally {
@@ -477,13 +572,24 @@
       noteScheduled(tabId, count) {
         scheduledWaiters.get(tabId)?.(count);
       },
+      takenOver: (handle) => takenOver(handle.tabId),
       close: (handle) => chrome.tabs.remove(handle.tabId),
       // After a worker restart, close the scan tab left behind only while it
-      // is still an inactive x.com tab.
-      async closeStale(tabId) {
+      // is still inactive and its x.com URL carries that run's marker.
+      async closeStale(tabId, marker) {
+        if (!MARKER.test(String(marker || ""))) return;
         const tab = await chrome.tabs.get(tabId);
-        const url = String(tab.url || tab.pendingUrl || "");
-        if (!tab.active && url.startsWith("https://x.com/"))
+        let url;
+        try {
+          url = new URL(String(tab.url || tab.pendingUrl || ""));
+        } catch {
+          return;
+        }
+        if (
+          !tab.active &&
+          url.origin === "https://x.com" &&
+          url.hash === `${MARKER_PREFIX}${marker}`
+        )
           await chrome.tabs.remove(tabId);
       },
     });
@@ -502,6 +608,8 @@
     PAGE_DELAY_MAX_MS,
     MIN_GAP_MS,
     MANUAL_MIN_GAP_MS,
+    BACKOFF_BASE_MS,
+    BACKOFF_MAX_MS,
     SCHEDULED_URL,
     OUTCOMES,
     dueReason,

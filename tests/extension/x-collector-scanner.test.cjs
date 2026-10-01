@@ -16,9 +16,10 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const START = Date.parse("2026-10-01T12:00:00Z");
+const MARKER = "0123456789abcdef0123456789abcdef";
 
 function loadScanner() {
-  const context = vm.createContext({ URL, setTimeout, Promise, Date });
+  const context = vm.createContext({ URL, setTimeout, Promise, Date, crypto });
   vm.runInContext(
     fs.readFileSync(
       path.join(repositoryRoot, "workflows/x-collector-scanner.js"),
@@ -56,6 +57,7 @@ function harness({
   status,
   pages = () => null,
   storage = memoryStorage(),
+  takeover = () => false,
 } = {}) {
   const Scanner = loadScanner();
   const clock = { now: START };
@@ -64,8 +66,8 @@ function harness({
   const recorded = [];
   let pageCount = 0;
   const runner = {
-    async open(handle, onTab) {
-      log.push(["open", handle]);
+    async open(handle, onTab, marker) {
+      log.push(["open", handle, marker]);
       pageCount = 0;
       await onTab(77);
       return { tabId: 77 };
@@ -101,8 +103,11 @@ function harness({
     async close(handle) {
       log.push(["close", handle.tabId]);
     },
-    async closeStale(tabId) {
-      log.push(["closeStale", tabId]);
+    async closeStale(tabId, marker) {
+      log.push(["closeStale", tabId, marker]);
+    },
+    async takenOver() {
+      return takeover(log);
     },
   };
   const desktop = {
@@ -115,6 +120,7 @@ function harness({
     runner,
     now: () => clock.now,
     random: () => 0.5,
+    marker: () => MARKER,
     sleep: async (ms) => {
       delays.push(ms);
       clock.now += ms;
@@ -446,13 +452,18 @@ test("one scan at a time, and a run left by a stopped worker has its tab closed"
       creatorXScanV1: {
         version: 1,
         lastAttemptAt: START - 7 * HOUR,
-        running: { startedAt: START - 7 * HOUR, trigger: "routine", tabId: 55 },
+        running: {
+          startedAt: START - 7 * HOUR,
+          trigger: "routine",
+          tabId: 55,
+          marker: MARKER,
+        },
         log: [],
       },
     }),
   });
   await restarted.scanner.tick();
-  assert.deepEqual(restarted.log[0], ["closeStale", 55]);
+  assert.deepEqual(restarted.log[0], ["closeStale", 55, MARKER]);
 
   // Even when no scan is due, the next tick closes the leftover tab.
   const idle = harness({
@@ -460,13 +471,18 @@ test("one scan at a time, and a run left by a stopped worker has its tab closed"
       creatorXScanV1: {
         version: 1,
         lastAttemptAt: START - HOUR,
-        running: { startedAt: START - HOUR, trigger: "routine", tabId: 56 },
+        running: {
+          startedAt: START - HOUR,
+          trigger: "routine",
+          tabId: 56,
+          marker: MARKER,
+        },
         log: [],
       },
     }),
   });
   assert.equal((await idle.scanner.tick()).reason, "not-due");
-  assert.deepEqual(idle.log, [["closeStale", 56]]);
+  assert.deepEqual(idle.log, [["closeStale", 56, MARKER]]);
   assert.equal(idle.storage.data.creatorXScanV1.running, null);
 });
 
@@ -518,8 +534,14 @@ test("the Chrome runner opens one inactive with_replies tab and closes only its 
   const calls = [];
   const tabs = new Map();
   let redirect = "";
+  let activate = null;
   const chrome = {
     tabs: {
+      onActivated: {
+        addListener(callback) {
+          activate = callback;
+        },
+      },
       async create(options) {
         calls.push(["create", options]);
         tabs.set(9, {
@@ -554,12 +576,18 @@ test("the Chrome runner opens one inactive with_replies tab and closes only its 
     pollMs: 1,
     scheduledTimeoutMs: 50,
   });
-  const handle = await runner.open("Owner_Handle", async () => {});
-  // A blank background tab first, then the owner's with_replies page.
+  const handle = await runner.open("Owner_Handle", async () => {}, MARKER);
+  // A blank background tab first, then the owner's with_replies page
+  // carrying this run's marker.
   assert.deepEqual(plain(calls.slice(0, 2)), [
     ["create", { url: "about:blank", active: false }],
-    ["update", 9, { url: "https://x.com/Owner_Handle/with_replies" }],
+    [
+      "update",
+      9,
+      { url: `https://x.com/Owner_Handle/with_replies#creator-scan=${MARKER}` },
+    ],
   ]);
+  assert.equal(await runner.takenOver(handle), false);
   await runner.command(handle, "page");
   assert.deepEqual(plain(calls.at(-1)), [
     "send",
@@ -573,7 +601,9 @@ test("the Chrome runner opens one inactive with_replies tab and closes only its 
   assert.deepEqual(plain(calls.filter((call) => call[0] === "update")[1]), [
     "update",
     9,
-    { url: "https://x.com/compose/post/unsent/scheduled" },
+    {
+      url: `https://x.com/compose/post/unsent/scheduled#creator-scan=${MARKER}`,
+    },
   ]);
   assert.equal(
     await runner.scheduled(handle),
@@ -598,16 +628,159 @@ test("the Chrome runner opens one inactive with_replies tab and closes only its 
   await assert.rejects(runner.open("Owner_Handle"), /no-timeline/);
   assert.deepEqual(calls.at(-1), ["remove", 10]);
 
-  tabs.set(11, { id: 11, url: "https://x.com/Owner_Handle", active: true });
-  tabs.set(12, { id: 12, url: "https://example.com/", active: false });
+  // Only an inactive x.com tab whose URL still carries this run's marker is
+  // closed after a restart; any other inactive x.com tab is left alone.
+  const marked = `https://x.com/Owner_Handle/with_replies#creator-scan=${MARKER}`;
+  tabs.set(11, { id: 11, url: marked, active: true });
+  tabs.set(12, {
+    id: 12,
+    url: `https://example.com/#creator-scan=${MARKER}`,
+    active: false,
+  });
   tabs.set(13, {
     id: 13,
     url: "https://x.com/Owner_Handle/with_replies",
     active: false,
   });
-  for (const id of [11, 12, 13]) await runner.closeStale(id);
+  tabs.set(14, { id: 14, url: marked, active: false });
+  tabs.set(15, { id: 15, url: marked.replace("0123", "9999"), active: false });
+  for (const id of [11, 12, 13, 15]) await runner.closeStale(id, MARKER);
+  await runner.closeStale(14, "");
+  await runner.closeStale(14, MARKER);
   assert.deepEqual(
     calls.filter((call) => call[0] === "remove").map((call) => call[1]),
-    [9, 10, 13],
+    [9, 10, 14],
   );
+
+  // The owner activates the tab: open stops and leaves the tab in place.
+  redirect = "";
+  chrome.tabs.create = async (options) => {
+    tabs.set(20, {
+      id: 20,
+      status: "complete",
+      url: options.url,
+      active: true,
+    });
+    return { id: 20 };
+  };
+  await assert.rejects(
+    runner.open("Owner_Handle", async () => {}, MARKER),
+    /user-took-over/,
+  );
+  assert.ok(tabs.has(20), "A tab the owner took over is not closed.");
+  // A brief activation during the scheduled step also hands the tab over.
+  chrome.tabs.create = async (options) => {
+    tabs.set(21, {
+      id: 21,
+      status: "complete",
+      url: options.url,
+      active: false,
+    });
+    return { id: 21 };
+  };
+  const later = await runner.open("Owner_Handle", async () => {}, MARKER);
+  const updatesBefore = calls.filter((call) => call[0] === "update").length;
+  const pending = runner.scheduled(later);
+  setTimeout(() => activate({ tabId: 21, windowId: 1 }), 5);
+  await assert.rejects(pending, /user-took-over/);
+  assert.equal(await runner.takenOver(later), true);
+  assert.equal(
+    calls.filter((call) => call[0] === "update").length,
+    updatesBefore + 1,
+  );
+  await assert.rejects(runner.scheduled(later), /user-took-over/);
+  assert.equal(
+    calls.filter((call) => call[0] === "update").length,
+    updatesBefore + 1,
+    "No navigation after the owner took over.",
+  );
+});
+
+test("the owner opening the scan tab stops the scan at once and leaves the tab alone", async () => {
+  let takeAfter = 2;
+  const h = harness({
+    takeover: (log) =>
+      log.filter((entry) => entry[1] === "page").length >= takeAfter,
+  });
+  const result = plain(await h.scanner.tick());
+  assert.equal(result.outcome, "user-took-over");
+  assert.equal(h.pageCommands(), 2, "No page after the takeover.");
+  assert.equal(h.log.filter((entry) => entry[0] === "close").length, 0);
+  assert.equal(h.log.filter((entry) => entry[0] === "scheduled").length, 0);
+  assert.equal(h.storage.data.creatorXScanV1.running, null);
+  assert.equal(h.recorded[0].outcome, "user-took-over");
+
+  // Taken over while the profile is still loading: nothing is commanded.
+  takeAfter = 0;
+  const early = harness({ takeover: () => true });
+  assert.equal((await early.scanner.run("manual")).outcome, "user-took-over");
+  assert.equal(early.log.filter((entry) => entry[0] === "command").length, 0);
+  assert.equal(early.log.filter((entry) => entry[0] === "close").length, 0);
+  assert.equal(early.log[0][2], MARKER, "The scan tab carries its marker.");
+});
+
+test("rate-limit and authorization errors pause automatic scans 6 h, doubling to 48 h; Scan now still runs", async () => {
+  const { BACKOFF_BASE_MS, BACKOFF_MAX_MS } = loadScanner();
+  assert.equal(BACKOFF_BASE_MS, 6 * HOUR);
+  assert.equal(BACKOFF_MAX_MS, 48 * HOUR);
+  let reason = "http-429";
+  const h = harness({
+    pages: (n) =>
+      reason ? { ok: false, reason, ownerId: OWNER.accountId } : null,
+  });
+  const expected = [6, 12, 24, 48, 48];
+  for (const [index, hours] of expected.entries()) {
+    reason = ["http-429", "http-403", "http-401"][index % 3];
+    const result = plain(await h.scanner.run("manual"));
+    assert.equal(result.outcome, "error");
+    const until = Date.parse(result.backoffUntilUtc);
+    assert.equal(
+      until - Date.parse(result.finishedUtc),
+      hours * HOUR,
+      `error ${index + 1}`,
+    );
+    // Neither the 6-hourly nor a checkpoint scan runs inside the pause.
+    h.clock.now = until - MINUTE;
+    h.planRef.recentPostsUtc = [
+      new Date(h.clock.now - DAY + 30_000).toISOString(),
+    ];
+    assert.equal((await h.scanner.tick()).reason, "not-due");
+    assert.equal(
+      (await h.scanner.status()).backoffUntilUtc,
+      result.backoffUntilUtc,
+    );
+    // A desktop "Scan now" request is still answered.
+    h.planRef.recentPostsUtc = [];
+    h.clock.now += 30_000;
+  }
+  // Other errors leave the pause as it is; a finished scan clears it.
+  reason = "http-500";
+  const other = plain(await h.scanner.run("manual"));
+  assert.equal(other.detail, "http-500");
+  assert.equal(h.storage.data.creatorXScanV1.backoffErrors, 5);
+  reason = "";
+  const ok = plain(await h.scanner.run("manual"));
+  assert.equal(ok.backoffUntilUtc, "");
+  assert.equal(h.storage.data.creatorXScanV1.backoffErrors, 0);
+  h.clock.now += 7 * HOUR;
+  assert.notEqual((await h.scanner.tick()).reason, "not-due");
+
+  const requested = harness({
+    storage: memoryStorage({
+      creatorXScanV1: {
+        version: 1,
+        backfillDone: true,
+        lastAttemptAt: START - HOUR,
+        backoffErrors: 1,
+        backoffUntil: START + 5 * HOUR,
+        log: [],
+      },
+    }),
+    plan: {
+      owner: OWNER,
+      requestedUtc: new Date(START - MINUTE).toISOString(),
+      recentPostsUtc: [],
+    },
+  });
+  assert.equal((await requested.scanner.tick()).trigger, "requested");
 });

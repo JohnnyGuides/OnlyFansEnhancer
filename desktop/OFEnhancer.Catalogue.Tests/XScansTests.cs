@@ -125,8 +125,16 @@ public sealed class XScansTests
         Assert.AreEqual(new XScanReport("requested", "routine", Now.AddMinutes(1).ToString("O", CultureInfo.InvariantCulture),
             Now.AddMinutes(3).ToString("O", CultureInfo.InvariantCulture), "error", "http-429", 3, 40, 2), answered.Last);
 
+        string paused = Now.AddHours(9).ToString("O", CultureInfo.InvariantCulture);
+        Assert.AreEqual(paused, store.RecordXScanResult(Report(Now.AddMinutes(4), "error") with
+            { Detail = "http-429", BackoffUntilUtc = paused }).Last!.BackoffUntilUtc);
+        XScanReport tookOver = Report(Now.AddMinutes(5), "user-took-over");
+        Assert.AreEqual(tookOver, store.RecordXScanResult(tookOver).Last);
+        Assert.AreEqual("", tookOver.BackoffUntilUtc);
+
         foreach (XScanReport bad in new[]
         {
+            early with { BackoffUntilUtc = "later" },
             early with { Trigger = "sometime" },
             early with { Mode = "full" },
             early with { Outcome = "posted" },

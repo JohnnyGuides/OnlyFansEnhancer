@@ -44,17 +44,20 @@
     ["rate", "engagement rate"],
   ];
   const POSTER_PATTERN = /^https:\/\/pbs\.twimg\.com\//;
-  const SCAN_OUTCOMES = {
-    complete: "finished",
-    "window-reached": "finished",
-    "no-new-posts": "finished",
-    "page-cap": "finished at the page limit",
-    "owner-unknown": "waiting until your own X posts were seen once",
-    "owner-mismatch": "stopped: another X account is signed in",
-    "signed-out": "stopped: signed out of X",
-    "no-timeline": "stopped: your profile did not load",
-    timeout: "stopped: it took too long",
-    error: "stopped after an X error",
+  const SCAN_FINISHED = [
+    "complete",
+    "window-reached",
+    "no-new-posts",
+    "page-cap",
+  ];
+  const SCAN_PROBLEMS = {
+    "owner-unknown": "waiting for your own X posts",
+    "owner-mismatch": "another X account is signed in",
+    "signed-out": "signed out of X",
+    "no-timeline": "profile did not load",
+    timeout: "took too long",
+    "user-took-over": "stopped, you opened the scan tab",
+    error: "X error",
   };
 
   function element(tag, className, text) {
@@ -417,12 +420,12 @@
       try {
         const result = await request("requestXScan", {});
         state.scanMessage = result?.started
-          ? "Scan started in a background tab."
+          ? "Scan started…"
           : result?.reason === "busy"
-            ? "A scan is already running."
+            ? "A scan is already running…"
             : result?.reason === "too-soon"
-              ? "A scan just ran; try again in a few minutes."
-              : "Scan requested; Chrome runs it within a few minutes.";
+              ? "A scan just ran…"
+              : "";
         if (result?.requestedUtc && state.overview)
           state.overview.scan = {
             ...(state.overview.scan || { last: null }),
@@ -440,31 +443,41 @@
       const bar = element("div", "xt-scan");
       const scan = state.overview?.scan;
       const last = scan?.last;
+      // One line: when, then the counts, or what stopped it.
       const parts = [];
+      const finished = last && SCAN_FINISHED.includes(last.outcome);
       if (last) {
-        const outcome = SCAN_OUTCOMES[last.outcome] || last.outcome;
-        const detail =
-          last.outcome === "error" && last.detail ? ` (${last.detail})` : "";
-        const scheduled =
-          typeof last.scheduled === "number"
-            ? `, ${last.scheduled} scheduled`
-            : "";
         parts.push(
-          `Last X scan ${stampLabel(last.finishedUtc || last.startedUtc)}: ${outcome}${detail} · ${last.pages} ${
-            last.pages === 1 ? "page" : "pages"
-          }, ${last.rows} posts${scheduled}.`,
+          `Last scan ${stampLabel(last.finishedUtc || last.startedUtc)}`,
         );
-      } else parts.push("No X scan yet.");
-      if (scan?.requestedUtc) parts.push("A scan is requested.");
-      if (state.scanMessage) parts.push(state.scanMessage);
-      const text = element("p", "xt-scan-text", parts.join(" "));
+        if (finished) {
+          parts.push(`${last.rows} posts`);
+          if (typeof last.scheduled === "number")
+            parts.push(`${last.scheduled} scheduled`);
+        } else
+          parts.push(
+            `${SCAN_PROBLEMS[last.outcome] || last.outcome}${
+              last.detail ? ` (${last.detail})` : ""
+            }`,
+          );
+        const backoff = Date.parse(String(last.backoffUntilUtc || ""));
+        if (Number.isFinite(backoff) && backoff > now().getTime())
+          parts.push(`automatic scans paused until ${stampLabel(backoff)}`);
+      } else parts.push("No scan yet");
+      const text = element("p", "xt-scan-text", parts.join(" · "));
       text.setAttribute("role", "status");
-      if (last && !/^finished/.test(SCAN_OUTCOMES[last.outcome] || ""))
-        text.dataset.tone = "warn";
+      if (last && !finished) text.dataset.tone = "warn";
+      const pending = element(
+        "span",
+        "xt-scan-state",
+        state.scanMessage || (scan?.requestedUtc ? "Scan requested…" : ""),
+      );
+      pending.setAttribute("role", "status");
+      pending.hidden = !pending.textContent;
       const action = button("xt-action", "", "Scan now");
       action.dataset.key = "scan-now";
       action.addEventListener("click", () => void scanNow());
-      bar.append(text, action);
+      bar.append(text, pending, action);
       return bar;
     }
 

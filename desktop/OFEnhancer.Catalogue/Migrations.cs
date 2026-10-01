@@ -286,7 +286,8 @@ internal static class Migrations
             last_detail TEXT,
             last_pages INTEGER,
             last_rows INTEGER,
-            last_scheduled INTEGER
+            last_scheduled INTEGER,
+            last_backoff_until_utc TEXT
         );
         """
     );

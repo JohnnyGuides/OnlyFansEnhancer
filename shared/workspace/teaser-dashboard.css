@@ -156,16 +156,31 @@
 
 .xt-scan {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px 16px;
+  gap: 12px;
 }
 
 .xt-scan-text {
+  min-width: 0;
   margin: 0;
   color: #aeb6c3;
   font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.xt-scan-state {
+  color: var(--xt-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.xt-scan-state[hidden] {
+  display: none;
+}
+
+.xt-scan .xt-action {
+  flex: none;
+  margin-inline-start: auto;
 }
 
 .xt-scan-text[data-tone="warn"] {

@@ -158,10 +158,17 @@ owner browsing. A five-minute `creator-x-scan` alarm asks the desktop
 request, and the owner's own non-reply posts of the last 31 days). A scan is due
 every 6 hours, when one of those posts passes 24 h, 72 h, 7 d or 30 d of age
 since the last attempt, or on request; automatic scans are at least 30 minutes
-apart and any two scans at least 2 minutes. Without a known owner account no tab
+apart and any two scans at least 2 minutes. An HTTP 401, 403 or 429 answer
+pauses automatic scans for 6 hours, doubling per consecutive such error up to
+48 hours (a finished scan resets it); "Scan now" still runs and the dashboard
+shows the pause. Without a known owner account no tab
 is opened. One scan at a time (in memory; a run record left by a stopped worker
 has its tab closed) opens one inactive tab on `https://x.com/<owner>/with_replies`
-(blank first, then navigated). The page script keeps X's own request for an
+(blank first, then navigated to a URL ending in `#creator-scan=<run marker>`;
+after a worker restart only an inactive x.com tab whose URL still carries the
+recorded marker is closed). If the owner activates or closes the scan tab at any
+point, the scan stops at once (`user-took-over`) and the tab is neither
+navigated nor closed. The page script keeps X's own request for an
 allowlisted profile timeline (`UserRepliesTimeline` and the other profile
 timelines) as a template only when its `variables.userId` is the owner's account,
 with the request headers limited to `authorization`, `x-csrf-token`,

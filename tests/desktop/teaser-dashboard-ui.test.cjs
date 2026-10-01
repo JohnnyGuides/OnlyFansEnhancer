@@ -895,17 +895,46 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
       assert.equal(await empty.getAttribute("data-kind"), "empty");
 
       const scan = page.locator(".xt-scan-text");
-      assert.match(
+      assert.equal(
         await scan.textContent(),
-        /Last X scan .*: finished · 3 pages, 41 posts, 2 scheduled\./,
+        "Last scan 1 Oct, 11:01 · 41 posts · 2 scheduled",
       );
-      await page.getByRole("button", { name: "Scan now" }).click();
-      await page.waitForFunction(() =>
-        document
-          .querySelector(".xt-scan-text")
-          ?.textContent.includes("Chrome runs it"),
+      const pending = page.locator(".xt-scan-state");
+      assert.equal(await pending.isVisible(), false);
+      // Text, muted pending state and a right-aligned button share one row.
+      const button = page.getByRole("button", { name: "Scan now" });
+      await button.click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".xt-scan-state")?.textContent ===
+          "Scan requested…",
       );
-      assert.match(await scan.textContent(), /A scan is requested\./);
+      assert.equal(await pending.isVisible(), true);
+      const [textBox, pendingBox, buttonBox, barBox] = await Promise.all([
+        scan.boundingBox(),
+        pending.boundingBox(),
+        button.boundingBox(),
+        page.locator(".xt-scan").boundingBox(),
+      ]);
+      assert.ok(
+        Math.abs(
+          textBox.y + textBox.height / 2 - (buttonBox.y + buttonBox.height / 2),
+        ) < 4,
+      );
+      assert.ok(
+        Math.abs(
+          pendingBox.y +
+            pendingBox.height / 2 -
+            (buttonBox.y + buttonBox.height / 2),
+        ) < 4,
+      );
+      assert.ok(
+        Math.abs(buttonBox.x + buttonBox.width - (barBox.x + barBox.width)) < 2,
+      );
+      assert.equal(
+        await pending.evaluate((node) => getComputedStyle(node).color),
+        "rgb(143, 153, 168)",
+      );
       assert.deepEqual(
         (await calls(page, "requestXScan")).map((call) => call.payload),
         [{}],
@@ -944,16 +973,18 @@ test("a failed scan is shown plainly", async () => {
           pages: 2,
           rows: 20,
           scheduled: null,
+          backoffUntilUtc: "2026-10-01T17:00:20.000Z",
         },
       },
     },
   });
   try {
     const scan = page.locator(".xt-scan-text");
-    assert.match(
+    assert.equal(
       await scan.textContent(),
-      /stopped after an X error \(http-429\) · 2 pages, 20 posts\./,
+      "Last scan 1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
     );
+    assert.equal(await page.locator(".xt-scan-state").isVisible(), false);
     assert.equal(await scan.getAttribute("data-tone"), "warn");
     assert.deepEqual(errors, []);
   } finally {
