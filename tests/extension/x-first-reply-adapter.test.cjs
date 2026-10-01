@@ -23,8 +23,13 @@ const TIMING = {
 };
 
 // Synthetic status page shaped like X's conversation view; benign text only.
-function fixture({ mode = "normal", extra = "" } = {}) {
+function fixture({
+  mode = "normal",
+  extra = "",
+  account = "Owner_Handle",
+} = {}) {
   return `<!doctype html><style>[hidden]{display:none}</style>
+    <nav><a id="profile" data-testid="AppTabBar_Profile_Link" href="/${account}">Profile</a></nav>
     <article><a href="/Owner_Handle/status/101"><time>now</time></a><div data-testid="videoPlayer"></div></article>
     ${extra}
     <div id="composer">
@@ -104,13 +109,14 @@ function prepare(page, over = {}) {
       statusId: "101",
       ownerHandle: "Owner_Handle",
       text: TEXT,
+      paidUrl: PAID,
       timing: TIMING,
       ...over,
     },
   );
 }
 
-function submit(page) {
+function submit(page, over = {}) {
   return page.evaluate(
     async (args) => {
       try {
@@ -125,7 +131,9 @@ function submit(page) {
       statusId: "101",
       ownerHandle: "Owner_Handle",
       text: TEXT,
+      paidUrl: PAID,
       timing: TIMING,
+      ...over,
     },
   );
 }
@@ -292,5 +300,47 @@ test("an unobserved reply after the click is reported unconfirmed", async () => 
       (await events(page)).filter((name) => name === "reply-clicked").length,
       1,
     );
+  });
+});
+
+test("a different signed-in X account fails closed before typing and before the click", async () => {
+  await withPage({ account: "Someone_Else" }, async (page) => {
+    assert.match((await prepare(page)).error, /^wrong-account:/);
+    assert.deepEqual(await events(page), []);
+  });
+  await withPage({}, async (page) => {
+    assert.equal((await prepare(page)).result?.status, "ready");
+    await page.evaluate(() =>
+      document.querySelector("#profile").setAttribute("href", "/Someone_Else"),
+    );
+    assert.match((await submit(page)).error, /^wrong-account:/);
+    assert.equal((await events(page)).includes("reply-clicked"), false);
+  });
+});
+
+test("submit refuses when an owner reply appears after preparation", async () => {
+  await withPage({}, async (page) => {
+    assert.equal((await prepare(page)).result?.status, "ready");
+    await page.evaluate(() => {
+      const reply = document.createElement("article");
+      reply.innerHTML =
+        '<a href="/Owner_Handle/status/160"><time>now</time></a>';
+      document.body.append(reply);
+    });
+    assert.match((await submit(page)).error, /^existing-reply:/);
+    assert.equal((await events(page)).includes("reply-clicked"), false);
+  });
+});
+
+test("the pre-click gate requires the reply to carry the scheduled episode link", async () => {
+  await withPage({}, async (page) => {
+    assert.equal((await prepare(page)).result?.status, "ready");
+    const other = "https://onlyfans.com/987654321/johnny_guides";
+    assert.match((await submit(page, { paidUrl: other })).error, /^mismatch:/);
+    assert.match(
+      (await submit(page, { paidUrl: "https://onlyfans.com/1/someone" })).error,
+      /^mismatch:/,
+    );
+    assert.equal((await events(page)).includes("reply-clicked"), false);
   });
 });

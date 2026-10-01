@@ -60,9 +60,13 @@ function fakeRunner({ prepare, submit } = {}) {
   const calls = [];
   return {
     calls,
-    async open(item) {
+    async open(item, onTab) {
       calls.push(["open", item.statusId]);
+      await onTab?.(7);
       return { tabId: 7 };
+    },
+    async closeStale(tabId, statusUrl) {
+      calls.push(["close-stale", tabId, statusUrl]);
     },
     async prepare(handle, item) {
       calls.push(["prepare", item.statusId]);
@@ -132,7 +136,12 @@ test("a pending reply survives a worker restart and runs once when due", async (
   await first.instance.tick();
   const runner = fakeRunner();
   const clock = { now: T0 + 61 * MINUTE };
-  const second = scheduler({ storage, runner, clock, items: [] });
+  const second = scheduler({
+    storage,
+    runner,
+    clock,
+    items: [candidate("101", T0)],
+  });
   const result = await second.instance.tick();
   assert.equal(result.executed, "101");
   assert.equal(result.outcome, "posted");
@@ -368,7 +377,7 @@ test("the setting defaults to off without live-check evidence and on with it", a
   await assert.rejects(() => withEvidence.instance.setEnabled("yes"));
 });
 
-test("desktop failures are recorded without dropping pending replies", async () => {
+test("without a fresh desktop answer nothing runs and pending replies are kept", async () => {
   const storage = memoryStorage();
   const first = scheduler({ storage, items: [candidate("101", T0)] });
   await first.instance.tick();
@@ -384,8 +393,157 @@ test("desktop failures are recorded without dropping pending replies", async () 
     now: () => T0 + 2 * HOUR,
   });
   const result = await instance.tick();
-  assert.equal(result.executed, "101");
+  assert.equal(result.executed, "");
+  assert.deepEqual(runner.calls, []);
+  assert.equal(state(storage).items["101"].state, "pending");
   assert.equal(state(storage).lastError, "desktop-unavailable");
+});
+
+test("a due reply runs only while still listed with the identical link", async () => {
+  const storage = memoryStorage();
+  const first = scheduler({ storage, items: [candidate("101", T0)] });
+  await first.instance.tick();
+  const runner = fakeRunner();
+  const changed = scheduler({
+    storage,
+    runner,
+    clock: { now: T0 + 2 * HOUR },
+    items: [
+      candidate("101", T0, {
+        paidUrl: "https://onlyfans.com/987654321/johnny_guides",
+      }),
+    ],
+  });
+  assert.equal((await changed.instance.tick()).changed, "binding-changed");
+  assert.equal(state(storage).items["101"].outcome, "binding-changed");
+  assert.deepEqual(runner.calls, []);
+
+  const storage2 = memoryStorage();
+  await scheduler({
+    storage: storage2,
+    items: [candidate("102", T0)],
+  }).instance.tick();
+  const gone = scheduler({
+    storage: storage2,
+    runner,
+    clock: { now: T0 + 2 * HOUR },
+    items: [candidate("102", T0, { ownerReplyExists: true })],
+  });
+  assert.equal((await gone.instance.tick()).changed, "no-longer-eligible");
+  assert.equal(state(storage2).items["102"].outcome, "no-longer-eligible");
+  assert.deepEqual(runner.calls, []);
+});
+
+test("overlapping ticks never run the same reply twice", async () => {
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const runner = fakeRunner({
+    async prepare() {
+      await gate;
+      return { status: "ready" };
+    },
+  });
+  const { instance, storage } = scheduler({
+    runner,
+    clock: { now: T0 + 2 * HOUR },
+    items: [candidate("101", T0)],
+  });
+  const ticks = [instance.tick(), instance.tick(), instance.tick()];
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  release();
+  await Promise.all(ticks);
+  assert.equal(runner.calls.filter(([name]) => name === "submit").length, 1);
+  assert.equal(runner.calls.filter(([name]) => name === "open").length, 1);
+  assert.equal(state(storage).items["101"].outcome, "posted");
+});
+
+test("turning the setting off aborts a run before the click and closes the tab", async () => {
+  let instance;
+  const runner = fakeRunner({
+    async prepare() {
+      await instance.setEnabled(false);
+      return { status: "ready" };
+    },
+  });
+  const made = scheduler({
+    runner,
+    clock: { now: T0 + 2 * HOUR },
+    items: [candidate("101", T0)],
+  });
+  instance = made.instance;
+  await instance.tick();
+  const item = state(made.storage).items["101"];
+  assert.equal(item.state, "pending");
+  assert.equal(item.attempts, 0);
+  assert.equal(item.tabId, undefined);
+  assert.equal(runner.calls.filter(([name]) => name === "submit").length, 0);
+  assert.equal(runner.calls.filter(([name]) => name === "close").length, 1);
+});
+
+test("a wrong signed-in account fails closed without retrying", async () => {
+  for (const phase of ["prepare", "submit"]) {
+    const fail = () => {
+      throw new Error("wrong-account: X is not signed in as the owner.");
+    };
+    const runner = fakeRunner({ [phase]: fail });
+    const clock = { now: T0 + 2 * HOUR };
+    const { instance, storage } = scheduler({
+      runner,
+      clock,
+      items: [candidate("101", T0)],
+    });
+    await instance.tick();
+    clock.now += 15 * MINUTE;
+    await instance.tick();
+    assert.equal(state(storage).items["101"].outcome, "wrong-account", phase);
+    assert.equal(runner.calls.filter(([name]) => name === "open").length, 1);
+    assert.equal(runner.calls.filter(([name]) => name === "close").length, 1);
+  }
+});
+
+test("a tab left by an interrupted run is closed on the next tick", async () => {
+  const storage = memoryStorage();
+  await scheduler({ storage, items: [candidate("101", T0)] }).instance.tick();
+  Object.assign(storage.data.creatorXFirstReplyV1.items["101"], {
+    state: "preparing",
+    attempts: 1,
+    tabId: 42,
+  });
+  const runner = fakeRunner({
+    prepare: () => {
+      throw new Error("composer-missing: the X reply composer was not shown.");
+    },
+  });
+  await scheduler({
+    storage,
+    runner,
+    clock: { now: T0 + 2 * HOUR },
+    items: [candidate("101", T0)],
+  }).instance.tick();
+  assert.deepEqual(runner.calls[0], [
+    "close-stale",
+    42,
+    "https://x.com/Owner_Handle/status/101",
+  ]);
+  assert.equal(state(storage).items["101"].tabId, undefined);
+  assert.equal(runner.calls.filter(([name]) => name === "close").length, 1);
+});
+
+test("a teaser without a link is revisited and scheduled once its link appears", async () => {
+  const storage = memoryStorage();
+  await scheduler({
+    storage,
+    items: [candidate("101", T0, { paidUrl: undefined })],
+  }).instance.tick();
+  assert.equal(state(storage).items["101"].state, "waiting-link");
+  await scheduler({
+    storage,
+    clock: { now: T0 + 5 * MINUTE },
+    items: [candidate("101", T0)],
+  }).instance.tick();
+  assert.equal(state(storage).items["101"].state, "pending");
+  assert.equal(state(storage).items["101"].paidUrl, PAID);
+  assert.equal(state(storage).counters["no-link"], 1);
 });
 
 test("the live-check evidence is empty or the SHA-256 of the committed live-check record", () => {

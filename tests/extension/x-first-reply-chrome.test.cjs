@@ -13,6 +13,7 @@ const PAID = "https://onlyfans.com/123456789/johnny_guides";
 
 // Synthetic status page shaped like X's conversation view; benign text only.
 const statusPage = `<!doctype html>
+  <nav><a data-testid="AppTabBar_Profile_Link" href="/Owner_Handle">Profile</a></nav>
   <article><a href="/Owner_Handle/status/101"><time>now</time></a><div data-testid="videoPlayer"></div></article>
   <div id="composer">
     <div id="reply" role="textbox" contenteditable="true" data-testid="tweetTextarea_0" style="white-space:pre-wrap"></div>

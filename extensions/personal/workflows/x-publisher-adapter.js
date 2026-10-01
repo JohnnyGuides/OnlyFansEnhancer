@@ -428,6 +428,28 @@
     return main;
   }
 
+  // The signed-in account, read from X's own profile tab link (the same
+  // source as the collector's owner check); every such link must agree.
+  function signedInHandle() {
+    const handles = new Set(
+      [
+        ...document.querySelectorAll('a[data-testid="AppTabBar_Profile_Link"]'),
+      ].map((link) => {
+        const match = String(link.getAttribute("href") || "").match(
+          /^\/([A-Za-z0-9_]{1,15})$/,
+        );
+        return match ? match[1].toLowerCase() : "";
+      }),
+    );
+    return handles.size === 1 ? [...handles][0] : "";
+  }
+
+  function requireOwnerAccount(ownerHandle) {
+    const owner = String(ownerHandle || "").toLowerCase();
+    if (!owner || signedInHandle() !== owner)
+      throw new Error("wrong-account: X is not signed in as the owner.");
+  }
+
   function ownerArticles(main) {
     return [...document.querySelectorAll("article")].filter(
       (article) =>
@@ -473,7 +495,14 @@
     ];
   }
 
-  function firstReplyGate(editor, root, text) {
+  function firstReplyGate(editor, root, text, paidUrl) {
+    if (
+      !/^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/.test(
+        String(paidUrl || ""),
+      ) ||
+      !text.endsWith(`\n-> ${paidUrl}`)
+    )
+      throw new Error("mismatch: the reply does not carry the episode link.");
     if (linkCards(root).length)
       throw new Error("card-not-removed: a link card is still attached.");
     if (composerText(editor) !== text)
@@ -499,11 +528,23 @@
     if (!handled) fillEditor(editor, text);
   }
 
-  async function prepareFirstReply({ statusId, ownerHandle, text, timing }) {
+  async function prepareFirstReply({
+    statusId,
+    ownerHandle,
+    text,
+    paidUrl,
+    timing,
+  }) {
     const limits = firstReplyTiming(timing);
     const expected = String(text || "");
     if (!expected) throw new Error("mismatch: the reply text is missing.");
     const main = ownerTeaser({ statusId, ownerHandle });
+    await waitFor(
+      () => signedInHandle(),
+      "The signed-in X account",
+      limits.elementWaitMs,
+    ).catch(() => {});
+    requireOwnerAccount(ownerHandle);
     await waitFor(
       () => ownerArticles(main).length > 0,
       "The teaser post",
@@ -551,7 +592,8 @@
         ).catch(() => false);
         if (appeared) await removeCard();
         await pause(limits.settleMs);
-        firstReplyGate(editor, root, expected);
+        firstReplyGate(editor, root, expected, paidUrl);
+        requireOwnerAccount(ownerHandle);
         one(REPLY_POST, "The X Reply button", enabled);
         return {
           status: "ready",
@@ -559,6 +601,7 @@
           attempts: attempt + 1,
         };
       } catch (error) {
+        if (/^wrong-account:/.test(String(error?.message))) throw error;
         failure = error;
       }
     }
@@ -571,7 +614,13 @@
         );
   }
 
-  async function submitFirstReply({ statusId, ownerHandle, text, timing }) {
+  async function submitFirstReply({
+    statusId,
+    ownerHandle,
+    text,
+    paidUrl,
+    timing,
+  }) {
     const limits = firstReplyTiming(timing);
     const expected = String(text || "");
     const main = ownerTeaser({ statusId, ownerHandle });
@@ -582,7 +631,8 @@
     const editor = one(MAIN_COMPOSER, "The X reply composer");
     const root = composerRoot(editor);
     // No await between the final gate and the click.
-    firstReplyGate(editor, root, expected);
+    requireOwnerAccount(ownerHandle);
+    firstReplyGate(editor, root, expected, paidUrl);
     one(REPLY_POST, "The X Reply button", enabled).click();
     const reply = await waitFor(
       () => replyFor(main),
