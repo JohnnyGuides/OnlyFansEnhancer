@@ -13,8 +13,11 @@ internal sealed record XTeaserOverviewResult(bool Active, XTeaserOverview Overvi
 // automatic Good/Failed moves, plus the dashboard read and undo operations.
 // Inactive while the teaser root setting is unset. Catalogue access runs on
 // the serial request dispatcher; file hashing during scans runs beside it.
+// The hourly sheet write-back of discovered teaser links is independent of
+// the teaser root.
 internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatcher dispatcher,
-    Func<DesktopSettings> settings, Func<DateTimeOffset>? clock = null) : IDisposable
+    Func<DesktopSettings> settings, Func<DateTimeOffset>? clock = null,
+    Func<DateTimeOffset, XSheetWritebackRun>? sheetWriteback = null) : IDisposable
 {
     internal static readonly TimeSpan FirstRunDelay = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan RunInterval = TimeSpan.FromHours(1);
@@ -29,7 +32,12 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
     {
         try { await RunOnceAsync().ConfigureAwait(false); }
         catch { /* The next hourly run retries; refusals are recorded in the move log. */ }
+        try { await WriteBackSheetLinksAsync().ConfigureAwait(false); }
+        catch { /* The next hourly run retries; attempts are recorded in the audit log. */ }
     }
+
+    internal async Task<XSheetWritebackRun?> WriteBackSheetLinksAsync() => sheetWriteback is null ? null
+        : await dispatcher.EnqueueAsync(() => sheetWriteback(Now)).ConfigureAwait(false);
 
     internal async Task<XTeaserRunResult> RunOnceAsync()
     {

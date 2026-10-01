@@ -160,6 +160,32 @@ its fingerprint before a narrow write, then verifies readback. Missing/duplicate
 metadata, nonempty conflicting cells, changed identity, or fingerprint drift
 blocks the mutation instead of overwriting another system's work.
 
+## Teaser links the app writes
+
+While Google is connected the app adds X teaser links it discovered to the
+catalogue's `Twitter Teaser(s)` column without a review step. This is the only
+automatic sheet write, it applies whether or not reviewed sync is set up, and the
+**Import catalogue** step itself still never writes.
+
+- Source: owner video teasers bound to a row through the first-reply OnlyFans or
+  Fansly link or an owner choice, with no recorded binding conflict. Unbound,
+  conflicted and ambiguous posts are never written. The link is
+  `https://x.com/<owner handle>/status/<id>`.
+- Only that row's `Twitter Teaser(s)` cell changes. Existing links and text stay
+  in place and order (surrounding whitespace is trimmed); the new link follows,
+  joined by the cell's own separator, else the column's most common one, else a
+  line break. The `# teasers` count and every other column are left alone; the
+  importer already counts the larger of that number and the links.
+- Nothing is written when the status is already in the cell (any handle,
+  `x.com` or `twitter.com`), when the cell holds a formula, carriage returns or tabs,
+  a whole-cell link on non-link text, when another row already links the status,
+  or when the row's ID or the live cell differs from the snapshot just read (both
+  are read in one request right before the write). The write is `RAW`, and the whole tab is read back; a
+  mismatch is recorded as `google-row-write-unresolved`.
+- At most five links per hourly run; a failed link is retried after 1 h,
+  doubling up to 24 h. Attempts are kept in the local audit log and summarized
+  in the teaser dashboard overview (`sheetWriteback`).
+
 ## Recovery
 
 The local outbox states are `pending`, `attempted`, `completed`, `conflict`, and

@@ -72,6 +72,20 @@ public sealed class XTeaserControllerTests
     }
 
     [TestMethod]
+    public async Task SheetWritebackRunsOnTheDispatcherWithoutTheTeaserRoot()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        using (XTeaserController without = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now))
+            Assert.IsNull(await without.WriteBackSheetLinksAsync());
+        List<DateTimeOffset> calls = [];
+        using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now,
+            now => { calls.Add(now); return new(true, 1, 0, 0); });
+        Assert.AreEqual(new XSheetWritebackRun(true, 1, 0, 0), await controller.WriteBackSheetLinksAsync());
+        CollectionAssert.AreEqual(new[] { Now }, calls);
+    }
+
+    [TestMethod]
     public void ReplyQueueWorksWithoutTheTeaserRootAndRejectsPayloads()
     {
         using TestDirectory temp = new();

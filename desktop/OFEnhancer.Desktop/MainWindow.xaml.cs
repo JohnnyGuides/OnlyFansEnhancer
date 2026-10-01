@@ -76,7 +76,8 @@ public partial class MainWindow : Window, IDisposable
         queuedRouter = router;
         uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets);
         xObservations = new XObservationController(catalogue);
-        xTeasers = new XTeaserController(catalogue, dispatcher, settings.Load);
+        xTeasers = new XTeaserController(catalogue, dispatcher, settings.Load,
+            sheetWriteback: googleCatalogue.WriteBackTeaserLinks);
         xTeasers.Start();
         uploadThumbnails = new UploadThumbnailCatalogue(catalogue);
         uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>

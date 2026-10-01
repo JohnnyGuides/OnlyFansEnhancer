@@ -41,6 +41,9 @@ internal interface IGoogleCatalogueSession : IDisposable
     Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
         CancellationToken cancellationToken) =>
         throw new GoogleCatalogueException("google-upload-write-unavailable");
+    Task<GoogleTeaserLinkResult> AppendTeaserLinkAsync(string sourceKey, string url,
+        CancellationToken cancellationToken) =>
+        throw new GoogleCatalogueException("google-teaser-write-unavailable");
 }
 
 internal sealed class GoogleCatalogueController : IGoogleCatalogueController
@@ -497,6 +500,56 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             return new { id = result.Id, row = result.Row, status = result.Status };
         }
         catch (Exception exception) { throw SafeException(exception); }
+        finally { ExitCatalogueOperation(); }
+    }
+
+    // Writes bound teaser links missing from the sheet, at most a few per run.
+    // Runs on the serial request dispatcher; skipped while Google is not
+    // connected or another catalogue operation is active. Each outcome is
+    // recorded, and a successful write is re-imported so the binding becomes
+    // sheet-link evidence.
+    internal XSheetWritebackRun WriteBackTeaserLinks(DateTimeOffset now)
+    {
+        IGoogleCatalogueSession session;
+        lock (_gate)
+        {
+            if (_disposed || _session is null) return new(false, 0, 0, 0);
+            session = _session;
+            if (Interlocked.CompareExchange(ref _catalogueOperationActive, 1, 0) != 0) return new(true, 0, 0, 0);
+        }
+        int appended = 0, present = 0, failed = 0;
+        try
+        {
+            _store.RefreshXBindings(now);
+            foreach (XSheetWritebackCandidate candidate in _store.GetXSheetWritebackCandidates(now))
+            {
+                GoogleTeaserLinkResult result;
+                try
+                {
+                    result = session.AppendTeaserLinkAsync(candidate.SourceKey, candidate.Url, _lifetime.Token)
+                        .GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { break; }
+                catch (Exception exception)
+                {
+                    string code = SafeException(exception).Code;
+                    _store.RecordXSheetWriteback(candidate, "failed", code, now);
+                    failed++;
+                    if (GoogleTeaserLinkWriter.RowCodes.Contains(code)) continue;
+                    break;
+                }
+                _store.RecordXSheetWriteback(candidate, result.Status, null, now);
+                if (result.Status == "appended") appended++;
+                else present++;
+                lock (_gate)
+                {
+                    if (_disposed || !ReferenceEquals(session, _session)) break;
+                    try { _store.ImportWorkbookProjection(result.Preview.Projection, updateGoogleBindings: false); }
+                    catch (WorkbookProjectionException) { /* The next run sees the link as already present. */ }
+                }
+            }
+            return new(true, appended, present, failed);
+        }
         finally { ExitCatalogueOperation(); }
     }
 
@@ -1141,6 +1194,11 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
         CancellationToken cancellationToken) =>
         new GoogleUploadEntryWriter(_workbookId, _preferredSheetId, _workspace)
             .WriteAsync(request, cancellationToken);
+
+    public Task<GoogleTeaserLinkResult> AppendTeaserLinkAsync(string sourceKey, string url,
+        CancellationToken cancellationToken) =>
+        new GoogleTeaserLinkWriter(_workbookId, _preferredSheetId, _workspace)
+            .AppendAsync(sourceKey, url, cancellationToken);
 
     public void Dispose() => _authorization?.Dispose();
 }

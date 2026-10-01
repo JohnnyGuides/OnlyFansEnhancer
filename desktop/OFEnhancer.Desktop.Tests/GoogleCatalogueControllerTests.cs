@@ -494,6 +494,113 @@ public sealed class GoogleCatalogueControllerTests
             harness.Session.UploadEntryRequests.Select(request => $"{request.Mode}:{request.Id}").ToArray());
     }
 
+    [TestMethod]
+    public void TeaserLinkWritebackRecordsOutcomesReimportsAndStaysWithinTheRunLimit()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        DateTimeOffset now = new(2026, 9, 28, 12, 0, 0, TimeSpan.Zero);
+        Dictionary<string, List<string>> sheet = [];
+        bool refuseFirst = true;
+        harness.Session.AppendTeaserLinkAction = (key, url) =>
+        {
+            if (key == "ep-1" && refuseFirst)
+            {
+                refuseFirst = false;
+                return Task.FromException<GoogleTeaserLinkResult>(new GoogleCatalogueException("catalogue-entry-changed"));
+            }
+            if (!sheet.TryGetValue(key, out List<string>? urls)) sheet[key] = urls = [];
+            urls.Add(url);
+            return Task.FromResult(new GoogleTeaserLinkResult("appended", TeaserPreview(sheet)));
+        };
+        SeedBoundTeasers(harness.Store, sheet, now);
+
+        XSheetWritebackRun first = harness.Controller.WriteBackTeaserLinks(now);
+
+        Assert.AreEqual(new XSheetWritebackRun(true, 4, 0, 1), first);
+        CollectionAssert.AreEqual(new[] { "ep-1", "ep-2", "ep-3", "ep-4", "ep-5" },
+            harness.Session.TeaserLinkRequests.Select(request => request.Split('|')[0]).ToArray());
+        Assert.AreEqual("ep-2|https://x.com/Owner_Handle/status/202", harness.Session.TeaserLinkRequests[1]);
+        Assert.AreEqual(4L, Scalar(harness.Store, "SELECT COUNT(*) FROM x_post_bindings WHERE evidence='sheet-link'"),
+            "re-import turns written links into sheet-link evidence");
+        Assert.AreEqual(5L, Scalar(harness.Store, "SELECT COUNT(*) FROM audit_events WHERE kind='x-sheet-writeback'"));
+
+        XSheetWritebackRun second = harness.Controller.WriteBackTeaserLinks(now.AddMinutes(10));
+        Assert.AreEqual(new XSheetWritebackRun(true, 2, 0, 0), second, "the refused row waits for its backoff");
+        XSheetWritebackRun third = harness.Controller.WriteBackTeaserLinks(now.AddHours(1));
+        Assert.AreEqual(new XSheetWritebackRun(true, 1, 0, 0), third);
+        Assert.AreEqual(new XSheetWritebackRun(true, 0, 0, 0), harness.Controller.WriteBackTeaserLinks(now.AddHours(2)));
+        Assert.IsFalse(harness.Session.TeaserLinkRequests.Any(request => request.StartsWith("ep-8|", StringComparison.Ordinal)
+            || request.EndsWith("/209", StringComparison.Ordinal) || request.EndsWith("/210", StringComparison.Ordinal)),
+            "conflicted and unbound teasers are never written");
+        XSheetWritebackStatus status = harness.Store.GetXSheetWritebackStatus(now.AddHours(2));
+        Assert.AreEqual(7, status.Written);
+        Assert.AreEqual(0, status.Pending);
+    }
+
+    [TestMethod]
+    public void TeaserLinkWritebackNeedsAConnectionAndStopsOnAConnectionFailure()
+    {
+        DateTimeOffset now = new(2026, 9, 28, 12, 0, 0, TimeSpan.Zero);
+        using (ControllerHarness offline = new())
+        {
+            SeedBoundTeasers(offline.Store, [], now);
+            Assert.AreEqual(new XSheetWritebackRun(false, 0, 0, 0), offline.Controller.WriteBackTeaserLinks(now));
+            Assert.AreEqual(0, offline.Session.TeaserLinkRequests.Count);
+        }
+        using ControllerHarness harness = ConnectedHarness();
+        SeedBoundTeasers(harness.Store, [], now);
+        harness.Session.AppendTeaserLinkAction = (_, _) =>
+            Task.FromException<GoogleTeaserLinkResult>(new GoogleCatalogueException("google-reauthorization-required"));
+
+        Assert.AreEqual(new XSheetWritebackRun(true, 0, 0, 1), harness.Controller.WriteBackTeaserLinks(now));
+        Assert.AreEqual(1, harness.Session.TeaserLinkRequests.Count);
+        Assert.AreEqual("google-reauthorization-required", harness.Store.GetXSheetWritebackStatus(now).LastCode);
+    }
+
+    // Seven teasers bound by first-reply paid links (ep-1..ep-7), one owner
+    // binding contradicted by its reply link (209 -> ep-8) and one unbound (210).
+    private static void SeedBoundTeasers(CatalogueStore store, Dictionary<string, List<string>> sheet, DateTimeOffset now)
+    {
+        store.ImportWorkbookProjection(TeaserPreview(sheet).Projection, updateGoogleBindings: false);
+        XOwnerIdentity owner = new("1000000000000000001", "Owner_Handle");
+        List<XObservation> posts = [];
+        XObservation Post(string id, DateTimeOffset at, string? replyTo = null, string? link = null) =>
+            new(id, "1000000000000000001", "Owner_Handle", at.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                link is null ? "benign teaser" : "full vid -> " + link, replyTo, replyTo ?? id, false,
+                replyTo is null ? [new XObservedMedia("video", "7_1", 15_000, null)] : [], link is null ? [] : [link], null, "network");
+        for (int index = 1; index <= 7; index++)
+        {
+            DateTimeOffset at = now.AddDays(-1).AddHours(index);
+            posts.Add(Post($"20{index}", at));
+            posts.Add(Post($"30{index}", at.AddMinutes(5), $"20{index}", $"https://fansly.com/post/70{index}"));
+        }
+        posts.Add(Post("209", now.AddHours(-2)));
+        posts.Add(Post("309", now.AddHours(-1.9), "209", "https://fansly.com/post/702"));
+        posts.Add(Post("210", now.AddHours(-1)));
+        store.RecordXObservations(new(owner, posts), now);
+        using Microsoft.Data.Sqlite.SqliteCommand command = store.Connection.CreateCommand();
+        command.CommandText = "INSERT OR REPLACE INTO x_post_bindings VALUES "
+            + "('209', (SELECT item_id FROM catalogue_items WHERE source_key = 'ep-8'), 'ep-8', 'owner', 'high', 'x')";
+        command.ExecuteNonQuery();
+        store.RefreshXBindings(now);
+    }
+
+    private static GoogleCatalogueImportPreview TeaserPreview(Dictionary<string, List<string>> sheet) => new(
+        new(WorkbookId, "1", true, [.. Enumerable.Range(1, 8).Select(index => new WorkbookCatalogueItem(index + 1,
+            $"ep-{index}", $"Episode {index}", "", null, null, null, 0, 0,
+            new Dictionary<string, string> { ["fansly"] = $"https://fansly.com/post/{(index == 8 ? 800 : 700 + index)}" }, null,
+            sheet.TryGetValue($"ep-{index}", out List<string>? urls)
+                ? new Dictionary<string, CatalogueSourceLinkCell> { ["x"] = new(string.Join("\n", urls), null, [.. urls]) }
+                : null))]),
+        17, "2026 Video Catalogue", 1, new Dictionary<string, int>());
+
+    private static object? Scalar(CatalogueStore store, string sql)
+    {
+        using Microsoft.Data.Sqlite.SqliteCommand command = store.Connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
+    }
+
     private static JsonElement UploadEntryPayload(string id) => JsonSerializer.SerializeToElement(new
     {
         mode = "update", title = "Episode 2", description = "", releaseDate = "2026-09-18",
@@ -1513,6 +1620,16 @@ public sealed class GoogleCatalogueControllerTests
         {
             UploadEntryRequests.Add(request);
             return WriteUploadEntryAction!(request);
+        }
+
+        internal Func<string, string, Task<GoogleTeaserLinkResult>>? AppendTeaserLinkAction { get; set; }
+        internal List<string> TeaserLinkRequests { get; } = [];
+
+        public Task<GoogleTeaserLinkResult> AppendTeaserLinkAsync(string sourceKey, string url,
+            CancellationToken cancellationToken)
+        {
+            TeaserLinkRequests.Add($"{sourceKey}|{url}");
+            return AppendTeaserLinkAction!(sourceKey, url);
         }
 
         public Task<WorkbookMigrationResult> ApplyMigrationAsync(
