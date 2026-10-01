@@ -11,6 +11,10 @@
   const TWEET_OPERATIONS = Object.freeze([
     "UserTweets",
     "UserTweetsAndReplies",
+    // Current profile timelines (observed on x.com, October 2026).
+    "UserOriginalsTimeline",
+    "UserRepliesTimeline",
+    "UserVideoTimeline",
     "UserMedia",
     "UserHighlightsTweets",
     "TweetDetail",

@@ -143,6 +143,12 @@ test("the GraphQL allowlist is one constant and unknown operations are ignored",
   );
   assert.equal(contract.operationKind("UserTweets"), "tweets");
   assert.equal(contract.operationKind("TweetDetail"), "tweets");
+  for (const name of [
+    "UserOriginalsTimeline",
+    "UserRepliesTimeline",
+    "UserVideoTimeline",
+  ])
+    assert.equal(contract.operationKind(name), "tweets");
   assert.equal(contract.operationKind("Viewer"), "viewer");
   for (const name of ["HomeTimeline", "SearchTimeline", "Followers", ""])
     assert.equal(contract.operationKind(name), null);
