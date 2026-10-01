@@ -124,7 +124,16 @@
       item.reject(new Error(reason));
     }
     for (const portId of [...ports.keys()]) closePort(portId, reason);
-    if (statusView) statusView.message.textContent = reason;
+    if (statusView) {
+      statusView.message.textContent = reason;
+      statusView.panel.title = reason;
+      // The pill must not stay green; a later reconnect fires the event again.
+      statusView.panel.dataset.connected = "false";
+      statusView.panel.dataset.state = "offline";
+      statusView.setup.hidden = false;
+      statusView.refresh.hidden = false;
+      statusView.select.hidden = true;
+    }
   }
   webview.addEventListener("message", ({ data }) => {
     let value;
@@ -460,8 +469,9 @@
       statusView.select.append(option);
     }
     statusView.select.value = browserStatus.selected || "";
+    // Switching stays available while several browsers are live.
     statusView.select.hidden =
-      connected || (ids.length < 2 && !browserStatus.selectionRequired);
+      ids.length < 2 && !browserStatus.selectionRequired;
     statusView.label.hidden = statusView.select.hidden;
   }
   function mountStatus() {

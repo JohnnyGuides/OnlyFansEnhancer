@@ -45,6 +45,13 @@ async function mount(page) {
             return callback({ ok: true, availability: { ready: true } });
           if (
             message.type === "GET_CREATOR_UPLOAD_RESUMABLE" &&
+            globalThis.resumeGate
+          )
+            return void globalThis.resumeGate.push(() =>
+              callback({ ok: false, error: "Chrome is unavailable." }),
+            );
+          if (
+            message.type === "GET_CREATOR_UPLOAD_RESUMABLE" &&
             globalThis.failResume
           )
             return callback({
@@ -644,6 +651,10 @@ test("recovery notice that failed at startup clears once Chrome connects", async
     page.on("pageerror", (error) => errors.push(error.message));
     await page.addInitScript(() => {
       globalThis.failResume = true;
+      // The plain-http fixture origin has no crypto.subtle.
+      Object.defineProperty(crypto, "subtle", {
+        value: { digest: async () => new ArrayBuffer(32) },
+      });
     });
     await mount(page);
     await page.locator("#resumePrompt").waitFor({ state: "visible" });
@@ -651,14 +662,36 @@ test("recovery notice that failed at startup clears once Chrome connects", async
       await page.locator("#resumeHeading").textContent(),
       "Saved uploads not checked yet",
     );
+    // Make the form otherwise complete so only recovery can block Upload.
+    await page.locator("#loadTemplate").click();
+    await page.locator("#uploadTitle").fill("Recovery fixture");
+    await page.waitForFunction(() =>
+      document.querySelector("#matchStatus").textContent.startsWith("Ready."),
+    );
     assert.equal(await page.locator("#resumeError").textContent(), "");
     assert.equal(await page.locator("#resumeUpload").isVisible(), false);
     assert.equal(await page.locator("#recheckResume").isVisible(), true);
-    // Upload stays blocked while recovery is unverified.
+    // Upload stays blocked only because recovery is unverified: the same
+    // form becomes enabled once the notice clears (checked below).
     assert.equal(await page.locator("#uploadButton").isDisabled(), true);
-    // A manual check with Chrome still unavailable keeps the notice.
+    // A manual check with Chrome still unavailable keeps the notice, and the
+    // control is disabled while that check is in flight.
+    await page.evaluate(() => {
+      globalThis.resumeGate = [];
+    });
     await page.locator("#recheckResume").click();
+    await page.waitForFunction(
+      () => document.querySelector("#recheckResume").disabled,
+    );
+    await page.evaluate(() => {
+      for (const release of resumeGate.splice(0)) release();
+      globalThis.resumeGate = null;
+    });
+    await page.waitForFunction(
+      () => !document.querySelector("#recheckResume").disabled,
+    );
     await page.locator("#resumePrompt").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
     // The connection indicator reports Chrome reachable: recovery re-checks.
     await page.evaluate(() => {
       globalThis.failResume = false;
@@ -666,6 +699,11 @@ test("recovery notice that failed at startup clears once Chrome connects", async
     });
     await page.locator("#resumePrompt").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#recheckResume").isVisible(), false);
+    // With the notice gone nothing else blocks Upload, so the earlier
+    // disabled state was caused by the unverified recovery guard.
+    await page.waitForFunction(
+      () => !document.querySelector("#uploadButton").disabled,
+    );
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

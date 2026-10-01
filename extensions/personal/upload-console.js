@@ -4564,6 +4564,7 @@
 
     async function loadResumePrompt() {
       const prompt = get("#resumePrompt");
+      get("#recheckResume").disabled = true;
       try {
         const response = await sendMessage({
           type: "GET_CREATOR_UPLOAD_RESUMABLE",
@@ -4617,12 +4618,15 @@
         get("#newFromResume").hidden = true;
         get("#recheckResume").hidden = false;
         get("#resumeHeading").textContent = "Saved uploads not checked yet";
-        get("#resumeSummary").textContent =
-          "Connect Chrome to check for an interrupted upload. This retries automatically.";
+        get("#resumeSummary").textContent = globalThis.OFEnhancerDesktopUpload
+          ? "Connect Chrome to check for an interrupted upload. This retries automatically."
+          : "The saved upload state could not be checked yet. Check again once the extension is reachable.";
         get("#resumeSummary").hidden = false;
         get("#resumeInstructions").textContent = "";
         get("#resumeInstructions").hidden = true;
         get("#resumeError").textContent = "";
+      } finally {
+        get("#recheckResume").disabled = false;
       }
     }
 

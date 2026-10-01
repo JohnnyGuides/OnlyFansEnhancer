@@ -128,3 +128,127 @@ test("connected Chrome is shown beside upload choices without a redundant refres
     await browser.close();
   }
 });
+
+async function mountPill(page, initial) {
+  await page.setContent(uploader);
+  await page.addStyleTag({
+    path: path.join(repositoryRoot, "extensions/personal/upload-console.css"),
+  });
+  await page.evaluate((initial) => {
+    Object.defineProperty(crypto, "randomUUID", {
+      value: () => String(Math.random()).slice(2),
+    });
+    globalThis.hostState = initial;
+    let receive;
+    globalThis.chrome = {
+      webview: {
+        addEventListener(_name, listener) {
+          receive = listener;
+        },
+        postMessage(message) {
+          const request = JSON.parse(message);
+          queueMicrotask(() => {
+            const reply = hostState[request.operation] ?? hostState.default;
+            receive({
+              data: reply?.error
+                ? { requestId: request.requestId, ok: false, error: reply }
+                : { requestId: request.requestId, ok: true, result: reply },
+            });
+          });
+        },
+      },
+    };
+  }, initial);
+  await page.addScriptTag({ content: hostScript });
+}
+
+test("two live browsers keep the switch select visible while connected; one hides it", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1100, height: 400 },
+    });
+    await mountPill(page, {
+      getChromeReadiness: { state: "connected", message: "Ready." },
+      getUploadBrowsers: {
+        browsers: ["aaaaaaaa1111", "bbbbbbbb2222"],
+        selected: "aaaaaaaa1111",
+        connected: true,
+        selectionRequired: false,
+      },
+    });
+    await page.waitForSelector(
+      '.desktop-upload-connection[data-state="connected"]',
+    );
+    const select = page.locator(".desktop-upload-connection select");
+    assert.equal(await select.isVisible(), true);
+    assert.equal(await select.inputValue(), "aaaaaaaa1111");
+    await page.evaluate(() => {
+      hostState.getUploadBrowsers = {
+        browsers: ["aaaaaaaa1111"],
+        selected: "aaaaaaaa1111",
+        connected: true,
+        selectionRequired: false,
+      };
+      dispatchEvent(new Event("focus"));
+    });
+    await page.waitForFunction(
+      () => document.querySelector(".desktop-upload-connection select").hidden,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("a lost connection turns the pill off and a reconnect fires the event again", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1100, height: 400 },
+    });
+    await mountPill(page, {
+      getChromeReadiness: { state: "connected", message: "Ready." },
+      getUploadBrowsers: {
+        browsers: ["a1"],
+        selected: "a1",
+        connected: true,
+        selectionRequired: false,
+      },
+    });
+    await page.evaluate(() => {
+      globalThis.connectedEvents = 0;
+      addEventListener("ofenhancer:browser-connected", () => connectedEvents++);
+    });
+    await page.waitForSelector(
+      '.desktop-upload-connection[data-state="connected"]',
+    );
+    await page.evaluate(() => {
+      hostState.getUploadBrowsers = { error: true, code: "lost" };
+      dispatchEvent(new Event("focus"));
+    });
+    await page.waitForSelector(
+      '.desktop-upload-connection[data-connected="false"]',
+    );
+    assert.equal(
+      await page
+        .locator(".desktop-upload-connection")
+        .getAttribute("data-state"),
+      "offline",
+    );
+    await page.evaluate(() => {
+      hostState.getUploadBrowsers = {
+        browsers: ["a1"],
+        selected: "a1",
+        connected: true,
+        selectionRequired: false,
+      };
+      dispatchEvent(new Event("focus"));
+    });
+    await page.waitForSelector(
+      '.desktop-upload-connection[data-state="connected"]',
+    );
+    assert.equal(await page.evaluate(() => connectedEvents), 1);
+  } finally {
+    await browser.close();
+  }
+});
