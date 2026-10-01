@@ -201,6 +201,7 @@
     "workflows/x-collector-page.js": "extensions/personal/workflows/x-collector-page.js",
     "workflows/x-collector-relay-contract.js": "extensions/personal/workflows/x-collector-contract.js",
     "workflows/x-collector-relay.js": "extensions/personal/workflows/x-collector-relay.js",
+    "workflows/x-collector-scanner.js": "extensions/personal/workflows/x-collector-scanner.js",
     "workflows/x-first-reply.js": "extensions/personal/workflows/x-first-reply.js",
     "workflows/x-publisher-adapter.js": "extensions/personal/workflows/x-publisher-adapter.js",
     "workflows/x-teaser-contract.js": "extensions/personal/workflows/x-teaser-contract.js",

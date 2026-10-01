@@ -22,7 +22,7 @@ public sealed class XTeaserDashboardTests
             Assert.AreEqual(7, oldStore.SchemaVersion);
         }
         using CatalogueStore store = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(8, store.SchemaVersion);
+        Assert.AreEqual(9, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v7-*.sqlite").Length);
         Assert.AreEqual("kept-id", store.GetItems().Single().ItemId);
         Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_planned_slots"));

@@ -186,6 +186,17 @@ public partial class MainWindow : Window, IDisposable
                 object recorded = await dispatcher.EnqueueAsync(() => xObservations.Record(WithoutTransportMetadata(payload)));
                 return AgentResponse.SuccessResult(request, recorded);
             }
+            if (request.Operation is "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult")
+            {
+                JsonElement scanPayload = WithoutTransportMetadata(payload);
+                object scan = await dispatcher.EnqueueAsync<object>(() => request.Operation switch
+                {
+                    "recordXScheduledPosts" => xObservations.RecordScheduled(scanPayload),
+                    "getXScanPlan" => xObservations.ScanPlan(scanPayload),
+                    _ => xObservations.RecordScan(scanPayload),
+                });
+                return AgentResponse.SuccessResult(request, scan);
+            }
             if (XTeaserController.Operations.Contains(request.Operation))
                 return AgentResponse.SuccessResult(request, await xTeasers.HandleAsync(request.Operation, WithoutTransportMetadata(payload)));
             if (request.Operation == "writeUploadCatalogueEntry")

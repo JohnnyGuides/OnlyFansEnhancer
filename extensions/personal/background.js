@@ -17,6 +17,7 @@ importScripts(
   "workflows/x-teaser-tab-binding.js",
   "workflows/x-collector-contract.js",
   "workflows/x-collector-forwarder.js",
+  "workflows/x-collector-scanner.js",
   "workflows/social-trace-evidence.js",
   "workflows/x-first-reply.js",
 );
@@ -141,6 +142,8 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
     ]).has(operation)
   )
     return sendDesktopRequest(operation, payload);
+  // "Scan now" on the extension's dashboard starts the scan right here.
+  if (operation === "requestXScan") return xScanner().requestNow();
   throw new Error("unsupported-operation");
 }
 
@@ -181,6 +184,8 @@ async function sendDesktopRequest(operation, payload = {}) {
 const xCollectorForwarder = globalThis.CreatorXCollectorForwarder?.create({
   contract: X_COLLECTOR_CONTRACT,
   send: (batch) => sendDesktopRequest("recordXObservations", batch),
+  sendScheduled: (scheduled) =>
+    sendDesktopRequest("recordXScheduledPosts", scheduled),
   persist: (diagnostics) =>
     chrome.storage.session.set({ [X_COLLECTOR_DIAGNOSTICS_KEY]: diagnostics }),
 });
@@ -195,8 +200,48 @@ function acceptXCollectorMessage(message, sender) {
   if (!sender?.tab?.id || sender.frameId !== 0 || origin !== "https://x.com")
     throw new Error("X observations are accepted only from an x.com page.");
   if (!xCollectorForwarder) throw new Error("X collector is unavailable.");
-  return xCollectorForwarder.accept(message);
+  const accepted = xCollectorForwarder.accept(message);
+  if (Object.hasOwn(message || {}, "scheduled"))
+    xScanner().noteScheduled(sender.tab.id, accepted.scheduled);
+  return accepted;
 }
+
+// Automatic background scans of the owner's own X profile: a periodic alarm
+// asks the desktop whether a scan is due; "Scan now" starts one at once.
+const X_SCANNER = globalThis.CreatorXCollectorScanner;
+let xScannerInstance = null;
+
+function xScanner() {
+  xScannerInstance ||= X_SCANNER.create({
+    storage: chrome.storage.local,
+    desktop: {
+      plan: () => sendDesktopRequest("getXScanPlan"),
+      record: (result) => sendDesktopRequest("recordXScanResult", result),
+    },
+    runner: X_SCANNER.createChromeRunner({ chrome }),
+  });
+  return xScannerInstance;
+}
+
+async function ensureXScanAlarm() {
+  if (!X_SCANNER || !chrome.alarms) return;
+  if (await chrome.alarms.get(X_SCANNER.ALARM_NAME)) return;
+  await chrome.alarms.create(X_SCANNER.ALARM_NAME, {
+    delayInMinutes: 2,
+    periodInMinutes: X_SCANNER.ALARM_PERIOD_MINUTES,
+  });
+}
+
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name !== X_SCANNER?.ALARM_NAME) return;
+  xScanner()
+    .tick()
+    .catch((error) => console.warn("The X background scan failed.", error));
+});
+
+ensureXScanAlarm().catch((error) =>
+  console.warn("Could not schedule the X background scan.", error),
+);
 
 async function syncXCollectorRegistration() {
   const ids = X_COLLECTOR_SCRIPTS.map((entry) => entry.id);

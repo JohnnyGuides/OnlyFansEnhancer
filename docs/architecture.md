@@ -116,8 +116,9 @@ required. Neither native host owns Chrome cookies or authenticated site sessions
 
 ## X collection
 
-The personal extension passively records the owner's own X posts while the owner
-browses x.com; it never clicks, types, scrolls or navigates there. The worker
+The personal extension records the owner's own X posts while the owner browses
+x.com and during its own background scans (below); it never clicks, types or
+scrolls there. The worker
 registers two dynamic `https://x.com/*` scripts at `document_start`:
 `x-collector-page.js` in the main world wraps `fetch` and `XMLHttpRequest` before
 X's code captures them, returns X's original responses unchanged, and reads a
@@ -141,6 +142,56 @@ than one remaining timestamp or text block) the row keeps no text or media. The 
 retrying, and keeps counters in session storage
 (`creatorXCollectorDiagnosticsV1`), including `ownerMismatchRows` with the time
 and handle of the last batch the desktop refused for a different account.
+
+A `TweetWithVisibilityResults` wrapper whose inner `tweet` has no `__typename`
+(X's current form) is read as the post when it carries `rest_id` and `legacy`.
+`FetchScheduledTweets` (X's compose > unsent > scheduled list,
+`data.viewer.scheduled_tweet_list`) is parsed whole or not at all: id,
+`execute_at` time, a 280-character text excerpt and the media count/types; any
+unexpected shape is `schema-drift` and nothing is sent. The list travels as a
+`scheduled` relay message, is validated in the worker and forwarded at once,
+without retry, through `recordXScheduledPosts`.
+
+Background scans (`x-collector-scanner.js`) keep the data fresh without the
+owner browsing. A five-minute `creator-x-scan` alarm asks the desktop
+(`getXScanPlan`: the recorded owner with its account id, a pending "Scan now"
+request, and the owner's own non-reply posts of the last 31 days). A scan is due
+every 6 hours, when one of those posts passes 24 h, 72 h, 7 d or 30 d of age
+since the last attempt, or on request; automatic scans are at least 30 minutes
+apart and any two scans at least 2 minutes. Without a known owner account no tab
+is opened. One scan at a time (in memory; a run record left by a stopped worker
+has its tab closed) opens one inactive tab on `https://x.com/<owner>/with_replies`
+(blank first, then navigated). The page script keeps X's own request for an
+allowlisted profile timeline (`UserRepliesTimeline` and the other profile
+timelines) as a template only when its `variables.userId` is the owner's account,
+with the request headers limited to `authorization`, `x-csrf-token`,
+`x-twitter-auth-type`, `x-twitter-active-user`, `x-twitter-client-language`,
+`x-client-transaction-id` and `content-type`. The worker sends `status`/`page`
+commands with `chrome.tabs.sendMessage`; only the worker (not a tab) may command,
+and the relay passes them over the private port. Each `page` replays the template
+once with the response's `Bottom` cursor; the response goes through the ordinary
+collector path. The worker waits 2–4 s (random) before every replay and stops on
+the first non-200, unreadable or drifted answer (`error`, no retry), when the page
+cookie's account is not the owner (`owner-mismatch`, checked before the first
+replay and on every page), when there is no next cursor (`complete`), a page
+brings no new owner post (`no-new-posts`), a page's newest post is older than the
+window (`window-reached`; 35 days for routine scans, none for the first full
+backfill) or at the page cap (`page-cap`: 30 pages for the backfill, 10 after),
+and after 8 minutes (`timeout`). After a finished scan the same tab opens
+`https://x.com/compose/post/unsent/scheduled` so the collector reads the scheduled
+list (waits up to 25 s). The tab is then closed in every case. The outcome,
+pages, new rows and scheduled count are kept in `chrome.storage.local`
+(`creatorXScanV1`, last 20 runs) and sent with `recordXScanResult`. "Scan now" on
+the extension's dashboard starts a scan directly (`requestXScan` handled by the
+worker); in the desktop workspace it records a request that the next alarm tick
+picks up.
+
+Catalogue migration 9 adds `x_scheduled_posts` (one row per scheduled post: time,
+text excerpt, media summary, first/last seen; a post missing from a later list is
+marked `gone`, an empty list marks all gone; only the recorded owner account's
+list is accepted, otherwise `x-owner-unknown`/`x-owner-mismatch`) and
+`x_scan_state` (the pending request time and the last scan outcome; a result
+whose scan started at or after the request clears it).
 
 Catalogue migration 6 adds `x_owner` (the single recorded account; a different
 account is refused with `x-owner-mismatch`), `x_posts` (one row per status;
@@ -201,7 +252,9 @@ and `clearTeaserPlanSlot`; nothing is sent to X. The shared
 `shared/workspace/teaser-dashboard.js` renders it in the desktop workspace's
 Twitter view and on the extension's `teaser-dashboard.html` page, which the
 upload console links to; the desktop serves the same operations to its
-workspace directly.
+workspace directly. The overview also carries the owner's current X scheduled
+posts (at most 50), outlined on their day in the next-7-days row, and the scan
+status shown above the strip with a "Scan now" button (`requestXScan`).
 
 The automatic first reply uses the agent operation `getTeaserReplyQueue` (empty
 payload; at most 50 items): the owner handle and each teaser posted in the last

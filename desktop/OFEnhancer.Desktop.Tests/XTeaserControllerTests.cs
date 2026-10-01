@@ -120,7 +120,7 @@ public sealed class XTeaserControllerTests
         }
         using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
         Assert.IsTrue(XTeaserController.Operations.SetEquals(["getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue",
-            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot"]));
+            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot", "requestXScan"]));
 
         var slot = (XTeaserPlanSlot)await controller.HandleAsync("setTeaserPlanSlot",
             Json("""{"date":"2026-09-29","episodeKey":"series-a-e3"}"""));
@@ -156,6 +156,24 @@ public sealed class XTeaserControllerTests
         await controller.HandleAsync("clearTeaserPlanSlot", Json("""{"date":"2026-09-29"}"""));
         Assert.AreEqual("2026-09-30", ((XTeaserPlan)await controller.HandleAsync("getTeaserPlan", Json("{}"))).Slots.Single().Date);
         Assert.AreEqual(1L, Count(store, "x_planned_slots"));
+    }
+
+    [TestMethod]
+    public async Task ScanNowFromTheDesktopRecordsARequestForChromeAndIsNotAnAgentOperation()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
+        object result = await controller.HandleAsync("requestXScan", Json("{}"));
+        StringAssert.Contains(JsonSerializer.Serialize(result), "\"requested\":true");
+        Assert.AreEqual(Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture), store.GetXScanStatus().RequestedUtc);
+        var overview = (XTeaserOverviewResult)await controller.HandleAsync("getTeaserOverview", Json("{}"));
+        Assert.AreEqual(store.GetXScanStatus().RequestedUtc, overview.Overview.Scan!.RequestedUtc);
+        Assert.AreEqual("invalid-teaser-request", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("requestXScan", Json("""{"now":true}""")))).Code);
+        // Only the desktop workspace asks; Chrome's own page starts the scan itself.
+        Assert.AreEqual("unsupported-operation", Assert.ThrowsException<AgentProtocolException>(() => AgentRequest.Parse(
+            $$$"""{"protocolVersion":1,"requestId":"{{{Guid.NewGuid()}}}","operation":"requestXScan","payload":{}}""")).Code);
     }
 
     private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement;

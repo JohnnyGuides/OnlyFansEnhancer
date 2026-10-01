@@ -26,6 +26,58 @@ public sealed class XObservationControllerTests
         Assert.AreEqual("recordXObservations", request.Operation);
     }
 
+    [DataTestMethod]
+    [DataRow("recordXScheduledPosts")]
+    [DataRow("getXScanPlan")]
+    [DataRow("recordXScanResult")]
+    public void BackgroundScanOperationsAreAllowedAgentOperations(string operation)
+    {
+        AgentRequest request = AgentRequest.Parse(
+            $$$"""{"protocolVersion":1,"requestId":"{{{Guid.NewGuid()}}}","operation":"{{{operation}}}","payload":{}}""");
+        Assert.AreEqual(operation, request.Operation);
+    }
+
+    [TestMethod]
+    public void ScanOperationsParseStrictly()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"ofenhancer-x-scan-controller-{Guid.NewGuid():N}");
+        try
+        {
+            using CatalogueStore store = CatalogueStore.Open(Path.Combine(directory, "catalogue.db"));
+            DateTimeOffset now = new(2026, 9, 28, 12, 0, 0, TimeSpan.Zero);
+            XObservationController controller = new(store, () => now);
+            controller.Record(Payload(Row));
+
+            XScanPlan plan = controller.ScanPlan(JsonDocument.Parse("{}").RootElement);
+            Assert.AreEqual("Owner_Handle", plan.Owner!.Handle);
+            Assert.AreEqual("invalid-x-scan", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.ScanPlan(JsonDocument.Parse("""{"since":1}""").RootElement)).Message);
+
+            const string scheduled = """
+                {"owner":{"accountId":"1000000000000000001","handle":null},
+                 "scheduled":[{"scheduledId":"7001","scheduledUtc":"2026-09-30T18:00:00.000Z","text":"benign",
+                               "mediaCount":1,"mediaTypes":["video"]}]}
+                """;
+            Assert.AreEqual(new XScheduledResult(1, 0), controller.RecordScheduled(JsonDocument.Parse(scheduled).RootElement));
+            Assert.AreEqual("invalid-x-scheduled", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.RecordScheduled(JsonDocument.Parse(scheduled.Replace("\"text\"", "\"html\":1,\"text\"")).RootElement)).Message);
+            Assert.AreEqual("x-owner-mismatch", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.RecordScheduled(JsonDocument.Parse(scheduled.Replace("1000000000000000001", "2000000000000000002"))
+                    .RootElement)).Message);
+
+            const string report = """
+                {"trigger":"routine","mode":"backfill","startedUtc":"2026-09-28T11:58:00.000Z",
+                 "finishedUtc":"2026-09-28T11:59:00.000Z","outcome":"complete","detail":"","pages":3,"rows":45,"scheduled":1}
+                """;
+            Assert.AreEqual("complete", controller.RecordScan(JsonDocument.Parse(report).RootElement).Last!.Outcome);
+            Assert.AreEqual("invalid-x-scan", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.RecordScan(JsonDocument.Parse(report.Replace("\"rows\"", "\"tabId\":5,\"rows\"")).RootElement)).Message);
+            Assert.AreEqual("invalid-x-scan", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.RecordScan(JsonDocument.Parse(report.Replace("complete", "posted")).RootElement)).Message);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [TestMethod]
     public void ControllerStoresOwnerRowsAndRejectsUnknownFieldsAndForeignAccounts()
     {

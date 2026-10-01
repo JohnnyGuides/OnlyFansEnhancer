@@ -260,6 +260,37 @@ internal static class Migrations
         """
     );
 
+    // The owner's X scheduled posts as last listed by X (gone = no longer
+    // listed), and the background scan's request flag and last outcome.
+    internal static readonly MigrationStep VersionNine = new(
+        9,
+        """
+        CREATE TABLE x_scheduled_posts (
+            scheduled_id TEXT PRIMARY KEY NOT NULL,
+            scheduled_utc TEXT NOT NULL,
+            text_excerpt TEXT NOT NULL,
+            media_summary TEXT NOT NULL,
+            first_seen_utc TEXT NOT NULL,
+            observed_utc TEXT NOT NULL,
+            gone INTEGER NOT NULL DEFAULT 0 CHECK (gone IN (0, 1))
+        );
+        CREATE INDEX x_scheduled_posts_time ON x_scheduled_posts(gone, scheduled_utc);
+        CREATE TABLE x_scan_state (
+            singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+            requested_utc TEXT,
+            last_trigger TEXT,
+            last_mode TEXT,
+            last_started_utc TEXT,
+            last_finished_utc TEXT,
+            last_outcome TEXT,
+            last_detail TEXT,
+            last_pages INTEGER,
+            last_rows INTEGER,
+            last_scheduled INTEGER
+        );
+        """
+    );
+
     internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix, VersionSeven,
-        VersionEight];
+        VersionEight, VersionNine];
 }

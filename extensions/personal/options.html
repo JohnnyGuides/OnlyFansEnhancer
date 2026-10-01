@@ -75,9 +75,12 @@
               removed.
             </small>
           </span>
-          <input id="xFirstReplyEnabled" type="checkbox" />
+          <span class="switch">
+            <input id="xFirstReplyEnabled" type="checkbox" role="switch" />
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
         </label>
-        <p id="xFirstReplyStatus" class="status" role="status"></p>
+        <p id="xFirstReplyStatus" class="status neutral" role="status"></p>
         <ul id="xFirstReplyLog" class="hint"></ul>
       </section>
 

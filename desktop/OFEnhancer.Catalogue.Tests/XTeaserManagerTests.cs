@@ -29,7 +29,7 @@ public sealed class XTeaserManagerTests
             Assert.AreEqual(6, oldStore.SchemaVersion);
         }
         using CatalogueStore store = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(8, store.SchemaVersion);
+        Assert.AreEqual(9, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v6-*.sqlite").Length);
         Assert.AreEqual("kept-id", store.GetItems().Single().ItemId);
         Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_posts"));

@@ -20,6 +20,7 @@
   function create({
     contract,
     send,
+    sendScheduled = async (_scheduled) => {},
     persist = async (_diagnostics) => {},
     setTimer = setTimeout,
     delayMs = FLUSH_DELAY_MS,
@@ -38,6 +39,9 @@
       lastOwnerMismatchHandle: "",
       lastDesktopError: "",
       lastForwardedUtc: "",
+      scheduledListsReceived: 0,
+      scheduledListsForwarded: 0,
+      lastScheduledUtc: "",
       pageReasons: {},
     };
     let timer = null;
@@ -45,7 +49,37 @@
 
     const save = () => persist({ ...diagnostics }).catch(() => {});
 
+    // A scheduled-post list is the whole current list; it is forwarded at
+    // once (never merged or retried) and an undeliverable one is dropped.
+    function acceptScheduled(batch) {
+      let valid;
+      try {
+        valid = contract.validateScheduledBatch(batch);
+      } catch (error) {
+        diagnostics.batchesRejected += 1;
+        void save();
+        throw error;
+      }
+      diagnostics.scheduledListsReceived += 1;
+      flushing = flushing.then(async () => {
+        try {
+          await sendScheduled(valid);
+          diagnostics.scheduledListsForwarded += 1;
+          diagnostics.lastScheduledUtc = new Date().toISOString();
+        } catch (error) {
+          diagnostics.desktopFailures += 1;
+          diagnostics.lastDesktopError = String(
+            error?.message || "desktop-unavailable",
+          ).slice(0, 200);
+        }
+        await save();
+      });
+      return { scheduled: valid.scheduled.length };
+    }
+
     function accept(message) {
+      if (message && Object.hasOwn(message, "scheduled"))
+        return acceptScheduled(message.scheduled);
       if (message && Object.hasOwn(message, "diagnostic")) {
         const { operation, reason } = message.diagnostic || {};
         if (

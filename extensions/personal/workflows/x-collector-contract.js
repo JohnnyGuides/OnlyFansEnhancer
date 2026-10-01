@@ -22,6 +22,28 @@
     "TweetResultsByRestIds",
   ]);
   const VIEWER_OPERATIONS = Object.freeze(["Viewer"]);
+  // The owner's own scheduled posts (compose > unsent > scheduled).
+  const SCHEDULED_OPERATIONS = Object.freeze(["FetchScheduledTweets"]);
+  // Profile timelines a background scan may page through by replaying X's
+  // own request with the next cursor. Each carries the profile's userId.
+  const SCAN_OPERATIONS = Object.freeze([
+    "UserRepliesTimeline",
+    "UserTweetsAndReplies",
+    "UserOriginalsTimeline",
+    "UserTweets",
+    "UserVideoTimeline",
+    "UserMedia",
+  ]);
+  // Request headers copied from X's own timeline request into a replay.
+  const REPLAY_HEADERS = Object.freeze([
+    "authorization",
+    "x-csrf-token",
+    "x-twitter-auth-type",
+    "x-twitter-active-user",
+    "x-twitter-client-language",
+    "x-client-transaction-id",
+    "content-type",
+  ]);
   const MESSAGE_TYPE = "CREATOR_X_COLLECTOR_BATCH";
   const PAGE_EVENT = "creator-x-collector";
   const MAX_TEXT = 2000;
@@ -32,6 +54,16 @@
   const MAX_METRIC = 1e12;
   const MAX_DURATION_MS = 24 * 60 * 60_000;
   const MAX_WALK = 5000;
+  const MAX_CURSOR = 2000;
+  const MAX_SCHEDULED = 100;
+  const MAX_SCHEDULED_TEXT = 280;
+  const MAX_SCHEDULED_MEDIA = 10;
+  const SCHEDULED_MEDIA_TYPES = new Set([
+    "video",
+    "photo",
+    "animated_gif",
+    "unknown",
+  ]);
   const METRIC_KEYS = Object.freeze([
     "views",
     "likes",
@@ -80,6 +112,7 @@
   function operationKind(name) {
     if (TWEET_OPERATIONS.includes(name)) return "tweets";
     if (VIEWER_OPERATIONS.includes(name)) return "viewer";
+    if (SCHEDULED_OPERATIONS.includes(name)) return "scheduled";
     return null;
   }
 
@@ -101,11 +134,11 @@
     return Number.isFinite(time) ? new Date(time).toISOString() : null;
   }
 
-  // Cut at MAX_TEXT UTF-16 units without leaving half a surrogate pair.
-  function capText(value) {
+  // Cut at `max` UTF-16 units without leaving half a surrogate pair.
+  function capText(value, max = MAX_TEXT) {
     const text = String(value || "");
-    if (text.length <= MAX_TEXT) return text;
-    const cut = text.slice(0, MAX_TEXT);
+    if (text.length <= max) return text;
+    const cut = text.slice(0, max);
     return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
   }
 
@@ -124,8 +157,21 @@
 
   function unwrapTweet(result) {
     if (!result || typeof result !== "object") return null;
-    if (result.__typename === "TweetWithVisibilityResults")
-      return unwrapTweet(result.tweet);
+    if (result.__typename === "TweetWithVisibilityResults") {
+      const inner = result.tweet;
+      // X omits the inner __typename here; the wrapped object is the post
+      // itself when it carries an id and legacy fields.
+      if (
+        inner &&
+        typeof inner === "object" &&
+        inner.__typename === undefined &&
+        inner.rest_id !== undefined &&
+        inner.legacy &&
+        typeof inner.legacy === "object"
+      )
+        return inner;
+      return unwrapTweet(inner);
+    }
     if (result.__typename === "Tweet") return result;
     // Tombstones and unavailable posts carry no owner data.
     return null;
@@ -529,9 +575,220 @@
     };
   }
 
+  // The timeline's Bottom cursor (next, older page). Cursor entries sit
+  // beside the post entries, so posts and modules are not descended into.
+  function bottomCursor(payload) {
+    const queue = [payload];
+    let visited = 0;
+    while (queue.length) {
+      const value = queue.shift();
+      if (!value || typeof value !== "object") continue;
+      if (++visited > MAX_WALK) return null;
+      if (Array.isArray(value)) {
+        queue.push(...value);
+        continue;
+      }
+      if (
+        value.cursorType === "Bottom" &&
+        typeof value.value === "string" &&
+        value.value.length > 0 &&
+        value.value.length <= MAX_CURSOR
+      )
+        return value.value;
+      for (const [key, child] of Object.entries(value)) {
+        if (key === "itemContent" || key === "items" || key === "tweet_results")
+          continue;
+        if (child && typeof child === "object") queue.push(child);
+      }
+    }
+    return null;
+  }
+
+  // X's own profile-timeline request with the next cursor. Refused unless
+  // the request is an allowlisted profile timeline of the owner's account.
+  function replayUrl(templateUrl, cursor, ownerId) {
+    const name = operationName(templateUrl);
+    if (!name || !SCAN_OPERATIONS.includes(name) || !idOrNull(ownerId))
+      return null;
+    if (typeof cursor !== "string" || !cursor || cursor.length > MAX_CURSOR)
+      return null;
+    try {
+      const url = new URL(String(templateUrl), "https://x.com/");
+      const variables = JSON.parse(url.searchParams.get("variables") || "");
+      if (
+        !variables ||
+        typeof variables !== "object" ||
+        Array.isArray(variables) ||
+        String(variables.userId) !== ownerId
+      )
+        return null;
+      variables.cursor = cursor;
+      url.searchParams.set("variables", JSON.stringify(variables));
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  // Only the allowlisted request headers, lower-cased, survive into a replay.
+  function replayHeaders(headers) {
+    const kept = {};
+    for (const [name, value] of Object.entries(headers || {})) {
+      const key = String(name).toLowerCase();
+      if (
+        REPLAY_HEADERS.includes(key) &&
+        typeof value === "string" &&
+        value.length <= 4096
+      )
+        kept[key] = value;
+    }
+    return kept;
+  }
+
+  function scheduledTime(value) {
+    const number =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && /^\d{1,16}$/.test(value)
+          ? Number(value)
+          : NaN;
+    if (!Number.isSafeInteger(number) || number <= 0) return null;
+    // Seconds or milliseconds since the epoch.
+    const time = number < 1e11 ? number * 1000 : number;
+    return time <= Date.UTC(2100, 0, 1) ? new Date(time).toISOString() : null;
+  }
+
+  function scheduledMediaType(entity) {
+    const name = entity?.media_info?.__typename;
+    if (name === "ApiVideo") return "video";
+    if (name === "ApiImage") return "photo";
+    if (name === "ApiGif") return "animated_gif";
+    return "unknown";
+  }
+
+  // Parse FetchScheduledTweets (data.viewer.scheduled_tweet_list). The whole
+  // list or nothing: any unexpected shape is schema drift, so a partial read
+  // never marks the owner's other scheduled posts as gone.
+  function extractScheduled(payload) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      return { ok: false, reason: "schema-drift", posts: [] };
+    if (!payload.data || typeof payload.data !== "object")
+      return {
+        ok: false,
+        reason: payload.errors ? "error-response" : "schema-drift",
+        posts: [],
+      };
+    const list = payload.data.viewer?.scheduled_tweet_list;
+    if (!Array.isArray(list) || list.length > MAX_SCHEDULED)
+      return { ok: false, reason: "schema-drift", posts: [] };
+    try {
+      const posts = [];
+      const seen = new Set();
+      for (const item of list) {
+        if (!item || typeof item !== "object" || Array.isArray(item))
+          throw drift("scheduled item is not an object");
+        const scheduledId = idOrNull(item.rest_id);
+        const scheduledUtc = scheduledTime(item.scheduling_info?.execute_at);
+        if (!scheduledId || !scheduledUtc)
+          throw drift("scheduled identity fields missing");
+        const request = item.tweet_create_request;
+        if (
+          request !== undefined &&
+          (!request || typeof request !== "object" || Array.isArray(request))
+        )
+          throw drift("scheduled request is not an object");
+        const status = request?.status;
+        if (
+          status !== undefined &&
+          status !== null &&
+          typeof status !== "string"
+        )
+          throw drift("scheduled text is not a string");
+        const entities = item.media_entities;
+        const ids = request?.media_ids;
+        if (
+          (entities !== undefined && !Array.isArray(entities)) ||
+          (ids !== undefined && !Array.isArray(ids))
+        )
+          throw drift("scheduled media is not a list");
+        const mediaTypes = (entities || [])
+          .slice(0, MAX_SCHEDULED_MEDIA)
+          .map(scheduledMediaType);
+        if (seen.has(scheduledId)) continue;
+        seen.add(scheduledId);
+        posts.push({
+          scheduledId,
+          scheduledUtc,
+          text: capText(status || "", MAX_SCHEDULED_TEXT),
+          mediaCount: Math.min(
+            Math.max(mediaTypes.length, (ids || []).length),
+            MAX_SCHEDULED_MEDIA,
+          ),
+          mediaTypes,
+        });
+      }
+      return { ok: true, reason: "", posts };
+    } catch (error) {
+      if (error instanceof SchemaDriftError)
+        return { ok: false, reason: "schema-drift", posts: [] };
+      throw error;
+    }
+  }
+
+  // Strict validation of one relayed scheduled list in the extension worker.
+  function validateScheduledBatch(batch) {
+    const invalid = () => new Error("invalid-x-scheduled");
+    if (!exactKeys(batch, ["owner", "scheduled"])) throw invalid();
+    const owner = batch.owner;
+    if (
+      !exactKeys(owner, ["accountId", "handle"]) ||
+      typeof owner.accountId !== "string" ||
+      !ID.test(owner.accountId) ||
+      (owner.handle !== null &&
+        (typeof owner.handle !== "string" || !HANDLE.test(owner.handle)))
+    )
+      throw invalid();
+    if (
+      !Array.isArray(batch.scheduled) ||
+      batch.scheduled.length > MAX_SCHEDULED
+    )
+      throw invalid();
+    const ids = new Set();
+    for (const row of batch.scheduled) {
+      if (
+        !exactKeys(row, [
+          "scheduledId",
+          "scheduledUtc",
+          "text",
+          "mediaCount",
+          "mediaTypes",
+        ]) ||
+        typeof row.scheduledId !== "string" ||
+        !ID.test(row.scheduledId) ||
+        ids.has(row.scheduledId) ||
+        typeof row.scheduledUtc !== "string" ||
+        isoDate(row.scheduledUtc) !== row.scheduledUtc ||
+        typeof row.text !== "string" ||
+        row.text.length > MAX_SCHEDULED_TEXT ||
+        !Number.isSafeInteger(row.mediaCount) ||
+        row.mediaCount < 0 ||
+        row.mediaCount > MAX_SCHEDULED_MEDIA ||
+        !Array.isArray(row.mediaTypes) ||
+        row.mediaTypes.length > row.mediaCount ||
+        !row.mediaTypes.every((type) => SCHEDULED_MEDIA_TYPES.has(type))
+      )
+        throw invalid();
+      ids.add(row.scheduledId);
+    }
+    return JSON.parse(JSON.stringify(batch));
+  }
+
   globalThis.CreatorXCollectorContract = Object.freeze({
     TWEET_OPERATIONS,
     VIEWER_OPERATIONS,
+    SCHEDULED_OPERATIONS,
+    SCAN_OPERATIONS,
+    REPLAY_HEADERS,
     MESSAGE_TYPE,
     PAGE_EVENT,
     MAX_BATCH,
@@ -546,5 +803,10 @@
     ownerHandleFromDocument,
     extractDomArticle,
     validateBatch,
+    bottomCursor,
+    replayUrl,
+    replayHeaders,
+    extractScheduled,
+    validateScheduledBatch,
   });
 })();
