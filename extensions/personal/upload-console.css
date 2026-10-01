@@ -2862,74 +2862,120 @@ a {
   margin-top: 20px;
 }
 
-/* Desktop Chrome connection panel: one status line, select, then actions. */
-.app-heading:has(.desktop-upload-connection:not([data-connected="true"])) {
-  flex-wrap: wrap;
-}
+/* Desktop Chrome connection: one compact pill in the header row. */
+.desktop-upload-connection,
 .desktop-upload-connection:not([data-connected="true"]) {
-  display: grid;
-  flex: 1 0 100%;
-  max-width: 420px;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 32px;
   box-sizing: border-box;
-  grid-template-columns: 19px minmax(0, 1fr);
-  align-items: start;
-  gap: 10px 12px;
-  padding: 14px 16px;
+  margin: 0;
+  padding: 3px 8px;
   border: 1px solid #272d38;
-  border-radius: 10px;
+  border-radius: 999px;
   background: #161d25;
+  grid-column: auto;
+  grid-row: auto;
+  justify-self: auto;
 }
-.desktop-upload-connection:not([data-connected="true"]) .chrome-brand-mark {
-  margin-top: 2px;
+.desktop-upload-connection[data-connected="true"] {
+  border-color: transparent;
+  background: #14251f;
 }
+.desktop-upload-connection .chrome-connection-state,
 .desktop-upload-connection:not([data-connected="true"])
   .chrome-connection-state {
-  grid-column: 2;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  font-size: 0.82rem;
-  line-height: 1.4;
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #dbe3ec;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.desktop-upload-connection .chrome-connection-state::before,
 .desktop-upload-connection:not([data-connected="true"])
   .chrome-connection-state::before {
-  display: none;
+  display: block;
+  content: "";
+  flex: 0 0 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f06a7a;
+  box-shadow: none;
 }
-.desktop-upload-connection .chrome-connection-state strong {
-  color: #e8edf3;
-  font-weight: 700;
+.desktop-upload-connection[data-state="checking"]
+  .chrome-connection-state::before {
+  background: #8793a3;
 }
-.desktop-upload-connection:not([data-connected="true"]) label,
-.desktop-upload-connection:not([data-connected="true"]) select,
-.desktop-upload-connection:not([data-connected="true"])
-  .chrome-connection-actions {
-  grid-column: 2;
+.desktop-upload-connection[data-state="choose"]
+  .chrome-connection-state::before {
+  background: #f3b959;
 }
-.desktop-upload-connection:not([data-connected="true"]) label {
-  color: #98a6b8;
+.desktop-upload-connection[data-state="connected"]
+  .chrome-connection-state::before {
+  background: #4bd997;
+  box-shadow: 0 0 0 3px rgb(75 217 151 / 15%);
+}
+.desktop-upload-connection label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.desktop-upload-connection select {
+  width: auto;
+  max-width: 150px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 600;
 }
-.desktop-upload-connection:not([data-connected="true"]) label + select {
-  width: 100%;
-  max-width: 320px;
-  margin-top: -6px;
+.desktop-upload-connection select[hidden],
+.desktop-upload-connection a[hidden],
+.desktop-upload-connection button[hidden] {
+  display: none;
 }
 .desktop-upload-connection .chrome-connection-actions {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: 2px;
 }
 .desktop-upload-connection .chrome-connection-actions button {
-  background: #00aff0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  min-width: 0;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
   border: 0;
-  color: #041118;
-  font-weight: 700;
+  border-radius: 50%;
+  background: transparent;
+  color: #9fb2c8;
+}
+.desktop-upload-connection .chrome-connection-actions button:hover {
+  background: #232c38;
+  color: #e8edf3;
 }
 .desktop-upload-connection .chrome-connection-actions a {
-  min-height: 32px;
+  min-height: 0;
   color: #9fb2c8;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 .desktop-upload-connection[data-connected="true"] .chrome-connection-actions {

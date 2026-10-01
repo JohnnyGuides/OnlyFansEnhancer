@@ -401,30 +401,28 @@
       choose: "Choose Chrome browser",
       connected: "Chrome connected",
     };
-    // One status line: a short title, with detail only when it adds something.
-    const statusLine = (title, detail) => {
-      const heading = document.createElement("strong");
-      heading.textContent = title;
-      statusView.message.replaceChildren(heading);
-      if (detail) {
-        const body = document.createElement("span");
-        body.textContent = detail;
-        statusView.message.append(body);
-      }
-    };
-    if (!browserStatus.updateRequired && readiness?.state)
-      statusLine(
-        labels[readiness.state] || "Checking Chrome",
-        readiness.state === "choose" ? "" : readiness.message,
-      );
-    else
-      statusView.message.textContent = browserStatus.updateRequired
-        ? "Chrome extension update required. Review existing uploads, reload the existing extension in chrome://extensions, then reopen the Upload Hub. Keep its settings and recovery data."
+    // One compact pill: a short label; the full explanation is the tooltip.
+    const detail = browserStatus.updateRequired
+      ? "Chrome extension update required. Review existing uploads, reload the existing extension in chrome://extensions, then reopen the Upload Hub. Keep its settings and recovery data."
+      : readiness?.state
+        ? readiness.message
         : browserStatus.connected
           ? "A browser exchange is live. Chrome setup diagnostics are unavailable."
           : ids.length
             ? "Choose the browser to use for uploads."
             : "Open Chrome with the OFEnhancer extension to connect uploads.";
+    statusView.message.textContent = browserStatus.updateRequired
+      ? "Update Chrome extension"
+      : readiness?.state
+        ? readiness.state === "choose"
+          ? "Chrome"
+          : labels[readiness.state] || "Checking…"
+        : browserStatus.connected
+          ? "Chrome connected"
+          : ids.length
+            ? "Chrome"
+            : labels.offline;
+    statusView.panel.title = detail;
     const connected =
       !browserStatus.updateRequired &&
       (readiness?.state === "connected" ||
@@ -442,7 +440,13 @@
       "aria-label",
       connected ? "Chrome connected" : "Chrome connection",
     );
-    statusView.setup.hidden = connected;
+    const state = statusView.panel.dataset.state;
+    statusView.setup.hidden = ![
+      "not-found",
+      "setup",
+      "repair",
+      "offline",
+    ].includes(state);
     statusView.refresh.hidden = connected;
     statusView.select.replaceChildren();
     const placeholder = document.createElement("option");
@@ -457,7 +461,7 @@
     }
     statusView.select.value = browserStatus.selected || "";
     statusView.select.hidden =
-      ids.length < 2 && !browserStatus.selectionRequired;
+      connected || (ids.length < 2 && !browserStatus.selectionRequired);
     statusView.label.hidden = statusView.select.hidden;
   }
   function mountStatus() {
@@ -475,10 +479,11 @@
     back.hidden = true;
     const setup = document.createElement("a");
     setup.href = "index.html?chrome-setup=1";
-    setup.textContent = "Check Chrome setup";
+    setup.textContent = "Setup";
+    setup.title = "Check Chrome setup";
     const message = document.createElement("p");
     message.setAttribute("role", "status");
-    message.textContent = "Connecting to Chrome…";
+    message.textContent = "Checking…";
     message.className = "chrome-connection-state";
     const chromeMark = document.createElement("span");
     chromeMark.className = "chrome-brand-mark";
@@ -491,7 +496,11 @@
     select.setAttribute("aria-label", "Upload browser");
     const refresh = document.createElement("button");
     refresh.type = "button";
-    refresh.textContent = "Check again";
+    refresh.setAttribute("aria-label", "Check again");
+    refresh.innerHTML =
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/></svg>';
+    refresh.hidden = true;
+    setup.hidden = true;
     refresh.title =
       "Check which Chrome browser is selected and whether its extension is connected";
     const actions = document.createElement("div");
@@ -503,6 +512,7 @@
       document.querySelector(".app-header");
     if (header) header.append(panel);
     else (document.querySelector("main") || document.body).prepend(panel);
+    panel.dataset.state = "checking";
     statusView = { panel, message, label, select, setup, refresh };
     const update = () => {
       const generation = ++observationGeneration;
