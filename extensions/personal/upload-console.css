@@ -2334,12 +2334,70 @@ a {
 #releaseTimeSummary {
   display: none;
 }
-#releaseTimeSummary[data-note] {
-  display: block;
-  margin: 4px 0 0;
-  color: #f5c26b;
+/* The note text lives in the (undisplayed) summary that the date and icon
+   reference with aria-describedby, and in the tooltip. */
+.metadata-release {
+  position: relative;
+}
+.release-date-field {
+  position: relative;
+}
+.release-date-field:has(.release-note-icon:not([hidden])) input {
+  padding-right: 62px;
+}
+#releaseDate.is-past {
+  border-color: #272d38;
+  background: #0a0d12;
+  color: #7a8494;
+  color-scheme: dark;
+}
+.release-note-icon {
+  position: absolute;
+  top: 50%;
+  right: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #8fa0b5;
+  transform: translateY(-50%);
+  cursor: help;
+}
+.release-note-icon[hidden] {
+  display: none;
+}
+.release-note-icon[data-note="adjusted"] .note-past,
+.release-note-icon[data-note="past"] .note-adjusted {
+  display: none;
+}
+.release-note-icon:hover,
+.release-note-icon:focus-visible {
+  color: #d4deea;
+}
+.release-note-icon:focus-visible {
+  outline-offset: 1px;
+}
+.release-note-icon:hover::after,
+.release-note-icon:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: -38px;
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid #35414f;
+  border-radius: 8px;
+  background: #1a212b;
+  color: #e6ecf3;
   font-size: 0.78rem;
-  line-height: 1.3;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 40%);
+  pointer-events: none;
 }
 .thumbnail-frame-dialog {
   overflow-y: auto;
@@ -2802,4 +2860,101 @@ a {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 20px;
+}
+
+/* Desktop Chrome connection panel: one status line, select, then actions. */
+.app-heading:has(.desktop-upload-connection:not([data-connected="true"])) {
+  flex-wrap: wrap;
+}
+.desktop-upload-connection:not([data-connected="true"]) {
+  display: grid;
+  flex: 1 0 100%;
+  max-width: 420px;
+  box-sizing: border-box;
+  grid-template-columns: 19px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px 12px;
+  padding: 14px 16px;
+  border: 1px solid #272d38;
+  border-radius: 10px;
+  background: #161d25;
+}
+.desktop-upload-connection:not([data-connected="true"]) .chrome-brand-mark {
+  margin-top: 2px;
+}
+.desktop-upload-connection:not([data-connected="true"])
+  .chrome-connection-state {
+  grid-column: 2;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.desktop-upload-connection:not([data-connected="true"])
+  .chrome-connection-state::before {
+  display: none;
+}
+.desktop-upload-connection .chrome-connection-state strong {
+  color: #e8edf3;
+  font-weight: 700;
+}
+.desktop-upload-connection:not([data-connected="true"]) label,
+.desktop-upload-connection:not([data-connected="true"]) select,
+.desktop-upload-connection:not([data-connected="true"])
+  .chrome-connection-actions {
+  grid-column: 2;
+}
+.desktop-upload-connection:not([data-connected="true"]) label {
+  color: #98a6b8;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.desktop-upload-connection:not([data-connected="true"]) label + select {
+  width: 100%;
+  max-width: 320px;
+  margin-top: -6px;
+}
+.desktop-upload-connection .chrome-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.desktop-upload-connection .chrome-connection-actions button {
+  background: #00aff0;
+  border: 0;
+  color: #041118;
+  font-weight: 700;
+}
+.desktop-upload-connection .chrome-connection-actions a {
+  min-height: 32px;
+  color: #9fb2c8;
+  font-weight: 600;
+}
+.desktop-upload-connection[data-connected="true"] .chrome-connection-actions {
+  display: none;
+}
+
+/* Recovery that could not be verified is a quiet notice, not an error. */
+.resume-prompt[data-state="unavailable"] {
+  align-items: center;
+  border-color: #343b48;
+  background: #161d25;
+}
+.resume-prompt[data-state="unavailable"] h2 {
+  font-size: 0.95rem;
+}
+.resume-prompt[data-state="unavailable"] p {
+  margin: 0;
+  color: #98a6b8;
+  font-size: 0.85rem;
+}
+.resume-prompt[data-state="unavailable"] .secondary-actions {
+  margin-top: 0;
+}
+.resume-prompt[data-state="unavailable"] #recheckResume {
+  border: 0;
+  background: #00aff0;
+  color: #041118;
 }

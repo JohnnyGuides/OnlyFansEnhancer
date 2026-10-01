@@ -1122,6 +1122,7 @@
     let catalogueBaseline = null;
     let activeSession = null;
     let resumable = null;
+    let recoveryUnavailable = false;
     let runBusy = false;
     let readiness = null;
     let readinessRevision = 0;
@@ -1825,6 +1826,17 @@
 
     function refreshReleaseSummary() {
       // Only notes the owner must see are shown; the plain time stays hidden.
+      releaseSummaryText();
+      // The note is an icon beside the date; its text stays accessible.
+      const note = releaseSummary.dataset.note || "";
+      const icon = get("#releaseNoteIcon");
+      icon.hidden = !note;
+      icon.dataset.note = note;
+      icon.dataset.tip = note ? releaseSummary.textContent : "";
+      releaseDate.classList.toggle("is-past", note === "past");
+    }
+
+    function releaseSummaryText() {
       delete releaseSummary.dataset.note;
       const releaseInstant = new Date(`${releaseDate.value}T15:00:00.000Z`);
       if (
@@ -4558,7 +4570,13 @@
         });
         if (activeSession) return;
         resumable = response.resumable || null;
+        recoveryUnavailable = false;
         prompt.hidden = !resumable && !response.pendingRecovery;
+        delete prompt.dataset.state;
+        prompt.removeAttribute("title");
+        get("#recheckResume").hidden = true;
+        get("#resumeSummary").hidden = false;
+        get("#resumeInstructions").hidden = false;
         updateUploadAction();
         if (prompt.hidden) return;
         get("#resumeError").textContent = "";
@@ -4588,18 +4606,34 @@
           : "This run cannot be resumed from the saved state. Review any remote draft, then choose New. Earlier local runs will be retired; remote drafts and review history remain.";
       } catch (error) {
         if (activeSession) return;
+        recoveryUnavailable = true;
         prompt.hidden = false;
+        // Recovery never proceeds unverified: Upload stays blocked until a
+        // browser-backed check succeeds.
         updateUploadAction();
+        prompt.dataset.state = "unavailable";
+        prompt.title = error.message;
         get("#resumeUpload").hidden = true;
         get("#newFromResume").hidden = true;
-        get("#resumeHeading").textContent = "Upload recovery unavailable";
+        get("#recheckResume").hidden = false;
+        get("#resumeHeading").textContent = "Saved uploads not checked yet";
         get("#resumeSummary").textContent =
-          "The saved upload state could not be checked.";
-        get("#resumeInstructions").textContent =
-          "Restore the browser connection, then reopen Upload.";
-        get("#resumeError").textContent = error.message;
+          "Connect Chrome to check for an interrupted upload. This retries automatically.";
+        get("#resumeSummary").hidden = false;
+        get("#resumeInstructions").textContent = "";
+        get("#resumeInstructions").hidden = true;
+        get("#resumeError").textContent = "";
       }
     }
+
+    get("#recheckResume")?.addEventListener("click", () => {
+      void loadResumePrompt();
+    });
+    // The connection indicator polls; recovery must follow it once Chrome
+    // becomes reachable instead of staying on a startup-time failure.
+    globalThis.addEventListener("ofenhancer:browser-connected", () => {
+      if (recoveryUnavailable && !activeSession) void loadResumePrompt();
+    });
 
     get("#resumeUpload")?.addEventListener("click", async () => {
       if (!resumable || activeSession || runBusy) return;

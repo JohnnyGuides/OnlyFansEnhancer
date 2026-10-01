@@ -43,6 +43,14 @@ async function mount(page) {
           calls.push(message);
           if (message.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY")
             return callback({ ok: true, availability: { ready: true } });
+          if (
+            message.type === "GET_CREATOR_UPLOAD_RESUMABLE" &&
+            globalThis.failResume
+          )
+            return callback({
+              ok: false,
+              error: "Chrome is unavailable or needs a browser selection.",
+            });
           if (message.type === "LOAD_DEVELOPMENT_TEMPLATE") {
             if (globalThis.missingFixture)
               return callback({
@@ -625,3 +633,41 @@ for (const [name, width, height, scale] of [
     }
   });
 }
+
+test("recovery notice that failed at startup clears once Chrome connects", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 900 },
+    });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.addInitScript(() => {
+      globalThis.failResume = true;
+    });
+    await mount(page);
+    await page.locator("#resumePrompt").waitFor({ state: "visible" });
+    assert.equal(
+      await page.locator("#resumeHeading").textContent(),
+      "Saved uploads not checked yet",
+    );
+    assert.equal(await page.locator("#resumeError").textContent(), "");
+    assert.equal(await page.locator("#resumeUpload").isVisible(), false);
+    assert.equal(await page.locator("#recheckResume").isVisible(), true);
+    // Upload stays blocked while recovery is unverified.
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
+    // A manual check with Chrome still unavailable keeps the notice.
+    await page.locator("#recheckResume").click();
+    await page.locator("#resumePrompt").waitFor({ state: "visible" });
+    // The connection indicator reports Chrome reachable: recovery re-checks.
+    await page.evaluate(() => {
+      globalThis.failResume = false;
+      globalThis.dispatchEvent(new Event("ofenhancer:browser-connected"));
+    });
+    await page.locator("#resumePrompt").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#recheckResume").isVisible(), false);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});

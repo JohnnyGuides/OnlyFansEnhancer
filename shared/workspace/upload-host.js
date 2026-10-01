@@ -401,10 +401,25 @@
       choose: "Choose Chrome browser",
       connected: "Chrome connected",
     };
-    statusView.message.textContent = browserStatus.updateRequired
-      ? "Chrome extension update required. Review existing uploads, reload the existing extension in chrome://extensions, then reopen the Upload Hub. Keep its settings and recovery data."
-      : readiness?.state
-        ? `${labels[readiness.state] || "Checking Chrome"}. ${readiness.message}`
+    // One status line: a short title, with detail only when it adds something.
+    const statusLine = (title, detail) => {
+      const heading = document.createElement("strong");
+      heading.textContent = title;
+      statusView.message.replaceChildren(heading);
+      if (detail) {
+        const body = document.createElement("span");
+        body.textContent = detail;
+        statusView.message.append(body);
+      }
+    };
+    if (!browserStatus.updateRequired && readiness?.state)
+      statusLine(
+        labels[readiness.state] || "Checking Chrome",
+        readiness.state === "choose" ? "" : readiness.message,
+      );
+    else
+      statusView.message.textContent = browserStatus.updateRequired
+        ? "Chrome extension update required. Review existing uploads, reload the existing extension in chrome://extensions, then reopen the Upload Hub. Keep its settings and recovery data."
         : browserStatus.connected
           ? "A browser exchange is live. Chrome setup diagnostics are unavailable."
           : ids.length
@@ -415,7 +430,14 @@
       (readiness?.state === "connected" ||
         (!readiness && browserStatus.connected));
     if (connected) statusView.message.textContent = "Connected";
+    const becameConnected =
+      connected && statusView.panel.dataset.connected !== "true";
     statusView.panel.dataset.connected = String(connected);
+    statusView.panel.dataset.state = connected
+      ? "connected"
+      : readiness?.state || (ids.length ? "choose" : "offline");
+    if (becameConnected)
+      globalThis.dispatchEvent(new Event("ofenhancer:browser-connected"));
     statusView.panel.setAttribute(
       "aria-label",
       connected ? "Chrome connected" : "Chrome connection",
@@ -472,7 +494,10 @@
     refresh.textContent = "Check again";
     refresh.title =
       "Check which Chrome browser is selected and whether its extension is connected";
-    panel.append(chromeMark, message, label, select, setup, refresh);
+    const actions = document.createElement("div");
+    actions.className = "chrome-connection-actions";
+    actions.append(refresh, setup);
+    panel.append(chromeMark, message, label, select, actions);
     const header =
       document.querySelector(".app-heading") ||
       document.querySelector(".app-header");

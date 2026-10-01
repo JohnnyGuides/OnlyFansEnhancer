@@ -88,6 +88,9 @@
               <p id="resumeError" class="error" role="alert"></p>
             </div>
             <div class="secondary-actions">
+              <button id="recheckResume" type="button" hidden>
+                Check saved uploads
+              </button>
               <button id="resumeUpload" type="button">Resume this run</button>
               <button id="newFromResume" type="button">Start new upload</button>
             </div>
@@ -459,14 +462,46 @@
               </div>
               <div class="metadata-release">
                 <label for="releaseDate">Release date</label>
-                <input
-                  id="releaseDate"
-                  name="releaseDate"
-                  type="date"
-                  autocomplete="off"
-                  required
-                  aria-describedby="draftErrors"
-                />
+                <div class="release-date-field">
+                  <input
+                    id="releaseDate"
+                    name="releaseDate"
+                    type="date"
+                    autocomplete="off"
+                    required
+                    aria-describedby="draftErrors releaseTimeSummary"
+                  />
+                  <span
+                    id="releaseNoteIcon"
+                    class="release-note-icon"
+                    tabindex="0"
+                    role="img"
+                    aria-label="Release date note"
+                    aria-describedby="releaseTimeSummary"
+                    hidden
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <g class="note-past">
+                        <path d="M12 8l0 4l2 2" />
+                        <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" />
+                      </g>
+                      <g class="note-adjusted">
+                        <path d="M12 9h.01M11 12h1v4h1" />
+                        <circle cx="12" cy="12" r="9" />
+                      </g>
+                    </svg>
+                  </span>
+                </div>
                 <p id="releaseTimeSummary" class="hint"></p>
               </div>
               <div class="metadata-category">
