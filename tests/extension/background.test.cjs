@@ -543,13 +543,18 @@ vm.runInContext(fs.readFileSync(backgroundPath, "utf8"), context, {
   filename: backgroundPath,
 });
 
-function send(message) {
+const extensionPageSender = {
+  id: "test-extension",
+  url: "chrome-extension://test-extension/upload-console.html",
+};
+
+function send(message, sender = extensionPageSender) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(
       () => reject(new Error("Message timed out.")),
       1000,
     );
-    messageListener(message, {}, (response) => {
+    messageListener(message, sender, (response) => {
       clearTimeout(timeout);
       if (!response?.ok) {
         reject(new Error(response?.error || "Unknown extension error."));
@@ -603,6 +608,18 @@ function send(message) {
     operation: "getStatus",
   });
   assert.equal(sharedAppStatus.result.productVersion, "0.20.91");
+  for (const sender of [
+    {},
+    { id: "test-extension", tab: { id: 5 }, url: "https://x.com/Owner" },
+    { id: "other-extension", url: "chrome-extension://test-extension/a.html" },
+    { id: "other-extension", url: "chrome-extension://other-extension/a.html" },
+  ]) {
+    await assert.rejects(
+      send({ type: "OFENHANCER_APP_REQUEST", operation: "getStatus" }, sender),
+      /only on extension pages/,
+      JSON.stringify(sender),
+    );
+  }
   await assert.rejects(
     send({
       type: "OFENHANCER_APP_REQUEST",

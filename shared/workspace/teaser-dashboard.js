@@ -737,7 +737,10 @@
             `Plan a re-edit of ${episode.title} on the next free day`,
           );
           remake.dataset.key = `remake-${post.statusId}`;
-          remake.append(icon("scissors"), element("span", "", "Remake"));
+          remake.append(
+            icon("scissors"),
+            element("span", "xt-remake-label", "Remake"),
+          );
           remake.addEventListener("click", () => {
             const date = nextEmptyDate();
             if (!date) {

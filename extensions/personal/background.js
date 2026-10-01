@@ -259,7 +259,10 @@ ensureXFirstReplyAlarm().catch((error) =>
 );
 
 function assertExtensionPage(sender) {
-  if (!String(sender?.url || "").startsWith(chrome.runtime.getURL("")))
+  if (
+    sender?.id !== chrome.runtime.id ||
+    !String(sender?.url || "").startsWith(chrome.runtime.getURL(""))
+  )
     throw new Error("This setting is available only on extension pages.");
 }
 
@@ -5997,6 +6000,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
       case "GET_DESKTOP_STATUS":
         return { desktopStatus: await getDesktopStatus() };
       case "OFENHANCER_APP_REQUEST":
+        assertExtensionPage(sender);
         return {
           result: await routeOFEnhancerAppRequest(
             message.operation,
