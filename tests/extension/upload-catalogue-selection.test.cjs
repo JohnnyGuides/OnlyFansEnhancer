@@ -122,6 +122,7 @@ test("a future sheet date that is not a Friday moves to the next Friday with a n
       await page.locator("#releaseTimeSummary").textContent(),
       /sheet date 2099-01-06 is not a Friday/,
     );
+    assert.equal(await page.locator("#releaseTimeSummary").isVisible(), true);
     const scheduled = await page.evaluate(() => readinessRequests.at(-1).draft);
     assert.equal(scheduled.scheduleIntent, "friday");
     assert.equal(scheduled.scheduledIso, "2099-01-09T15:00:00.000Z");
@@ -144,6 +145,7 @@ test("a past sheet date is noted and prepares every platform unscheduled", async
       await page.locator("#releaseTimeSummary").textContent(),
       /^Past date — sheet update, posts go up unscheduled/,
     );
+    assert.equal(await page.locator("#releaseTimeSummary").isVisible(), true);
     await page.waitForFunction(
       () => readinessRequests.at(-1)?.draft?.releaseDate === "2020-01-03",
     );
@@ -159,6 +161,8 @@ test("a past sheet date is noted and prepares every platform unscheduled", async
           document.querySelector("#releaseTimeSummary").textContent,
         ),
     );
+    // A plain future Friday has no note, so the summary stays hidden.
+    assert.equal(await page.locator("#releaseTimeSummary").isVisible(), false);
     assert.deepEqual(fixture.errors, []);
   } finally {
     await fixture.close();

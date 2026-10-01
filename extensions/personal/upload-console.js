@@ -1824,6 +1824,8 @@
     }
 
     function refreshReleaseSummary() {
+      // Only notes the owner must see are shown; the plain time stays hidden.
+      delete releaseSummary.dataset.note;
       const releaseInstant = new Date(`${releaseDate.value}T15:00:00.000Z`);
       if (
         !Number.isNaN(releaseInstant.getTime()) &&
@@ -1832,6 +1834,7 @@
         releaseSummary.textContent = mainPublishMode.checked
           ? "Past date — sheet update, posts publish now without a schedule"
           : "Past date — sheet update, posts go up unscheduled";
+        releaseSummary.dataset.note = "past";
         return;
       }
       const iso = scheduledIsoForReleaseDate(releaseDate.value);
@@ -1845,8 +1848,10 @@
         " ",
       );
       releaseSummary.textContent = `15:00 UTC · ${local} ${timeZone}`;
-      if (adjustedSheetDate?.scheduled === releaseDate.value)
+      if (adjustedSheetDate?.scheduled === releaseDate.value) {
         releaseSummary.textContent += ` · sheet date ${adjustedSheetDate.sheet} is not a Friday`;
+        releaseSummary.dataset.note = "adjusted";
+      }
     }
 
     function fileSummary(file, emptyText) {
