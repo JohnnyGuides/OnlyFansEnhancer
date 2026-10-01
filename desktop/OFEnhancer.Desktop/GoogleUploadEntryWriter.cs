@@ -142,7 +142,7 @@ internal sealed class GoogleUploadEntryWriter(
     }
 
     // Google quotes a sheet title in a returned range only when the title needs it.
-    private static bool SameCell(string returned, string sheetTitle, string requested)
+    internal static bool SameCell(string returned, string sheetTitle, string requested)
     {
         int separator = returned.LastIndexOf('!');
         if (separator < 1) return false;

@@ -326,7 +326,8 @@ internal sealed class GoogleWorkspaceClient
     internal async Task<GoogleProjectionCell> ReadProjectionCellAsync(
         string fileId,
         string range,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool allowTextWhitespace = false
     )
     {
         string workbookId = Required(fileId, 256, "fileId");
@@ -365,7 +366,7 @@ internal sealed class GoogleWorkspaceClient
                     if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() > 1)
                         throw new GoogleCatalogueException("invalid-google-response");
                     if (row.GetArrayLength() == 1)
-                        value = GoogleWorkbookSnapshot.CellValue(row[0], 10_000);
+                        value = GoogleWorkbookSnapshot.CellValue(row[0], 10_000, allowTextWhitespace);
                 }
             }
             return new(returnedRange, value, Fingerprint(value));

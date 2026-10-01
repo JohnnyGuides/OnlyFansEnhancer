@@ -163,6 +163,21 @@ link matching exactly one row's OnlyFans/Fansly link binds as `reply-link`;
 recorded in `x_binding_conflicts`, and an ambiguous match binds nothing; titles
 are never compared.
 
+While Google is connected, the hourly `XTeaserController` tick (independent of
+`xTeaserRoot`) asks `GoogleCatalogueController` to write discovered teaser links
+back to the sheet on the serial request dispatcher. It refreshes the bindings,
+then takes at most five owner video teasers bound by `reply-link` or `owner`
+evidence, with no recorded conflict, whose status is missing from the bound
+row's `Twitter Teaser(s)` cell, oldest first. `GoogleTeaserLinkWriter` appends
+`https://x.com/<owner handle>/status/<id>` to that one cell (see
+`docs/google-catalogue.md`), and the returned workbook is imported so the binding
+becomes `sheet-link` evidence. Each attempt is an `x-sheet-writeback` audit event
+(`appended`, `already-present` or `failed` with its code); a failed status waits
+1 h, doubling per consecutive failure up to 24 h. A row-specific refusal moves
+on to the next teaser, any other failure ends the run. No schema change: the
+audit log is the ledger. `getTeaserOverview` carries the counts as
+`sheetWriteback` (pending, waiting, written, last outcome/code/time).
+
 When the `xTeaserRoot` setting is set, `XTeaserController` runs two minutes after
 start and then hourly. It lists video files in the root, `Done`, `Done\Good`
 and `Done\Failed` (no other folders, no reparse points), hashes them beside the
