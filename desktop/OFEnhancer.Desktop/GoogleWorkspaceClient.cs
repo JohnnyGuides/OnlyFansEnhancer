@@ -350,26 +350,7 @@ internal sealed class GoogleWorkspaceClient
         try
         {
             using JsonDocument json = JsonDocument.Parse(body, new() { MaxDepth = 8 });
-            JsonElement root = RequireObject(json.RootElement);
-            string returnedRange = root.TryGetProperty("range", out JsonElement rangeElement)
-                && rangeElement.ValueKind == JsonValueKind.String
-                ? Required(rangeElement.GetString(), 512, "range")
-                : boundedRange;
-            string? value = null;
-            if (root.TryGetProperty("values", out JsonElement values))
-            {
-                if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 1)
-                    throw new GoogleCatalogueException("invalid-google-response");
-                if (values.GetArrayLength() == 1)
-                {
-                    JsonElement row = values[0];
-                    if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() > 1)
-                        throw new GoogleCatalogueException("invalid-google-response");
-                    if (row.GetArrayLength() == 1)
-                        value = GoogleWorkbookSnapshot.CellValue(row[0], 10_000, allowTextWhitespace);
-                }
-            }
-            return new(returnedRange, value, Fingerprint(value));
+            return ParseProjectionCell(RequireObject(json.RootElement), boundedRange, allowTextWhitespace);
         }
         catch (GoogleCatalogueException)
         {
@@ -379,6 +360,76 @@ internal sealed class GoogleWorkspaceClient
         {
             throw new GoogleCatalogueException("invalid-google-response");
         }
+    }
+
+    // Single cells read together in one values:batchGet request, in request order.
+    internal async Task<IReadOnlyList<GoogleProjectionCell>> ReadProjectionCellsAsync(
+        string fileId,
+        IReadOnlyList<string> ranges,
+        CancellationToken cancellationToken,
+        bool allowTextWhitespace = false
+    )
+    {
+        string workbookId = Required(fileId, 256, "fileId");
+        if (ranges is null || ranges.Count is < 1 or > 10)
+            throw new GoogleCatalogueException("invalid-range");
+        string[] boundedRanges = [.. ranges.Select(range => Required(range, 512, "range"))];
+        Uri endpoint = BuildUri(
+            $"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}/values:batchGet",
+            [
+                .. boundedRanges.Select(range => ("ranges", range)),
+                ("majorDimension", "ROWS"),
+                ("valueRenderOption", "FORMULA"),
+                ("dateTimeRenderOption", "FORMATTED_STRING"),
+            ]
+        );
+        byte[] body = await SendReadAsync(
+            token => CreateJsonRequest(HttpMethod.Get, endpoint, token),
+            SheetsOrigin,
+            MaximumDriveResponseBytes,
+            cancellationToken
+        ).ConfigureAwait(false);
+
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(body, new() { MaxDepth = 8 });
+            JsonElement valueRanges = RequireObject(json.RootElement).GetProperty("valueRanges");
+            if (valueRanges.ValueKind != JsonValueKind.Array || valueRanges.GetArrayLength() != boundedRanges.Length)
+                throw new GoogleCatalogueException("invalid-google-response");
+            return [.. boundedRanges.Select((range, index) =>
+                ParseProjectionCell(RequireObject(valueRanges[index]), range, allowTextWhitespace))];
+        }
+        catch (GoogleCatalogueException)
+        {
+            throw;
+        }
+        catch
+        {
+            throw new GoogleCatalogueException("invalid-google-response");
+        }
+    }
+
+    private static GoogleProjectionCell ParseProjectionCell(JsonElement root, string requestedRange, bool allowTextWhitespace)
+    {
+        string returnedRange = root.TryGetProperty("range", out JsonElement rangeElement)
+            && rangeElement.ValueKind == JsonValueKind.String
+            ? Required(rangeElement.GetString(), 512, "range")
+            : requestedRange;
+        string? value = null;
+        if (root.TryGetProperty("values", out JsonElement values))
+        {
+            if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 1)
+                throw new GoogleCatalogueException("invalid-google-response");
+            if (values.GetArrayLength() == 1)
+            {
+                JsonElement row = values[0];
+                if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() > 1)
+                    throw new GoogleCatalogueException("invalid-google-response");
+                if (row.GetArrayLength() == 1)
+                    value = GoogleWorkbookSnapshot.CellValue(row[0], 10_000, allowTextWhitespace);
+            }
+        }
+        return new(returnedRange, value, Fingerprint(value));
     }
 
     internal Task ApplyStructuralBatchAsync(

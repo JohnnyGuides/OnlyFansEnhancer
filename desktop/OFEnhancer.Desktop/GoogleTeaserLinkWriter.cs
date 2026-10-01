@@ -22,6 +22,7 @@ internal sealed class GoogleTeaserLinkWriter(
     {
         "catalogue-entry-missing", "catalogue-entry-changed", "google-row-write-unresolved", "invalid-teaser-link",
         "teaser-cell-unreadable", "teaser-cell-formula", "teaser-cell-linked", "teaser-cell-full",
+        "catalogue-row-moved", "teaser-status-elsewhere",
     };
 
     internal async Task<GoogleTeaserLinkResult> AppendAsync(string sourceKey, string url,
@@ -41,6 +42,10 @@ internal sealed class GoogleTeaserLinkWriter(
         if (StatusIds(text).Contains(statusId)
             || cell?.Hyperlink is { } target && CatalogueStore.XStatusIdFromUrl(target) == statusId)
             return new("already-present", before);
+        // A status already linked from another row is never duplicated here.
+        if (sheet.Rows.Any(row => row.RowNumber > before.HeaderRow && row.RowNumber != item.SourceRow
+            && StatusIds(row.Cells.ElementAtOrDefault(column - 1)?.Value ?? "").Contains(statusId)))
+            throw new GoogleCatalogueException("teaser-status-elsewhere");
         if (text.Any(c => c is '\r' or '\t'))
             throw new GoogleCatalogueException("teaser-cell-unreadable");
         // A whole-cell link on non-link text would be lost by a value write.
@@ -50,11 +55,18 @@ internal sealed class GoogleTeaserLinkWriter(
         string existing = text.Trim();
         string updated = existing.Length == 0 ? url : existing + DetectSeparator(sheet, before, column, text) + url;
         if (updated.Length > 10_000) throw new GoogleCatalogueException("teaser-cell-full");
-        string range = $"'{before.CatalogueSheetTitle.Replace("'", "''", StringComparison.Ordinal)}'!{(char)('A' + column - 1)}{item.SourceRow}";
-        GoogleProjectionCell live = await workspace.ReadProjectionCellAsync(workbookId, range, cancellationToken,
-            allowTextWhitespace: true).ConfigureAwait(false);
-        if (!GoogleUploadEntryWriter.SameCell(live.Range, before.CatalogueSheetTitle, range))
+        string prefix = $"'{before.CatalogueSheetTitle.Replace("'", "''", StringComparison.Ordinal)}'!";
+        string range = $"{prefix}{(char)('A' + column - 1)}{item.SourceRow}";
+        string idRange = $"{prefix}{(char)('A' + before.Columns["sourceKey"] - 1)}{item.SourceRow}";
+        // The row's ID and teaser cell are read together just before the write,
+        // so a row inserted, deleted or sorted since the full read is refused.
+        IReadOnlyList<GoogleProjectionCell> cells = await workspace.ReadProjectionCellsAsync(workbookId, [idRange, range],
+            cancellationToken, allowTextWhitespace: true).ConfigureAwait(false);
+        GoogleProjectionCell liveId = cells[0], live = cells[1];
+        if (!GoogleUploadEntryWriter.SameCell(liveId.Range, before.CatalogueSheetTitle, idRange)
+            || !GoogleUploadEntryWriter.SameCell(live.Range, before.CatalogueSheetTitle, range))
             throw new GoogleCatalogueException("catalogue-entry-changed");
+        if ((liveId.Value ?? "").Trim() != sourceKey) throw new GoogleCatalogueException("catalogue-row-moved");
         if ((live.Value ?? "").StartsWith('=')) throw new GoogleCatalogueException("teaser-cell-formula");
         if ((live.Value ?? "").Trim() != existing) throw new GoogleCatalogueException("catalogue-entry-changed");
         try

@@ -178,8 +178,9 @@ automatic sheet write, it applies whether or not reviewed sync is set up, and th
   importer already counts the larger of that number and the links.
 - Nothing is written when the status is already in the cell (any handle,
   `x.com` or `twitter.com`), when the cell holds a formula, carriage returns or tabs,
-  a whole-cell link on non-link text, or when the live cell differs from
-  the snapshot just read. The write is `RAW`, and the whole tab is read back; a
+  a whole-cell link on non-link text, when another row already links the status,
+  or when the row's ID or the live cell differs from the snapshot just read (both
+  are read in one request right before the write). The write is `RAW`, and the whole tab is read back; a
   mismatch is recorded as `google-row-write-unresolved`.
 - At most five links per hourly run; a failed link is retried after 1 h,
   doubling up to 24 h. Attempts are kept in the local audit log and summarized

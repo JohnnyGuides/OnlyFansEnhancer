@@ -78,6 +78,29 @@ public sealed class GoogleTeaserLinkWriterTests
     }
 
     [TestMethod]
+    public async Task ARowInsertedBeforeTheWriteIsRefusedWithoutWriting()
+    {
+        FakeSheet sheet = Workbook();
+        sheet.BeforeCellRead = () => sheet.InsertRow(2, ["ep-new", "Episode New", "", "https://x.com/Owner_Handle/status/13", "1"]);
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).AppendAsync("ep-c", NewLink, CancellationToken.None));
+        Assert.AreEqual("catalogue-row-moved", error.Code);
+        Assert.AreEqual(0, sheet.Posts.Count);
+        Assert.IsTrue(GoogleTeaserLinkWriter.RowCodes.Contains(error.Code), "retried on a later run");
+    }
+
+    [TestMethod]
+    public async Task AStatusLinkedFromAnotherRowIsNotDuplicated()
+    {
+        FakeSheet sheet = Workbook();
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).AppendAsync("ep-a", "https://x.com/Owner_Handle/status/13", CancellationToken.None));
+        Assert.AreEqual("teaser-status-elsewhere", error.Code);
+        Assert.AreEqual(0, sheet.Posts.Count);
+        Assert.AreEqual("", sheet.Cell(2, 4));
+    }
+
+    [TestMethod]
     public async Task AReadbackMismatchIsUnresolved()
     {
         FakeSheet sheet = Workbook();
@@ -143,7 +166,9 @@ public sealed class GoogleTeaserLinkWriterTests
         internal bool FailAfterWrite { get; set; }
         internal string? FormulaOverride { get; set; }
 
-        internal string Cell(int row, int column) => rows[row - 1][column - 1];
+        internal string Cell(int row, int column) => row <= rows.Count ? rows[row - 1][column - 1] : "";
+
+        internal void InsertRow(int row, string[] cells) => rows.Insert(row - 1, cells);
 
         internal void SetCell(int row, int column, string value, string? hyperlink = null)
         {
@@ -168,16 +193,23 @@ public sealed class GoogleTeaserLinkWriterTests
                 if (FailAfterWrite) throw new TaskCanceledException("Accepted before the acknowledgement was lost.");
                 return Json(request, "{}");
             }
-            int values = path.IndexOf("/values/", StringComparison.Ordinal);
-            if (request.Method == HttpMethod.Get && values >= 0)
+            if (request.Method == HttpMethod.Get && path.EndsWith("/values:batchGet", StringComparison.Ordinal))
             {
                 CellReads++;
                 BeforeCellRead?.Invoke();
-                string range = path[(values + "/values/".Length)..];
-                (int row, int column) = Address(range);
-                string value = FormulaOverride ?? Cell(row, column);
-                return Json(request, JsonSerializer.Serialize(value.Length == 0
-                    ? (object)new { range } : new { range, values = new[] { new[] { value } } }));
+                string[] ranges = [.. request.RequestUri.Query.TrimStart('?').Split('&')
+                    .Where(pair => pair.StartsWith("ranges=", StringComparison.Ordinal))
+                    .Select(pair => Uri.UnescapeDataString(pair["ranges=".Length..]))];
+                return Json(request, JsonSerializer.Serialize(new
+                {
+                    spreadsheetId = "workbook-one",
+                    valueRanges = ranges.Select(range =>
+                    {
+                        (int row, int column) = Address(range);
+                        string value = column == 4 && FormulaOverride is not null ? FormulaOverride : Cell(row, column);
+                        return value.Length == 0 ? (object)new { range } : new { range, values = new[] { new[] { value } } };
+                    }),
+                }));
             }
             bool data = request.RequestUri.Query.Contains("ranges=", StringComparison.Ordinal);
             JsonObject sheet = new()
