@@ -65,6 +65,17 @@ and outline.
   episode returns to rotation and appears in picking mode, preferring a spare cut
   or a re-edit of the retired clip.
 
+### Local teaser folders
+
+- `.TWEETS\` holds ready (unposted) clips; `Done\` holds posted clips awaiting a verdict; `Done\Good\` holds clips whose tweet performed at or above the owner's usual; `Done\Failed\` holds clips whose tweet underperformed — remake candidates, and their episode returns to rotation.
+- The verdict is taken at 7 days against comparable teasers at the same age. The app moves the clip automatically and records every move in an undoable log. Clips are identified by file fingerprint, so moves and renames never break the binding.
+- Files are named `<catalogue episode key>__t<N>[-variant].mp4` (applied to the existing folder on 1 October 2026 with a revert list in the ignored `.local/twitter/`).
+
+### Automatic first reply
+
+- For every teaser the owner posts (through OFEnhancer or by hand), the extension posts the first reply 15–60 minutes later (random), live rather than scheduled, so X's link preview card can be removed and confirmed gone before posting.
+- The text rotates between short variants (for example "full vid (no ppv)", "full session", "full vid :)") followed by `-> <the episode's OnlyFans link from the catalogue>`. A durable checkpoint and a scan for an existing owner reply prevent duplicates.
+
 ## Data needed
 
 - **X posts with metrics over time.** Candidate sources, to decide: the owner's
