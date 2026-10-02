@@ -166,8 +166,8 @@
 
 .xt-trend-average {
   box-sizing: border-box;
-  height: 22px;
-  padding: 2px 7px;
+  height: 18px;
+  padding: 0 7px;
   border-radius: 999px;
   background: #253440;
   color: #b5bfcc;

@@ -806,7 +806,7 @@ test("summary compares the same cohort and resists viral skew", async () => {
     );
     assert.equal(
       await overall.locator(".xt-trend-average").textContent(),
-      `avg ${compact[2]}`,
+      compact[2],
     );
     assert.equal(await overall.locator(".xt-trend").textContent(), "\u221291%");
     assert.equal(
@@ -995,7 +995,7 @@ test("history calendar lines up with the week row and trend cards compare period
         .first()
         .locator(".xt-trend-average")
         .textContent(),
-      `avg ${overallViews}`,
+      overallViews,
     );
     for (const cell of await page
       .locator('.xt-trend-metric[data-baseline="true"]')
@@ -1026,6 +1026,15 @@ test("history calendar lines up with the week row and trend cards compare period
           .locator(".xt-trend-average")
           .evaluate((node) => getComputedStyle(node).borderRadius),
         "999px",
+      );
+      assert.equal(average.height, 18, "average pills use a slim height");
+      assert.match(
+        await cell.locator(".xt-trend-average").getAttribute("aria-label"),
+        /^Average /,
+      );
+      assert.equal(
+        await cell.locator(".xt-trend-average").getAttribute("title"),
+        await cell.locator(".xt-trend-average").getAttribute("aria-label"),
       );
     }
     const pillGeometry = await page

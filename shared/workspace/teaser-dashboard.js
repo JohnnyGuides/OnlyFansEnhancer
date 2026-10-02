@@ -751,10 +751,12 @@
         const averagePill = element(
           "span",
           "xt-trend-average",
-          `avg ${formatMetric(name, mean)}`,
+          formatMetric(name, mean),
         );
+        averagePill.title = `Average ${label}: ${averagePill.textContent}`;
+        averagePill.setAttribute("aria-label", averagePill.title);
         line.append(averagePill);
-        description = `Median ${description}; ${averagePill.textContent}`;
+        description = `Median ${description}; average ${averagePill.textContent}`;
         if (value !== null && mean > 0) {
           const badge = trendBadge(
             { value, usual: mean },
