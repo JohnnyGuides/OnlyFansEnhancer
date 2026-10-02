@@ -451,6 +451,30 @@ test("timeline strip orders 7 square days and colours numbers by the usual", asy
       );
     assert.notEqual(colours[0], colours[1]);
     assert.notEqual(colours[1], colours[2]);
+    assert.equal(
+      colours[1],
+      "rgb(198, 210, 222)",
+      "neutral metrics use a brighter foreground",
+    );
+    const metricStyles = await past
+      .nth(0)
+      .locator(".xt-number")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const style = getComputedStyle(node);
+          return {
+            size: parseFloat(style.fontSize),
+            weight: parseInt(style.fontWeight),
+            fits: node.scrollWidth <= node.clientWidth,
+          };
+        }),
+      );
+    assert.ok(
+      metricStyles.every(
+        (style) => style.size >= 12 && style.weight >= 600 && style.fits,
+      ),
+      "week metrics are legible and fit their tile width",
+    );
     assert.match(
       await past
         .nth(0)
@@ -934,6 +958,19 @@ test("page sections distinguish history, recent days, upcoming days and catalogu
       3,
       "history, posted days and upcoming days use distinct surfaces",
     );
+    assert.ok(
+      await page.locator(".xt-week-section").evaluateAll((nodes) =>
+        nodes.every((node) => {
+          const style = getComputedStyle(node);
+          return (
+            style.paddingTop === "8px" &&
+            style.paddingBottom === "8px" &&
+            style.paddingLeft === "8px"
+          );
+        }),
+      ),
+      "calendar padding stays compact",
+    );
     assert.equal(
       await page
         .locator(
@@ -975,7 +1012,7 @@ test("page sections distinguish history, recent days, upcoming days and catalogu
     );
     for (let index = 1; index < regions.length; index++)
       assert.ok(
-        regions[index].top - regions[index - 1].bottom >= 27,
+        regions[index].top - regions[index - 1].bottom >= 19,
         "distinct sections have more breathing room than their internal elements",
       );
     assert.equal(

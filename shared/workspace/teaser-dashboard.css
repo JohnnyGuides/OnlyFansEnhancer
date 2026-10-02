@@ -12,7 +12,7 @@
   display: grid;
   max-width: 100%;
   min-width: 0;
-  gap: 28px;
+  gap: 20px;
   color: #f4f5f7;
 }
 
@@ -65,13 +65,13 @@
 /* Timeline strip */
 .xt-strip {
   display: grid;
-  gap: 28px;
+  gap: 20px;
 }
 
 .xt-history-region {
   display: grid;
   margin-top: 24px;
-  padding-block: 8px;
+  padding-block: 4px;
   border-radius: 10px;
   background: #0d121a;
 }
@@ -86,11 +86,11 @@
 
 .xt-week-section {
   min-width: 0;
-  padding: 14px 12px;
+  padding: 8px;
 }
 
 .xt-week-section[data-period="next"] {
-  padding-block: 20px 16px;
+  padding-block: 8px;
   background: #14212c;
 }
 
@@ -109,7 +109,7 @@
 }
 
 .xt-flow {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 /* History strip */
@@ -592,7 +592,8 @@
   justify-content: space-between;
   gap: 2px;
   min-height: 1.1rem;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -604,7 +605,7 @@
 }
 
 .xt-number[data-tone="neutral"] {
-  color: var(--xt-muted);
+  color: #c6d2de;
 }
 
 .xt-number[data-tone="good"] {
