@@ -951,8 +951,8 @@ html:has(.xt-picker[open]) {
 }
 .xt-shortlist {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, 96px);
+  gap: 6px;
   margin-bottom: 24px;
 }
 .xt-shortlist-label {
@@ -963,9 +963,10 @@ html:has(.xt-picker[open]) {
 }
 .xt-suggestion {
   display: grid;
-  gap: 6px;
+  align-content: start;
+  gap: 4px;
   min-width: 0;
-  padding: 0 0 8px;
+  padding: 0 0 5px;
   border: 1px solid #426275;
   border-radius: 8px;
   background: #192733;
@@ -973,13 +974,19 @@ html:has(.xt-picker[open]) {
 }
 .xt-suggestion strong,
 .xt-suggestion > span:not(.xt-thumb) {
-  padding-inline: 8px;
-  font-size: 0.75rem;
+  padding-inline: 4px;
+  font-size: 0.65rem;
   overflow-wrap: anywhere;
 }
 .xt-suggestion > span:not(.xt-thumb) {
   color: #b6c3d1;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
+}
+.xt-suggestion strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .xt-suggestion:hover {
   border-color: #65cfff;

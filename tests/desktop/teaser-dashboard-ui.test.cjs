@@ -1636,6 +1636,13 @@ test("focused picker recommends unused ready clips and preserves planning rules"
       true,
     );
     assert.equal(await hidden.getAttribute("aria-disabled"), "true");
+    await page
+      .locator(".xt-picker")
+      .evaluate((node) =>
+        Promise.all(
+          node.getAnimations().map((animation) => animation.finished),
+        ),
+      );
     await hidden.click({ force: true });
     assert.equal(
       (await calls(page, "setTeaserPlanSlot")).length,
@@ -1743,6 +1750,25 @@ test("picker stays within the viewport, traps focus and cancels without changing
         true,
       );
       assert.equal(
+        await picker.evaluate((node) => {
+          const card = node.querySelector(".xt-card").getBoundingClientRect();
+          const suggestion = node
+            .querySelector(".xt-suggestion")
+            .getBoundingClientRect();
+          const cards = [...node.querySelectorAll(".xt-card")].map((card) =>
+            card.getBoundingClientRect(),
+          );
+          const bar = node
+            .querySelector(".xt-flow-bar")
+            .getBoundingClientRect();
+          return (
+            suggestion.width === card.width &&
+            bar.right <= Math.max(...cards.map((card) => card.right)) + 1
+          );
+        }),
+        true,
+      );
+      assert.equal(
         await page.evaluate(
           () => getComputedStyle(document.documentElement).overflow,
         ),
@@ -1826,6 +1852,138 @@ test("picker slides in once, keeps its place during filtering and respects reduc
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
+  }
+});
+
+test("recommendations use age-matched history, resist viral outliers and fall back carefully", async () => {
+  const candidates = [
+    episode("Steady", "Zulu", 4, 0, 1),
+    episode("Unknown", "Beta", 1, 0, 1),
+    episode("Viral", "Alpha", 4, 0, 1),
+    episode("Insufficient", "Sparse", 2, 0, 1),
+    episode("Young", "Young", 4, 0, 1),
+    episode("Fallback", "New", 1, 0, 1),
+    episode("Fallback", "Weak", 4, 0, 1),
+  ];
+  const historyEpisodes = [];
+  const history = [];
+  const addHistory = (category, series, views, comparable = true) => {
+    views.forEach((value, index) => {
+      const entry = episode(category, series, index + 1, 1, 0);
+      historyEpisodes.push(entry);
+      history.push(
+        post(
+          `${series}-${index}`,
+          12 + index,
+          entry.sourceKey,
+          metrics(value, value / 100, 0, 0, 0),
+          comparable ? usual(1000, 10, 0, 0.01) : null,
+        ),
+      );
+    });
+  };
+  addHistory("Steady", "Zulu", [2000, 2000, 2000]);
+  addHistory("Viral", "Alpha", [500, 500, 1000000000]);
+  addHistory("Insufficient", "Sparse", [1000000000]);
+  addHistory("Young", "Young", [1000000000, 1000000000, 1000000000], false);
+  addHistory("Fallback", "Old", [4000, 4000, 4000, 4000, 4000]);
+  addHistory("Fallback", "Weak", [100, 100, 100]);
+  const { page, context, errors } = await openDashboard({
+    slots: [],
+    overviewExtra: {
+      episodes: [...candidates, ...historyEpisodes],
+      posts: history,
+    },
+  });
+  try {
+    await page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    const suggestions = page.locator(".xt-suggestion");
+    assert.deepEqual(
+      await suggestions.evaluateAll((nodes) =>
+        nodes.map((node) => node.dataset.episodeKey),
+      ),
+      ["new-e1", "zulu-e4", "sparse-e2"],
+    );
+    assert.match(
+      await suggestions.nth(0).textContent(),
+      /Category above usual/,
+    );
+    assert.match(
+      await suggestions.nth(1).getAttribute("title"),
+      /3 comparable posts/,
+    );
+    assert.match(await suggestions.nth(1).textContent(), /Series above usual/);
+    assert.match(
+      await suggestions.nth(2).textContent(),
+      /No comparable history/,
+    );
+    // Remove the insufficient/unknown candidates to reveal the weaker series.
+    // Its own series evidence must take precedence over its stronger category.
+    await page.keyboard.press("Escape");
+    assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+  const second = await openDashboard({
+    slots: [],
+    overviewExtra: {
+      episodes: [
+        ...candidates.filter((candidate) =>
+          ["alpha-e4", "weak-e4", "young-e4"].includes(candidate.sourceKey),
+        ),
+        ...historyEpisodes,
+      ],
+      posts: history,
+    },
+  });
+  try {
+    await second.page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    assert.deepEqual(
+      await second.page
+        .locator(".xt-suggestion")
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.episodeKey)),
+      ["young-e4", "alpha-e4", "weak-e4"],
+    );
+    assert.match(
+      await second.page.locator('[data-episode-key="weak-e4"]').textContent(),
+      /Series below usual/,
+    );
+    assert.deepEqual(second.errors, []);
+  } finally {
+    await second.context.close();
+  }
+  const third = await openDashboard({
+    slots: [],
+    overviewExtra: {
+      episodes: [
+        ...candidates.filter((candidate) =>
+          ["zulu-e4", "new-e1", "sparse-e2"].includes(candidate.sourceKey),
+        ),
+        ...historyEpisodes,
+      ],
+      posts: history.map((entry) =>
+        entry.sourceKey.startsWith("zulu-")
+          ? {
+              ...entry,
+              latest: { ...entry.latest, likes: entry.latest.likes * 4 },
+            }
+          : entry,
+      ),
+    },
+  });
+  try {
+    await third.page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    assert.deepEqual(
+      await third.page
+        .locator(".xt-suggestion")
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.episodeKey)),
+      ["zulu-e4", "new-e1", "sparse-e2"],
+      "stronger engagement changes the ranking even with unchanged view counts",
+    );
+    assert.deepEqual(third.errors, []);
+  } finally {
+    await third.context.close();
   }
 });
 

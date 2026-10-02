@@ -359,6 +359,78 @@
       return "neutral";
     }
 
+    // Rank eligible clips with observed performance, never raw lifetime views.
+    // Three age-matched posts are needed before borrowing a series/category's
+    // history. Median log ratios limit viral skew; small samples lean toward
+    // neutral. This is an ordering aid, not a prediction of the next post.
+    function recommendations(context) {
+      const bySeries = new Map();
+      const byCategory = new Map();
+      const seen = new Set();
+      const add = (map, key, score) => {
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(score);
+      };
+      for (const post of posts()) {
+        if (seen.has(post.statusId)) continue;
+        seen.add(post.statusId);
+        const episode = episodeByItem(post.itemId);
+        const posted = Date.parse(post.postedUtc);
+        if (!episode || !Number.isFinite(posted) || posted > now().getTime())
+          continue;
+        const ratios = ["views", "rate"].map((name) => {
+          const value = metricValue(post, name);
+          const usual = usualValue(post, name);
+          return Number.isFinite(value) &&
+            value >= 0 &&
+            Number.isFinite(usual) &&
+            usual > 0
+            ? Math.log(Math.min(4, Math.max(0.25, value / usual)))
+            : null;
+        });
+        if (ratios.some((ratio) => ratio === null)) continue;
+        const score = (ratios[0] + ratios[1]) / 2;
+        add(bySeries, seasonKey(episode), score);
+        if (episode.category) add(byCategory, episode.category, score);
+      }
+      return orderEpisodes(episodes())
+        .filter((episode) => pickState(episode, context) === "recommended")
+        .map((episode) => {
+          const series = bySeries.get(seasonKey(episode)) || [];
+          const category = byCategory.get(episode.category) || [];
+          const values =
+            series.length >= 3 ? series : category.length >= 3 ? category : [];
+          const basis = series.length >= 3 ? "Series" : "Category";
+          if (!values.length)
+            return {
+              episode,
+              score: 0,
+              reason: "No comparable history",
+              detail:
+                "Not enough age-matched views and engagement to judge past performance.",
+            };
+          const sorted = [...values].sort((left, right) => left - right);
+          const middle = Math.floor(sorted.length / 2);
+          const typical =
+            sorted.length % 2
+              ? sorted[middle]
+              : (sorted[middle - 1] + sorted[middle]) / 2;
+          const result =
+            typical >= Math.log(1.15)
+              ? "above usual"
+              : typical <= Math.log(0.8)
+                ? "below usual"
+                : "near usual";
+          return {
+            episode,
+            score: (typical * values.length) / (values.length + 3),
+            reason: `${basis} ${result}`,
+            detail: `${values.length} comparable posts from this ${basis.toLowerCase()}. Each post combines views and engagement relative to usual at the same age, equally weighted. Ranked by the median result; smaller samples carry less weight.`,
+          };
+        })
+        .sort((left, right) => right.score - left.score);
+    }
+
     async function load() {
       const current = ++generation;
       state.phase = state.overview ? state.phase : "loading";
@@ -1316,12 +1388,19 @@
       const heading = container.querySelector(".twitter-heading");
       if (heading) heading.style.width = width;
       const bar = root.querySelector(".xt-flow-bar");
-      if (state.picking) {
-        if (bar) bar.style.width = "";
-      } else if (bar) bar.style.width = `${columns * 102 - 6}px`;
       const wallColumns = state.picking
-        ? Math.max(1, Math.floor(((wall?.clientWidth || 0) + 6) / 102))
+        ? Math.max(
+            1,
+            Math.floor(
+              ((wall?.clientWidth ||
+                root.querySelector(".xt-picker .xt-flow")?.clientWidth ||
+                0) +
+                6) /
+                102,
+            ),
+          )
         : columns;
+      if (bar) bar.style.width = `${wallColumns * 102 - 6}px`;
       const cards = Array.from(wall?.children || []);
       cards.forEach((card, index) => {
         const next = cards[index + 1];
@@ -1558,9 +1637,7 @@
         });
         picker.append(renderPicking());
         const context = pickContext(state.picking.date);
-        const recommended = orderEpisodes(episodes())
-          .filter((episode) => pickState(episode, context) === "recommended")
-          .slice(0, 3);
+        const recommended = recommendations(context).slice(0, 3);
         const shortlist = element("section", "xt-shortlist");
         shortlist.setAttribute("aria-label", "Recommended teasers");
         shortlist.append(
@@ -1572,8 +1649,10 @@
               : "No unused ready clips in quiet categories. Browse the catalogue below.",
           ),
         );
-        for (const episode of recommended) {
+        for (const { episode, reason, detail } of recommended) {
           const choice = button("xt-suggestion", `Choose ${episode.title}`);
+          choice.dataset.episodeKey = episode.sourceKey;
+          choice.title = `${episode.title} · ${reason}. ${detail}`;
           choice.append(
             thumbnail(episode),
             element("strong", "", episode.title),
@@ -1582,6 +1661,7 @@
               "",
               `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"}`,
             ),
+            element("span", "xt-suggestion-reason", reason),
           );
           choice.addEventListener(
             "click",
