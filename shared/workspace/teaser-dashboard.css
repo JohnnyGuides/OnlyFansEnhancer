@@ -949,43 +949,6 @@ html:has(.xt-picker[open]) {
 .xt-episode[data-pick="hidden"] .xt-pick-reason {
   color: #f2b84b;
 }
-.xt-shortlist {
-  display: grid;
-  grid-template-columns: repeat(3, 96px);
-  gap: 6px;
-  margin-bottom: 24px;
-}
-.xt-shortlist-label {
-  grid-column: 1 / -1;
-  margin: 0 0 2px;
-  color: #b6c3d1;
-  font-size: 0.8rem;
-}
-.xt-suggestion {
-  display: grid;
-  align-content: start;
-  gap: 4px;
-  min-width: 0;
-  padding: 0 0 5px;
-  border: 1px solid #426275;
-  border-radius: 8px;
-  background: #192733;
-  text-align: left;
-}
-.xt-suggestion strong {
-  padding-inline: 4px;
-  font-size: 0.65rem;
-  overflow-wrap: anywhere;
-}
-.xt-suggestion strong {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-.xt-suggestion:hover {
-  border-color: #65cfff;
-}
 @media (max-width: 600px) {
   .xt-picker {
     width: 100%;

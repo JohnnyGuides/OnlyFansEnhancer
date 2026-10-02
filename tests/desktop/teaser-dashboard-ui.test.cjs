@@ -1585,6 +1585,17 @@ test("history calendar lines up with the week row and trend cards compare period
 test("focused picker recommends unused ready clips and preserves planning rules", async () => {
   const { page, context, errors } = await openDashboard();
   try {
+    const normalOrder = await page
+      .locator(".xt-episode")
+      .evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId));
+    const colours = await page
+      .locator(".xt-card")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.querySelector(".xt-episode").dataset.itemId,
+          node.style.getPropertyValue("--xt-season"),
+        ]),
+      );
     await page
       .locator('[data-row="past"] > li')
       .nth(6)
@@ -1620,16 +1631,49 @@ test("focused picker recommends unused ready clips and preserves planning rules"
         .evaluate((node) => node.matches(":modal")),
       true,
     );
-    assert.equal(await page.locator(".xt-suggestion").count(), 3);
-    assert.deepEqual(await page.locator(".xt-suggestion").allTextContents(), [
-      "Series G E1",
-      "Series H E1",
-      "Series F E1",
-    ]);
+    assert.equal(
+      await page.locator(".xt-episode[data-recommendation-rank]").count(),
+      3,
+    );
+    assert.deepEqual(
+      await page
+        .locator(".xt-episode[data-recommendation-rank]")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
+      ["series-g-e1", "series-h-e1", "series-f-e1"],
+    );
+    assert.equal(
+      await page.locator(".xt-shortlist, .xt-suggestion").count(),
+      0,
+    );
     assert.equal(await page.locator(".xt-shortlist-label").count(), 0);
+    assert.deepEqual(
+      await page
+        .locator(".xt-episode")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
+      ["series-g-e1", "series-h-e1", "series-f-e1"],
+      "recommendations lead the actual catalogue grid",
+    );
+    assert.deepEqual(
+      await page
+        .locator(".xt-card")
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) => [
+              node.querySelector(".xt-episode").dataset.itemId,
+              node.style.getPropertyValue("--xt-season"),
+            ])
+            .sort(),
+        ),
+      [...colours].sort(),
+      "ranking preserves series accents",
+    );
     assert.match(
       await page
-        .locator(".xt-suggestion")
+        .locator(".xt-episode[data-recommendation-rank]")
         .first()
         .getAttribute("aria-description"),
       /1 ready clip/,
@@ -1663,9 +1707,7 @@ test("focused picker recommends unused ready clips and preserves planning rules"
       "recently used series cannot be picked",
     );
 
-    await page
-      .getByRole("button", { name: "Choose Series F E1", exact: true })
-      .click();
+    await page.locator('.xt-episode[data-item-id="item-series-f-e1"]').click();
     await page
       .locator('.xt-tile[data-date="2026-10-01"][data-kind="planned"]')
       .waitFor();
@@ -1702,6 +1744,13 @@ test("focused picker recommends unused ready clips and preserves planning rules"
     await page.getByRole("button", { name: "Done" }).click();
     assert.equal(await page.locator(".xt-picking").isHidden(), true);
     assert.equal(await page.locator(".xt-episode[data-pick]").count(), 0);
+    assert.deepEqual(
+      await page
+        .locator(".xt-episode")
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId)),
+      normalOrder,
+      "browsing restores the normal catalogue order",
+    );
     assert.equal(
       await page
         .locator('[data-row="next"] .xt-tile[data-date="2026-10-02"]')
@@ -1765,9 +1814,6 @@ test("picker stays within the viewport, traps focus and cancels without changing
       assert.equal(
         await picker.evaluate((node) => {
           const card = node.querySelector(".xt-card").getBoundingClientRect();
-          const suggestion = node
-            .querySelector(".xt-suggestion")
-            .getBoundingClientRect();
           const cards = [...node.querySelectorAll(".xt-card")].map((card) =>
             card.getBoundingClientRect(),
           );
@@ -1775,7 +1821,7 @@ test("picker stays within the viewport, traps focus and cancels without changing
             .querySelector(".xt-flow-bar")
             .getBoundingClientRect();
           return (
-            suggestion.width === card.width &&
+            card.width === 96 &&
             bar.right <= Math.max(...cards.map((card) => card.right)) + 1
           );
         }),
@@ -1910,10 +1956,10 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   });
   try {
     await page.locator('.xt-tile[data-date="2026-10-02"]').click();
-    const suggestions = page.locator(".xt-suggestion");
+    const suggestions = page.locator(".xt-episode[data-recommendation-rank]");
     assert.deepEqual(
       await suggestions.evaluateAll((nodes) =>
-        nodes.map((node) => node.dataset.episodeKey),
+        nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
       ),
       ["new-e1", "zulu-e4", "sparse-e2"],
     );
@@ -1957,8 +2003,10 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
     await second.page.locator('.xt-tile[data-date="2026-10-02"]').click();
     assert.deepEqual(
       await second.page
-        .locator(".xt-suggestion")
-        .evaluateAll((nodes) => nodes.map((node) => node.dataset.episodeKey)),
+        .locator(".xt-episode[data-recommendation-rank]")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
       ["young-e4", "alpha-e4", "weak-e4"],
     );
     assert.match(
@@ -1994,8 +2042,10 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
     await third.page.locator('.xt-tile[data-date="2026-10-02"]').click();
     assert.deepEqual(
       await third.page
-        .locator(".xt-suggestion")
-        .evaluateAll((nodes) => nodes.map((node) => node.dataset.episodeKey)),
+        .locator(".xt-episode[data-recommendation-rank]")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
       ["zulu-e4", "new-e1", "sparse-e2"],
       "stronger engagement changes the ranking even with unchanged view counts",
     );

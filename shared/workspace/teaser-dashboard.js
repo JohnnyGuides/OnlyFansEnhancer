@@ -1317,9 +1317,15 @@
       }
       flow.append(renderCoverageBar(ordered));
       const context = state.picking ? pickContext(state.picking.date) : null;
+      const ranked = context ? recommendations(context) : [];
+      const ranks = new Map(
+        ranked.map((entry, index) => [
+          entry.episode.itemId,
+          { ...entry, rank: index },
+        ]),
+      );
       // Each season keeps one accent across filtering and wrapped rows.
       const colours = new Map();
-      const seasons = [];
       for (const episode of ordered) {
         const key = seasonKey(episode);
         if (!colours.has(key))
@@ -1327,6 +1333,26 @@
             key,
             SEASON_COLOURS[colours.size % SEASON_COLOURS.length],
           );
+      }
+      if (context) {
+        const priority = (episode) => {
+          if (ranks.has(episode.itemId)) return ranks.get(episode.itemId).rank;
+          const pick = pickState(episode, context);
+          return (
+            ranked.length +
+            (pick === "hidden"
+              ? 3
+              : episode.readyClips > 0
+                ? pick === "dimmed"
+                  ? 1
+                  : 0
+                : 2)
+          );
+        };
+        ordered.sort((left, right) => priority(left) - priority(right));
+      }
+      const seasons = [];
+      for (const episode of ordered) {
         if (!matchesCoverage(episode, state.coverage)) continue;
         const last = seasons[seasons.length - 1];
         if (last && seasonKey(last[0]) === seasonKey(episode))
@@ -1341,6 +1367,15 @@
         const category = first.category || "Uncategorised";
         season.forEach((episode, position) => {
           const card = episodeCard(episode, context);
+          const recommendation = ranks.get(episode.itemId);
+          if (recommendation) {
+            const description = `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"} · ${recommendation.reason}. ${recommendation.detail}`;
+            const choice = card.querySelector(".xt-episode");
+            choice.dataset.recommendationRank = String(recommendation.rank);
+            choice.dataset.episodeKey = episode.sourceKey;
+            choice.title = `${episode.title} · ${description}`;
+            choice.setAttribute("aria-description", description);
+          }
           card.dataset.category = category;
           card.dataset.season = seasonKey(first);
           if (position === season.length - 1) card.dataset.seasonEnd = "true";
@@ -1636,35 +1671,7 @@
             closePicker();
         });
         picker.append(renderPicking());
-        const context = pickContext(state.picking.date);
-        const recommended = recommendations(context).slice(0, 3);
-        const shortlist = element("section", "xt-shortlist");
-        shortlist.setAttribute("aria-label", "Recommended teasers");
-        if (!recommended.length)
-          shortlist.append(
-            element(
-              "p",
-              "xt-shortlist-label",
-              "No recommendations available. Browse the catalogue below.",
-            ),
-          );
-        for (const { episode, reason, detail } of recommended) {
-          const choice = button("xt-suggestion", `Choose ${episode.title}`);
-          choice.dataset.episodeKey = episode.sourceKey;
-          const description = `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"} · ${reason}. ${detail}`;
-          choice.title = `${episode.title} · ${description}`;
-          choice.setAttribute("aria-description", description);
-          choice.append(
-            thumbnail(episode),
-            element("strong", "", episode.title),
-          );
-          choice.addEventListener(
-            "click",
-            () => void plan(state.picking.date, episode),
-          );
-          shortlist.append(choice);
-        }
-        picker.append(shortlist, renderFlow());
+        picker.append(renderFlow());
         root.append(picker);
         picker.showModal();
         if (focusKey !== "picking-start") picker.scrollTop = pickerScroll;
