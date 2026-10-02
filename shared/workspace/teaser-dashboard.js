@@ -235,6 +235,7 @@
       period: "30",
       worstFirst: false,
       historyExpanded: false,
+      historyWindow: "30",
       coverage: "all",
       picking: null,
       detail: "",
@@ -889,6 +890,32 @@
       return tile;
     }
 
+    function changeHistory(change, focusKey) {
+      const previousHeight = root
+        .querySelector(".xt-past-scroll")
+        ?.getBoundingClientRect().height;
+      change();
+      render(focusKey);
+      const panel = root.querySelector(".xt-past-scroll");
+      if (
+        !panel ||
+        previousHeight === undefined ||
+        global.matchMedia("(prefers-reduced-motion: reduce)").matches
+      )
+        return;
+      const height = panel.getBoundingClientRect().height;
+      panel.style.overflow = "hidden";
+      const animation = panel.animate(
+        [{ height: `${previousHeight}px` }, { height: `${height}px` }],
+        { duration: 280, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+      );
+      animation.finished
+        .catch(() => {})
+        .finally(() => {
+          panel.style.overflow = "";
+        });
+    }
+
     // Show the latest two weeks; older days expand inline on request.
     function renderHistoryStrip() {
       const end = addDays(today(), -7);
@@ -908,10 +935,14 @@
         HISTORY_MAX_ROWS,
         Math.ceil(total / HISTORY_ROW_DAYS),
       );
-      const start = addDays(
+      let start = addDays(
         end,
         -((state.historyExpanded ? rows : 1) * HISTORY_ROW_DAYS - 1),
       );
+      if (state.historyExpanded && state.historyWindow !== "all") {
+        const cutoff = addDays(today(), -(Number(state.historyWindow) - 1));
+        if (cutoff > start) start = cutoff;
+      }
       const scroller = element("div", "xt-past-scroll");
       scroller.dataset.expanded = String(state.historyExpanded);
       const toggle = button(
@@ -926,9 +957,35 @@
         : "Show older history";
       toggle.append(icon(state.historyExpanded ? "collapse" : "expand"));
       toggle.addEventListener("click", () => {
-        state.historyExpanded = !state.historyExpanded;
-        render("history-expand");
+        changeHistory(() => {
+          state.historyExpanded = !state.historyExpanded;
+        }, "history-expand");
       });
+      const content = element("div", "xt-past-content");
+      if (state.historyExpanded) {
+        const menu = element("div", "xt-segments xt-past-periods");
+        menu.setAttribute("role", "group");
+        menu.setAttribute("aria-label", "Earlier history period");
+        for (const [value, label] of HISTORY_PERIODS) {
+          const choice = button(
+            "xt-segment",
+            "",
+            value === "all" ? "All" : `Last ${label}`,
+          );
+          choice.dataset.key = `history-window-${value}`;
+          choice.setAttribute(
+            "aria-pressed",
+            String(state.historyWindow === value),
+          );
+          choice.addEventListener("click", () =>
+            changeHistory(() => {
+              state.historyWindow = value;
+            }, choice.dataset.key),
+          );
+          menu.append(choice);
+        }
+        content.append(menu);
+      }
       const grid = element("ol", "xt-past-list");
       grid.id = "xt-earlier-days";
       grid.setAttribute("aria-label", "Earlier days");
@@ -937,7 +994,8 @@
         item.append(historyTile(date));
         grid.append(item);
       }
-      scroller.append(toggle, grid);
+      content.append(grid);
+      scroller.append(toggle, content);
       section.append(scroller);
       return section;
     }

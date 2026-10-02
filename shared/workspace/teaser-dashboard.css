@@ -225,6 +225,19 @@
   height: 48px;
 }
 
+.xt-past-content {
+  min-width: 0;
+}
+
+.xt-past-periods {
+  margin-bottom: 12px;
+}
+
+.xt-past-periods .xt-segment {
+  padding: 3px 10px;
+  font-size: 0.75rem;
+}
+
 .xt-past-list {
   display: grid;
   grid-template-columns: repeat(14, minmax(0, 1fr));

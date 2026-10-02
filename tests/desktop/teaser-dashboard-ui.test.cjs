@@ -1172,6 +1172,42 @@ test("history calendar lines up with the week row and trend cards compare period
     });
     assert.equal(await expand.getAttribute("aria-expanded"), "false");
     await expand.click();
+    const menu = page.getByRole("group", { name: "Earlier history period" });
+    assert.deepEqual(await menu.getByRole("button").allTextContents(), [
+      "Last 30 days",
+      "Last 90 days",
+      "All",
+    ]);
+    assert.equal(
+      await days.count(),
+      23,
+      "last 30 days excludes the main seven-day row",
+    );
+    assert.ok(
+      await page
+        .locator(".xt-past-scroll")
+        .evaluate((node) =>
+          node
+            .getAnimations()
+            .some((animation) =>
+              animation.effect
+                .getKeyframes()
+                .every((frame) => typeof frame.height === "string"),
+            ),
+        ),
+      "expansion animates the panel height",
+    );
+    await menu
+      .getByRole("button", { name: "Last 90 days", exact: true })
+      .click();
+    assert.equal(await days.count(), 83);
+    await menu.getByRole("button", { name: "All", exact: true }).click();
+    await page.locator(".xt-past-scroll").evaluate(async (node) => {
+      await Promise.all(
+        node.getAnimations().map((animation) => animation.finished),
+      );
+    });
+    await screenshot(page, "M5-expanded-history.png");
     assert.equal(
       await page
         .getByRole("button", { name: "Collapse history", exact: true })
@@ -1258,6 +1294,11 @@ test("history calendar lines up with the week row and trend cards compare period
     await page
       .getByRole("button", { name: "Collapse history", exact: true })
       .click();
+    await page.locator(".xt-past-scroll").evaluate(async (node) => {
+      await Promise.all(
+        node.getAnimations().map((animation) => animation.finished),
+      );
+    });
     assert.equal(await days.count(), 14);
     assert.equal(
       await page
