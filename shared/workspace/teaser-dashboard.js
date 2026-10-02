@@ -25,6 +25,12 @@
     ["all", "All"],
   ];
   const ICONS = {
+    views:
+      "M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
+    likes:
+      "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z",
+    reposts: "M4 10V5h13m-4-4 4 4-4 4M20 14v5H7m4 4-4-4 4-4",
+    rate: "M3 12h4l3-7 4 14 3-7h4",
     expand: "M9 3H3v6m12 12h6v-6M3 3l6 6m12 12-6-6",
     collapse: "M4 9h5V4m11 11h-5v5M3 3l6 6m12 12-6-6",
     scissors:
@@ -36,7 +42,7 @@
     ["reposts", "reposts"],
     ["rate", "engagement rate"],
   ];
-  const CATEGORY_COLOURS = [
+  const SEASON_COLOURS = [
     "#00aff0",
     "#c58cff",
     "#ff8fb1",
@@ -505,6 +511,8 @@
         const value = metricValue(post, name);
         const result = tone(value, usualValue(post, name));
         const cell = element("span", "xt-number", formatMetric(name, value));
+        cell.prepend(icon(name));
+        cell.title = label;
         cell.dataset.metric = name;
         cell.dataset.tone = result;
         cell.setAttribute("role", "img");
@@ -1226,16 +1234,15 @@
       }
       flow.append(renderCoverageBar(ordered));
       const context = state.picking ? pickContext(state.picking.date) : null;
-      // Seasons pack side by side, each under one small label tinted with
-      // its category colour.
+      // Each season keeps one accent across filtering and wrapped rows.
       const colours = new Map();
       const seasons = [];
       for (const episode of ordered) {
-        const category = episode.category || "Uncategorised";
-        if (!colours.has(category))
+        const key = seasonKey(episode);
+        if (!colours.has(key))
           colours.set(
-            category,
-            CATEGORY_COLOURS[colours.size % CATEGORY_COLOURS.length],
+            key,
+            SEASON_COLOURS[colours.size % SEASON_COLOURS.length],
           );
         if (!matchesCoverage(episode, state.coverage)) continue;
         const last = seasons[seasons.length - 1];
@@ -1244,8 +1251,7 @@
         else seasons.push([episode]);
       }
       // One aligned grid of tiles: a season's title sits on the line over its
-      // first tile, never wider than the season; every tile carries a line in
-      // its category colour.
+      // first tile, never wider than the season; every tile carries its accent.
       const wall = element("ul", "xt-cards");
       for (const season of seasons) {
         const first = season[0];
@@ -1255,7 +1261,7 @@
           card.dataset.category = category;
           card.dataset.season = seasonKey(first);
           if (position === season.length - 1) card.dataset.seasonEnd = "true";
-          card.style.setProperty("--xt-category", colours.get(category));
+          card.style.setProperty("--xt-season", colours.get(seasonKey(first)));
           if (position === 0) {
             const label = element(
               "span",

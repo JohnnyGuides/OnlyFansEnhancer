@@ -587,21 +587,28 @@
 
 .xt-numbers {
   display: grid;
-  /* Content-sized columns: equal quarters clip a bold "1.15K" at tile widths. */
-  grid-template-columns: repeat(4, auto);
-  justify-content: space-between;
-  gap: 2px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
   min-height: 1.1rem;
   font-size: 0.75rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  text-align: center;
+  text-align: start;
 }
 
 .xt-number {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: clip;
+}
+
+.xt-number .xt-icon {
+  width: 10px;
+  height: 10px;
+  color: #9dabbc;
 }
 
 .xt-number[data-tone="neutral"] {
@@ -730,12 +737,12 @@
   inset-block-start: 31px;
   inset-inline: 0;
   height: 5px;
-  border-block-start: 2px solid var(--xt-category);
+  border-block-start: 2px solid var(--xt-season);
   content: "";
 }
 
 .xt-card[data-season-end="true"]::before {
-  border-inline-end: 2px solid var(--xt-category);
+  border-inline-end: 2px solid var(--xt-season);
   border-start-end-radius: 2px;
 }
 
@@ -754,7 +761,7 @@
   overflow: hidden;
   box-sizing: border-box;
   max-width: calc(var(--xt-span) * 102px - 6px);
-  color: var(--xt-category);
+  color: var(--xt-season);
   font-size: 0.7rem;
   font-weight: 650;
   line-height: 1.2;

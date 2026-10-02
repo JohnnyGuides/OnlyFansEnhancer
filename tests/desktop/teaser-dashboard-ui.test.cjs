@@ -475,6 +475,25 @@ test("timeline strip orders 7 square days and colours numbers by the usual", asy
       ),
       "week metrics are legible and fit their tile width",
     );
+    const metricLayout = await past
+      .nth(0)
+      .locator(".xt-number")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const box = node.getBoundingClientRect();
+          return {
+            x: box.x,
+            y: box.y,
+            icon: node.querySelector('svg[aria-hidden="true"]') !== null,
+          };
+        }),
+      );
+    assert.ok(metricLayout.every((metric) => metric.icon));
+    assert.equal(metricLayout[0].y, metricLayout[1].y);
+    assert.equal(metricLayout[2].y, metricLayout[3].y);
+    assert.ok(metricLayout[2].y > metricLayout[0].y);
+    assert.equal(metricLayout[0].x, metricLayout[2].x);
+    assert.equal(metricLayout[1].x, metricLayout[3].x);
     assert.match(
       await past
         .nth(0)
@@ -590,6 +609,36 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     assert.deepEqual(
       games.filter(([, end]) => end).map(([season]) => season),
       ["Series A", "Series C"],
+    );
+    const seasonAccents = await page
+      .locator(".xt-card")
+      .evaluateAll((cards) =>
+        Object.fromEntries(
+          cards.map((card) => [
+            card.dataset.season,
+            card.style.getPropertyValue("--xt-season"),
+          ]),
+        ),
+      );
+    assert.notEqual(
+      seasonAccents["Games\u0000Series A"],
+      seasonAccents["Games\u0000Series C"],
+      "seasons within one category have distinct accents",
+    );
+    assert.ok(
+      await page.locator(".xt-card").evaluateAll((cards) =>
+        cards.every(
+          (card) =>
+            getComputedStyle(card, "::before").borderTopColor ===
+            getComputedStyle(
+              cards.find(
+                (other) => other.dataset.season === card.dataset.season,
+              ),
+              "::before",
+            ).borderTopColor,
+        ),
+      ),
+      "season accents remain consistent across episode tiles and wrapped rows",
     );
     // The category line bridges gaps inside a season but never past its end.
     await page.locator(".xt-card[data-join]").first().waitFor();
@@ -779,6 +828,27 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     );
     await page.locator('.xt-segment[data-coverage="ready"]').click();
     assert.equal(await tiles.count(), 8);
+    assert.deepEqual(
+      await page
+        .locator(".xt-card")
+        .evaluateAll((cards) =>
+          cards.map((card) => [
+            card.dataset.season,
+            card.style.getPropertyValue("--xt-season"),
+          ]),
+        ),
+      await page
+        .locator(".xt-card")
+        .evaluateAll(
+          (cards, accents) =>
+            cards.map((card) => [
+              card.dataset.season,
+              accents[card.dataset.season],
+            ]),
+          seasonAccents,
+        ),
+      "filtering preserves each season's accent",
+    );
     await page.locator('.xt-segment[data-coverage="posted"]').click();
     assert.deepEqual(await shown(), Array(9).fill("used"));
     await screenshot(page, "M5-catalogue.png", true);
