@@ -730,7 +730,7 @@
       return badge;
     }
 
-    function trendMetric(list, name, label, compare, sharedCoverage) {
+    function trendMetric(list, name, label, compare) {
       const block = element("td", "xt-trend-metric");
       block.dataset.metric = name;
       if (!compare) block.dataset.baseline = "true";
@@ -742,7 +742,6 @@
         : median(list, name);
       const line = element("div", "xt-trend-line");
       line.append(element("span", "xt-trend-value", formatMetric(name, value)));
-      const caption = element("div", "xt-trend-note");
       let description = `${formatMetric(name, value)} ${label}`;
       if (!compare) {
         const mean = average(list, name);
@@ -768,14 +767,10 @@
         const badge = trendBadge(pair, name, label, list.length);
         line.append(badge);
         description += `; ${badge.title}; ${badge.textContent}`;
-        if (pair.count < list.length)
-          caption.textContent = `${pair.count} of ${list.length} compared`;
       } else if (list.length) {
         description += "; comparison unavailable";
       }
       block.append(line);
-      if (caption.textContent && (!compare || !sharedCoverage))
-        block.append(caption);
       block.title = description;
       block.setAttribute("aria-label", description);
       block.tabIndex = 0;
@@ -790,7 +785,8 @@
       table.setAttribute("aria-label", "Teaser performance by period");
       const header = element("thead", "");
       const heading = element("tr", "");
-      const metricHeading = element("th", "xt-trend-row-label", "Per teaser");
+      const metricHeading = element("th", "xt-trend-row-label");
+      metricHeading.setAttribute("aria-label", "Metric");
       metricHeading.scope = "col";
       heading.append(metricHeading);
       const at = now().getTime();
@@ -798,15 +794,6 @@
       const lists = periods.map(([days]) =>
         days === null ? posts() : postsBetween(at - days * DAY_MS, at),
       );
-      // Shared coverage is explained once, in the column header.
-      const coverage = lists.map((list, index) => {
-        if (index === 0 || !list.length) return null;
-        const counts = ["views", "likes", "reposts", "rate"].map((name) => {
-          const pair = averageAgainstUsual(list, name);
-          return pair ? (pair.usual > 0 ? pair.count : null) : 0;
-        });
-        return counts.every((count) => count === counts[0]) ? counts[0] : null;
-      });
       for (let index = 0; index < periods.length; index++) {
         const [days, label] = periods[index];
         const list = lists[index];
@@ -822,14 +809,6 @@
             `${list.length} ${list.length === 1 ? "teaser" : "teasers"}`,
           ),
         );
-        if (coverage[index] > 0 && coverage[index] < list.length)
-          head.append(
-            element(
-              "span",
-              "xt-trend-note",
-              `${coverage[index]} of ${list.length} compared`,
-            ),
-          );
         cell.append(head);
         heading.append(cell);
       }
@@ -852,7 +831,6 @@
               name,
               label.toLowerCase(),
               periods[index][0] !== null,
-              coverage[index] !== null,
             ),
           );
         body.append(row);

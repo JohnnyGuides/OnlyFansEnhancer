@@ -766,8 +766,12 @@ test("summary compares the same cohort and resists viral skew", async () => {
         .locator(".xt-trend-column")
         .nth(1)
         .locator(".xt-trend-note")
-        .textContent(),
-      "1 of 2 compared",
+        .count(),
+      0,
+    );
+    assert.doesNotMatch(
+      await page.locator(".xt-trends").textContent(),
+      /\d+ of \d+ compared/,
     );
     assert.deepEqual(errors, []);
   } finally {
@@ -839,6 +843,17 @@ test("history calendar lines up with the week row and trend cards compare period
       return [1050, 1000, 2100].map((value) => formatter.format(value));
     });
     const cards = page.locator(".xt-trend-column");
+    assert.equal(
+      await page.locator(".xt-trends thead th").first().textContent(),
+      "",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trends thead th")
+        .first()
+        .getAttribute("aria-label"),
+      "Metric",
+    );
     assert.deepEqual(
       await cards.evaluateAll((nodes) =>
         nodes.map((node) => [
