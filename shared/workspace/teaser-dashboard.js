@@ -1471,7 +1471,8 @@
     }
 
     function render(focusKey) {
-      const pickerScroll = root.querySelector(".xt-picker")?.scrollTop || 0;
+      const previousPicker = root.querySelector(".xt-picker");
+      const pickerScroll = previousPicker?.scrollTop || 0;
       const activeKey =
         focusKey ||
         (root.contains(document.activeElement)
@@ -1513,6 +1514,7 @@
       root.append(renderStrip());
       if (state.picking) {
         const picker = element("dialog", "xt-picker");
+        picker.dataset.entering = String(!previousPicker);
         picker.setAttribute("aria-label", "Choose a teaser");
         picker.addEventListener("keydown", (event) => {
           if (event.key !== "Tab") return;

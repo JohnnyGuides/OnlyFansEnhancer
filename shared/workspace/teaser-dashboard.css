@@ -881,12 +881,31 @@ html:has(.xt-picker[open]) {
   border-radius: 16px 0 0 16px;
   background: #111923;
   color: #f4f5f7;
-  transition:
-    transform 220ms ease-out,
-    opacity 220ms ease-out;
 }
 .xt-picker::backdrop {
   background: rgb(0 0 0 / 72%);
+}
+.xt-picker[data-entering="true"] {
+  animation: xt-picker-enter 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.xt-picker[data-entering="true"]::backdrop {
+  animation: xt-picker-backdrop-enter 220ms ease-out;
+}
+@keyframes xt-picker-enter {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes xt-picker-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .xt-picker .xt-picking {
   position: sticky;
@@ -965,12 +984,6 @@ html:has(.xt-picker[open]) {
 .xt-suggestion:hover {
   border-color: #65cfff;
 }
-@starting-style {
-  .xt-picker[open] {
-    transform: translateX(28px);
-    opacity: 0;
-  }
-}
 @media (max-width: 600px) {
   .xt-picker {
     width: 100%;
@@ -984,8 +997,11 @@ html:has(.xt-picker[open]) {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .xt-picker {
-    transition: none;
+  .xt-picker[data-entering="true"] {
+    animation: none;
+  }
+  .xt-picker[data-entering="true"]::backdrop {
+    animation-duration: 100ms;
   }
 }
 

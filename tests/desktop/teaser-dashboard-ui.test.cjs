@@ -1661,6 +1661,10 @@ test("focused picker recommends unused ready clips and preserves planning rules"
       "2026-10-02",
     );
     assert.equal(await pick("series-f-e2"), "hidden");
+    assert.equal(
+      await page.locator(".xt-picker").getAttribute("data-entering"),
+      "false",
+    );
     await screenshot(page, "M3-picking.png");
 
     await page.locator('.xt-episode[data-item-id="item-series-h-e1"]').click();
@@ -1774,6 +1778,54 @@ test("picker stays within the viewport, traps focus and cancels without changing
     } finally {
       await context.close();
     }
+  }
+});
+
+test("picker slides in once, keeps its place during filtering and respects reduced motion", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    const day = page.locator('.xt-tile[data-date="2026-10-02"]');
+    const animations = await day.evaluate((node) => {
+      node.click();
+      return document
+        .querySelector(".xt-picker")
+        .getAnimations()
+        .map((animation) => ({
+          name: animation.animationName,
+          frames: animation.effect.getKeyframes(),
+        }));
+    });
+    const slide = animations.find(
+      (animation) => animation.name === "xt-picker-enter",
+    );
+    assert.ok(slide, "opening starts an actual drawer animation");
+    assert.equal(slide.frames[0].transform, "translateX(100%)");
+    assert.equal(slide.frames.at(-1).transform, "translateX(0px)");
+    const picker = page.locator(".xt-picker");
+    await picker.evaluate((node) =>
+      Promise.all(node.getAnimations().map((animation) => animation.finished)),
+    );
+    await picker.locator('[data-coverage="ready"]').click();
+    assert.equal(await picker.getAttribute("data-entering"), "false");
+    assert.equal(
+      await picker.evaluate((node) => node.getAnimations().length),
+      0,
+    );
+    await page.keyboard.press("Escape");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reducedAnimations = await day.evaluate((node) => {
+      node.click();
+      return document
+        .querySelector(".xt-picker")
+        .getAnimations()
+        .map((animation) => animation.animationName);
+    });
+    assert.equal(reducedAnimations.includes("xt-picker-enter"), false);
+    assert.equal(await picker.getAttribute("data-entering"), "true");
+    await page.keyboard.press("Escape");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
   }
 });
 
