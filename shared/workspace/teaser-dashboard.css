@@ -10,6 +10,8 @@
   --xt-surface: #121720;
   --xt-accent: #65cfff;
   display: grid;
+  max-width: 100%;
+  min-width: 0;
   gap: 28px;
   color: #f4f5f7;
 }
@@ -63,7 +65,26 @@
 /* Timeline strip */
 .xt-strip {
   display: grid;
-  gap: 14px;
+  gap: 28px;
+}
+
+.xt-history-region {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.xt-week-section {
+  display: grid;
+  gap: 12px;
+}
+
+.xt-section-title {
+  margin: 0;
+  color: #c4ceda;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.4;
 }
 
 /* History strip */
@@ -116,35 +137,6 @@
 
 .xt-trend-column[data-baseline="true"] {
   width: 246px;
-}
-
-/* Review alternatives preserve the shared metric rows and column headers. */
-.xt-trends-wrap[data-comparison-style="gutters"] .xt-trends {
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.xt-trends-wrap[data-comparison-style="gutters"] .xt-trends tr > * + * {
-  border-inline-start: 6px solid #090b10;
-}
-
-.xt-trends-wrap[data-comparison-style="shading"] .xt-trends tr > :nth-child(3),
-.xt-trends-wrap[data-comparison-style="shading"] .xt-trends tr > :nth-child(5) {
-  background: #1b2430;
-}
-
-.xt-trends-wrap[data-comparison-style="dividers"] .xt-trends tr > * + * {
-  border-inline-start-color: #596575;
-}
-
-.xt-trends-wrap[data-comparison-style] .xt-trend-column[data-baseline="true"] {
-  width: 220px;
-}
-
-.xt-trends-wrap[data-comparison-style]
-  .xt-trend-metric[data-baseline="true"]
-  .xt-trend-line {
-  grid-template-columns: 50px 62px 52px;
 }
 
 .xt-trend-metric[data-baseline="true"] .xt-trend-line {
@@ -229,7 +221,6 @@
 }
 
 .xt-past-scroll {
-  margin-top: 16px;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   gap: 4px;
@@ -957,7 +948,7 @@
 }
 
 .twitter-heading {
-  max-width: none;
+  max-width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
   align-items: center;

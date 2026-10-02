@@ -787,11 +787,6 @@
     // median; period values and deltas use the same age-matched cohort.
     function renderTrends() {
       const wrap = element("div", "xt-trends-wrap");
-      const comparisonStyle =
-        options.comparisonStyle ||
-        new URLSearchParams(global.location.search).get("comparison");
-      if (["gutters", "shading", "dividers"].includes(comparisonStyle))
-        wrap.dataset.comparisonStyle = comparisonStyle;
       const table = element("table", "xt-trends");
       table.setAttribute("aria-label", "Teaser performance by period");
       const header = element("thead", "");
@@ -1001,7 +996,13 @@
       }
       content.append(grid);
       scroller.append(toggle, content);
-      section.append(scroller);
+      const historyRegion = element("section", "xt-history-region");
+      historyRegion.setAttribute("aria-label", "History");
+      historyRegion.append(
+        element("h2", "xt-section-title", "History"),
+        scroller,
+      );
+      section.append(historyRegion);
       return section;
     }
 
@@ -1019,7 +1020,15 @@
       for (let offset = 1; offset <= PICK_WINDOW_DAYS; offset++)
         next.append(nextDay(addDays(first, offset)));
       strip.append(renderHistoryStrip());
-      strip.append(past, next);
+      for (const [row, label] of [
+        [past, "Last 7 days"],
+        [next, "Next 7 days"],
+      ]) {
+        const week = element("section", "xt-week-section");
+        week.setAttribute("aria-label", label);
+        week.append(element("h2", "xt-section-title", label), row);
+        strip.append(week);
+      }
       return strip;
     }
 
