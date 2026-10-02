@@ -738,6 +738,8 @@ test("history calendar lines up with the week row and trend cards compare period
     // The overall card is the plain average teaser, with nothing to beat.
     assert.deepEqual(await metricsOf(cards.nth(0)), [
       [overallViews, "views", null, null, null],
+      ["100", "likes", null, null, null],
+      ["10", "reposts", null, null, null],
       ["11%", "engagement", null, null, null],
     ]);
     // 3 days (6004-6006) against their usual at the same age: within the
@@ -751,6 +753,20 @@ test("history calendar lines up with the week row and trend cards compare period
         `Usual views at the same age: ${usualViews}`,
       ],
       [
+        "96",
+        "likes",
+        "neutral",
+        "\u22124%",
+        "Usual likes at the same age: 100",
+      ],
+      [
+        "9",
+        "reposts",
+        "neutral",
+        "\u221210%",
+        "Usual reposts at the same age: 10",
+      ],
+      [
         "11%",
         "engagement",
         "neutral",
@@ -759,7 +775,7 @@ test("history calendar lines up with the week row and trend cards compare period
       ],
     ]);
     // 7 days engages 19% more than usual: green, in points.
-    assert.deepEqual((await metricsOf(cards.nth(2)))[1].slice(2, 4), [
+    assert.deepEqual((await metricsOf(cards.nth(2)))[3].slice(2, 4), [
       "good",
       "+2.1 pts",
     ]);
@@ -772,6 +788,22 @@ test("history calendar lines up with the week row and trend cards compare period
       assert.ok(
         Math.abs(unit.y + unit.height / 2 - value.y - value.height / 2) < 1,
         "label and value share a line",
+      );
+    }
+    for (let metric = 0; metric < 4; metric++) {
+      const rowTops = await cards.evaluateAll(
+        (nodes, index) =>
+          nodes.map(
+            (card) =>
+              card
+                .querySelectorAll(".xt-trend-metric")
+                [index].getBoundingClientRect().top,
+          ),
+        metric,
+      );
+      assert.ok(
+        Math.max(...rowTops) - Math.min(...rowTops) <= 1,
+        "metric rows align across all cards",
       );
     }
 
@@ -844,8 +876,8 @@ test("history calendar lines up with the week row and trend cards compare period
       "history uses full weekday columns",
     );
     assert.ok(
-      Math.abs(2 * postedBox.height + 4 - firstPast.width) <= 1,
-      "two history tiles and their gap match the main tile height",
+      Math.abs(postedBox.height - firstPast.width) <= 1,
+      "history tiles match the main tile height",
     );
     const visibleHistory = await page
       .locator(".xt-past-scroll")
@@ -868,10 +900,10 @@ test("history calendar lines up with the week row and trend cards compare period
       });
     assert.ok(
       visibleHistory.height <= firstPast.width + 0.1,
-      "both history rows fit within the main tile height",
+      "the history row fits within the main tile height",
     );
-    assert.equal(visibleHistory.count, 14, "exactly two weeks are visible");
-    assert.equal(visibleHistory.rows, 2, "two weekly rows are visible");
+    assert.equal(visibleHistory.count, 7, "exactly one week is visible");
+    assert.equal(visibleHistory.rows, 1, "one weekly row is visible");
     assert.ok(visibleHistory.complete, "no partial older row appears");
 
     await tile.click();

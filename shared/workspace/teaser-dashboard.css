@@ -68,9 +68,7 @@
 /* History strip */
 .xt-past {
   --xt-past-row-gap: 4px;
-  --xt-past-tile-height: calc(
-    ((100cqw - 6 * var(--xt-day-gap)) / 7 - var(--xt-past-row-gap)) / 2
-  );
+  --xt-past-tile-height: calc((100cqw - 6 * var(--xt-day-gap)) / 7);
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -138,6 +136,7 @@
 
 .xt-trend-metric {
   display: grid;
+  grid-template-rows: 22px 18px;
   gap: 1px;
 }
 
@@ -171,11 +170,16 @@
 }
 
 .xt-trend-usual {
+  min-width: 0;
+  overflow: hidden;
   color: #b5bfcc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Pill tinted like the tile numbers: green above usual, red below. */
 .xt-trend {
+  flex-shrink: 0;
   padding: 1px 7px;
   border-radius: 999px;
   background: #1d2430;
@@ -204,7 +208,7 @@
   display: flex;
   flex-direction: column-reverse;
   overflow-y: auto;
-  max-height: calc(2 * var(--xt-past-tile-height) + var(--xt-past-row-gap));
+  max-height: var(--xt-past-tile-height);
   scrollbar-width: thin;
 }
 

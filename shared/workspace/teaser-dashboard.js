@@ -735,7 +735,7 @@
         );
       if (compare) caption.append(trendBadge(pair, name, label));
       block.append(line);
-      if (caption.children.length) block.append(caption);
+      block.append(caption);
       return block;
     }
 
@@ -763,6 +763,8 @@
         card.append(
           head,
           trendMetric(list, "views", "views", days !== null),
+          trendMetric(list, "likes", "likes", days !== null),
+          trendMetric(list, "reposts", "reposts", days !== null),
           trendMetric(list, "rate", "engagement", days !== null),
         );
         row.append(card);
@@ -815,7 +817,7 @@
     }
 
     // Every day before the 7-day row, empty days included, in weekly rows
-    // whose weekdays line up with the 7-day row; newest two rows at the
+    // whose weekdays line up with the 7-day row; newest row at the
     // bottom, older rows scroll up. History is bounded in two-week blocks.
     function renderHistoryStrip() {
       const end = addDays(today(), -7);
