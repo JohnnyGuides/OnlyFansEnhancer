@@ -1,5 +1,34 @@
 # Acceptance and platform evidence
 
+## Reviewed Teasers dashboard — installed 0.20.94, 2 October 2026
+
+The owner approved the dashboard mockup and requested a normal installed update.
+The desktop and extension use the reviewed shared dashboard, including the
+comparison table, expandable square history tiles, distinct calendar sections,
+series accents and grouped metrics. Naming suggestions preserve owner edits and
+require explicit application; conflicting hints are checked independently by the
+native catalogue writer.
+
+- Release gates: lint, typecheck and formatting passed; portable suite 858 tests
+  (857 passed, no failures, one pre-stage skip); .NET 598 passed; native 31 passed;
+  Windows packaging 16 passed with two pre-stage skips. After compiling the
+  installer, all three stage-dependent installer/browser tests passed.
+- Setup SHA-256: `b5ae3277c86f76ce7f2a70cfaf2d35088a76b461098f903bd5eadb0dedd3282e`.
+  Stage manifest SHA-256:
+  `0ce1622d67181d7674084e59f21d80f769c2438781737edece3c9a2c52ab3953`.
+- Silent normal update exited 0; the installer log reports success. All 1,301
+  installed inventory files match the staged package. Thirteen settings/data
+  files were byte-identical immediately after installation, before restarting
+  the app; both existing extension manifest identities were preserved.
+- The restarted desktop runs from the permanent installation folder and its
+  native status response reports 0.20.94. Installed dashboard HTML, JavaScript
+  and CSS match the reviewed source. The owner must reload the existing Chrome
+  extension entry; no extension was removed or loaded under a new identity.
+  An unauthenticated CLI teaser query was correctly refused with
+  `extension-not-admitted`; no admitted Chrome workflow or real catalogue write
+  was exercised for this update. No public release, publication or media move
+  was performed.
+
 This is a reusable procedure, not a record of a completed test run. Automated
 commands are in [development](development.md). Product authority remains in
 [the product contract](product.md). Keep private captures outside source and
