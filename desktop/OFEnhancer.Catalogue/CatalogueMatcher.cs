@@ -192,7 +192,7 @@ internal static partial class CatalogueMatcher
         return result;
     }
 
-    private static Dictionary<string, string> ReadPrimaryAssets(SqliteConnection connection)
+    internal static Dictionary<string, string> ReadPrimaryAssets(SqliteConnection connection)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText =

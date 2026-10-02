@@ -11,10 +11,28 @@
   const ABOVE_USUAL = 1.15;
   const BELOW_USUAL = 0.8;
   const PICK_WINDOW_DAYS = 7;
+  const HISTORY_ROW_DAYS = 14;
+  const HISTORY_MAX_ROWS = 26;
+  const TREND_PERIODS = [
+    [3, "Last 3 days"],
+    [7, "Last week"],
+    [14, "Last 2 weeks"],
+    [30, "Last month"],
+  ];
   const HISTORY_PERIODS = [
     ["30", "30 days"],
     ["90", "90 days"],
     ["all", "All"],
+  ];
+  const ICONS = {
+    scissors:
+      "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M20 4 8.1 15.9 M14.5 14.5 20 20 M8.1 8.1 12 12",
+  };
+  const METRICS = [
+    ["views", "views"],
+    ["likes", "likes"],
+    ["reposts", "reposts"],
+    ["rate", "engagement rate"],
   ];
   const CATEGORY_COLOURS = [
     "#00aff0",
@@ -26,22 +44,11 @@
     "#ff9f5a",
     "#9aa8ff",
   ];
-  const ICONS = {
-    views:
-      "M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
-    likes:
-      "M12 20s-7.5-4.6-9.3-9.2A5 5 0 0 1 12 6.6a5 5 0 0 1 9.3 4.2C19.5 15.4 12 20 12 20Z",
-    reposts:
-      "M17 3l3.5 3.5L17 10 M3.5 11V9.5a3 3 0 0 1 3-3h14 M7 21l-3.5-3.5L7 14 M20.5 13v1.5a3 3 0 0 1-3 3h-14",
-    rate: "M19 5 5 19 M7 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z M17 19.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
-    scissors:
-      "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M20 4 8.1 15.9 M14.5 14.5 20 20 M8.1 8.1 12 12",
-  };
-  const METRICS = [
-    ["views", "views"],
-    ["likes", "likes"],
-    ["reposts", "reposts"],
-    ["rate", "engagement rate"],
+  const COVERAGE_FILTERS = [
+    ["needs", "Needs teasers"],
+    ["ready", "Ready to post"],
+    ["posted", "Posted"],
+    ["all", "All"],
   ];
   const POSTER_PATTERN = /^https:\/\/pbs\.twimg\.com\//;
   const SCAN_FINISHED = [
@@ -139,7 +146,8 @@
   function compact(value) {
     return new Intl.NumberFormat(undefined, {
       notation: "compact",
-      maximumFractionDigits: 1,
+      // Three significant digits keep every cell at "999K"/"1.25M" width.
+      maximumSignificantDigits: 3,
     }).format(value);
   }
 
@@ -212,6 +220,10 @@
       ((operation, payload) =>
         global.OFEnhancerHost.request(operation, payload));
     const now = options.now || (() => new Date());
+    const thumbnailUrl =
+      options.thumbnailUrl ||
+      ((assetId) =>
+        `https://thumbs.ofenhancer.local/${encodeURIComponent(assetId)}`);
     const state = {
       phase: "loading",
       active: true,
@@ -220,12 +232,14 @@
       scanMessage: "",
       period: "30",
       worstFirst: false,
+      coverage: "all",
       picking: null,
       detail: "",
       message: "",
       busy: false,
     };
     let generation = 0;
+    let wallObserver = null;
 
     root.classList.add("xt");
     root.addEventListener("keydown", (event) => {
@@ -635,19 +649,189 @@
       return badge;
     }
 
+    function shortDayLabel(value) {
+      return new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+      }).format(parseDate(value));
+    }
+
+    function average(list, name) {
+      const values = list
+        .map((post) => metricValue(post, name))
+        .filter((value) => value !== null);
+      return values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null;
+    }
+
+    function postsBetween(fromMs, toMs) {
+      return posts().filter((post) => {
+        const at = Date.parse(post.postedUtc);
+        return at > fromMs && at <= toMs;
+      });
+    }
+
+    function trendBadge(current, previous, name) {
+      const badge = element("span", "xt-trend");
+      if (current === null || previous === null || !(previous > 0)) {
+        badge.dataset.direction = "none";
+        return badge;
+      }
+      // Views change in percent; engagement in percentage points.
+      const change =
+        name === "rate" ? (current - previous) * 100 : (current / previous - 1) * 100;
+      const flat = name === "rate" ? 0.2 : 3;
+      const direction =
+        Math.abs(change) < flat ? "flat" : change > 0 ? "up" : "down";
+      badge.dataset.direction = direction;
+      const amount =
+        name === "rate"
+          ? `${Math.abs(change).toFixed(1)} pts`
+          : `${Math.abs(Math.round(change))}%`;
+      badge.append(
+        element(
+          "span",
+          "xt-trend-arrow",
+          direction === "up" ? "↑" : direction === "down" ? "↓" : "→",
+        ),
+        element("span", "xt-trend-amount", amount),
+      );
+      badge.title = `Period before: ${formatMetric(name, previous)}`;
+      return badge;
+    }
+
+    // Average views and engagement for recent periods, each compared with
+    // the period of the same length just before it.
+    function renderTrends() {
+      const row = element("ul", "xt-trends");
+      row.setAttribute("aria-label", "Recent averages");
+      const at = now().getTime();
+      for (const [days, label] of TREND_PERIODS) {
+        const current = postsBetween(at - days * DAY_MS, at);
+        const previous = postsBetween(at - 2 * days * DAY_MS, at - days * DAY_MS);
+        const card = element("li", "xt-trend-card");
+        card.append(
+          element("span", "xt-trend-label", label),
+          element(
+            "span",
+            "xt-trend-count",
+            `${current.length} ${current.length === 1 ? "teaser" : "teasers"}`,
+          ),
+        );
+        for (const [name, unit] of [
+          ["views", "views"],
+          ["rate", "engagement"],
+        ]) {
+          const value = average(current, name);
+          const line = element("span", "xt-trend-line");
+          line.append(
+            element("span", "xt-trend-value", formatMetric(name, value)),
+            element("span", "xt-trend-unit", unit),
+            trendBadge(value, average(previous, name), name),
+          );
+          card.append(line);
+        }
+        row.append(card);
+      }
+      return row;
+    }
+
+    function historyTile(date) {
+      const list = postsOn(date);
+      const post = list[0];
+      if (!post) {
+        const empty = element("span", "xt-past-tile");
+        empty.dataset.kind = "none";
+        empty.setAttribute("role", "img");
+        empty.setAttribute("aria-label", `${longDayLabel(date)}: no teaser`);
+        empty.title = longDayLabel(date);
+        empty.append(element("span", "xt-past-date", shortDayLabel(date)));
+        return empty;
+      }
+      const tile = button(
+        "xt-past-tile",
+        `${postLabel(post)}, posted ${longDayLabel(date)}`,
+      );
+      tile.title = list.map(describePost).join("\n");
+      tile.dataset.key = `past-${post.statusId}`;
+      if (post.verdict) tile.dataset.verdict = post.verdict.verdict;
+      tile.append(
+        poster(post, "xt-past-poster"),
+        element("span", "xt-past-date", shortDayLabel(date)),
+      );
+      if (list.length > 1)
+        tile.append(element("span", "xt-past-more", `+${list.length - 1}`));
+      const views = metricValue(post, "views");
+      const rate = metricValue(post, "rate");
+      const viewCell = element(
+        "span",
+        "xt-past-views",
+        formatMetric("views", views),
+      );
+      viewCell.dataset.tone = tone(views, usualValue(post, "views"));
+      const rateCell = element(
+        "span",
+        "xt-past-rate",
+        formatMetric("rate", rate),
+      );
+      rateCell.dataset.tone = tone(rate, usualValue(post, "rate"));
+      tile.append(viewCell, rateCell);
+      tile.addEventListener("click", () => {
+        state.detail = list.map(describePost).join(" | ");
+        render(tile.dataset.key);
+      });
+      return tile;
+    }
+
+    // Every day before the 7-day row, empty days included, in rows of two
+    // weeks whose weekdays line up with the 7-day row; newest row at the
+    // bottom, older rows scroll up.
+    function renderHistoryStrip() {
+      const end = addDays(today(), -7);
+      const earlier = posts().filter(
+        (post) => localDate(new Date(post.postedUtc)) <= end,
+      );
+      const section = element("div", "xt-past");
+      const head = element("div", "xt-past-head");
+      head.append(element("span", "xt-past-title", "History"));
+      section.append(head, renderTrends());
+      if (!earlier.length) return section;
+      const first = earlier.reduce((oldest, post) => {
+        const date = localDate(new Date(post.postedUtc));
+        return date < oldest ? date : oldest;
+      }, end);
+      const total =
+        Math.round((parseDate(end) - parseDate(first)) / DAY_MS) + 1;
+      const rows = Math.min(
+        HISTORY_MAX_ROWS,
+        Math.ceil(total / HISTORY_ROW_DAYS),
+      );
+      const start = addDays(end, -(rows * HISTORY_ROW_DAYS - 1));
+      head.append(
+        element(
+          "span",
+          "xt-past-range",
+          `${earlier.length} earlier ${
+            earlier.length === 1 ? "teaser" : "teasers"
+          } since ${longDayLabel(first)}`,
+        ),
+      );
+      const scroller = element("div", "xt-past-scroll");
+      const grid = element("ol", "xt-past-list");
+      grid.setAttribute("aria-label", "Earlier days");
+      for (let date = start; date <= end; date = addDays(date, 1)) {
+        const item = element("li", "xt-past-day");
+        item.append(historyTile(date));
+        grid.append(item);
+      }
+      scroller.append(grid);
+      section.append(scroller);
+      return section;
+    }
+
     function renderStrip() {
       const strip = element("div", "xt-strip");
-      const key = element("div", "xt-key");
-      key.setAttribute("role", "note");
-      key.setAttribute(
-        "aria-label",
-        "Numbers under each teaser: views, likes, reposts, engagement rate",
-      );
-      for (const [name, label] of METRICS) {
-        const item = element("span", "xt-key-item");
-        item.append(icon(name), element("span", "xt-key-text", label));
-        key.append(item);
-      }
       const first = today();
       const past = element("ol", "xt-row");
       past.dataset.row = "past";
@@ -659,7 +843,8 @@
       next.setAttribute("aria-label", "Next 7 days");
       for (let offset = 1; offset <= PICK_WINDOW_DAYS; offset++)
         next.append(nextDay(addDays(first, offset)));
-      strip.append(key, past, next);
+      strip.append(renderHistoryStrip());
+      strip.append(past, next);
       return strip;
     }
 
@@ -710,70 +895,140 @@
       return parts.join(" · ");
     }
 
+    // Catalogue gallery: every video with its thumbnail and a plain teaser
+    // status, grouped by category and season, filterable by what needs work.
+    function coverOf(episode) {
+      if (episode.usedCount > 0) return "used";
+      if (episode.readyClips > 0) return "ready";
+      return "empty";
+    }
+
+    function matchesCoverage(episode, filter) {
+      if (filter === "needs")
+        return episode.usedCount === 0 && episode.readyClips === 0;
+      if (filter === "ready") return episode.readyClips > 0;
+      if (filter === "posted") return episode.usedCount > 0;
+      return true;
+    }
+
+    function bestRate(episode) {
+      let best = null;
+      for (const post of posts()) {
+        if (post.itemId !== episode.itemId) continue;
+        const rate = metricValue(post, "rate");
+        if (rate !== null && (best === null || rate > best)) best = rate;
+      }
+      return best;
+    }
+
+    function thumbnail(episode) {
+      const frame = element("span", "xt-thumb");
+      if (episode.thumbnailAssetId) {
+        const image = element("img", "xt-thumb-image");
+        image.alt = "";
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.src = thumbnailUrl(episode.thumbnailAssetId);
+        image.addEventListener("error", () => image.remove());
+        frame.append(image);
+      }
+      return frame;
+    }
+
+    // Posted, ready and failed counts as small badges on the thumbnail.
+    function badges(episode) {
+      const row = element("span", "xt-badges");
+      const badge = (tone, text) => {
+        const node = element("span", "xt-badge", text);
+        node.dataset.tone = tone;
+        row.append(node);
+      };
+      if (episode.usedCount > 0) badge("posted", `✓${episode.usedCount}`);
+      if (episode.readyClips > 0) badge("ready", String(episode.readyClips));
+      const failed = Math.max(episode.failedCount, episode.failedClips);
+      if (failed > 0) badge("failed", `✕${failed}`);
+      return row;
+    }
+
+    function cardTooltip(episode) {
+      const parts = [episode.title];
+      if (episode.series)
+        parts.unshift(
+          episode.episode
+            ? `${episode.series} E${episode.episode}`
+            : episode.series,
+        );
+      if (episode.usedCount > 0) parts.push(`${episode.usedCount} posted`);
+      if (episode.readyClips > 0) parts.push(`${episode.readyClips} ready`);
+      const failed = Math.max(episode.failedCount, episode.failedClips);
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (parts.length === 1) parts.push("no teasers");
+      const best = bestRate(episode);
+      if (best !== null) parts.push(`best ${formatMetric("rate", best)}`);
+      return parts.join(" · ");
+    }
+
+    function renderCoverageBar(all) {
+      const bar = element("div", "xt-flow-bar");
+      bar.append(element("h2", "xt-flow-title", "Catalogue"));
+      const filters = element("div", "xt-segments");
+      filters.setAttribute("role", "group");
+      filters.setAttribute("aria-label", "Show videos");
+      for (const [value, label] of COVERAGE_FILTERS) {
+        const count = all.filter((episode) =>
+          matchesCoverage(episode, value),
+        ).length;
+        const choice = button("xt-segment", "", `${label} ${count}`);
+        choice.dataset.coverage = value;
+        choice.dataset.key = `coverage-${value}`;
+        choice.setAttribute("aria-pressed", String(value === state.coverage));
+        choice.addEventListener("click", () => {
+          state.coverage = value;
+          render(choice.dataset.key);
+        });
+        filters.append(choice);
+      }
+      bar.append(filters);
+      return bar;
+    }
+
+    function episodeCard(episode, context) {
+      const item = element("li", "xt-card");
+      const card = button("xt-episode", describeEpisode(episode));
+      card.dataset.key = `episode-${episode.itemId}`;
+      card.dataset.itemId = episode.itemId;
+      card.dataset.cover = coverOf(episode);
+      card.title = cardTooltip(episode);
+      const frame = thumbnail(episode);
+      frame.append(badges(episode));
+      card.append(frame);
+      if (context) {
+        const pick = pickState(episode, context);
+        card.dataset.pick = pick;
+        if (pick === "hidden") {
+          card.setAttribute("aria-disabled", "true");
+          card.tabIndex = -1;
+        }
+      }
+      card.addEventListener("click", () => {
+        if (state.picking) {
+          if (card.dataset.pick === "hidden") return;
+          void plan(state.picking.date, episode);
+          return;
+        }
+        state.detail = describeEpisode(episode);
+        render(card.dataset.key);
+      });
+      item.append(card);
+      return item;
+    }
+
     function renderFlow() {
       const flow = element("div", "xt-flow");
-      flow.setAttribute("role", "list");
       flow.setAttribute("aria-label", "Catalogue coverage");
       if (state.picking) flow.dataset.picking = "true";
       const ordered = orderEpisodes(episodes());
-      const context = state.picking ? pickContext(state.picking.date) : null;
-      const colours = new Map();
-      ordered.forEach((episode, index) => {
-        const category = episode.category || "Uncategorised";
-        if (!colours.has(category))
-          colours.set(
-            category,
-            CATEGORY_COLOURS[colours.size % CATEGORY_COLOURS.length],
-          );
-        const previous = ordered[index - 1];
-        const following = ordered[index + 1];
-        const cell = element("div", "xt-cell");
-        cell.setAttribute("role", "listitem");
-        cell.dataset.category = category;
-        cell.style.setProperty("--xt-category", colours.get(category));
-        if (!previous || (previous.category || "Uncategorised") !== category) {
-          cell.dataset.categoryStart = "true";
-          cell.append(element("span", "xt-category-name", category));
-        }
-        if (!following || seasonKey(following) !== seasonKey(episode))
-          cell.dataset.seasonEnd = "true";
-        const cover =
-          episode.usedCount > 0
-            ? "used"
-            : episode.readyClips > 0
-              ? "ready"
-              : "empty";
-        const square = button("xt-episode", describeEpisode(episode));
-        square.dataset.key = `episode-${episode.itemId}`;
-        square.dataset.itemId = episode.itemId;
-        square.dataset.cover = cover;
-        if (cover === "used")
-          square.append(element("span", "xt-used", String(episode.usedCount)));
-        if (episode.readyClips > 0)
-          square.append(
-            element("span", "xt-ready", String(episode.readyClips)),
-          );
-        if (context) {
-          const pick = pickState(episode, context);
-          square.dataset.pick = pick;
-          if (pick === "hidden") {
-            square.setAttribute("aria-disabled", "true");
-            square.tabIndex = -1;
-          }
-        }
-        square.addEventListener("click", () => {
-          if (state.picking) {
-            if (square.dataset.pick === "hidden") return;
-            void plan(state.picking.date, episode);
-            return;
-          }
-          state.detail = describeEpisode(episode);
-          render(square.dataset.key);
-        });
-        cell.append(square);
-        flow.append(cell);
-      });
-      if (!ordered.length)
+      if (!ordered.length) {
         flow.append(
           element(
             "p",
@@ -781,7 +1036,83 @@
             "No catalogue episodes yet. Import the catalogue first.",
           ),
         );
+        return flow;
+      }
+      flow.append(renderCoverageBar(ordered));
+      const context = state.picking ? pickContext(state.picking.date) : null;
+      // Seasons pack side by side, each under one small label tinted with
+      // its category colour.
+      const colours = new Map();
+      const seasons = [];
+      for (const episode of ordered) {
+        const category = episode.category || "Uncategorised";
+        if (!colours.has(category))
+          colours.set(
+            category,
+            CATEGORY_COLOURS[colours.size % CATEGORY_COLOURS.length],
+          );
+        if (!matchesCoverage(episode, state.coverage)) continue;
+        const last = seasons[seasons.length - 1];
+        if (last && seasonKey(last[0]) === seasonKey(episode))
+          last.push(episode);
+        else seasons.push([episode]);
+      }
+      // One aligned grid of tiles: a season's title sits on the line over its
+      // first tile, never wider than the season; every tile carries a line in
+      // its category colour.
+      const wall = element("ul", "xt-cards");
+      for (const season of seasons) {
+        const first = season[0];
+        const category = first.category || "Uncategorised";
+        season.forEach((episode, position) => {
+          const card = episodeCard(episode, context);
+          card.dataset.category = category;
+          card.dataset.season = seasonKey(first);
+          if (position === season.length - 1) card.dataset.seasonEnd = "true";
+          card.style.setProperty("--xt-category", colours.get(category));
+          if (position === 0) {
+            const label = element(
+              "span",
+              "xt-season-name",
+              first.series || category,
+            );
+            label.title = first.series
+              ? `${category} · ${first.series}`
+              : category;
+            label.style.setProperty("--xt-span", String(season.length));
+            card.dataset.seasonStart = "true";
+            card.prepend(label);
+          }
+          wall.append(card);
+        });
+      }
+      flow.append(
+        wall.children.length
+          ? wall
+          : element("p", "xt-empty", "No videos match this filter."),
+      );
+      wallObserver?.disconnect();
+      wallObserver = null;
+      if (wall.children.length && global.ResizeObserver) {
+        wallObserver = new ResizeObserver(() => joinSeasonLines(wall));
+        wallObserver.observe(wall);
+      }
       return flow;
+    }
+
+    // A season's line bridges the gap to its next tile unless the row ends
+    // there; the grid has fixed 96px columns with 6px gaps.
+    function joinSeasonLines(wall) {
+      const columns = Math.max(1, Math.floor((wall.clientWidth + 6) / 102));
+      const cards = Array.from(wall.children);
+      cards.forEach((card, index) => {
+        const next = cards[index + 1];
+        card.dataset.join = String(
+          Boolean(next) &&
+            next.dataset.season === card.dataset.season &&
+            (index + 1) % columns !== 0,
+        );
+      });
     }
 
     function performance(post) {

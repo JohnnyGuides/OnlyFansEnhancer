@@ -450,8 +450,7 @@ test("timeline strip orders 7 square days and colours numbers by the usual", asy
         .getAttribute("aria-label"),
       /views, above usual$/,
     );
-    assert.equal(await page.locator(".xt-key .xt-key-item").count(), 4);
-    assert.equal(await page.locator(".xt-key").count(), 1, "key shown once");
+    assert.equal(await page.locator(".xt-key").count(), 0, "no metric key");
 
     // Row 2: planned re-edit is faded with scissors, empty days show +.
     const planned = next.nth(2).locator(".xt-tile");
@@ -474,7 +473,7 @@ test("timeline strip orders 7 square days and colours numbers by the usual", asy
     await past.nth(0).locator(".xt-tile").click();
     assert.match(
       await page.locator(".xt-detail").textContent(),
-      /^Series A E1 · posted .* · 1\.2K views/i,
+      /^Series A E1 · posted .* · 1\.15K views/i,
     );
     assert.equal(
       await page.evaluate(

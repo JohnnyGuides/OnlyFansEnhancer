@@ -6,7 +6,7 @@ namespace OFEnhancer.Catalogue;
 
 public sealed record XTeaserEpisode(string ItemId, string SourceKey, string Title, int UsedCount, int FailedCount,
     int ReadyClips, int PostedClips, int GoodClips, int FailedClips, string? Category = null, string? Series = null,
-    string? Episode = null);
+    string? Episode = null, string? ThumbnailAssetId = null);
 
 public sealed record XTeaserMetrics(string ObservedUtc, double AgeHours, long? Views, long? Likes, long? Reposts,
     long? Replies, long? Bookmarks);
@@ -105,6 +105,7 @@ public sealed partial class CatalogueStore
             if (posts[index].Latest is { } own)
                 posts[index] = posts[index] with { Usual = Usual(posts[index].StatusId, own.AgeHours, teaserIds, samples) };
 
+        Dictionary<string, string> thumbnails = CatalogueMatcher.ReadPrimaryAssets(Connection);
         List<XTeaserEpisode> episodes = [];
         foreach (CatalogueItemSummary item in GetItems())
         {
@@ -116,7 +117,7 @@ public sealed partial class CatalogueStore
             episodes.Add(new(item.ItemId, item.SourceKey, item.Title, used.Count - failed, failed,
                 own.Count(clip => clip.State == "ready"), own.Count(clip => clip.State == "posted"),
                 own.Count(clip => clip.State == "good"), own.Count(clip => clip.State == "failed"),
-                item.Category, item.Series, item.Episode));
+                item.Category, item.Series, item.Episode, thumbnails.GetValueOrDefault(item.ItemId)));
         }
 
         List<XTeaserMove> moves = [];
