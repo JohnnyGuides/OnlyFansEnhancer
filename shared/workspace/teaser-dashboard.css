@@ -118,6 +118,35 @@
   width: 246px;
 }
 
+/* Review alternatives preserve the shared metric rows and column headers. */
+.xt-trends-wrap[data-comparison-style="gutters"] .xt-trends {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.xt-trends-wrap[data-comparison-style="gutters"] .xt-trends tr > * + * {
+  border-inline-start: 6px solid #090b10;
+}
+
+.xt-trends-wrap[data-comparison-style="shading"] .xt-trends tr > :nth-child(3),
+.xt-trends-wrap[data-comparison-style="shading"] .xt-trends tr > :nth-child(5) {
+  background: #1b2430;
+}
+
+.xt-trends-wrap[data-comparison-style="dividers"] .xt-trends tr > * + * {
+  border-inline-start-color: #596575;
+}
+
+.xt-trends-wrap[data-comparison-style] .xt-trend-column[data-baseline="true"] {
+  width: 220px;
+}
+
+.xt-trends-wrap[data-comparison-style]
+  .xt-trend-metric[data-baseline="true"]
+  .xt-trend-line {
+  grid-template-columns: 50px 62px 52px;
+}
+
 .xt-trend-metric[data-baseline="true"] .xt-trend-line {
   grid-template-columns: 56px 78px 52px;
   gap: 6px;

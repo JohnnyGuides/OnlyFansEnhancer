@@ -249,6 +249,7 @@ async function openDashboard({
   viewport,
   slots,
   overviewExtra = {},
+  comparisonStyle,
 } = {}) {
   const context = await browser.newContext({
     viewport: viewport || { width: 1200, height: 900 },
@@ -349,7 +350,9 @@ async function openDashboard({
     };
   });
   if (area === "desktop") {
-    await page.goto(`http://127.0.0.1:${port}/desktop/index.html`);
+    await page.goto(
+      `http://127.0.0.1:${port}/desktop/index.html${comparisonStyle ? `?comparison=${comparisonStyle}` : ""}`,
+    );
     await page.getByRole("button", { name: "Teasers", exact: true }).click();
   } else {
     await page.goto(`http://127.0.0.1:${port}/extension/teaser-dashboard.html`);
@@ -903,6 +906,70 @@ test("young teasers omit comparison copy and preserve even medians", async () =>
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
+  }
+});
+
+test("comparison review alternatives preserve aligned rows and compact metrics", async () => {
+  for (const style of ["gutters", "shading", "dividers"]) {
+    const { page, context, errors } = await openDashboard({
+      comparisonStyle: style,
+      viewport: { width: 1280, height: 900 },
+    });
+    try {
+      assert.equal(
+        await page
+          .locator(".xt-trends-wrap")
+          .getAttribute("data-comparison-style"),
+        style,
+      );
+      const cells = await page
+        .locator(".xt-trends tbody tr")
+        .evaluateAll((rows) =>
+          rows.map((row) =>
+            [...row.querySelectorAll("td")].map((cell) => {
+              const r = cell.getBoundingClientRect();
+              const spans = [
+                ...cell.querySelectorAll(".xt-trend-line > span"),
+              ].map((n) => n.getBoundingClientRect());
+              return {
+                top: r.top,
+                right: r.right,
+                spans: spans.map((s) => ({ right: s.right, left: s.left })),
+              };
+            }),
+          ),
+        );
+      for (const row of cells) {
+        assert.ok(row.every((cell) => Math.abs(cell.top - row[0].top) < 1));
+        assert.ok(
+          row.every((cell) =>
+            cell.spans.every((span) => span.right <= cell.right + 1),
+          ),
+          "metrics fit within each column",
+        );
+      }
+      const column = page.locator(".xt-trend-column").nth(1);
+      const actual = await column.evaluate((n) => ({
+        border: getComputedStyle(n).borderInlineStartWidth,
+        color: getComputedStyle(n).borderInlineStartColor,
+        background: getComputedStyle(n).backgroundColor,
+      }));
+      if (style === "gutters") assert.equal(actual.border, "6px");
+      if (style === "shading")
+        assert.equal(actual.background, "rgb(27, 36, 48)");
+      if (style === "dividers") assert.equal(actual.color, "rgb(89, 101, 117)");
+      await screenshot(page, `comparison-${style}.png`);
+      await page.setViewportSize({ width: 390, height: 900 });
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        true,
+      );
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
   }
 });
 

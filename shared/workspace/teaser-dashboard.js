@@ -787,6 +787,11 @@
     // median; period values and deltas use the same age-matched cohort.
     function renderTrends() {
       const wrap = element("div", "xt-trends-wrap");
+      const comparisonStyle =
+        options.comparisonStyle ||
+        new URLSearchParams(global.location.search).get("comparison");
+      if (["gutters", "shading", "dividers"].includes(comparisonStyle))
+        wrap.dataset.comparisonStyle = comparisonStyle;
       const table = element("table", "xt-trends");
       table.setAttribute("aria-label", "Teaser performance by period");
       const header = element("thead", "");
