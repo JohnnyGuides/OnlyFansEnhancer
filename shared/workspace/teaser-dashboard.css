@@ -66,7 +66,8 @@
 
 /* History strip */
 .xt-past {
-  --xt-past-tile-height: 60px;
+  --xt-past-tile-height: 100px;
+  --xt-past-row-gap: 4px;
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -152,13 +153,18 @@
 }
 
 .xt-trend-unit {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
   color: var(--xt-muted);
   font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.xt-trend-comparison {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .xt-trend-usual {
@@ -195,14 +201,14 @@
   display: flex;
   flex-direction: column-reverse;
   overflow-y: auto;
-  max-height: var(--xt-past-tile-height);
+  max-height: calc(2 * var(--xt-past-tile-height) + var(--xt-past-row-gap));
   scrollbar-width: thin;
 }
 
 .xt-past-list {
   display: grid;
-  grid-template-columns: repeat(14, minmax(0, 1fr));
-  gap: 4px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--xt-past-row-gap);
   margin: 0;
   padding: 0;
   list-style: none;

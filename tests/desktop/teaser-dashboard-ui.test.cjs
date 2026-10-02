@@ -745,14 +745,14 @@ test("history calendar lines up with the week row and trend cards compare period
     assert.deepEqual(await metricsOf(cards.nth(1)), [
       [
         "943",
-        `viewsusual ${usualViews}`,
+        "views",
         "neutral",
         "\u22126%",
         `Usual views at the same age: ${usualViews}`,
       ],
       [
         "11%",
-        "engagementusual 11%",
+        "engagement",
         "neutral",
         "+0.3 pts",
         "Usual engagement at the same age: 11%",
@@ -763,6 +763,17 @@ test("history calendar lines up with the week row and trend cards compare period
       "good",
       "+2.1 pts",
     ]);
+    for (const metric of await page.locator(".xt-trend-metric").all()) {
+      const [value, unit] = await Promise.all([
+        metric.locator(".xt-trend-value").boundingBox(),
+        metric.locator(".xt-trend-unit").boundingBox(),
+      ]);
+      assert.ok(unit.x >= value.x + value.width, "label is right of its value");
+      assert.ok(
+        Math.abs(unit.y + unit.height / 2 - value.y - value.height / 2) < 1,
+        "label and value share a line",
+      );
+    }
 
     // Days before the 7-day row, oldest first, in two-week rows ending the
     // day before the row; the first post (3 Jun) falls in the oldest row.
@@ -822,12 +833,17 @@ test("history calendar lines up with the week row and trend cards compare period
         .evaluate((node) => getComputedStyle(node).borderTopStyle),
       "dashed",
     );
-    // Each history row is two weeks wide with the same weekday columns as the 7-day row.
+    // Each history row has seven larger tiles aligned with the 7-day row.
     const [firstPast, firstHistory] = await Promise.all([
       page.locator('[data-row="past"] > li').first().boundingBox(),
       page.locator(".xt-past-list > li").nth(14).boundingBox(),
     ]);
     assert.ok(Math.abs(firstPast.x - firstHistory.x) <= 1, "columns line up");
+    assert.ok(
+      postedBox.width >= firstPast.width,
+      "history uses full weekday columns",
+    );
+    assert.equal(postedBox.height, 100, "history tiles are larger");
     const visibleHistory = await page
       .locator(".xt-past-scroll")
       .evaluate((node) => {
@@ -840,18 +856,16 @@ test("history calendar lines up with the week row and trend cards compare period
         return {
           height: viewport.height,
           count: visible.length,
+          rows: new Set(visible.map((tile) => tile.top)).size,
           complete: visible.every(
             (tile) =>
               tile.top >= viewport.top && tile.bottom <= viewport.bottom,
           ),
         };
       });
-    assert.equal(visibleHistory.height, 60);
-    assert.equal(
-      visibleHistory.count,
-      14,
-      "exactly one two-week row is visible",
-    );
+    assert.equal(visibleHistory.height, 204);
+    assert.equal(visibleHistory.count, 14, "exactly two weeks are visible");
+    assert.equal(visibleHistory.rows, 2, "two weekly rows are visible");
     assert.ok(visibleHistory.complete, "no partial older row appears");
 
     await tile.click();

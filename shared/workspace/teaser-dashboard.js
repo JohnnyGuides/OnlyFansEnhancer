@@ -719,11 +719,12 @@
       const block = element("div", "xt-trend-metric");
       const value = average(list, name);
       const line = element("div", "xt-trend-line");
-      line.append(element("span", "xt-trend-value", formatMetric(name, value)));
+      line.append(
+        element("span", "xt-trend-value", formatMetric(name, value)),
+        element("span", "xt-trend-unit", label),
+      );
       const pair = compare ? averageAgainstUsual(list, name) : null;
-      if (compare) line.append(trendBadge(pair, name, label));
-      const caption = element("div", "xt-trend-unit");
-      caption.append(element("span", "", label));
+      const caption = element("div", "xt-trend-comparison");
       if (pair && pair.usual > 0)
         caption.append(
           element(
@@ -732,7 +733,9 @@
             `usual ${formatMetric(name, pair.usual)}`,
           ),
         );
-      block.append(line, caption);
+      if (compare) caption.append(trendBadge(pair, name, label));
+      block.append(line);
+      if (caption.children.length) block.append(caption);
       return block;
     }
 
@@ -811,9 +814,9 @@
       return tile;
     }
 
-    // Every day before the 7-day row, empty days included, in rows of two
-    // weeks whose weekdays line up with the 7-day row; newest row at the
-    // bottom, older rows scroll up.
+    // Every day before the 7-day row, empty days included, in weekly rows
+    // whose weekdays line up with the 7-day row; newest two rows at the
+    // bottom, older rows scroll up. History is bounded in two-week blocks.
     function renderHistoryStrip() {
       const end = addDays(today(), -7);
       const earlier = posts().filter(
