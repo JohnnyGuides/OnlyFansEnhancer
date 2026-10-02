@@ -1115,8 +1115,8 @@ test("history calendar lines up with the week row and trend cards compare period
       /^Thu,? 24 Sept: no teaser$/,
     );
     assert.equal(
-      await page.locator(".xt-past-range").last().textContent(),
-      "5 earlier teasers",
+      await page.locator(".xt-past-head, .xt-past-range").count(),
+      0,
     );
     const posted = page.locator(".xt-past-tile[data-key]");
     assert.deepEqual(
@@ -1532,12 +1532,20 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
       const scan = page.locator(".xt-scan-text");
       assert.equal(
         await scan.textContent(),
-        "Last scan 1 Oct, 11:01 · 41 posts · 2 scheduled",
+        "Scan 1 Oct, 11:01 · 41 posts · 2 scheduled",
       );
       const pending = page.locator(".xt-scan-state");
       assert.equal(await pending.isVisible(), false);
-      // Text, muted pending state and a right-aligned button share one row.
-      const button = page.getByRole("button", { name: "Scan now" });
+      // Scan aligns with the title; status is secondary beneath it.
+      const button = page.getByRole("button", { name: "Scan", exact: true });
+      assert.equal(
+        await page
+          .locator(".twitter-heading")
+          .getByRole("button", { name: "Scan", exact: true })
+          .count(),
+        1,
+        "scan action belongs to the title header",
+      );
       await button.click();
       await page.waitForFunction(
         () =>
@@ -1545,26 +1553,33 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
           "Scan requested…",
       );
       assert.equal(await pending.isVisible(), true);
-      const [textBox, pendingBox, buttonBox, barBox] = await Promise.all([
-        scan.boundingBox(),
-        pending.boundingBox(),
-        button.boundingBox(),
-        page.locator(".xt-scan").boundingBox(),
-      ]);
+      const [textBox, pendingBox, buttonBox, headingBox, titleBox] =
+        await Promise.all([
+          scan.boundingBox(),
+          pending.boundingBox(),
+          button.boundingBox(),
+          page.locator(".twitter-heading").boundingBox(),
+          page.locator(".twitter-heading h1").boundingBox(),
+        ]);
       assert.ok(
         Math.abs(
-          textBox.y + textBox.height / 2 - (buttonBox.y + buttonBox.height / 2),
-        ) < 4,
-      );
-      assert.ok(
-        Math.abs(
-          pendingBox.y +
-            pendingBox.height / 2 -
+          titleBox.y +
+            titleBox.height / 2 -
             (buttonBox.y + buttonBox.height / 2),
-        ) < 4,
+        ) < 1,
+        "Scan is vertically aligned with the title",
       );
       assert.ok(
-        Math.abs(buttonBox.x + buttonBox.width - (barBox.x + barBox.width)) < 2,
+        textBox.y >= titleBox.y + titleBox.height &&
+          pendingBox.y >= textBox.y + textBox.height &&
+          Math.abs(textBox.x - titleBox.x) < 1,
+        "status and pending feedback sit beneath the title",
+      );
+      assert.ok(
+        Math.abs(
+          buttonBox.x + buttonBox.width - (headingBox.x + headingBox.width),
+        ) < 2,
+        "Scan aligns with the dashboard's right edge",
       );
       assert.equal(
         await pending.evaluate((node) => getComputedStyle(node).color),
@@ -1617,10 +1632,32 @@ test("a failed scan is shown plainly", async () => {
     const scan = page.locator(".xt-scan-text");
     assert.equal(
       await scan.textContent(),
-      "Last scan 1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
+      "Scan 1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
     );
     assert.equal(await page.locator(".xt-scan-state").isVisible(), false);
     assert.equal(await scan.getAttribute("data-tone"), "warn");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("an interrupted scan uses concise status copy", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      scan: {
+        last: {
+          startedUtc: "2026-10-01T11:00:00.000Z",
+          outcome: "user-took-over",
+        },
+      },
+    },
+  });
+  try {
+    assert.equal(
+      await page.locator(".xt-scan-text").textContent(),
+      "Scan 1 Oct, 11:00 · stopped (tab opened)",
+    );
     assert.deepEqual(errors, []);
   } finally {
     await context.close();

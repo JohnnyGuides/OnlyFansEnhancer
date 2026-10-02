@@ -63,7 +63,7 @@
     "signed-out": "signed out of X",
     "no-timeline": "profile did not load",
     timeout: "took too long",
-    "user-took-over": "stopped, you opened the scan tab",
+    "user-took-over": "stopped (tab opened)",
     error: "X error",
   };
 
@@ -461,9 +461,7 @@
       const parts = [];
       const finished = last && SCAN_FINISHED.includes(last.outcome);
       if (last) {
-        parts.push(
-          `Last scan ${stampLabel(last.finishedUtc || last.startedUtc)}`,
-        );
+        parts.push(`Scan ${stampLabel(last.finishedUtc || last.startedUtc)}`);
         if (finished) {
           parts.push(`${last.rows} posts`);
           if (typeof last.scheduled === "number")
@@ -488,7 +486,7 @@
       );
       pending.setAttribute("role", "status");
       pending.hidden = !pending.textContent;
-      const action = button("xt-action", "", "Scan now");
+      const action = button("xt-action", "", "Scan");
       action.dataset.key = "scan-now";
       action.addEventListener("click", () => void scanNow());
       bar.append(text, pending, action);
@@ -892,16 +890,7 @@
         (post) => localDate(new Date(post.postedUtc)) <= end,
       );
       const section = element("div", "xt-past");
-      const head = element("div", "xt-past-head");
-      head.append(
-        element("span", "xt-past-title", "History"),
-        element(
-          "span",
-          "xt-past-range",
-          "Overall median · recent averages vs usual at the same age",
-        ),
-      );
-      section.append(head, renderTrends());
+      section.append(renderTrends());
       if (!earlier.length) return section;
       const first = earlier.reduce((oldest, post) => {
         const date = localDate(new Date(post.postedUtc));
@@ -914,15 +903,6 @@
         Math.ceil(total / HISTORY_ROW_DAYS),
       );
       const start = addDays(end, -(rows * HISTORY_ROW_DAYS - 1));
-      head.append(
-        element(
-          "span",
-          "xt-past-range",
-          `${earlier.length} earlier ${
-            earlier.length === 1 ? "teaser" : "teasers"
-          }`,
-        ),
-      );
       const scroller = element("div", "xt-past-scroll");
       const grid = element("ol", "xt-past-list");
       grid.setAttribute("aria-label", "Earlier days");
@@ -1364,6 +1344,8 @@
           ? document.activeElement?.dataset?.key
           : "");
       root.replaceChildren();
+      const heading = root.parentElement.querySelector(".twitter-heading");
+      heading?.querySelector(".xt-scan")?.remove();
       root.dataset.state = state.phase;
       const status = element("p", "xt-status", "");
       status.setAttribute("role", "status");
@@ -1390,8 +1372,9 @@
       if (state.phase === "loading") return;
       const detail = element("p", "xt-detail", state.detail);
       detail.setAttribute("role", "status");
+      if (heading) heading.append(renderScan());
+      else root.append(renderScan());
       root.append(
-        renderScan(),
         renderStrip(),
         renderPicking(),
         renderFlow(),
@@ -1399,7 +1382,7 @@
         renderHistory(),
       );
       if (activeKey) {
-        const target = root.querySelector(
+        const target = root.parentElement.querySelector(
           `[data-key="${CSS.escape(activeKey)}"]`,
         );
         target?.focus?.({ preventScroll: focusKey !== "picking-start" });
