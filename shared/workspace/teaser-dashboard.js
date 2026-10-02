@@ -63,7 +63,7 @@
     "signed-out": "signed out of X",
     "no-timeline": "profile did not load",
     timeout: "took too long",
-    "user-took-over": "stopped (tab opened)",
+    "user-took-over": "stopped",
     error: "X error",
   };
 
@@ -461,7 +461,7 @@
       const parts = [];
       const finished = last && SCAN_FINISHED.includes(last.outcome);
       if (last) {
-        parts.push(`Scan ${stampLabel(last.finishedUtc || last.startedUtc)}`);
+        parts.push(stampLabel(last.finishedUtc || last.startedUtc));
         if (finished) {
           parts.push(`${last.rows} posts`);
           if (typeof last.scheduled === "number")
@@ -478,7 +478,9 @@
       } else parts.push("No scan yet");
       const text = element("p", "xt-scan-text", parts.join(" · "));
       text.setAttribute("role", "status");
-      if (last && !finished) text.dataset.tone = "warn";
+      if (last?.outcome === "user-took-over")
+        text.title = "Scan stopped because you opened the scan tab.";
+      else if (last && !finished) text.dataset.tone = "warn";
       const pending = element(
         "span",
         "xt-scan-state",

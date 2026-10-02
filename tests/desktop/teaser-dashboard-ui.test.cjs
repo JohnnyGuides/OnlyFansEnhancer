@@ -1532,7 +1532,7 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
       const scan = page.locator(".xt-scan-text");
       assert.equal(
         await scan.textContent(),
-        "Scan 1 Oct, 11:01 · 41 posts · 2 scheduled",
+        "1 Oct, 11:01 · 41 posts · 2 scheduled",
       );
       const pending = page.locator(".xt-scan-state");
       assert.equal(await pending.isVisible(), false);
@@ -1570,10 +1570,12 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
         "Scan is vertically aligned with the title",
       );
       assert.ok(
-        textBox.y >= titleBox.y + titleBox.height &&
-          pendingBox.y >= textBox.y + textBox.height &&
-          Math.abs(textBox.x - titleBox.x) < 1,
-        "status and pending feedback sit beneath the title",
+        Math.abs(
+          textBox.y + textBox.height / 2 - buttonBox.y - buttonBox.height / 2,
+        ) < 1 &&
+          Math.abs(buttonBox.x - textBox.x - textBox.width - 16) < 1 &&
+          pendingBox.y >= buttonBox.y + buttonBox.height,
+        "status sits directly left of Scan, with pending feedback underneath",
       );
       assert.ok(
         Math.abs(
@@ -1632,7 +1634,7 @@ test("a failed scan is shown plainly", async () => {
     const scan = page.locator(".xt-scan-text");
     assert.equal(
       await scan.textContent(),
-      "Scan 1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
+      "1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
     );
     assert.equal(await page.locator(".xt-scan-state").isVisible(), false);
     assert.equal(await scan.getAttribute("data-tone"), "warn");
@@ -1656,7 +1658,15 @@ test("an interrupted scan uses concise status copy", async () => {
   try {
     assert.equal(
       await page.locator(".xt-scan-text").textContent(),
-      "Scan 1 Oct, 11:00 · stopped (tab opened)",
+      "1 Oct, 11:00 · stopped",
+    );
+    assert.equal(
+      await page.locator(".xt-scan-text").getAttribute("title"),
+      "Scan stopped because you opened the scan tab.",
+    );
+    assert.equal(
+      await page.locator(".xt-scan-text").getAttribute("data-tone"),
+      null,
     );
     assert.deepEqual(errors, []);
   } finally {
