@@ -1621,6 +1621,19 @@ test("focused picker recommends unused ready clips and preserves planning rules"
       true,
     );
     assert.equal(await page.locator(".xt-suggestion").count(), 3);
+    assert.deepEqual(await page.locator(".xt-suggestion").allTextContents(), [
+      "Series G E1",
+      "Series H E1",
+      "Series F E1",
+    ]);
+    assert.equal(await page.locator(".xt-shortlist-label").count(), 0);
+    assert.match(
+      await page
+        .locator(".xt-suggestion")
+        .first()
+        .getAttribute("aria-description"),
+      /1 ready clip/,
+    );
     assert.equal(
       await page
         .locator(".xt-picker img")
@@ -1905,16 +1918,19 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
       ["new-e1", "zulu-e4", "sparse-e2"],
     );
     assert.match(
-      await suggestions.nth(0).textContent(),
+      await suggestions.nth(0).getAttribute("title"),
       /Category above usual/,
     );
     assert.match(
       await suggestions.nth(1).getAttribute("title"),
       /3 comparable posts/,
     );
-    assert.match(await suggestions.nth(1).textContent(), /Series above usual/);
     assert.match(
-      await suggestions.nth(2).textContent(),
+      await suggestions.nth(1).getAttribute("title"),
+      /Series above usual/,
+    );
+    assert.match(
+      await suggestions.nth(2).getAttribute("title"),
       /No comparable history/,
     );
     // Remove the insufficient/unknown candidates to reveal the weaker series.
@@ -1946,7 +1962,9 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
       ["young-e4", "alpha-e4", "weak-e4"],
     );
     assert.match(
-      await second.page.locator('[data-episode-key="weak-e4"]').textContent(),
+      await second.page
+        .locator('[data-episode-key="weak-e4"]')
+        .getAttribute("title"),
       /Series below usual/,
     );
     assert.deepEqual(second.errors, []);

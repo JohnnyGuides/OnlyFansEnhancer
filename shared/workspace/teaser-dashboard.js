@@ -1640,28 +1640,23 @@
         const recommended = recommendations(context).slice(0, 3);
         const shortlist = element("section", "xt-shortlist");
         shortlist.setAttribute("aria-label", "Recommended teasers");
-        shortlist.append(
-          element(
-            "p",
-            "xt-shortlist-label",
-            recommended.length
-              ? "Ready clips from series not used recently"
-              : "No unused ready clips in quiet categories. Browse the catalogue below.",
-          ),
-        );
+        if (!recommended.length)
+          shortlist.append(
+            element(
+              "p",
+              "xt-shortlist-label",
+              "No recommendations available. Browse the catalogue below.",
+            ),
+          );
         for (const { episode, reason, detail } of recommended) {
           const choice = button("xt-suggestion", `Choose ${episode.title}`);
           choice.dataset.episodeKey = episode.sourceKey;
-          choice.title = `${episode.title} · ${reason}. ${detail}`;
+          const description = `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"} · ${reason}. ${detail}`;
+          choice.title = `${episode.title} · ${description}`;
+          choice.setAttribute("aria-description", description);
           choice.append(
             thumbnail(episode),
             element("strong", "", episode.title),
-            element(
-              "span",
-              "",
-              `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"}`,
-            ),
-            element("span", "xt-suggestion-reason", reason),
           );
           choice.addEventListener(
             "click",

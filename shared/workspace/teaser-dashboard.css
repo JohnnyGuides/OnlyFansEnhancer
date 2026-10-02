@@ -972,15 +972,10 @@ html:has(.xt-picker[open]) {
   background: #192733;
   text-align: left;
 }
-.xt-suggestion strong,
-.xt-suggestion > span:not(.xt-thumb) {
+.xt-suggestion strong {
   padding-inline: 4px;
   font-size: 0.65rem;
   overflow-wrap: anywhere;
-}
-.xt-suggestion > span:not(.xt-thumb) {
-  color: #b6c3d1;
-  font-size: 0.65rem;
 }
 .xt-suggestion strong {
   display: -webkit-box;
