@@ -70,21 +70,46 @@
 
 .xt-history-region {
   display: grid;
-  gap: 12px;
   margin-top: 24px;
+  padding-block: 8px;
+  border-radius: 10px;
+  background: #0d121a;
+}
+
+.xt-calendar {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #293545;
+  border-radius: 16px;
+  background: #0f151e;
 }
 
 .xt-week-section {
-  display: grid;
-  gap: 12px;
+  min-width: 0;
+  padding: 14px 12px;
 }
 
-.xt-section-title {
-  margin: 0;
-  color: #c4ceda;
-  font-size: 1rem;
-  font-weight: 650;
-  line-height: 1.4;
+.xt-week-section[data-period="next"] {
+  padding-block: 20px 16px;
+  background: #14212c;
+}
+
+.xt-week-section[data-period="past"] .xt-tile[data-kind="none"] {
+  border-style: solid;
+  background: #141b25;
+}
+
+.xt-week-section[data-period="next"] .xt-date {
+  color: #b4cbdc;
+}
+
+.xt-week-section[data-period="next"] .xt-tile[data-kind="empty"] {
+  background: #0d1721;
+  border-color: #526b80;
+}
+
+.xt-flow {
+  margin-top: 12px;
 }
 
 /* History strip */

@@ -998,10 +998,7 @@
       scroller.append(toggle, content);
       const historyRegion = element("section", "xt-history-region");
       historyRegion.setAttribute("aria-label", "History");
-      historyRegion.append(
-        element("h2", "xt-section-title", "History"),
-        scroller,
-      );
+      historyRegion.append(scroller);
       section.append(historyRegion);
       return section;
     }
@@ -1020,15 +1017,18 @@
       for (let offset = 1; offset <= PICK_WINDOW_DAYS; offset++)
         next.append(nextDay(addDays(first, offset)));
       strip.append(renderHistoryStrip());
+      const calendar = element("div", "xt-calendar");
       for (const [row, label] of [
         [past, "Last 7 days"],
         [next, "Next 7 days"],
       ]) {
         const week = element("section", "xt-week-section");
         week.setAttribute("aria-label", label);
-        week.append(element("h2", "xt-section-title", label), row);
-        strip.append(week);
+        week.dataset.period = row.dataset.row;
+        week.append(row);
+        calendar.append(week);
       }
+      strip.append(calendar);
       return strip;
     }
 

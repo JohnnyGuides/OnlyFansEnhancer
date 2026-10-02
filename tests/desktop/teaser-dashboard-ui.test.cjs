@@ -913,10 +913,47 @@ test("page sections distinguish history, recent days, upcoming days and catalogu
   try {
     assert.deepEqual(
       await page.locator(".xt-section-title, .xt-flow-title").allTextContents(),
-      ["History", "Last 7 days", "Next 7 days", "Catalogue"],
+      ["Catalogue"],
+    );
+    assert.deepEqual(
+      await page
+        .locator(".xt-history-region, .xt-week-section")
+        .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label"))),
+      ["History", "Last 7 days", "Next 7 days"],
+      "regions remain named for accessibility",
+    );
+    const surfaces = await page
+      .locator(
+        ".xt-calendar, .xt-week-section[data-period='next'], .xt-history-region",
+      )
+      .evaluateAll((nodes) =>
+        nodes.map((n) => getComputedStyle(n).backgroundColor),
+      );
+    assert.equal(
+      new Set(surfaces).size,
+      3,
+      "history, posted days and upcoming days use distinct surfaces",
+    );
+    assert.equal(
+      await page
+        .locator(
+          '.xt-week-section[data-period="past"] .xt-tile[data-kind="posted"]',
+        )
+        .first()
+        .evaluate((n) => getComputedStyle(n).borderTopStyle),
+      "solid",
+    );
+    assert.equal(
+      await page
+        .locator(
+          '.xt-week-section[data-period="next"] .xt-tile[data-kind="empty"]',
+        )
+        .first()
+        .evaluate((n) => getComputedStyle(n).borderTopStyle),
+      "dashed",
     );
     const regions = await page
-      .locator(".xt-history-region, .xt-week-section, .xt-flow")
+      .locator(".xt-history-region, .xt-calendar, .xt-flow")
       .evaluateAll((nodes) =>
         nodes.map((node) => {
           const box = node.getBoundingClientRect();
@@ -1332,7 +1369,11 @@ test("history calendar lines up with the week row and trend cards compare period
       page.locator(".xt-past-list > li").nth(14).boundingBox(),
     ]);
     assert.ok(
-      Math.abs(firstPast.x + 28 - firstHistory.x) <= 1,
+      Math.abs(
+        (await page.locator(".xt-past-expand").boundingBox()).x +
+          28 -
+          firstHistory.x,
+      ) <= 1,
       "history leaves a slim control on the left",
     );
     assert.ok(
