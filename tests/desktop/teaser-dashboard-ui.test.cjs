@@ -998,15 +998,21 @@ test("history calendar lines up with the week row and trend cards compare period
       for (const cell of await row.locator("td").all()) {
         const delta = cell.locator(".xt-trend");
         if (!(await delta.count())) continue;
-        const [cellBox, deltaBox] = await Promise.all([
+        const [cellBox, valueBox, deltaBox] = await Promise.all([
           cell.boundingBox(),
+          cell.locator(".xt-trend-value").boundingBox(),
           delta.boundingBox(),
         ]);
+        const overall = (await cell.getAttribute("data-baseline")) === "true";
         assert.ok(
-          Math.abs(
-            cellBox.x + cellBox.width - 14 - deltaBox.x - deltaBox.width,
-          ) < 1,
-          "changes align at the right of each column",
+          Math.abs(valueBox.x - cellBox.x - 14) < 1 &&
+            Math.abs(deltaBox.x - valueBox.x - (overall ? 146 : 56)) < 1,
+          "values and changes use compact, uniform tracks anchored left",
+        );
+        assert.equal(
+          await delta.evaluate((node) => getComputedStyle(node).textAlign),
+          "start",
+          "change text starts at the same position regardless of its length",
         );
       }
     }
@@ -1059,6 +1065,26 @@ test("history calendar lines up with the week row and trend cards compare period
         }),
       ),
       "summary has no horizontal dividers",
+    );
+    assert.ok(
+      await page
+        .locator(".xt-trends tr > * + *")
+        .evaluateAll((nodes) =>
+          nodes.every(
+            (node) => getComputedStyle(node).borderInlineStartWidth === "1px",
+          ),
+        ),
+      "vertical separators distinguish each comparison column",
+    );
+    assert.notEqual(
+      await page
+        .locator(".xt-trend-column")
+        .nth(1)
+        .evaluate((node) => getComputedStyle(node).backgroundColor),
+      await page
+        .locator(".xt-trends-wrap")
+        .evaluate((node) => getComputedStyle(node).backgroundColor),
+      "period headers have a distinct surface from the metrics",
     );
     for (const row of await page.locator(".xt-trends tbody tr").all()) {
       const rowTops = await row

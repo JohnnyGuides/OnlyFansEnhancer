@@ -116,6 +116,15 @@
 
 .xt-trends thead th {
   padding-block: 14px;
+  background: #1c2430;
+}
+
+.xt-trends tr > * + * {
+  border-inline-start: 1px solid var(--xt-line);
+}
+
+.xt-trends .xt-trend-row-label {
+  background: #0e131b;
 }
 
 .xt-trends [data-baseline="true"] {
@@ -127,7 +136,7 @@
 }
 
 .xt-trend-metric[data-baseline="true"] .xt-trend-line {
-  grid-template-columns: minmax(0, 1fr) 78px 52px;
+  grid-template-columns: 56px 78px 52px;
   gap: 6px;
 }
 
@@ -160,7 +169,8 @@
 
 .xt-trend-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 52px;
+  grid-template-columns: 50px 52px;
+  justify-content: start;
   align-items: center;
   gap: 6px;
 }
@@ -195,7 +205,7 @@
   font-size: 0.75rem;
   font-weight: 500;
   white-space: nowrap;
-  text-align: end;
+  text-align: start;
 }
 
 .xt-trend[data-tone="good"] {
