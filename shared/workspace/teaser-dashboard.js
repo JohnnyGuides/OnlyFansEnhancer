@@ -746,8 +746,13 @@
       let description = `${formatMetric(name, value)} ${label}`;
       if (!compare) {
         const mean = average(list, name);
-        caption.textContent = `avg ${formatMetric(name, mean)}`;
-        description = `Median ${description}; ${caption.textContent}`;
+        const averagePill = element(
+          "span",
+          "xt-trend-average",
+          `avg ${formatMetric(name, mean)}`,
+        );
+        line.append(averagePill);
+        description = `Median ${description}; ${averagePill.textContent}`;
         if (value !== null && mean > 0) {
           const badge = trendBadge(
             { value, usual: mean },

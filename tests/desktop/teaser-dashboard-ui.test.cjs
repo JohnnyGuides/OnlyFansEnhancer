@@ -730,7 +730,7 @@ test("summary compares the same cohort and resists viral skew", async () => {
       compact[1],
     );
     assert.equal(
-      await overall.locator(".xt-trend-note").textContent(),
+      await overall.locator(".xt-trend-average").textContent(),
       `avg ${compact[2]}`,
     );
     assert.equal(await overall.locator(".xt-trend").textContent(), "\u221291%");
@@ -889,10 +889,41 @@ test("history calendar lines up with the week row and trend cards compare period
       await page
         .locator('.xt-trend-metric[data-baseline="true"]')
         .first()
-        .locator(".xt-trend-note")
+        .locator(".xt-trend-average")
         .textContent(),
       `avg ${overallViews}`,
     );
+    for (const cell of await page
+      .locator('.xt-trend-metric[data-baseline="true"]')
+      .all()) {
+      assert.deepEqual(
+        await cell
+          .locator(".xt-trend-line > span")
+          .evaluateAll((nodes) => nodes.map((node) => node.className)),
+        ["xt-trend-value", "xt-trend-average", "xt-trend"],
+      );
+      const [value, average, delta] = await Promise.all([
+        cell.locator(".xt-trend-value").boundingBox(),
+        cell.locator(".xt-trend-average").boundingBox(),
+        cell.locator(".xt-trend").boundingBox(),
+      ]);
+      assert.ok(
+        average.x >= value.x + value.width &&
+          delta.x >= average.x + average.width,
+        "average pill follows the value, then the change",
+      );
+      assert.ok(
+        Math.abs(value.y + value.height / 2 - average.y - average.height / 2) <=
+          1,
+        "average pill stays on the value's line",
+      );
+      assert.equal(
+        await cell
+          .locator(".xt-trend-average")
+          .evaluate((node) => getComputedStyle(node).borderRadius),
+        "999px",
+      );
+    }
     // 3 days (6004-6006) against their usual at the same age: within the
     // grey band, so neither green nor red.
     assert.deepEqual(await metricsOf(1), [

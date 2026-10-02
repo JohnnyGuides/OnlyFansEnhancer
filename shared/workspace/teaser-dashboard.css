@@ -100,7 +100,7 @@
 
 .xt-trends {
   width: 100%;
-  min-width: 680px;
+  min-width: 840px;
   border-collapse: collapse;
   table-layout: fixed;
   font-variant-numeric: tabular-nums;
@@ -119,6 +119,16 @@
 
 .xt-trends [data-baseline="true"] {
   background: #15212a;
+}
+
+.xt-trend-column[data-baseline="true"] {
+  width: 230px;
+}
+
+.xt-trend-metric[data-baseline="true"] .xt-trend-line {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .xt-trend-head {
@@ -161,6 +171,17 @@
 
 .xt-trend-note {
   margin-top: 4px;
+}
+
+.xt-trend-average {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #253440;
+  color: #b5bfcc;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .xt-trend-metric:focus-visible {
