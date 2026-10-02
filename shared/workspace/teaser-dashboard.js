@@ -884,9 +884,8 @@
       return tile;
     }
 
-    // Every day before the 7-day row, empty days included, in weekly rows
-    // whose weekdays line up with the 7-day row; newest row at the
-    // bottom, older rows scroll up. History is bounded in two-week blocks.
+    // Every day before the 7-day row, empty days included, in compact
+    // two-week rows; newest row at the bottom, older rows scroll up.
     function renderHistoryStrip() {
       const end = addDays(today(), -7);
       const earlier = posts().filter(
@@ -1213,6 +1212,8 @@
     // there; the grid has fixed 96px columns with 6px gaps.
     function joinSeasonLines(wall) {
       const columns = Math.max(1, Math.floor((wall.clientWidth + 6) / 102));
+      const bar = wall.parentElement.querySelector(".xt-flow-bar");
+      if (bar) bar.style.width = `${columns * 102 - 6}px`;
       const cards = Array.from(wall.children);
       cards.forEach((card, index) => {
         const next = cards[index + 1];

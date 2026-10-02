@@ -647,6 +647,31 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     );
 
     const filters = page.locator(".xt-flow-bar .xt-segment");
+    await page.waitForFunction(
+      () => document.querySelector(".xt-flow-bar").style.width,
+    );
+    const catalogueEdges = await page.evaluate(() => ({
+      gallery: Math.max(
+        ...[...document.querySelectorAll(".xt-card")].map(
+          (node) => node.getBoundingClientRect().right,
+        ),
+      ),
+      filters: Math.max(
+        ...[...document.querySelectorAll(".xt-flow-bar .xt-segment")].map(
+          (node) => node.getBoundingClientRect().right,
+        ),
+      ),
+      header: document.querySelector(".xt-flow-bar").getBoundingClientRect()
+        .right,
+    }));
+    assert.ok(
+      catalogueEdges.filters <= catalogueEdges.gallery + 1,
+      "filter pills stay within the gallery edge",
+    );
+    assert.ok(
+      Math.abs(catalogueEdges.header - catalogueEdges.gallery) <= 1,
+      "catalogue header aligns with full tile columns",
+    );
     assert.deepEqual(await filters.allTextContents(), [
       "Needs teasers 9",
       "Ready to post 8",
@@ -843,6 +868,20 @@ test("history calendar lines up with the week row and trend cards compare period
       return [1050, 1000, 2100].map((value) => formatter.format(value));
     });
     const cards = page.locator(".xt-trend-column");
+    for (const header of await cards.all()) {
+      const [label, count] = await Promise.all([
+        header.locator(".xt-trend-label").boundingBox(),
+        header.locator(".xt-trend-count").boundingBox(),
+      ]);
+      assert.ok(
+        count.x >= label.x + label.width,
+        "teaser count is right of the period",
+      );
+      assert.ok(
+        Math.abs(count.y - label.y) < 4,
+        "teaser count shares the heading line",
+      );
+    }
     assert.equal(
       await page.locator(".xt-trends thead th").first().textContent(),
       "",
@@ -938,6 +977,38 @@ test("history calendar lines up with the week row and trend cards compare period
           .evaluate((node) => getComputedStyle(node).borderRadius),
         "999px",
       );
+    }
+    const pillGeometry = await page
+      .locator(".xt-trend-average")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const rect = node.getBoundingClientRect();
+          return [rect.x, rect.width, rect.height];
+        }),
+      );
+    assert.ok(
+      pillGeometry.every((geometry) =>
+        geometry.every(
+          (value, index) => Math.abs(value - pillGeometry[0][index]) < 1,
+        ),
+      ),
+      "average pills have uniform size and alignment",
+    );
+    for (const row of await page.locator(".xt-trends tbody tr").all()) {
+      for (const cell of await row.locator("td").all()) {
+        const delta = cell.locator(".xt-trend");
+        if (!(await delta.count())) continue;
+        const [cellBox, deltaBox] = await Promise.all([
+          cell.boundingBox(),
+          delta.boundingBox(),
+        ]);
+        assert.ok(
+          Math.abs(
+            cellBox.x + cellBox.width - 14 - deltaBox.x - deltaBox.width,
+          ) < 1,
+          "changes align at the right of each column",
+        );
+      }
     }
     // 3 days (6004-6006) against their usual at the same age: within the
     // grey band, so neither green nor red.
@@ -1066,12 +1137,12 @@ test("history calendar lines up with the week row and trend cards compare period
     ]);
     assert.ok(Math.abs(firstPast.x - firstHistory.x) <= 1, "columns line up");
     assert.ok(
-      postedBox.width >= firstPast.width,
-      "history uses full weekday columns",
+      postedBox.width < firstPast.width,
+      "history keeps the compact two-week layout",
     );
     assert.ok(
-      Math.abs(postedBox.height - firstPast.width) <= 1,
-      "history tiles match the main tile height",
+      postedBox.height === 72,
+      "history tiles are slightly taller than the original 60px tiles",
     );
     const visibleHistory = await page
       .locator(".xt-past-scroll")
@@ -1096,9 +1167,15 @@ test("history calendar lines up with the week row and trend cards compare period
       visibleHistory.height <= firstPast.width + 0.1,
       "the history row fits within the main tile height",
     );
-    assert.equal(visibleHistory.count, 7, "exactly one week is visible");
+    assert.equal(visibleHistory.count, 14, "exactly two weeks are visible");
     assert.equal(visibleHistory.rows, 1, "one weekly row is visible");
     assert.ok(visibleHistory.complete, "no partial older row appears");
+    const comparison = await page.locator(".xt-trends-wrap").boundingBox();
+    const history = await page.locator(".xt-past-scroll").boundingBox();
+    assert.ok(
+      history.y - comparison.y - comparison.height >= 20,
+      "comparison and history have breathing room",
+    );
 
     await tile.click();
     assert.match(
@@ -1121,10 +1198,7 @@ test("history calendar lines up with the week row and trend cards compare period
         sizes.history <= sizes.main + 0.1,
         `history fits the main tile at ${width}px`,
       );
-      assert.ok(
-        Math.abs(sizes.history - sizes.main) <= 1,
-        `history scales with the main tile at ${width}px`,
-      );
+      assert.equal(sizes.history, 72, `history stays compact at ${width}px`);
     }
     assert.deepEqual(errors, []);
   } finally {
