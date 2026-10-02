@@ -14,10 +14,10 @@
   const HISTORY_ROW_DAYS = 14;
   const HISTORY_MAX_ROWS = 26;
   const TREND_PERIODS = [
-    [3, "Last 3 days"],
-    [7, "Last week"],
-    [14, "Last 2 weeks"],
-    [30, "Last month"],
+    [3, "3 days"],
+    [7, "7 days"],
+    [14, "14 days"],
+    [30, "30 days"],
   ];
   const HISTORY_PERIODS = [
     ["30", "30 days"],
@@ -665,6 +665,23 @@
         : null;
     }
 
+    // Each post's number set against what teasers usually had at the same
+    // age, so a young teaser is not judged against fully grown ones.
+    function averageAgainstUsual(list, name) {
+      let value = 0;
+      let usual = 0;
+      let count = 0;
+      for (const post of list) {
+        const own = metricValue(post, name);
+        const typical = usualValue(post, name);
+        if (own === null || typical === null) continue;
+        value += own;
+        usual += typical;
+        count++;
+      }
+      return count ? { value: value / count, usual: usual / count } : null;
+    }
+
     function postsBetween(fromMs, toMs) {
       return posts().filter((post) => {
         const at = Date.parse(post.postedUtc);
@@ -672,71 +689,79 @@
       });
     }
 
-    function trendBadge(current, previous, name) {
+    // Same colours as the tiles: green 15% above the usual, red 20% below.
+    function trendBadge(pair, name, label) {
       const badge = element("span", "xt-trend");
-      if (current === null || previous === null || !(previous > 0)) {
-        badge.dataset.direction = "none";
+      if (!pair || !(pair.usual > 0)) {
+        badge.dataset.tone = "none";
         return badge;
       }
+      const result = tone(pair.value, pair.usual);
+      badge.dataset.tone = result;
       // Views change in percent; engagement in percentage points.
       const change =
         name === "rate"
-          ? (current - previous) * 100
-          : (current / previous - 1) * 100;
-      const flat = name === "rate" ? 0.2 : 3;
-      const direction =
-        Math.abs(change) < flat ? "flat" : change > 0 ? "up" : "down";
-      badge.dataset.direction = direction;
-      const amount =
+          ? (pair.value - pair.usual) * 100
+          : (pair.value / pair.usual - 1) * 100;
+      const sign = change >= 0 ? "+" : "\u2212";
+      badge.textContent =
         name === "rate"
-          ? `${Math.abs(change).toFixed(1)} pts`
-          : `${Math.abs(Math.round(change))}%`;
-      badge.append(
-        element(
-          "span",
-          "xt-trend-arrow",
-          direction === "up" ? "↑" : direction === "down" ? "↓" : "→",
-        ),
-        element("span", "xt-trend-amount", amount),
-      );
-      badge.title = `Period before: ${formatMetric(name, previous)}`;
+          ? `${sign}${Math.abs(change).toFixed(1)} pts`
+          : `${sign}${Math.abs(Math.round(change))}%`;
+      badge.title = `Usual ${label} at the same age: ${formatMetric(
+        name,
+        pair.usual,
+      )}`;
       return badge;
     }
 
-    // Average views and engagement for recent periods, each compared with
-    // the period of the same length just before it.
+    function trendMetric(list, name, label, compare) {
+      const block = element("div", "xt-trend-metric");
+      const value = average(list, name);
+      const line = element("div", "xt-trend-line");
+      line.append(element("span", "xt-trend-value", formatMetric(name, value)));
+      const pair = compare ? averageAgainstUsual(list, name) : null;
+      if (compare) line.append(trendBadge(pair, name, label));
+      const caption = element("div", "xt-trend-unit");
+      caption.append(element("span", "", label));
+      if (pair && pair.usual > 0)
+        caption.append(
+          element(
+            "span",
+            "xt-trend-usual",
+            `usual ${formatMetric(name, pair.usual)}`,
+          ),
+        );
+      block.append(line, caption);
+      return block;
+    }
+
+    // Your average teaser first, then recent periods, each compared with
+    // what teasers usually had at the same age.
     function renderTrends() {
       const row = element("ul", "xt-trends");
-      row.setAttribute("aria-label", "Recent averages");
+      row.setAttribute("aria-label", "Average numbers per teaser");
       const at = now().getTime();
-      for (const [days, label] of TREND_PERIODS) {
-        const current = postsBetween(at - days * DAY_MS, at);
-        const previous = postsBetween(
-          at - 2 * days * DAY_MS,
-          at - days * DAY_MS,
-        );
+      const periods = [[null, "Overall"], ...TREND_PERIODS];
+      for (const [days, label] of periods) {
+        const list =
+          days === null ? posts() : postsBetween(at - days * DAY_MS, at);
         const card = element("li", "xt-trend-card");
-        card.append(
+        if (days === null) card.dataset.baseline = "true";
+        const head = element("div", "xt-trend-head");
+        head.append(
           element("span", "xt-trend-label", label),
           element(
             "span",
             "xt-trend-count",
-            `${current.length} ${current.length === 1 ? "teaser" : "teasers"}`,
+            `${list.length} ${list.length === 1 ? "teaser" : "teasers"}`,
           ),
         );
-        for (const [name, unit] of [
-          ["views", "views"],
-          ["rate", "engagement"],
-        ]) {
-          const value = average(current, name);
-          const line = element("span", "xt-trend-line");
-          line.append(
-            element("span", "xt-trend-value", formatMetric(name, value)),
-            element("span", "xt-trend-unit", unit),
-            trendBadge(value, average(previous, name), name),
-          );
-          card.append(line);
-        }
+        card.append(
+          head,
+          trendMetric(list, "views", "views", days !== null),
+          trendMetric(list, "rate", "engagement", days !== null),
+        );
         row.append(card);
       }
       return row;
@@ -751,7 +776,6 @@
         empty.setAttribute("role", "img");
         empty.setAttribute("aria-label", `${longDayLabel(date)}: no teaser`);
         empty.title = longDayLabel(date);
-        empty.append(element("span", "xt-past-date", shortDayLabel(date)));
         return empty;
       }
       const tile = button(
@@ -761,10 +785,7 @@
       tile.title = list.map(describePost).join("\n");
       tile.dataset.key = `past-${post.statusId}`;
       if (post.verdict) tile.dataset.verdict = post.verdict.verdict;
-      tile.append(
-        poster(post, "xt-past-poster"),
-        element("span", "xt-past-date", shortDayLabel(date)),
-      );
+      tile.append(poster(post, "xt-past-poster"));
       if (list.length > 1)
         tile.append(element("span", "xt-past-more", `+${list.length - 1}`));
       const views = metricValue(post, "views");
@@ -799,7 +820,14 @@
       );
       const section = element("div", "xt-past");
       const head = element("div", "xt-past-head");
-      head.append(element("span", "xt-past-title", "History"));
+      head.append(
+        element("span", "xt-past-title", "History"),
+        element(
+          "span",
+          "xt-past-range",
+          "Average per teaser; usual is what teasers had at the same age.",
+        ),
+      );
       section.append(head, renderTrends());
       if (!earlier.length) return section;
       const first = earlier.reduce((oldest, post) => {
@@ -825,9 +853,22 @@
       const scroller = element("div", "xt-past-scroll");
       const grid = element("ol", "xt-past-list");
       grid.setAttribute("aria-label", "Earlier days");
+      let column = 0;
       for (let date = start; date <= end; date = addDays(date, 1)) {
         const item = element("li", "xt-past-day");
-        item.append(historyTile(date));
+        // The day sits above the picture; the month starts each row and
+        // marks the 1st.
+        const rowStart = column++ % HISTORY_ROW_DAYS === 0;
+        const caption = element(
+          "span",
+          "xt-past-date",
+          rowStart || date.endsWith("-01")
+            ? shortDayLabel(date)
+            : String(parseDate(date).getDate()),
+        );
+        caption.setAttribute("aria-hidden", "true");
+        if (date.endsWith("-01")) caption.dataset.month = "true";
+        item.append(caption, historyTile(date));
         grid.append(item);
       }
       scroller.append(grid);
@@ -984,7 +1025,8 @@
         const count = all.filter((episode) =>
           matchesCoverage(episode, value),
         ).length;
-        const choice = button("xt-segment", "", `${label} ${count}`);
+        const choice = button("xt-segment", "", `${label} `);
+        choice.append(element("span", "xt-segment-count", String(count)));
         choice.dataset.coverage = value;
         choice.dataset.key = `coverage-${value}`;
         choice.setAttribute("aria-pressed", String(value === state.coverage));

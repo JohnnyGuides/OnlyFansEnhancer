@@ -523,6 +523,34 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
       8,
       "every season ends with a capped line",
     );
+    // A long title wraps to at most two lines inside its season, resting on
+    // the season line instead of running past it.
+    const long = await page
+      .locator('.xt-card[data-season-start="true"] .xt-season-name')
+      .last()
+      .evaluate((label) => {
+        label.textContent =
+          "Fallen Angel Marielle - Ascend The Futanari Tower Of Doom";
+        const box = label.getBoundingClientRect();
+        const card = label.parentElement.getBoundingClientRect();
+        const lineHeight = parseFloat(getComputedStyle(label).lineHeight);
+        return {
+          lines: Math.round(box.height / lineHeight),
+          clipped: label.scrollHeight > label.clientHeight,
+          inside: box.right <= card.right + 0.5,
+          abovePicture:
+            box.bottom <=
+            label.parentElement
+              .querySelector(".xt-episode")
+              .getBoundingClientRect().top,
+        };
+      });
+    assert.deepEqual(long, {
+      lines: 2,
+      clipped: true,
+      inside: true,
+      abovePicture: true,
+    });
     const games = await page
       .locator('.xt-card[data-category="Games"]')
       .evaluateAll((cards) =>
@@ -680,28 +708,52 @@ test("history calendar lines up with the week row and trend cards compare period
         ]),
       ),
       [
-        ["Last 3 days", "3 teasers"],
-        ["Last week", "6 teasers"],
-        ["Last 2 weeks", "7 teasers"],
-        ["Last month", "8 teasers"],
+        ["Overall", "11 teasers"],
+        ["3 days", "3 teasers"],
+        ["7 days", "6 teasers"],
+        ["14 days", "7 teasers"],
+        ["30 days", "8 teasers"],
       ],
     );
-    // Last 3 days (6004-6006) against the 3 days before (6001-6003).
-    const lines = await cards
-      .first()
-      .locator(".xt-trend-line")
-      .evaluateAll((nodes) =>
-        nodes.map((node) => [
-          node.querySelector(".xt-trend-value").textContent,
-          node.querySelector(".xt-trend-unit").textContent,
-          node.querySelector(".xt-trend").dataset.direction,
-          node.querySelector(".xt-trend").textContent,
-          node.querySelector(".xt-trend").title,
-        ]),
-      );
-    assert.deepEqual(lines, [
-      ["943", "views", "down", "↓13%", "Period before: 1.09K"],
-      ["11%", "engagement", "down", "↓2.7 pts", "Period before: 14%"],
+    const metricsOf = (card) =>
+      card
+        .locator(".xt-trend-metric")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => [
+            node.querySelector(".xt-trend-value").textContent,
+            node.querySelector(".xt-trend-unit").textContent,
+            node.querySelector(".xt-trend")?.dataset.tone ?? null,
+            node.querySelector(".xt-trend")?.textContent ?? null,
+            node.querySelector(".xt-trend")?.title ?? null,
+          ]),
+        );
+    // The overall card is the plain average teaser, with nothing to beat.
+    assert.deepEqual(await metricsOf(cards.nth(0)), [
+      ["1.05K", "views", null, null, null],
+      ["11%", "engagement", null, null, null],
+    ]);
+    // 3 days (6004-6006) against their usual at the same age: within the
+    // grey band, so neither green nor red.
+    assert.deepEqual(await metricsOf(cards.nth(1)), [
+      [
+        "943",
+        "viewsusual 1K",
+        "neutral",
+        "\u22126%",
+        "Usual views at the same age: 1K",
+      ],
+      [
+        "11%",
+        "engagementusual 11%",
+        "neutral",
+        "+0.3 pts",
+        "Usual engagement at the same age: 11%",
+      ],
+    ]);
+    // 7 days engages 19% more than usual: green, in points.
+    assert.deepEqual((await metricsOf(cards.nth(2)))[1].slice(2, 4), [
+      "good",
+      "+2.1 pts",
     ]);
 
     // Days before the 7-day row, oldest first, in two-week rows ending the
@@ -720,7 +772,7 @@ test("history calendar lines up with the week row and trend cards compare period
       "Thu, 24 Sept: no teaser",
     );
     assert.equal(
-      await page.locator(".xt-past-range").textContent(),
+      await page.locator(".xt-past-range").last().textContent(),
       "5 earlier teasers since Wed, 3 Jun",
     );
     const posted = page.locator(".xt-past-tile[data-key]");
@@ -732,7 +784,20 @@ test("history calendar lines up with the week row and trend cards compare period
     );
     const tile = page.locator('.xt-past-tile[data-key="past-5002"]');
     assert.equal(await tile.getAttribute("data-verdict"), "good");
-    assert.equal(await tile.locator(".xt-past-date").textContent(), "11 Sept");
+    // The date sits above the picture, never on it; the month starts each
+    // two-week row and marks the 1st.
+    assert.equal(await tile.locator(".xt-past-date").count(), 0);
+    assert.equal(
+      await tile.locator("xpath=preceding-sibling::span").textContent(),
+      "11 Sept",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-past-list > li > .xt-past-date[data-month]")
+        .first()
+        .textContent(),
+      "1 Jun",
+    );
     assert.equal(await tile.locator(".xt-past-views").textContent(), "2.1K");
     assert.equal(
       await tile.locator(".xt-past-views").getAttribute("data-tone"),

@@ -98,68 +98,95 @@
 
 .xt-trend-card {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 8px;
-  padding: 8px 10px;
+  min-width: 0;
+  align-content: start;
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid var(--xt-line);
   border-radius: 10px;
   background: var(--xt-surface);
 }
 
+/* The reference card: your average teaser, no comparison. */
+.xt-trend-card[data-baseline="true"] {
+  border-color: #35657a;
+  background: #111d27;
+}
+
+.xt-trend-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+
 .xt-trend-label {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
 .xt-trend-count {
   color: var(--xt-muted);
-  font-size: 0.68rem;
-  text-align: end;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.xt-trend-metric {
+  display: grid;
+  gap: 1px;
 }
 
 .xt-trend-line {
   display: flex;
-  grid-column: 1 / -1;
-  align-items: baseline;
-  gap: 5px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-variant-numeric: tabular-nums;
 }
 
 .xt-trend-value {
-  font-size: 1rem;
+  font-size: 1.15rem;
   font-weight: 750;
+  line-height: 1.2;
 }
 
 .xt-trend-unit {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
   color: var(--xt-muted);
-  font-size: 0.68rem;
-}
-
-.xt-trend {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 2px;
-  margin-inline-start: auto;
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.xt-trend-arrow {
-  font-size: 1rem;
-  line-height: 1;
+.xt-trend-usual {
+  color: #b5bfcc;
 }
 
-.xt-trend[data-direction="up"] {
+/* Pill tinted like the tile numbers: green above usual, red below. */
+.xt-trend {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #1d2430;
+  color: var(--xt-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.xt-trend[data-tone="none"] {
+  display: none;
+}
+
+.xt-trend[data-tone="good"] {
+  background: rgb(82 209 155 / 16%);
   color: var(--xt-good);
 }
 
-.xt-trend[data-direction="down"] {
+.xt-trend[data-tone="bad"] {
+  background: rgb(240 114 114 / 16%);
   color: var(--xt-bad);
-}
-
-.xt-trend[data-direction="flat"] {
-  color: var(--xt-muted);
 }
 
 /* Newest row at the bottom: a reversed column starts scrolled to the end. */
@@ -167,7 +194,7 @@
   display: flex;
   flex-direction: column-reverse;
   overflow-y: auto;
-  max-height: 128px;
+  max-height: 160px;
   scrollbar-width: thin;
 }
 
@@ -182,7 +209,9 @@
 }
 
 .xt-past-day {
-  display: block;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .xt-past-tile {
@@ -204,11 +233,6 @@
 
 .xt-past-tile[data-kind="none"]::after {
   content: none;
-}
-
-.xt-past-tile[data-kind="none"] .xt-past-date {
-  background: none;
-  color: #4a5363;
 }
 
 .xt-past-more {
@@ -235,7 +259,7 @@
 
 .xt-past-tile::after {
   position: absolute;
-  inset: 45% 0 0;
+  inset: 60% 0 0;
   background: linear-gradient(transparent, rgb(0 0 0 / 85%));
   content: "";
 }
@@ -247,7 +271,6 @@
   object-fit: cover;
 }
 
-.xt-past-date,
 .xt-past-views,
 .xt-past-rate {
   position: absolute;
@@ -260,13 +283,20 @@
   text-shadow: 0 1px 2px rgb(0 0 0 / 90%);
 }
 
+/* Above the picture so it never covers it. */
 .xt-past-date {
-  inset-block-start: 3px;
-  inset-inline-start: 3px;
-  padding: 2px 3px;
-  border-radius: 3px;
-  background: rgb(0 0 0 / 60%);
-  text-shadow: none;
+  overflow: hidden;
+  color: var(--xt-muted);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xt-past-date[data-month="true"] {
+  color: #c3ccd8;
+  font-weight: 700;
 }
 
 .xt-past-views {
@@ -516,8 +546,35 @@
   font-weight: 650;
 }
 
+.xt-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 6px 4px 14px;
+  border: 1px solid #3a4352;
+  border-radius: 999px;
+  background: #151a23;
+  font-size: 0.82rem;
+}
+
+.xt-segment:not(:has(.xt-segment-count)) {
+  padding-inline-end: 14px;
+}
+
+.xt-segment-count {
+  min-width: 1.6em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #232b38;
+  color: #c3ccd8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .xt-action,
-.xt-segment,
 .xt-remake {
   min-height: 32px;
   padding: 5px 12px;
@@ -565,12 +622,12 @@
 .xt-card {
   position: relative;
   width: 96px;
-  padding-block-start: 20px;
+  padding-block-start: 38px;
 }
 
 .xt-card::before {
   position: absolute;
-  inset-block-start: 15px;
+  inset-block-start: 31px;
   inset-inline: 0;
   height: 5px;
   border-block-start: 2px solid var(--xt-category);
@@ -586,23 +643,26 @@
   inset-inline-end: -6px;
 }
 
+/* Up to two lines whose last line rests on the season line; the full
+   name is in the tooltip. */
 .xt-season-name {
   position: absolute;
   z-index: 1;
-  inset-block-start: 9px;
+  inset-block-start: 29px;
   inset-inline-start: 0;
+  display: -webkit-box;
   overflow: hidden;
   box-sizing: border-box;
   max-width: calc(var(--xt-span) * 102px - 6px);
-  padding-inline-end: 6px;
-  /* Page colour hides the line under the title, so the line starts after it. */
-  background: #090b10;
   color: var(--xt-category);
   font-size: 0.7rem;
   font-weight: 650;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  transform: translateY(-100%);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .xt-episode {
@@ -712,12 +772,19 @@
 
 .xt-segments {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .xt-segment[aria-pressed="true"] {
-  border-color: #35657a;
-  background: #172733;
+  border-color: var(--xt-accent);
+  background: #13303f;
+  color: #ffffff;
+}
+
+.xt-segment[aria-pressed="true"] .xt-segment-count {
+  background: var(--xt-accent);
+  color: #06121a;
 }
 
 .xt-history-list {
