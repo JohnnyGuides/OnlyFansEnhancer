@@ -1076,15 +1076,16 @@ test("history calendar lines up with the week row and trend cards compare period
         ),
       "vertical separators distinguish each comparison column",
     );
-    assert.notEqual(
+    assert.equal(
       await page
         .locator(".xt-trend-column")
         .nth(1)
         .evaluate((node) => getComputedStyle(node).backgroundColor),
       await page
-        .locator(".xt-trends-wrap")
+        .locator(".xt-trends tbody td")
+        .nth(1)
         .evaluate((node) => getComputedStyle(node).backgroundColor),
-      "period headers have a distinct surface from the metrics",
+      "period headers share the metrics' background",
     );
     for (const row of await page.locator(".xt-trends tbody tr").all()) {
       const rowTops = await row
