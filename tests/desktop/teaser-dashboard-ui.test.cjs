@@ -733,6 +733,15 @@ test("summary compares the same cohort and resists viral skew", async () => {
       await overall.locator(".xt-trend-note").textContent(),
       `avg ${compact[2]}`,
     );
+    assert.equal(await overall.locator(".xt-trend").textContent(), "\u221291%");
+    assert.equal(
+      await overall.locator(".xt-trend").getAttribute("data-tone"),
+      "bad",
+    );
+    assert.equal(
+      await overall.locator(".xt-trend").getAttribute("title"),
+      `Median views vs average ${compact[2]}`,
+    );
     const recent = page
       .locator(".xt-trends tbody tr")
       .first()
@@ -766,7 +775,7 @@ test("summary compares the same cohort and resists viral skew", async () => {
   }
 });
 
-test("young teasers explain missing comparisons and even medians", async () => {
+test("young teasers omit comparison copy and preserve even medians", async () => {
   const { page, context, errors } = await openDashboard({
     overviewExtra: {
       posts: [
@@ -790,8 +799,12 @@ test("young teasers explain missing comparisons and even medians", async () => {
         .locator(".xt-trend-column")
         .nth(1)
         .locator(".xt-trend-note")
-        .textContent(),
-      "too new to compare",
+        .count(),
+      0,
+    );
+    assert.doesNotMatch(
+      await page.locator(".xt-trends").textContent(),
+      /too new to compare/,
     );
     assert.equal(await cells.nth(1).locator(".xt-trend").count(), 0);
     await page.setViewportSize({ width: 390, height: 844 });
@@ -855,10 +868,22 @@ test("history calendar lines up with the week row and trend cards compare period
         );
     // Overall leads with the median while retaining the mean as a caption.
     assert.deepEqual(await metricsOf(0), [
-      ["980", "views", null, null, null],
-      ["96", "likes", null, null, null],
-      ["9", "reposts", null, null, null],
-      ["10%", "engagement", null, null, null],
+      [
+        "980",
+        "views",
+        "neutral",
+        "\u22127%",
+        `Median views vs average ${overallViews}`,
+      ],
+      ["96", "likes", "neutral", "\u22124%", "Median likes vs average 100"],
+      ["9", "reposts", "neutral", "\u221210%", "Median reposts vs average 10"],
+      [
+        "10%",
+        "engagement",
+        "neutral",
+        "\u22120.7 pts",
+        "Median engagement vs average 11%",
+      ],
     ]);
     assert.equal(
       await page
@@ -905,6 +930,18 @@ test("history calendar lines up with the week row and trend cards compare period
     assert.deepEqual(
       await page.locator('.xt-trends tbody th[scope="row"]').allTextContents(),
       ["Views", "Likes", "Reposts", "Engagement"],
+    );
+    assert.ok(
+      await page.locator(".xt-trends th, .xt-trends td").evaluateAll((nodes) =>
+        nodes.every((node) => {
+          const style = getComputedStyle(node);
+          return (
+            parseFloat(style.borderTopWidth) === 0 &&
+            parseFloat(style.borderBottomWidth) === 0
+          );
+        }),
+      ),
+      "summary has no horizontal dividers",
     );
     for (const row of await page.locator(".xt-trends tbody tr").all()) {
       const rowTops = await row

@@ -704,7 +704,7 @@
     }
 
     // Same colours as the tiles: green 15% above the usual, red 20% below.
-    function trendBadge(pair, name, label, total) {
+    function trendBadge(pair, name, label, total, againstAverage = false) {
       const badge = element("span", "xt-trend");
       if (!pair || !(pair.usual > 0)) {
         badge.dataset.tone = "none";
@@ -724,10 +724,9 @@
         name === "rate"
           ? `${sign}${Math.abs(rounded).toFixed(1)} pts`
           : `${sign}${Math.abs(rounded)}%`;
-      badge.title = `Usual ${label} at the same age: ${formatMetric(
-        name,
-        pair.usual,
-      )} · ${pair.count} of ${total} teasers compared`;
+      badge.title = againstAverage
+        ? `Median ${label} vs average ${formatMetric(name, pair.usual)}`
+        : `Usual ${label} at the same age: ${formatMetric(name, pair.usual)} · ${pair.count} of ${total} teasers compared`;
       return badge;
     }
 
@@ -746,8 +745,20 @@
       const caption = element("div", "xt-trend-note");
       let description = `${formatMetric(name, value)} ${label}`;
       if (!compare) {
-        caption.textContent = `avg ${formatMetric(name, average(list, name))}`;
+        const mean = average(list, name);
+        caption.textContent = `avg ${formatMetric(name, mean)}`;
         description = `Median ${description}; ${caption.textContent}`;
+        if (value !== null && mean > 0) {
+          const badge = trendBadge(
+            { value, usual: mean },
+            name,
+            label,
+            list.length,
+            true,
+          );
+          line.append(badge);
+          description += `; ${badge.title}; ${badge.textContent}`;
+        }
       } else if (pair && pair.usual > 0) {
         const badge = trendBadge(pair, name, label, list.length);
         line.append(badge);
@@ -755,8 +766,7 @@
         if (pair.count < list.length)
           caption.textContent = `${pair.count} of ${list.length} compared`;
       } else if (list.length) {
-        caption.textContent = pair ? "no comparison" : "too new to compare";
-        description += `; ${caption.textContent}`;
+        description += "; comparison unavailable";
       }
       block.append(line);
       if (caption.textContent && (!compare || !sharedCoverage))
@@ -807,14 +817,12 @@
             `${list.length} ${list.length === 1 ? "teaser" : "teasers"}`,
           ),
         );
-        if (coverage[index] !== null && coverage[index] < list.length)
+        if (coverage[index] > 0 && coverage[index] < list.length)
           head.append(
             element(
               "span",
               "xt-trend-note",
-              coverage[index] === 0
-                ? "too new to compare"
-                : `${coverage[index]} of ${list.length} compared`,
+              `${coverage[index]} of ${list.length} compared`,
             ),
           );
         cell.append(head);
