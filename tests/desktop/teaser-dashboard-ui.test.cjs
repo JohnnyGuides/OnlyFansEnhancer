@@ -1767,6 +1767,8 @@ test("history toggles its period, sorts worst first, plans remakes and undoes ve
 test("the extension page mounts the same dashboard and the console links to it", async () => {
   const { page, context, errors } = await openDashboard({ area: "extension" });
   try {
+    assert.equal(await page.locator("h1").textContent(), "Teasers");
+    assert.equal(await page.title(), "Teasers · OFEnhancer");
     assert.equal(
       await page.locator(".xt-flow .xt-episode").count(),
       fixture().overview.episodes.length,
@@ -1784,6 +1786,7 @@ test("the extension page mounts the same dashboard and the console links to it",
     consoleHtml,
     /<a[^>]+href="teaser-dashboard\.html"[^>]*data-chrome-only/,
   );
+  assert.match(consoleHtml, /href="teaser-dashboard\.html"[^>]*>Teasers<\/a/s);
   const background = fs.readFileSync(
     path.join(repositoryRoot, "extensions/personal/background.js"),
     "utf8",
@@ -1804,6 +1807,64 @@ test("the extension page mounts the same dashboard and the console links to it",
         .includes(`"${operation}"`),
       operation,
     );
+});
+
+test("refresh cleans up layout observers through empty and failed results", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    await page.evaluate(async () => {
+      const container = document.createElement("div");
+      container.style.width = "1000px";
+      const root = document.createElement("div");
+      container.append(root);
+      document.body.append(container);
+      let response = {
+        overview: {
+          episodes: [
+            {
+              itemId: "test-item",
+              sourceKey: "test",
+              title: "Test",
+              series: "Test",
+              category: "Games",
+              readyClips: 0,
+              usedCount: 0,
+            },
+          ],
+          posts: [],
+          recentMoves: [],
+        },
+      };
+      let fail = false;
+      const dashboard = globalThis.OFEnhancerTeaserDashboard.mount(root, {
+        request: async (operation) => {
+          if (fail) throw new Error("offline");
+          return operation === "getTeaserOverview" ? response : { slots: [] };
+        },
+      });
+      await dashboard.load();
+      response = { overview: { episodes: [], posts: [], recentMoves: [] } };
+      await dashboard.load();
+      container.style.width = "800px";
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      if (root.style.width !== "708px")
+        throw new Error("Empty catalogue did not resize");
+      fail = true;
+      await dashboard.load();
+      container.style.width = "700px";
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      if (root.dataset.state !== "error")
+        throw new Error("Expected load error");
+      container.remove();
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
 });
 
 test("X scheduled posts outline their day in row 2 and Scan now asks for a scan", async () => {

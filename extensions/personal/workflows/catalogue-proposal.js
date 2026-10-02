@@ -23,6 +23,14 @@
     return String(value == null ? "" : value).trim();
   }
 
+  function seriesIdentity(value) {
+    return clean(value)
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  }
+
   function platformLabel(platform) {
     return {
       pornhub: "Pornhub",
@@ -32,39 +40,216 @@
     }[platform];
   }
 
-  function positiveEpisode(value) {
-    const text = clean(value);
-    return /^\d+$/.test(text) && Number(text) > 0 ? Number(text) : null;
+  function templateIsGrounded(template, draft, hints) {
+    const known = new Set(
+      seriesIdentity(
+        `${draft.filename || ""} ${draft.title || ""} ${hints.seasonArc} ${hints.season || ""}`,
+      ).split(/\s+/),
+    );
+    const words = seriesIdentity(`${template.prefix} ${template.suffix}`)
+      .replace(/\b(?:s\d+\s*e(?:p(?:isode)?)?|ep(?:isode)?|season)\b/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    return words.every((word) => known.has(word));
   }
 
-  function episodeHint(draft) {
-    const text = `${clean(draft.filename)} ${clean(draft.title)}`.replace(
-      /[_-]/g,
-      " ",
-    );
-    const hints = [
-      ...text.matchAll(
-        /\bs\s*0*(\d+)\s*[-_. ]*e(?:p(?:isode)?)?\s*0*(\d+)\b/gi,
-      ),
-    ].map((match) => ({ season: Number(match[1]), episode: Number(match[2]) }));
-    if (hints.length) {
-      const first = hints[0];
-      return first.episode > 0 &&
-        hints.every(
-          (hint) =>
-            hint.season === first.season && hint.episode === first.episode,
-        )
-        ? first
-        : null;
-    }
-    const episodes = [...text.matchAll(/\b(?:ep|episode)\s*0*(\d+)\b/gi)].map(
-      (match) => Number(match[1]),
-    );
-    return episodes.length &&
-      episodes[0] > 0 &&
-      episodes.every((episode) => episode === episodes[0])
-      ? { season: null, episode: episodes[0] }
+  function positiveEpisode(value) {
+    const text = clean(value);
+    return /^\d+$/.test(text) &&
+      Number.isSafeInteger(Number(text)) &&
+      Number(text) > 0 &&
+      Number(text) <= 999
+      ? Number(text)
       : null;
+  }
+
+  function namingHints(draft, seasonAliases = {}) {
+    const evidence = [];
+    for (const source of ["filename", "title"]) {
+      let text = clean(draft[source]).replace(/[_-]/g, " ");
+      text = text.replace(
+        /\bs\s*(\d+)\s*[. ]*e(?:p(?:isode)?)?\s*(\d+)\b/gi,
+        (value, season, episode) => {
+          evidence.push({
+            source,
+            value,
+            season: Number(season),
+            episode: Number(episode),
+          });
+          return " ";
+        },
+      );
+      for (const match of text.matchAll(/\b(?:season\s*|s\s*)(\d+)\b/gi))
+        evidence.push({
+          source,
+          value: match[0],
+          season: Number(match[1]),
+          episode: null,
+        });
+      for (const match of text.matchAll(/\b(?:ep|episode)\s*[. ]*(\d+)\b/gi))
+        evidence.push({
+          source,
+          value: match[0],
+          season: null,
+          episode: Number(match[1]),
+        });
+    }
+    const conflicts = [];
+    if (
+      evidence.some(
+        (hint) =>
+          (hint.episode !== null && positiveEpisode(hint.episode) === null) ||
+          (hint.season !== null &&
+            (!Number.isInteger(hint.season) ||
+              hint.season < 1 ||
+              hint.season > 99)),
+      )
+    )
+      conflicts.push("Invalid season or episode number.");
+    const episodes = new Set(
+      evidence
+        .filter((hint) => hint.episode !== null)
+        .map((hint) => hint.episode),
+    );
+    const seasons = new Set(
+      evidence
+        .filter((hint) => hint.season !== null)
+        .map((hint) => hint.season),
+    );
+    if (episodes.size > 1 || seasons.size > 1)
+      conflicts.push("Filename and title contain conflicting episode hints.");
+    const season = seasons.size === 1 ? [...seasons][0] : null;
+    const alias = season === null ? "" : clean(seasonAliases[String(season)]);
+    const selected = clean(draft.seasonArc);
+    if (alias && selected && seriesIdentity(alias) !== seriesIdentity(selected))
+      conflicts.push(
+        "Selected series conflicts with the filename or title season.",
+      );
+    return {
+      evidence,
+      conflicts,
+      season,
+      episode: conflicts.length || !episodes.size ? null : [...episodes][0],
+      seasonArc: selected || alias,
+    };
+  }
+
+  function proposeNaming(
+    draft = {},
+    snapshot = {},
+    { selectedRow = null } = {},
+  ) {
+    const hints = namingHints(draft, snapshot?.seasonAliases);
+    const unmappedSeason =
+      hints.season !== null &&
+      !clean(snapshot?.seasonAliases?.[String(hints.season)]);
+    const rows = snapshot?.rows || [];
+    const canonical =
+      selectedRow !== null && selectedRow !== "new"
+        ? rows.find((row) => Number(row.row) === Number(selectedRow))
+        : null;
+    let title =
+      clean(draft.title) ||
+      clean(draft.filename)
+        .replace(/\.(?:mp4|m4v|mov|webm|avi|mkv)$/i, "")
+        .replace(/\s*\((?:full|limited|teaser)\)\s*$/i, "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const reasons = [];
+    if (unmappedSeason)
+      reasons.push(
+        "Check the series: this season number has no catalogue mapping.",
+      );
+    if (canonical) {
+      if (
+        hints.episode !== null &&
+        positiveEpisode(canonical.episode) !== null &&
+        hints.episode !== positiveEpisode(canonical.episode)
+      )
+        hints.conflicts.push(
+          "Selected catalogue episode conflicts with the file or title.",
+        );
+      if (
+        hints.seasonArc &&
+        seriesIdentity(hints.seasonArc) !== seriesIdentity(canonical.seasonArc)
+      )
+        hints.conflicts.push(
+          "Selected catalogue series conflicts with the naming hints.",
+        );
+      title = clean(canonical.title);
+      reasons.push("Selected catalogue title.");
+    } else if (
+      !hints.conflicts.length &&
+      hints.seasonArc &&
+      hints.episode !== null
+    ) {
+      const siblings = rows.filter(
+        (row) =>
+          seriesIdentity(row.seasonArc) === seriesIdentity(hints.seasonArc) &&
+          positiveEpisode(row.episode) !== null,
+      );
+      const templates = siblings.map((row) => {
+        const text = clean(row.title);
+        const siblingHints = namingHints({ title: text });
+        if (
+          siblingHints.conflicts.length ||
+          (siblingHints.season !== null && siblingHints.season !== hints.season)
+        )
+          return null;
+        const matches = [
+          ...text.matchAll(
+            /\b(?:s\d+\s*e(?:p(?:isode)?)?|ep(?:isode)?)\s*[._-]*(\d+)\b/gi,
+          ),
+        ];
+        if (
+          matches.length !== 1 ||
+          Number(matches[0][1]) !== positiveEpisode(row.episode)
+        )
+          return null;
+        const match = matches[0];
+        const start = match.index + match[0].lastIndexOf(match[1]);
+        return {
+          prefix: text.slice(0, start),
+          suffix: text.slice(start + match[1].length),
+          padding: /^0/.test(match[1]) ? match[1].length : 0,
+        };
+      });
+      if (
+        new Set(siblings.map((row) => positiveEpisode(row.episode))).size >=
+          2 &&
+        templates.every(
+          (template) =>
+            template &&
+            template.prefix === templates[0].prefix &&
+            template.suffix === templates[0].suffix &&
+            template.padding === templates[0].padding,
+        ) &&
+        // A repeated episode format establishes structure, not permission to
+        // borrow subject wording from previous episodes.
+        templateIsGrounded(templates[0], draft, hints)
+      ) {
+        title =
+          templates[0].prefix +
+          String(hints.episode).padStart(templates[0].padding, "0") +
+          templates[0].suffix;
+        reasons.push("Consistent catalogue episode title pattern.");
+      }
+    }
+    return {
+      status:
+        hints.conflicts.length || unmappedSeason ? "needs-review" : "suggested",
+      title,
+      seasonArc: canonical ? clean(canonical.seasonArc) : hints.seasonArc,
+      episode: canonical
+        ? clean(canonical.episode)
+        : hints.episode === null
+          ? ""
+          : String(hints.episode),
+      reasons,
+      conflicts: hints.conflicts,
+      evidence: hints.evidence,
+    };
   }
 
   function rowMetrics(draft, row, seasonAliases = {}) {
@@ -88,16 +273,20 @@
       row.description,
     );
     const episode = positiveEpisode(row.episode);
-    const hint = episodeHint(draft);
+    const hints = namingHints(draft, seasonAliases);
+    const hint =
+      hints.conflicts.length || hints.episode === null ? null : hints;
     const episodeMatch = episode !== null && hint?.episode === episode;
     const selectedArc = clean(draft.seasonArc);
     const knownArc =
-      selectedArc ||
+      (hint?.season !== null &&
+      hint?.season !== undefined &&
+      !clean(seasonAliases?.[String(hint.season)])
+        ? ""
+        : selectedArc) ||
       (hint?.season > 0 ? clean(seasonAliases?.[String(hint.season)]) : "");
     const matchingArc =
-      knownArc &&
-      contract.normalizedText(knownArc) ===
-        contract.normalizedText(row.seasonArc);
+      knownArc && seriesIdentity(knownArc) === seriesIdentity(row.seasonArc);
     // Explicit identity is a ranking hint, never permission to update a row.
     const identityRank =
       hint && knownArc
@@ -171,14 +360,14 @@
   }
 
   function findPredecessor(row, rows) {
-    const arc = contract.normalizedText(row?.seasonArc);
+    const arc = seriesIdentity(row?.seasonArc);
     const episode = positiveEpisode(row?.episode);
     if (!arc || episode === null) return null;
     return (
       (Array.isArray(rows) ? rows : [])
         .filter(
           (candidate) =>
-            contract.normalizedText(candidate.seasonArc) === arc &&
+            seriesIdentity(candidate.seasonArc) === arc &&
             positiveEpisode(candidate.episode) !== null &&
             positiveEpisode(candidate.episode) < episode,
         )
@@ -319,14 +508,16 @@
       id = `${base}-${suffix}`;
       suffix += 1;
     }
+    const naming = proposeNaming(draft, snapshot);
     return {
       row: Number(empty.row),
       id,
       releaseDate: clean(draft?.releaseDate),
       title: clean(draft?.title),
       description: clean(draft?.description),
-      seasonArc: "",
-      episode: "",
+      seasonArc: naming.seasonArc,
+      episode: naming.conflicts.length ? "" : naming.episode,
+      naming,
       pornhubLink: "",
       onlyfansLink: "",
       fanslyLink: "",
@@ -439,6 +630,7 @@
     findPredecessor,
     inferTargets,
     proposeSchedule,
+    proposeNaming,
     rankRows,
   });
 })();

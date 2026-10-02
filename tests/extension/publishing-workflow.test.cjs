@@ -452,6 +452,7 @@ test("catalogue helpers score the same Friday and protect existing platform link
     contract.slugify("  Episode 42: The Test!  "),
     "episode-42-the-test",
   );
+  assert.equal(contract.slugify("Final VR review"), "final-vr-review");
   assert.equal(
     contract.canonicalPostUrl(
       "onlyfans",

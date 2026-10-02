@@ -1283,12 +1283,6 @@
           ? wall
           : element("p", "xt-empty", "No videos match this filter."),
       );
-      wallObserver?.disconnect();
-      wallObserver = null;
-      if (wall.children.length && global.ResizeObserver) {
-        wallObserver = new ResizeObserver(() => joinSeasonLines(wall));
-        wallObserver.observe(root.parentElement);
-      }
       return flow;
     }
 
@@ -1296,6 +1290,7 @@
     // there; the grid has fixed 96px columns with 6px gaps.
     function joinSeasonLines(wall) {
       const container = root.parentElement;
+      if (!root.isConnected || !container) return;
       const style = getComputedStyle(container);
       const available =
         container.clientWidth -
@@ -1309,9 +1304,9 @@
       root.style.width = width;
       const heading = container.querySelector(".twitter-heading");
       if (heading) heading.style.width = width;
-      const bar = wall.parentElement.querySelector(".xt-flow-bar");
+      const bar = root.querySelector(".xt-flow-bar");
       if (bar) bar.style.width = `${columns * 102 - 6}px`;
-      const cards = Array.from(wall.children);
+      const cards = Array.from(wall?.children || []);
       cards.forEach((card, index) => {
         const next = cards[index + 1];
         card.dataset.join = String(
@@ -1460,6 +1455,8 @@
         (root.contains(document.activeElement)
           ? document.activeElement?.dataset?.key
           : "");
+      wallObserver?.disconnect();
+      wallObserver = null;
       root.replaceChildren();
       const heading = root.parentElement.querySelector(".twitter-heading");
       heading?.querySelector(".xt-scan")?.remove();
@@ -1498,6 +1495,15 @@
         detail,
         renderHistory(),
       );
+      // Observe the current layout even when a filter yields no tiles. The
+      // callback resolves the current wall rather than retaining detached DOM.
+      const updateLayout = () =>
+        joinSeasonLines(root.querySelector(".xt-flow .xt-cards"));
+      updateLayout();
+      if (global.ResizeObserver) {
+        wallObserver = new ResizeObserver(updateLayout);
+        wallObserver.observe(root.parentElement);
+      }
       if (activeKey) {
         const target = root.parentElement.querySelector(
           `[data-key="${CSS.escape(activeKey)}"]`,
