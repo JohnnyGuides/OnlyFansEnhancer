@@ -254,8 +254,10 @@
     root.classList.add("xt");
     root.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && state.picking) {
+        event.preventDefault();
+        const date = state.picking.date;
         state.picking = null;
-        render("picking-start");
+        render(`day-${date}`);
       }
     });
 
@@ -324,7 +326,7 @@
     }
 
     // Seasons posted in the last 7 days or planned for another day in the week
-    // are nearly hidden; categories with two or more of those are dimmed.
+    // are unavailable; categories with two or more of those are deprioritised.
     function pickContext(target) {
       const since = now().getTime() - PICK_WINDOW_DAYS * DAY_MS;
       const used = [];
@@ -638,6 +640,7 @@
       } else tile.append(element("span", "xt-plus", "+"));
       tile.addEventListener("click", () => {
         state.picking = { date };
+        if (state.coverage === "needs") state.coverage = "ready";
         state.detail = "";
         render("picking-start");
       });
@@ -1042,7 +1045,6 @@
 
     function renderPicking() {
       const bar = element("div", "xt-picking");
-      bar.setAttribute("role", "status");
       if (!state.picking) {
         bar.hidden = true;
         return bar;
@@ -1051,7 +1053,7 @@
       const text = element(
         "span",
         "xt-picking-text",
-        `Picking for ${longDayLabel(date)}`,
+        `Choose a teaser · ${longDayLabel(date)}`,
       );
       text.tabIndex = -1;
       text.dataset.key = "picking-start";
@@ -1203,6 +1205,15 @@
           card.setAttribute("aria-disabled", "true");
           card.tabIndex = -1;
         }
+        const reason =
+          pick === "hidden"
+            ? "Recent or planned"
+            : pick === "dimmed"
+              ? "Busy category"
+              : pick === "recommended"
+                ? "Recommended"
+                : `${episode.readyClips} ready`;
+        card.append(element("span", "xt-pick-reason", reason));
       }
       card.addEventListener("click", () => {
         if (state.picking) {
@@ -1305,14 +1316,24 @@
       const heading = container.querySelector(".twitter-heading");
       if (heading) heading.style.width = width;
       const bar = root.querySelector(".xt-flow-bar");
-      if (bar) bar.style.width = `${columns * 102 - 6}px`;
+      if (state.picking) {
+        if (bar) bar.style.width = "";
+      } else if (bar) bar.style.width = `${columns * 102 - 6}px`;
+      const wallColumns = state.picking
+        ? Math.max(1, Math.floor(((wall?.clientWidth || 0) + 6) / 102))
+        : columns;
       const cards = Array.from(wall?.children || []);
       cards.forEach((card, index) => {
         const next = cards[index + 1];
+        if (state.picking) {
+          const label = card.querySelector(".xt-season-name");
+          if (label)
+            label.style.maxWidth = `${(wallColumns - (index % wallColumns)) * 102 - 6}px`;
+        }
         card.dataset.join = String(
           Boolean(next) &&
             next.dataset.season === card.dataset.season &&
-            (index + 1) % columns !== 0,
+            (index + 1) % wallColumns !== 0,
         );
       });
     }
@@ -1450,6 +1471,7 @@
     }
 
     function render(focusKey) {
+      const pickerScroll = root.querySelector(".xt-picker")?.scrollTop || 0;
       const activeKey =
         focusKey ||
         (root.contains(document.activeElement)
@@ -1488,13 +1510,89 @@
       detail.setAttribute("role", "status");
       if (heading) heading.append(renderScan());
       else root.append(renderScan());
-      root.append(
-        renderStrip(),
-        renderPicking(),
-        renderFlow(),
-        detail,
-        renderHistory(),
-      );
+      root.append(renderStrip());
+      if (state.picking) {
+        const picker = element("dialog", "xt-picker");
+        picker.setAttribute("aria-label", "Choose a teaser");
+        picker.addEventListener("keydown", (event) => {
+          if (event.key !== "Tab") return;
+          const controls = Array.from(
+            picker.querySelectorAll(
+              "button:not([disabled]):not([tabindex='-1'])",
+            ),
+          );
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (
+            event.shiftKey &&
+            (event.target === first || !controls.includes(event.target))
+          ) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && event.target === last) {
+            event.preventDefault();
+            first?.focus();
+          }
+        });
+        const closePicker = () => {
+          const date = state.picking?.date;
+          state.picking = null;
+          render(`day-${date}`);
+        };
+        picker.addEventListener("cancel", (event) => {
+          event.preventDefault();
+          closePicker();
+        });
+        picker.addEventListener("click", (event) => {
+          if (event.target !== picker) return;
+          const bounds = picker.getBoundingClientRect();
+          if (
+            event.clientX < bounds.left ||
+            event.clientX > bounds.right ||
+            event.clientY < bounds.top ||
+            event.clientY > bounds.bottom
+          )
+            closePicker();
+        });
+        picker.append(renderPicking());
+        const context = pickContext(state.picking.date);
+        const recommended = orderEpisodes(episodes())
+          .filter((episode) => pickState(episode, context) === "recommended")
+          .slice(0, 3);
+        const shortlist = element("section", "xt-shortlist");
+        shortlist.setAttribute("aria-label", "Recommended teasers");
+        shortlist.append(
+          element(
+            "p",
+            "xt-shortlist-label",
+            recommended.length
+              ? "Ready clips from series not used recently"
+              : "No unused ready clips in quiet categories. Browse the catalogue below.",
+          ),
+        );
+        for (const episode of recommended) {
+          const choice = button("xt-suggestion", `Choose ${episode.title}`);
+          choice.append(
+            thumbnail(episode),
+            element("strong", "", episode.title),
+            element(
+              "span",
+              "",
+              `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"}`,
+            ),
+          );
+          choice.addEventListener(
+            "click",
+            () => void plan(state.picking.date, episode),
+          );
+          shortlist.append(choice);
+        }
+        picker.append(shortlist, renderFlow());
+        root.append(picker);
+        picker.showModal();
+        if (focusKey !== "picking-start") picker.scrollTop = pickerScroll;
+      } else root.append(renderPicking(), renderFlow());
+      root.append(detail, renderHistory());
       // Observe the current layout even when a filter yields no tiles. The
       // callback resolves the current wall rather than retaining detached DOM.
       const updateLayout = () =>
@@ -1508,7 +1606,9 @@
         const target = root.parentElement.querySelector(
           `[data-key="${CSS.escape(activeKey)}"]`,
         );
-        target?.focus?.({ preventScroll: focusKey !== "picking-start" });
+        target?.focus?.({
+          preventScroll: Boolean(state.picking) || focusKey !== "picking-start",
+        });
       }
     }
 

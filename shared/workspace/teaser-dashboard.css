@@ -862,6 +862,133 @@
   color: var(--xt-muted);
 }
 
+html:has(.xt-picker[open]) {
+  overflow: hidden;
+}
+.xt-picker {
+  position: fixed;
+  inset: 0 0 0 auto;
+  box-sizing: border-box;
+  width: min(620px, calc(100vw - 24px));
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #364453;
+  border-radius: 16px 0 0 16px;
+  background: #111923;
+  color: #f4f5f7;
+  transition:
+    transform 220ms ease-out,
+    opacity 220ms ease-out;
+}
+.xt-picker::backdrop {
+  background: rgb(0 0 0 / 72%);
+}
+.xt-picker .xt-picking {
+  position: sticky;
+  top: -20px;
+  z-index: 2;
+  margin: -20px -20px 20px;
+  padding: 16px 20px;
+  border: 0;
+  border-bottom: 1px solid #364453;
+  border-radius: 0;
+  background: #111923;
+  color: #f4f5f7;
+}
+.xt-picker .xt-flow-bar {
+  align-items: flex-start;
+}
+.xt-picker .xt-flow-bar .xt-segments {
+  gap: 4px;
+}
+.xt-picker .xt-segment {
+  font-size: 0.75rem;
+}
+.xt-picker .xt-episode[data-pick] {
+  opacity: 1;
+  box-shadow: none;
+}
+.xt-picker .xt-thumb-image,
+.xt-picker .xt-episode[data-cover="empty"] .xt-thumb-image {
+  opacity: 1;
+  filter: none;
+}
+.xt-pick-reason {
+  display: block;
+  margin-top: 5px;
+  color: #b6c3d1;
+  font-size: 0.65rem;
+}
+.xt-episode[data-pick="recommended"] .xt-pick-reason {
+  color: #65cfff;
+}
+.xt-episode[data-pick="hidden"] .xt-pick-reason {
+  color: #f2b84b;
+}
+.xt-shortlist {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.xt-shortlist-label {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  color: #b6c3d1;
+  font-size: 0.8rem;
+}
+.xt-suggestion {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 0 8px;
+  border: 1px solid #426275;
+  border-radius: 8px;
+  background: #192733;
+  text-align: left;
+}
+.xt-suggestion strong,
+.xt-suggestion > span:not(.xt-thumb) {
+  padding-inline: 8px;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.xt-suggestion > span:not(.xt-thumb) {
+  color: #b6c3d1;
+  font-size: 0.68rem;
+}
+.xt-suggestion:hover {
+  border-color: #65cfff;
+}
+@starting-style {
+  .xt-picker[open] {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+@media (max-width: 600px) {
+  .xt-picker {
+    width: 100%;
+    border-radius: 0;
+    padding: 16px;
+  }
+  .xt-picker .xt-picking {
+    margin: -16px -16px 16px;
+    top: -16px;
+    padding: 14px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .xt-picker {
+    transition: none;
+  }
+}
+
 /* History */
 .xt-history {
   display: grid;

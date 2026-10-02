@@ -102,11 +102,11 @@ function fixture() {
     episode("Dolls", "Series B", 5, 0, 1),
     episode("Reviews", "Series D", 1, 1, 0),
     episode("Reviews", "Series D", 2),
-    episode("Reviews", "Series G", 1, 0, 1),
+    episode("Reviews", "Series G", 1, 0, 1, { thumb: "asset-g1" }),
     episode("Reviews", "Series G", 2),
     episode("Specials", "Series E", 1, 1, 0),
-    episode("Specials", "Series H", 1, 0, 1),
-    episode("Toys", "Series F", 1, 0, 1),
+    episode("Specials", "Series H", 1, 0, 1, { thumb: "asset-h1" }),
+    episode("Toys", "Series F", 1, 0, 1, { thumb: "asset-f1" }),
     episode("Toys", "Series F", 2),
     episode("Toys", "Series F", 3, 1, 0),
   ];
@@ -1582,7 +1582,7 @@ test("history calendar lines up with the week row and trend cards compare period
   }
 });
 
-test("picking mode hides recent seasons, dims busy categories and persists picks", async () => {
+test("focused picker recommends unused ready clips and preserves planning rules", async () => {
   const { page, context, errors } = await openDashboard();
   try {
     await page
@@ -1592,7 +1592,7 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
       .click();
     assert.match(
       await page.locator(".xt-picking-text").textContent(),
-      /Picking for/,
+      /Choose a teaser/,
     );
     const pick = (key) =>
       page
@@ -1610,19 +1610,42 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
     assert.equal(await pick("series-h-e1"), "recommended");
     assert.equal(await pick("series-f-e2"), "neutral");
     const hidden = page.locator('.xt-episode[data-item-id="item-series-a-e3"]');
-    assert.ok(
-      Number(await hidden.evaluate((node) => getComputedStyle(node).opacity)) <
-        0.2,
+    assert.equal(
+      await hidden.evaluate((node) => getComputedStyle(node).opacity),
+      "1",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-picker")
+        .evaluate((node) => node.matches(":modal")),
+      true,
+    );
+    assert.equal(await page.locator(".xt-suggestion").count(), 3);
+    assert.equal(
+      await page
+        .locator(".xt-picker img")
+        .evaluateAll(
+          (nodes) =>
+            nodes.length > 0 &&
+            nodes.every(
+              (node) =>
+                getComputedStyle(node).opacity === "1" &&
+                getComputedStyle(node).filter === "none",
+            ),
+        ),
+      true,
     );
     assert.equal(await hidden.getAttribute("aria-disabled"), "true");
     await hidden.click({ force: true });
     assert.equal(
       (await calls(page, "setTeaserPlanSlot")).length,
       0,
-      "hidden squares cannot be picked",
+      "recently used series cannot be picked",
     );
 
-    await page.locator('.xt-episode[data-item-id="item-series-f-e1"]').click();
+    await page
+      .getByRole("button", { name: "Choose Series F E1", exact: true })
+      .click();
     await page
       .locator('.xt-tile[data-date="2026-10-01"][data-kind="planned"]')
       .waitFor();
@@ -1677,6 +1700,80 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
+  }
+});
+
+test("picker stays within the viewport, traps focus and cancels without changing the plan", async () => {
+  for (const options of [
+    {},
+    { area: "extension" },
+    { viewport: { width: 390, height: 844 } },
+  ]) {
+    const { page, context, errors } = await openDashboard(options);
+    try {
+      await page.locator('.xt-segment[data-coverage="needs"]').click();
+      const day = page.locator('.xt-tile[data-date="2026-10-02"]');
+      await day.click();
+      const picker = page.getByRole("dialog", { name: "Choose a teaser" });
+      await picker.waitFor();
+      await picker.evaluate((node) =>
+        Promise.all(
+          node.getAnimations().map((animation) => animation.finished),
+        ),
+      );
+      assert.equal(
+        await picker
+          .locator('[data-coverage="ready"]')
+          .getAttribute("aria-pressed"),
+        "true",
+      );
+      assert.equal(
+        await picker.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return (
+            rect.left >= 0 &&
+            rect.right <= innerWidth &&
+            node.scrollWidth <= node.clientWidth
+          );
+        }),
+        true,
+      );
+      assert.equal(
+        await page.evaluate(
+          () => getComputedStyle(document.documentElement).overflow,
+        ),
+        "hidden",
+      );
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(
+        await picker.evaluate((node) => node.contains(document.activeElement)),
+        true,
+      );
+      await screenshot(
+        page,
+        options.viewport
+          ? "M3-picker-mobile.png"
+          : options.area
+            ? "M3-picker-extension.png"
+            : "M3-picker-desktop.png",
+      );
+      await page.keyboard.press("Escape");
+      assert.equal(await picker.count(), 0);
+      assert.equal(
+        await day.evaluate((node) => node === document.activeElement),
+        true,
+      );
+      assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+      if (!options.viewport) {
+        await day.click();
+        await page.mouse.click(5, 5);
+        assert.equal(await picker.count(), 0);
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
   }
 });
 
