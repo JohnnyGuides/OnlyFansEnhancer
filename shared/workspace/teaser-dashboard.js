@@ -25,6 +25,8 @@
     ["all", "All"],
   ];
   const ICONS = {
+    expand: "M9 3H3v6m12 12h6v-6M3 3l6 6m12 12-6-6",
+    collapse: "M4 9h5V4m11 11h-5v5M3 3l6 6m12 12-6-6",
     scissors:
       "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M20 4 8.1 15.9 M14.5 14.5 20 20 M8.1 8.1 12 12",
   };
@@ -232,6 +234,7 @@
       scanMessage: "",
       period: "30",
       worstFirst: false,
+      historyExpanded: false,
       coverage: "all",
       picking: null,
       detail: "",
@@ -884,8 +887,7 @@
       return tile;
     }
 
-    // Every day before the 7-day row, empty days included, in compact
-    // two-week rows; newest row at the bottom, older rows scroll up.
+    // Show the latest two weeks; older days expand inline on request.
     function renderHistoryStrip() {
       const end = addDays(today(), -7);
       const earlier = posts().filter(
@@ -904,16 +906,36 @@
         HISTORY_MAX_ROWS,
         Math.ceil(total / HISTORY_ROW_DAYS),
       );
-      const start = addDays(end, -(rows * HISTORY_ROW_DAYS - 1));
+      const start = addDays(
+        end,
+        -((state.historyExpanded ? rows : 1) * HISTORY_ROW_DAYS - 1),
+      );
       const scroller = element("div", "xt-past-scroll");
+      scroller.dataset.expanded = String(state.historyExpanded);
+      const toggle = button(
+        "xt-past-expand",
+        state.historyExpanded ? "Collapse history" : "Expand history",
+      );
+      toggle.dataset.key = "history-expand";
+      toggle.setAttribute("aria-expanded", String(state.historyExpanded));
+      toggle.setAttribute("aria-controls", "xt-earlier-days");
+      toggle.title = state.historyExpanded
+        ? "Show recent history"
+        : "Show older history";
+      toggle.append(icon(state.historyExpanded ? "collapse" : "expand"));
+      toggle.addEventListener("click", () => {
+        state.historyExpanded = !state.historyExpanded;
+        render("history-expand");
+      });
       const grid = element("ol", "xt-past-list");
+      grid.id = "xt-earlier-days";
       grid.setAttribute("aria-label", "Earlier days");
       for (let date = start; date <= end; date = addDays(date, 1)) {
         const item = element("li", "xt-past-day");
         item.append(historyTile(date));
         grid.append(item);
       }
-      scroller.append(grid);
+      scroller.append(toggle, grid);
       section.append(scroller);
       return section;
     }

@@ -1152,6 +1152,23 @@ test("history calendar lines up with the week row and trend cards compare period
     // Days before the 7-day row, oldest first, in two-week rows ending the
     // day before the row; the first post (3 Jun) falls in the oldest row.
     const days = page.locator(".xt-past-list > li > .xt-past-tile");
+    assert.equal(
+      await days.count(),
+      14,
+      "history starts with only the newest row",
+    );
+    const expand = page.getByRole("button", {
+      name: "Expand history",
+      exact: true,
+    });
+    assert.equal(await expand.getAttribute("aria-expanded"), "false");
+    await expand.click();
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Collapse history", exact: true })
+        .getAttribute("aria-expanded"),
+      "true",
+    );
     const dates = await page
       .locator(".xt-past-list > li")
       .evaluateAll((nodes) => nodes.length);
@@ -1212,14 +1229,37 @@ test("history calendar lines up with the week row and trend cards compare period
       page.locator('[data-row="past"] > li').first().boundingBox(),
       page.locator(".xt-past-list > li").nth(14).boundingBox(),
     ]);
-    assert.ok(Math.abs(firstPast.x - firstHistory.x) <= 1, "columns line up");
+    assert.ok(
+      Math.abs(firstPast.x + 28 - firstHistory.x) <= 1,
+      "history leaves a slim control on the left",
+    );
     assert.ok(
       postedBox.width < firstPast.width,
       "history keeps the compact two-week layout",
     );
     assert.ok(
-      postedBox.height === 72,
-      "history tiles are slightly taller than the original 60px tiles",
+      Math.abs(postedBox.height - postedBox.width) < 1,
+      "history tiles remain square",
+    );
+    await tile.click();
+    assert.match(
+      await page.locator(".xt-detail").textContent(),
+      /^Series B E1 · posted .* · 2\.1K views/i,
+    );
+    await page
+      .getByRole("button", { name: "Collapse history", exact: true })
+      .click();
+    assert.equal(await days.count(), 14);
+    assert.equal(
+      await page
+        .locator(".xt-past-scroll")
+        .evaluate(
+          (node) =>
+            node.scrollHeight === node.clientHeight &&
+            getComputedStyle(node).overflowY === "visible",
+        ),
+      true,
+      "collapsed history has no internal scrolling",
     );
     const visibleHistory = await page
       .locator(".xt-past-scroll")
@@ -1254,11 +1294,6 @@ test("history calendar lines up with the week row and trend cards compare period
       "comparison and history have breathing room",
     );
 
-    await tile.click();
-    assert.match(
-      await page.locator(".xt-detail").textContent(),
-      /^Series B E1 · posted .* · 2\.1K views/i,
-    );
     await page.locator(".xt-past").scrollIntoViewIfNeeded();
     await screenshot(page, "M5-history.png");
     for (const width of [900, 1400]) {
@@ -1270,12 +1305,21 @@ test("history calendar lines up with the week row and trend cards compare period
         main: document
           .querySelector('[data-row="past"] .xt-tile')
           .getBoundingClientRect().height,
+        tile: (() => {
+          const r = document
+            .querySelector(".xt-past-tile")
+            .getBoundingClientRect();
+          return [r.width, r.height];
+        })(),
       }));
       assert.ok(
         sizes.history <= sizes.main + 0.1,
         `history fits the main tile at ${width}px`,
       );
-      assert.equal(sizes.history, 72, `history stays compact at ${width}px`);
+      assert.ok(
+        Math.abs(sizes.tile[0] - sizes.tile[1]) < 1,
+        `history stays square at ${width}px`,
+      );
     }
     assert.deepEqual(errors, []);
   } finally {
