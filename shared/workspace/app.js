@@ -20,8 +20,6 @@
   );
   const openUploader = document.querySelector("#openUploader");
   const actionStatus = document.querySelector("#actionStatus");
-  const attentionHeading = document.querySelector("#attentionHeading");
-  const attentionStatus = document.querySelector("#attentionStatus");
   const catalogueSummary = document.querySelector("#catalogueSummary");
   const catalogueStatus = document.querySelector("#catalogueStatus");
   const catalogueLoading = document.querySelector("#catalogueLoading");
@@ -142,8 +140,6 @@
     connectionLabel.textContent = label;
     document.querySelector("#extensionSetting").textContent =
       `${label}. ${value.message}`;
-    attentionHeading.textContent = label;
-    attentionStatus.textContent = value.message;
     for (const node of document.querySelectorAll(".chrome-readiness-message"))
       node.textContent = `${label}. ${value.message}`;
     document.querySelector("#chromeSetupMessage").textContent =

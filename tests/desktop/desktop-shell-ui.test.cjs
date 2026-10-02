@@ -97,6 +97,14 @@ async function main() {
         1,
         viewport.name,
       );
+      assert.deepEqual(
+        (await page.locator("nav [data-view]").allTextContents()).map((text) =>
+          text.trim(),
+        ),
+        ["Catalogue", "Uploads", "Teasers", "Twitter", "Settings"],
+        `${viewport.name} navigation excludes Attention`,
+      );
+      assert.equal(await page.locator('[data-panel="attention"]').count(), 0);
       assert.equal(
         await page.getByRole("button", { name: "Upload a video" }).count(),
         1,
@@ -327,12 +335,10 @@ async function testOfflineBridgeRecovery(browser, port) {
     .getByText("Desktop agent unavailable", { exact: true })
     .waitFor();
 
-  await page.getByRole("button", { name: "Attention" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page
-    .getByRole("heading", { name: "Desktop agent unavailable", exact: true })
-    .waitFor();
-  await page
-    .getByText("Start OFEnhancer to reconnect.", { exact: true })
+    .locator("#extensionSetting")
+    .getByText("Start OFEnhancer to reconnect.", { exact: false })
     .waitFor();
   assert.equal(
     await page
@@ -341,7 +347,7 @@ async function testOfflineBridgeRecovery(browser, port) {
     0,
   );
 
-  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page.getByRole("button", { name: "Catalogue", exact: true }).click();
   await page
     .locator("#googleCatalogue")
     .getByText(
