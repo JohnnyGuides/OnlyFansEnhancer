@@ -680,7 +680,9 @@
       }
       // Views change in percent; engagement in percentage points.
       const change =
-        name === "rate" ? (current - previous) * 100 : (current / previous - 1) * 100;
+        name === "rate"
+          ? (current - previous) * 100
+          : (current / previous - 1) * 100;
       const flat = name === "rate" ? 0.2 : 3;
       const direction =
         Math.abs(change) < flat ? "flat" : change > 0 ? "up" : "down";
@@ -709,7 +711,10 @@
       const at = now().getTime();
       for (const [days, label] of TREND_PERIODS) {
         const current = postsBetween(at - days * DAY_MS, at);
-        const previous = postsBetween(at - 2 * days * DAY_MS, at - days * DAY_MS);
+        const previous = postsBetween(
+          at - 2 * days * DAY_MS,
+          at - days * DAY_MS,
+        );
         const card = element("li", "xt-trend-card");
         card.append(
           element("span", "xt-trend-label", label),
@@ -958,11 +963,12 @@
             ? `${episode.series} E${episode.episode}`
             : episode.series,
         );
+      const named = parts.length;
       if (episode.usedCount > 0) parts.push(`${episode.usedCount} posted`);
       if (episode.readyClips > 0) parts.push(`${episode.readyClips} ready`);
       const failed = Math.max(episode.failedCount, episode.failedClips);
       if (failed > 0) parts.push(`${failed} failed`);
-      if (parts.length === 1) parts.push("no teasers");
+      if (parts.length === named) parts.push("no teasers");
       const best = bestRate(episode);
       if (best !== null) parts.push(`best ${formatMetric("rate", best)}`);
       return parts.join(" · ");

@@ -39,6 +39,7 @@ function episode(category, series, number, used = 0, ready = 0, extra = {}) {
     category,
     series,
     episode: String(number),
+    thumbnailAssetId: extra.thumb ?? null,
   };
 }
 
@@ -84,10 +85,10 @@ function post(statusId, daysAgo, itemKey, latest, typical, extra = {}) {
 
 function fixture() {
   const episodes = [
-    episode("Games", "Series A", 1, 2, 1),
+    episode("Games", "Series A", 1, 2, 1, { thumb: "asset-a1" }),
     episode("Games", "Series A", 2, 1, 0),
     episode("Games", "Series A", 3, 0, 2),
-    episode("Games", "Series A", 4),
+    episode("Games", "Series A", 4, 0, 0, { thumb: "asset-a4" }),
     episode("Games", "Series A", 5),
     episode("Games", "Series A", 6, 0, 0, { failed: 1 }),
     episode("Games", "Series C", 1, 1, 0),
@@ -266,6 +267,13 @@ async function openDashboard({
       status: 200,
       contentType: "image/svg+xml",
       body: posterSvg(new URL(route.request().url()).pathname.split("/")[2]),
+    }),
+  );
+  await page.route("https://thumbs.ofenhancer.local/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: posterSvg(route.request().url().length),
     }),
   );
   await page.exposeFunction("__teaserFixture", () => {
@@ -489,108 +497,279 @@ test("timeline strip orders 7 square days and colours numbers by the usual", asy
   }
 });
 
-test("coverage flow groups every episode by category and season with visible states", async () => {
+test("catalogue gallery groups seasons under titles, badges teasers and filters by need", async () => {
   const { page, context, errors } = await openDashboard();
   try {
-    const squares = page.locator(".xt-flow .xt-episode");
-    assert.equal(await squares.count(), fixture().overview.episodes.length);
+    const tiles = page.locator(".xt-cards .xt-episode");
+    assert.equal(await tiles.count(), fixture().overview.episodes.length);
+    // Category, then season order; each season's title sits over its first tile.
     assert.deepEqual(
       await page
-        .locator('.xt-cell[data-category-start="true"] .xt-category-name')
+        .locator('.xt-card[data-season-start="true"] .xt-season-name')
         .allTextContents(),
-      ["Dolls", "Games", "Reviews", "Specials", "Toys"],
+      [
+        "Series B",
+        "Series A",
+        "Series C",
+        "Series D",
+        "Series G",
+        "Series E",
+        "Series H",
+        "Series F",
+      ],
     );
-    const order = await page
-      .locator(".xt-cell")
-      .evaluateAll((cells) =>
-        cells.map((cell) => [
-          cell.dataset.category,
-          cell.querySelector("button").getAttribute("aria-label"),
-          cell.dataset.seasonEnd === "true",
+    assert.equal(
+      await page.locator('.xt-card[data-season-end="true"]').count(),
+      8,
+      "every season ends with a capped line",
+    );
+    const games = await page
+      .locator('.xt-card[data-category="Games"]')
+      .evaluateAll((cards) =>
+        cards.map((card) => [
+          card.dataset.season.split("\u0000")[1],
+          card.dataset.seasonEnd === "true",
         ]),
       );
-    // Seasons stay together and each season's last square breaks the line.
-    const gamesSeasons = order
-      .filter(([category]) => category === "Games")
-      .map(([, label, end]) => [label.split(" · ")[1], end]);
     assert.deepEqual(
-      gamesSeasons.map(([season]) => season),
+      games.map(([season]) => season),
       [...Array(6).fill("Series A"), ...Array(4).fill("Series C")],
     );
     assert.deepEqual(
-      gamesSeasons.filter(([, end]) => end).length,
-      2,
-      "two Games seasons end",
+      games.filter(([, end]) => end).map(([season]) => season),
+      ["Series A", "Series C"],
     );
-    const lineTops = await page
-      .locator(".xt-cell")
-      .evaluateAll(
-        (cells) => new Set(cells.map((cell) => cell.offsetTop)).size,
+    // The category line bridges gaps inside a season but never past its end.
+    await page.locator(".xt-card[data-join]").first().waitFor();
+    const joins = await page
+      .locator(".xt-card")
+      .evaluateAll((cards) =>
+        cards.map((card) => [card.dataset.seasonEnd, card.dataset.join]),
       );
-    assert.ok(lineTops >= 1);
+    assert.ok(joins.some(([, join]) => join === "true"));
+    assert.ok(
+      joins.every(([end, join]) => end !== "true" || join === "false"),
+      "season ends do not join",
+    );
 
-    const state = (key) =>
+    const tile = (key) =>
       page.locator(`.xt-episode[data-item-id="item-${key}"]`);
-    assert.equal(await state("series-a-e1").getAttribute("data-cover"), "used");
-    assert.equal(
-      await state("series-a-e1").locator(".xt-used").textContent(),
-      "2",
+    const badges = (key) =>
+      tile(key)
+        .locator(".xt-badge")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => [node.dataset.tone, node.textContent]),
+        );
+    assert.equal(await tile("series-a-e1").getAttribute("data-cover"), "used");
+    assert.deepEqual(await badges("series-a-e1"), [
+      ["posted", "✓2"],
+      ["ready", "1"],
+    ]);
+    assert.equal(await tile("series-a-e3").getAttribute("data-cover"), "ready");
+    assert.deepEqual(await badges("series-a-e3"), [["ready", "2"]]);
+    assert.equal(await tile("series-a-e4").getAttribute("data-cover"), "empty");
+    assert.deepEqual(await badges("series-a-e4"), []);
+    assert.deepEqual(await badges("series-a-e6"), [["failed", "✕1"]]);
+    assert.match(
+      await tile("series-a-e1").getAttribute("title"),
+      /^Series A E1 · Series A E1 · 2 posted · 1 ready · best \d+%$/,
     );
-    assert.equal(
-      await state("series-a-e1").locator(".xt-ready").textContent(),
-      "1",
+    assert.match(
+      await tile("series-a-e4").getAttribute("title"),
+      /no teasers$/,
     );
-    assert.equal(
-      await state("series-a-e3").getAttribute("data-cover"),
-      "ready",
-    );
-    assert.equal(
-      await state("series-a-e4").getAttribute("data-cover"),
-      "empty",
-    );
-    const used = await state("series-a-e1").evaluate(
-      (node) => getComputedStyle(node).backgroundColor,
-    );
-    const ready = await state("series-a-e3").evaluate((node) => {
-      const style = getComputedStyle(node);
-      return [style.backgroundColor, style.borderTopColor];
-    });
-    const empty = await state("series-a-e4").evaluate((node) => {
-      const style = getComputedStyle(node);
-      return [
-        style.borderTopWidth,
-        style.borderTopColor,
-        style.opacity,
-        style.visibility,
-      ];
-    });
-    assert.notEqual(used, "rgba(0, 0, 0, 0)", "used squares are filled");
-    assert.equal(
-      ready[0],
-      "rgba(0, 0, 0, 0)",
-      "ready-only squares have no fill",
-    );
-    assert.equal(
-      ready[1],
-      "rgb(242, 184, 75)",
-      "ready-only squares are amber outlined",
-    );
-    assert.ok(parseFloat(empty[0]) >= 1, "empty squares keep a border");
-    assert.notEqual(empty[1], "rgba(0, 0, 0, 0)");
-    assert.equal(empty[2], "1");
-    assert.equal(empty[3], "visible");
 
-    await state("series-a-e1").click();
+    // Thumbnails come from the desktop thumbnail host; untouched videos are grey.
+    const thumb = (key) => tile(key).locator("img.xt-thumb-image");
+    assert.equal(
+      await thumb("series-a-e1").getAttribute("src"),
+      "https://thumbs.ofenhancer.local/asset-a1",
+    );
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll("img.xt-thumb-image")].every(
+        (image) => image.complete && image.naturalWidth > 0,
+      ),
+    );
+    const look = (key) =>
+      thumb(key).evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.filter, style.opacity];
+      });
+    assert.deepEqual(await look("series-a-e1"), ["none", "1"]);
+    assert.deepEqual(await look("series-a-e4"), ["grayscale(1)", "0.35"]);
+    assert.equal(await tile("series-a-e2").locator("img").count(), 0);
+    assert.equal(
+      await tile("series-a-e3").evaluate(
+        (node) => getComputedStyle(node).borderTopColor,
+      ),
+      "rgb(242, 184, 75)",
+      "ready-only tiles are amber outlined",
+    );
+
+    await tile("series-a-e1").click();
     assert.equal(
       await page.locator(".xt-detail").textContent(),
       "Games · Series A · E1 · 2 used · 1 ready",
     );
-    await state("series-a-e6").focus();
+    await tile("series-a-e6").focus();
     await page.keyboard.press("Enter");
     assert.equal(
       await page.locator(".xt-detail").textContent(),
       "Games · Series A · E6 · 0 used · 0 ready · 1 failed",
     );
+
+    const filters = page.locator(".xt-flow-bar .xt-segment");
+    assert.deepEqual(await filters.allTextContents(), [
+      "Needs teasers 9",
+      "Ready to post 8",
+      "Posted 9",
+      "All 24",
+    ]);
+    assert.equal(
+      await page
+        .locator('.xt-segment[data-coverage="all"]')
+        .getAttribute("aria-pressed"),
+      "true",
+    );
+    const shown = () =>
+      tiles.evaluateAll((nodes) => nodes.map((node) => node.dataset.cover));
+    await page.locator('.xt-segment[data-coverage="needs"]').click();
+    assert.deepEqual(await shown(), Array(9).fill("empty"));
+    assert.equal(
+      await page
+        .locator('.xt-segment[data-coverage="needs"]')
+        .getAttribute("aria-pressed"),
+      "true",
+    );
+    // A filtered season keeps its title over its first remaining tile.
+    assert.equal(
+      await page
+        .locator('.xt-card[data-season-start="true"]')
+        .filter({ has: tile("series-a-e4") })
+        .locator(".xt-season-name")
+        .textContent(),
+      "Series A",
+    );
+    await page.locator('.xt-segment[data-coverage="ready"]').click();
+    assert.equal(await tiles.count(), 8);
+    await page.locator('.xt-segment[data-coverage="posted"]').click();
+    assert.deepEqual(await shown(), Array(9).fill("used"));
+    await screenshot(page, "M5-catalogue.png", true);
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+      "no horizontal overflow",
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("history calendar lines up with the week row and trend cards compare periods", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    const cards = page.locator(".xt-trend-card");
+    assert.deepEqual(
+      await cards.evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.querySelector(".xt-trend-label").textContent,
+          node.querySelector(".xt-trend-count").textContent,
+        ]),
+      ),
+      [
+        ["Last 3 days", "3 teasers"],
+        ["Last week", "6 teasers"],
+        ["Last 2 weeks", "7 teasers"],
+        ["Last month", "8 teasers"],
+      ],
+    );
+    // Last 3 days (6004-6006) against the 3 days before (6001-6003).
+    const lines = await cards
+      .first()
+      .locator(".xt-trend-line")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.querySelector(".xt-trend-value").textContent,
+          node.querySelector(".xt-trend-unit").textContent,
+          node.querySelector(".xt-trend").dataset.direction,
+          node.querySelector(".xt-trend").textContent,
+          node.querySelector(".xt-trend").title,
+        ]),
+      );
+    assert.deepEqual(lines, [
+      ["943", "views", "down", "↓13%", "Period before: 1.09K"],
+      ["11%", "engagement", "down", "↓2.7 pts", "Period before: 14%"],
+    ]);
+
+    // Days before the 7-day row, oldest first, in two-week rows ending the
+    // day before the row; the first post (3 Jun) falls in the oldest row.
+    const days = page.locator(".xt-past-list > li > .xt-past-tile");
+    const dates = await page
+      .locator(".xt-past-list > li")
+      .evaluateAll((nodes) => nodes.length);
+    assert.equal(dates, 9 * 14);
+    assert.match(
+      await days.first().getAttribute("aria-label"),
+      /^Fri,? 22 May: no teaser$/,
+    );
+    assert.equal(
+      await days.last().getAttribute("aria-label"),
+      "Thu, 24 Sept: no teaser",
+    );
+    assert.equal(
+      await page.locator(".xt-past-range").textContent(),
+      "5 earlier teasers since Wed, 3 Jun",
+    );
+    const posted = page.locator(".xt-past-tile[data-key]");
+    assert.deepEqual(
+      await posted.evaluateAll((nodes) =>
+        nodes.map((node) => node.dataset.key),
+      ),
+      ["past-5005", "past-5004", "past-5003", "past-5002", "past-5001"],
+    );
+    const tile = page.locator('.xt-past-tile[data-key="past-5002"]');
+    assert.equal(await tile.getAttribute("data-verdict"), "good");
+    assert.equal(await tile.locator(".xt-past-date").textContent(), "11 Sept");
+    assert.equal(await tile.locator(".xt-past-views").textContent(), "2.1K");
+    assert.equal(
+      await tile.locator(".xt-past-views").getAttribute("data-tone"),
+      "good",
+    );
+    assert.equal(await tile.locator(".xt-past-rate").textContent(), "10%");
+    assert.equal(
+      await tile.locator("img.xt-past-poster").getAttribute("src"),
+      "https://pbs.twimg.com/ext_tw_video_thumb/5002/pu/img/poster.jpg",
+    );
+    // Empty days stay as faint squares the same size as posted days.
+    const [emptyBox, postedBox] = await Promise.all([
+      days.first().boundingBox(),
+      tile.boundingBox(),
+    ]);
+    assert.equal(Math.round(emptyBox.width), Math.round(postedBox.width));
+    assert.equal(Math.round(emptyBox.height), Math.round(postedBox.height));
+    assert.equal(
+      await days
+        .first()
+        .evaluate((node) => getComputedStyle(node).borderTopStyle),
+      "dashed",
+    );
+    // Each history row is two weeks wide with the same weekday columns as the 7-day row.
+    const [firstPast, firstHistory] = await Promise.all([
+      page.locator('[data-row="past"] > li').first().boundingBox(),
+      page.locator(".xt-past-list > li").nth(14).boundingBox(),
+    ]);
+    assert.ok(Math.abs(firstPast.x - firstHistory.x) <= 1, "columns line up");
+
+    await tile.click();
+    assert.match(
+      await page.locator(".xt-detail").textContent(),
+      /^Series B E1 · posted .* · 2\.1K views/i,
+    );
+    await page.locator(".xt-past").scrollIntoViewIfNeeded();
+    await screenshot(page, "M5-history.png");
     assert.deepEqual(errors, []);
   } finally {
     await context.close();

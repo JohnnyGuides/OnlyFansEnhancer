@@ -466,7 +466,9 @@
 
 .xt-numbers {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Content-sized columns: equal quarters clip a bold "1.15K" at tile widths. */
+  grid-template-columns: repeat(4, auto);
+  justify-content: space-between;
   gap: 2px;
   min-height: 1.1rem;
   font-size: 0.7rem;
