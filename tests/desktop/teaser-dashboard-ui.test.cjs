@@ -843,7 +843,10 @@ test("history calendar lines up with the week row and trend cards compare period
       postedBox.width >= firstPast.width,
       "history uses full weekday columns",
     );
-    assert.equal(postedBox.height, 100, "history tiles are larger");
+    assert.ok(
+      Math.abs(2 * postedBox.height + 4 - firstPast.width) <= 1,
+      "two history tiles and their gap match the main tile height",
+    );
     const visibleHistory = await page
       .locator(".xt-past-scroll")
       .evaluate((node) => {
@@ -863,7 +866,10 @@ test("history calendar lines up with the week row and trend cards compare period
           ),
         };
       });
-    assert.equal(visibleHistory.height, 204);
+    assert.ok(
+      visibleHistory.height <= firstPast.width + 0.1,
+      "both history rows fit within the main tile height",
+    );
     assert.equal(visibleHistory.count, 14, "exactly two weeks are visible");
     assert.equal(visibleHistory.rows, 2, "two weekly rows are visible");
     assert.ok(visibleHistory.complete, "no partial older row appears");
@@ -875,6 +881,25 @@ test("history calendar lines up with the week row and trend cards compare period
     );
     await page.locator(".xt-past").scrollIntoViewIfNeeded();
     await screenshot(page, "M5-history.png");
+    for (const width of [900, 1400]) {
+      await page.setViewportSize({ width, height: 900 });
+      const sizes = await page.evaluate(() => ({
+        history: document
+          .querySelector(".xt-past-scroll")
+          .getBoundingClientRect().height,
+        main: document
+          .querySelector('[data-row="past"] .xt-tile')
+          .getBoundingClientRect().height,
+      }));
+      assert.ok(
+        sizes.history <= sizes.main + 0.1,
+        `history fits the main tile at ${width}px`,
+      );
+      assert.ok(
+        Math.abs(sizes.history - sizes.main) <= 1,
+        `history scales with the main tile at ${width}px`,
+      );
+    }
     assert.deepEqual(errors, []);
   } finally {
     await context.close();

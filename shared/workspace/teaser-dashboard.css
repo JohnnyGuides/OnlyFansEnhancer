@@ -1,5 +1,6 @@
 /* X teaser dashboard: one page, state by colour, opacity and outline. */
 .xt {
+  --xt-day-gap: 12px;
   --xt-good: #52d19b;
   --xt-bad: #f07272;
   --xt-muted: #8f99a8;
@@ -66,8 +67,10 @@
 
 /* History strip */
 .xt-past {
-  --xt-past-tile-height: 100px;
   --xt-past-row-gap: 4px;
+  --xt-past-tile-height: calc(
+    ((100cqw - 6 * var(--xt-day-gap)) / 7 - var(--xt-past-row-gap)) / 2
+  );
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -324,10 +327,14 @@
   color: var(--xt-bad);
 }
 
+.xt-strip {
+  container-type: inline-size;
+}
+
 .xt-row {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--xt-day-gap);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -863,8 +870,8 @@
 }
 
 @media (max-width: 560px) {
-  .xt-row {
-    gap: 6px;
+  .xt {
+    --xt-day-gap: 6px;
   }
 
   .xt-numbers {
