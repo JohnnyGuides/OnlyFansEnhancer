@@ -143,8 +143,8 @@
 .xt-trend-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .xt-trend-label {

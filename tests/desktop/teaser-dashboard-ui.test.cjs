@@ -874,8 +874,8 @@ test("history calendar lines up with the week row and trend cards compare period
         header.locator(".xt-trend-count").boundingBox(),
       ]);
       assert.ok(
-        count.x >= label.x + label.width,
-        "teaser count is right of the period",
+        Math.abs(count.x - label.x - label.width - 8) < 1,
+        "teaser count sits beside the period with a consistent compact gap",
       );
       assert.ok(
         Math.abs(count.y - label.y) < 4,
