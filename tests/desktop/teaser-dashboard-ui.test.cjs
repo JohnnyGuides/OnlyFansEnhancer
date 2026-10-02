@@ -663,6 +663,16 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
       ),
       header: document.querySelector(".xt-flow-bar").getBoundingClientRect()
         .right,
+      sections: [
+        ".twitter-heading",
+        ".xt-trends-wrap",
+        ".xt-past-scroll",
+        ".xt-strip",
+        "#teaserDashboard",
+      ].map(
+        (selector) =>
+          document.querySelector(selector).getBoundingClientRect().right,
+      ),
     }));
     assert.ok(
       catalogueEdges.filters <= catalogueEdges.gallery + 1,
@@ -672,6 +682,46 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
       Math.abs(catalogueEdges.header - catalogueEdges.gallery) <= 1,
       "catalogue header aligns with full tile columns",
     );
+    assert.ok(
+      catalogueEdges.sections.every(
+        (right) => Math.abs(right - catalogueEdges.gallery) <= 1,
+      ),
+      "title, summary, history and calendar share the catalogue's right edge",
+    );
+    for (const width of [1440, 1120, 390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForFunction(() => {
+        const root = document.querySelector("#teaserDashboard");
+        const parent = root.parentElement;
+        const style = getComputedStyle(parent);
+        const available =
+          parent.clientWidth -
+          parseFloat(style.paddingLeft) -
+          parseFloat(style.paddingRight);
+        return (
+          Math.abs(
+            root.getBoundingClientRect().width -
+              (available >= 600
+                ? Math.floor((available + 6) / 102) * 102 - 6
+                : available),
+          ) < 1
+        );
+      });
+      const geometry = await page
+        .locator(".xt-day .xt-tile")
+        .first()
+        .boundingBox();
+      assert.ok(
+        Math.abs(geometry.width - geometry.height) < 1,
+        "calendar tiles remain square after container alignment and resizing",
+      );
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        true,
+      );
+    }
     assert.deepEqual(await filters.allTextContents(), [
       "Needs teasers 9",
       "Ready to post 8",

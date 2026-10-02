@@ -1185,7 +1185,7 @@
       wallObserver = null;
       if (wall.children.length && global.ResizeObserver) {
         wallObserver = new ResizeObserver(() => joinSeasonLines(wall));
-        wallObserver.observe(wall);
+        wallObserver.observe(root.parentElement);
       }
       return flow;
     }
@@ -1193,7 +1193,20 @@
     // A season's line bridges the gap to its next tile unless the row ends
     // there; the grid has fixed 96px columns with 6px gaps.
     function joinSeasonLines(wall) {
-      const columns = Math.max(1, Math.floor((wall.clientWidth + 6) / 102));
+      const container = root.parentElement;
+      const style = getComputedStyle(container);
+      const available =
+        container.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight);
+      if (available <= 0) return;
+      const columns = Math.max(1, Math.floor((available + 6) / 102));
+      // Align the desktop sections to complete catalogue columns. The tiles
+      // keep their natural size; narrow screens keep all available space.
+      const width = available >= 600 ? `${columns * 102 - 6}px` : "";
+      root.style.width = width;
+      const heading = container.querySelector(".twitter-heading");
+      if (heading) heading.style.width = width;
       const bar = wall.parentElement.querySelector(".xt-flow-bar");
       if (bar) bar.style.width = `${columns * 102 - 6}px`;
       const cards = Array.from(wall.children);
