@@ -776,6 +776,7 @@
         empty.setAttribute("role", "img");
         empty.setAttribute("aria-label", `${longDayLabel(date)}: no teaser`);
         empty.title = longDayLabel(date);
+        empty.append(element("span", "xt-past-date", shortDayLabel(date)));
         return empty;
       }
       const tile = button(
@@ -847,28 +848,15 @@
           "xt-past-range",
           `${earlier.length} earlier ${
             earlier.length === 1 ? "teaser" : "teasers"
-          } since ${longDayLabel(first)}`,
+          }`,
         ),
       );
       const scroller = element("div", "xt-past-scroll");
       const grid = element("ol", "xt-past-list");
       grid.setAttribute("aria-label", "Earlier days");
-      let column = 0;
       for (let date = start; date <= end; date = addDays(date, 1)) {
         const item = element("li", "xt-past-day");
-        // The day sits above the picture; the month starts each row and
-        // marks the 1st.
-        const rowStart = column++ % HISTORY_ROW_DAYS === 0;
-        const caption = element(
-          "span",
-          "xt-past-date",
-          rowStart || date.endsWith("-01")
-            ? shortDayLabel(date)
-            : String(parseDate(date).getDate()),
-        );
-        caption.setAttribute("aria-hidden", "true");
-        if (date.endsWith("-01")) caption.dataset.month = "true";
-        item.append(caption, historyTile(date));
+        item.append(historyTile(date));
         grid.append(item);
       }
       scroller.append(grid);

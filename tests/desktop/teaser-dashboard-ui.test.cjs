@@ -699,6 +699,14 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
 test("history calendar lines up with the week row and trend cards compare periods", async () => {
   const { page, context, errors } = await openDashboard();
   try {
+    // Compact suffixes vary with the browser's locale data (en-GB uses k).
+    const [overallViews, usualViews, tileViews] = await page.evaluate(() => {
+      const formatter = new Intl.NumberFormat(undefined, {
+        notation: "compact",
+        maximumSignificantDigits: 3,
+      });
+      return [1050, 1000, 2100].map((value) => formatter.format(value));
+    });
     const cards = page.locator(".xt-trend-card");
     assert.deepEqual(
       await cards.evaluateAll((nodes) =>
@@ -729,7 +737,7 @@ test("history calendar lines up with the week row and trend cards compare period
         );
     // The overall card is the plain average teaser, with nothing to beat.
     assert.deepEqual(await metricsOf(cards.nth(0)), [
-      ["1.05K", "views", null, null, null],
+      [overallViews, "views", null, null, null],
       ["11%", "engagement", null, null, null],
     ]);
     // 3 days (6004-6006) against their usual at the same age: within the
@@ -737,10 +745,10 @@ test("history calendar lines up with the week row and trend cards compare period
     assert.deepEqual(await metricsOf(cards.nth(1)), [
       [
         "943",
-        "viewsusual 1K",
+        `viewsusual ${usualViews}`,
         "neutral",
         "\u22126%",
-        "Usual views at the same age: 1K",
+        `Usual views at the same age: ${usualViews}`,
       ],
       [
         "11%",
@@ -767,13 +775,13 @@ test("history calendar lines up with the week row and trend cards compare period
       await days.first().getAttribute("aria-label"),
       /^Fri,? 22 May: no teaser$/,
     );
-    assert.equal(
+    assert.match(
       await days.last().getAttribute("aria-label"),
-      "Thu, 24 Sept: no teaser",
+      /^Thu,? 24 Sept: no teaser$/,
     );
     assert.equal(
       await page.locator(".xt-past-range").last().textContent(),
-      "5 earlier teasers since Wed, 3 Jun",
+      "5 earlier teasers",
     );
     const posted = page.locator(".xt-past-tile[data-key]");
     assert.deepEqual(
@@ -784,21 +792,14 @@ test("history calendar lines up with the week row and trend cards compare period
     );
     const tile = page.locator('.xt-past-tile[data-key="past-5002"]');
     assert.equal(await tile.getAttribute("data-verdict"), "good");
-    // The date sits above the picture, never on it; the month starts each
-    // two-week row and marks the 1st.
-    assert.equal(await tile.locator(".xt-past-date").count(), 0);
+    // Posted tiles have no visible dates; empty tiles retain the day and month.
+    assert.equal(await posted.locator(".xt-past-date").count(), 0);
+    assert.equal(await page.locator(".xt-past-day > .xt-past-date").count(), 0);
     assert.equal(
-      await tile.locator("xpath=preceding-sibling::span").textContent(),
-      "11 Sept",
+      await days.first().locator(".xt-past-date").textContent(),
+      "22 May",
     );
-    assert.equal(
-      await page
-        .locator(".xt-past-list > li > .xt-past-date[data-month]")
-        .first()
-        .textContent(),
-      "1 Jun",
-    );
-    assert.equal(await tile.locator(".xt-past-views").textContent(), "2.1K");
+    assert.equal(await tile.locator(".xt-past-views").textContent(), tileViews);
     assert.equal(
       await tile.locator(".xt-past-views").getAttribute("data-tone"),
       "good",
@@ -827,6 +828,31 @@ test("history calendar lines up with the week row and trend cards compare period
       page.locator(".xt-past-list > li").nth(14).boundingBox(),
     ]);
     assert.ok(Math.abs(firstPast.x - firstHistory.x) <= 1, "columns line up");
+    const visibleHistory = await page
+      .locator(".xt-past-scroll")
+      .evaluate((node) => {
+        const viewport = node.getBoundingClientRect();
+        const visible = [...node.querySelectorAll(".xt-past-tile")]
+          .map((tile) => tile.getBoundingClientRect())
+          .filter(
+            (tile) => tile.bottom > viewport.top && tile.top < viewport.bottom,
+          );
+        return {
+          height: viewport.height,
+          count: visible.length,
+          complete: visible.every(
+            (tile) =>
+              tile.top >= viewport.top && tile.bottom <= viewport.bottom,
+          ),
+        };
+      });
+    assert.equal(visibleHistory.height, 60);
+    assert.equal(
+      visibleHistory.count,
+      14,
+      "exactly one two-week row is visible",
+    );
+    assert.ok(visibleHistory.complete, "no partial older row appears");
 
     await tile.click();
     assert.match(
