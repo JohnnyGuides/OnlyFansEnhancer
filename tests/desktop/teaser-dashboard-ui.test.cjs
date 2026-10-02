@@ -1,7 +1,7 @@
 "use strict";
 
 // Renders the shared X teaser dashboard with synthetic overview data in the
-// desktop workspace's Twitter view and in the extension's dashboard page.
+// desktop workspace's Teasers view and in the extension's dashboard page.
 // Set OFENHANCER_TEASER_SCREENSHOTS to a folder to also save review images.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -350,7 +350,7 @@ async function openDashboard({
   });
   if (area === "desktop") {
     await page.goto(`http://127.0.0.1:${port}/desktop/index.html`);
-    await page.getByRole("button", { name: "Twitter", exact: true }).click();
+    await page.getByRole("button", { name: "Teasers", exact: true }).click();
   } else {
     await page.goto(`http://127.0.0.1:${port}/extension/teaser-dashboard.html`);
   }
@@ -696,6 +696,124 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
   }
 });
 
+test("summary compares the same cohort and resists viral skew", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      posts: [
+        post(
+          "8001",
+          1,
+          "series-a-e1",
+          metrics(1000, 100, 10),
+          usual(1001, 100, 10, 0.115),
+        ),
+        post("8002", 2, "series-a-e2", metrics(3000, 300, 30), null),
+        post("8003", 10, "series-b-e1", metrics(100000, 10000, 1000), null),
+      ],
+    },
+  });
+  try {
+    const compact = await page.evaluate(() => {
+      const format = new Intl.NumberFormat(undefined, {
+        notation: "compact",
+        maximumSignificantDigits: 3,
+      });
+      return [1000, 3000, 104000 / 3].map((value) => format.format(value));
+    });
+    const overall = page
+      .locator(".xt-trends tbody tr")
+      .first()
+      .locator("td")
+      .nth(0);
+    assert.equal(
+      await overall.locator(".xt-trend-value").textContent(),
+      compact[1],
+    );
+    assert.equal(
+      await overall.locator(".xt-trend-note").textContent(),
+      `avg ${compact[2]}`,
+    );
+    const recent = page
+      .locator(".xt-trends tbody tr")
+      .first()
+      .locator("td")
+      .nth(1);
+    assert.equal(
+      await recent.locator(".xt-trend-value").textContent(),
+      compact[0],
+      "headline uses the compared teaser, excluding the unpaired viral post",
+    );
+    assert.equal(
+      await recent.locator(".xt-trend").textContent(),
+      "0%",
+      "rounded zero has no misleading sign",
+    );
+    assert.match(
+      await recent.locator(".xt-trend").getAttribute("title"),
+      /1 of 2 teasers compared/,
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trend-column")
+        .nth(1)
+        .locator(".xt-trend-note")
+        .textContent(),
+      "1 of 2 compared",
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("young teasers explain missing comparisons and even medians", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      posts: [
+        post("8001", 1, "series-a-e1", metrics(100, 10, 1), null),
+        post("8002", 2, "series-a-e2", metrics(300, 30, 3), null),
+      ],
+    },
+  });
+  try {
+    const cells = page.locator(".xt-trends tbody tr").first().locator("td");
+    assert.equal(
+      await cells.nth(0).locator(".xt-trend-value").textContent(),
+      "200",
+    );
+    assert.equal(
+      await cells.nth(1).locator(".xt-trend-value").textContent(),
+      "200",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trend-column")
+        .nth(1)
+        .locator(".xt-trend-note")
+        .textContent(),
+      "too new to compare",
+    );
+    assert.equal(await cells.nth(1).locator(".xt-trend").count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      "summary scrolls locally on narrow screens",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trends-wrap")
+        .evaluate((node) => node.scrollWidth > node.clientWidth),
+      true,
+    );
+    await screenshot(page, "M6-summary-narrow.png");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test("history calendar lines up with the week row and trend cards compare periods", async () => {
   const { page, context, errors } = await openDashboard();
   try {
@@ -707,7 +825,7 @@ test("history calendar lines up with the week row and trend cards compare period
       });
       return [1050, 1000, 2100].map((value) => formatter.format(value));
     });
-    const cards = page.locator(".xt-trend-card");
+    const cards = page.locator(".xt-trend-column");
     assert.deepEqual(
       await cards.evaluateAll((nodes) =>
         nodes.map((node) => [
@@ -723,87 +841,80 @@ test("history calendar lines up with the week row and trend cards compare period
         ["30 days", "8 teasers"],
       ],
     );
-    const metricsOf = (card) =>
-      card
-        .locator(".xt-trend-metric")
+    const metricsOf = (column) =>
+      page
+        .locator(`.xt-trends tbody tr > td:nth-child(${column + 2})`)
         .evaluateAll((nodes) =>
           nodes.map((node) => [
             node.querySelector(".xt-trend-value").textContent,
-            node.querySelector(".xt-trend-unit").textContent,
+            node.dataset.metric === "rate" ? "engagement" : node.dataset.metric,
             node.querySelector(".xt-trend")?.dataset.tone ?? null,
             node.querySelector(".xt-trend")?.textContent ?? null,
             node.querySelector(".xt-trend")?.title ?? null,
           ]),
         );
-    // The overall card is the plain average teaser, with nothing to beat.
-    assert.deepEqual(await metricsOf(cards.nth(0)), [
-      [overallViews, "views", null, null, null],
-      ["100", "likes", null, null, null],
-      ["10", "reposts", null, null, null],
-      ["11%", "engagement", null, null, null],
+    // Overall leads with the median while retaining the mean as a caption.
+    assert.deepEqual(await metricsOf(0), [
+      ["980", "views", null, null, null],
+      ["96", "likes", null, null, null],
+      ["9", "reposts", null, null, null],
+      ["10%", "engagement", null, null, null],
     ]);
+    assert.equal(
+      await page
+        .locator('.xt-trend-metric[data-baseline="true"]')
+        .first()
+        .locator(".xt-trend-note")
+        .textContent(),
+      `avg ${overallViews}`,
+    );
     // 3 days (6004-6006) against their usual at the same age: within the
     // grey band, so neither green nor red.
-    assert.deepEqual(await metricsOf(cards.nth(1)), [
+    assert.deepEqual(await metricsOf(1), [
       [
         "943",
         "views",
         "neutral",
         "\u22126%",
-        `Usual views at the same age: ${usualViews}`,
+        `Usual views at the same age: ${usualViews} · 3 of 3 teasers compared`,
       ],
       [
         "96",
         "likes",
         "neutral",
         "\u22124%",
-        "Usual likes at the same age: 100",
+        "Usual likes at the same age: 100 · 3 of 3 teasers compared",
       ],
       [
         "9",
         "reposts",
         "neutral",
         "\u221210%",
-        "Usual reposts at the same age: 10",
+        "Usual reposts at the same age: 10 · 3 of 3 teasers compared",
       ],
       [
         "11%",
         "engagement",
         "neutral",
         "+0.3 pts",
-        "Usual engagement at the same age: 11%",
+        "Usual engagement at the same age: 11% · 3 of 3 teasers compared",
       ],
     ]);
     // 7 days engages 19% more than usual: green, in points.
-    assert.deepEqual((await metricsOf(cards.nth(2)))[3].slice(2, 4), [
-      "good",
-      "+2.1 pts",
-    ]);
-    for (const metric of await page.locator(".xt-trend-metric").all()) {
-      const [value, unit] = await Promise.all([
-        metric.locator(".xt-trend-value").boundingBox(),
-        metric.locator(".xt-trend-unit").boundingBox(),
-      ]);
-      assert.ok(unit.x >= value.x + value.width, "label is right of its value");
-      assert.ok(
-        Math.abs(unit.y + unit.height / 2 - value.y - value.height / 2) < 1,
-        "label and value share a line",
-      );
-    }
-    for (let metric = 0; metric < 4; metric++) {
-      const rowTops = await cards.evaluateAll(
-        (nodes, index) =>
-          nodes.map(
-            (card) =>
-              card
-                .querySelectorAll(".xt-trend-metric")
-                [index].getBoundingClientRect().top,
-          ),
-        metric,
-      );
+    assert.deepEqual((await metricsOf(2))[3].slice(2, 4), ["good", "+2.1 pts"]);
+    assert.deepEqual(
+      await page.locator('.xt-trends tbody th[scope="row"]').allTextContents(),
+      ["Views", "Likes", "Reposts", "Engagement"],
+    );
+    for (const row of await page.locator(".xt-trends tbody tr").all()) {
+      const rowTops = await row
+        .locator("td")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getBoundingClientRect().top),
+        );
       assert.ok(
         Math.max(...rowTops) - Math.min(...rowTops) <= 1,
-        "metric rows align across all cards",
+        "metric rows align across all periods",
       );
     }
 

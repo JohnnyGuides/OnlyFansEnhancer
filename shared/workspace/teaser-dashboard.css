@@ -90,116 +90,101 @@
   color: var(--xt-muted);
 }
 
-.xt-trends {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.xt-trend-card {
-  display: grid;
-  min-width: 0;
-  align-content: start;
-  gap: 8px;
-  padding: 10px 12px;
+.xt-trends-wrap {
+  overflow-x: auto;
   border: 1px solid var(--xt-line);
   border-radius: 10px;
   background: var(--xt-surface);
+  scrollbar-width: thin;
 }
 
-/* The reference card: your average teaser, no comparison. */
-.xt-trend-card[data-baseline="true"] {
-  border-color: #35657a;
-  background: #111d27;
+.xt-trends {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.xt-trends th,
+.xt-trends td {
+  padding: 8px 14px;
+  vertical-align: middle;
+  text-align: start;
+}
+
+.xt-trends thead th {
+  padding-block: 14px;
+  border-bottom: 1px solid var(--xt-line);
+}
+
+.xt-trends tbody tr + tr > * {
+  border-top: 1px solid #252d39;
+}
+
+.xt-trends [data-baseline="true"] {
+  background: #15212a;
 }
 
 .xt-trend-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 6px;
+  display: grid;
+  gap: 4px;
 }
 
 .xt-trend-label {
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   font-weight: 700;
 }
 
-.xt-trend-count {
+.xt-trend-count,
+.xt-trend-note {
   color: var(--xt-muted);
-  font-size: 0.7rem;
-  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
-.xt-trend-metric {
-  display: grid;
-  grid-template-rows: 22px 18px;
-  gap: 1px;
+.xt-trend-row-label {
+  width: 110px;
+  color: #b5bfcc;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .xt-trend-line {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
 }
 
 .xt-trend-value {
-  font-size: 1.15rem;
-  font-weight: 750;
-  line-height: 1.2;
-}
-
-.xt-trend-unit {
-  color: var(--xt-muted);
-  font-size: 0.7rem;
-  white-space: nowrap;
-}
-
-.xt-trend-comparison {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.xt-trend-usual {
-  min-width: 0;
-  overflow: hidden;
-  color: #b5bfcc;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Pill tinted like the tile numbers: green above usual, red below. */
-.xt-trend {
-  flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: #1d2430;
-  color: var(--xt-muted);
-  font-size: 0.74rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  white-space: nowrap;
+  line-height: 1.3;
 }
 
-.xt-trend[data-tone="none"] {
-  display: none;
+.xt-trend-note {
+  margin-top: 4px;
+}
+
+.xt-trend-metric:focus-visible {
+  outline: 2px solid var(--xt-accent);
+  outline-offset: -3px;
+}
+
+.xt-trend {
+  color: var(--xt-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .xt-trend[data-tone="good"] {
-  background: rgb(82 209 155 / 16%);
   color: var(--xt-good);
 }
 
 .xt-trend[data-tone="bad"] {
-  background: rgb(240 114 114 / 16%);
   color: var(--xt-bad);
 }
 

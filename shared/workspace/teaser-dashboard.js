@@ -1,7 +1,7 @@
 (function attachTeaserDashboard(global) {
   "use strict";
 
-  // One-page X teaser dashboard shared by the desktop workspace's Twitter view
+  // One-page X teaser dashboard shared by the desktop workspace's Teasers view
   // and the extension's teaser-dashboard page. It reads the desktop teaser
   // overview (including the owner's X scheduled posts and the background
   // scan status) and the owner-local plan; it never posts or schedules on X.
@@ -665,6 +665,18 @@
         : null;
     }
 
+    function median(list, name) {
+      const values = list
+        .map((post) => metricValue(post, name))
+        .filter((value) => value !== null)
+        .sort((left, right) => left - right);
+      if (!values.length) return null;
+      const middle = Math.floor(values.length / 2);
+      return values.length % 2
+        ? values[middle]
+        : (values[middle - 1] + values[middle]) / 2;
+    }
+
     // Each post's number set against what teasers usually had at the same
     // age, so a young teaser is not judged against fully grown ones.
     function averageAgainstUsual(list, name) {
@@ -679,7 +691,9 @@
         usual += typical;
         count++;
       }
-      return count ? { value: value / count, usual: usual / count } : null;
+      return count
+        ? { value: value / count, usual: usual / count, count }
+        : null;
     }
 
     function postsBetween(fromMs, toMs) {
@@ -690,7 +704,7 @@
     }
 
     // Same colours as the tiles: green 15% above the usual, red 20% below.
-    function trendBadge(pair, name, label) {
+    function trendBadge(pair, name, label, total) {
       const badge = element("span", "xt-trend");
       if (!pair || !(pair.usual > 0)) {
         badge.dataset.tone = "none";
@@ -703,54 +717,87 @@
         name === "rate"
           ? (pair.value - pair.usual) * 100
           : (pair.value / pair.usual - 1) * 100;
-      const sign = change >= 0 ? "+" : "\u2212";
+      const rounded =
+        name === "rate" ? Number(change.toFixed(1)) : Math.round(change);
+      const sign = rounded === 0 ? "" : rounded > 0 ? "+" : "\u2212";
       badge.textContent =
         name === "rate"
-          ? `${sign}${Math.abs(change).toFixed(1)} pts`
-          : `${sign}${Math.abs(Math.round(change))}%`;
+          ? `${sign}${Math.abs(rounded).toFixed(1)} pts`
+          : `${sign}${Math.abs(rounded)}%`;
       badge.title = `Usual ${label} at the same age: ${formatMetric(
         name,
         pair.usual,
-      )}`;
+      )} · ${pair.count} of ${total} teasers compared`;
       return badge;
     }
 
-    function trendMetric(list, name, label, compare) {
-      const block = element("div", "xt-trend-metric");
-      const value = average(list, name);
-      const line = element("div", "xt-trend-line");
-      line.append(
-        element("span", "xt-trend-value", formatMetric(name, value)),
-        element("span", "xt-trend-unit", label),
-      );
+    function trendMetric(list, name, label, compare, sharedCoverage) {
+      const block = element("td", "xt-trend-metric");
+      block.dataset.metric = name;
+      if (!compare) block.dataset.baseline = "true";
       const pair = compare ? averageAgainstUsual(list, name) : null;
-      const caption = element("div", "xt-trend-comparison");
-      if (pair && pair.usual > 0)
-        caption.append(
-          element(
-            "span",
-            "xt-trend-usual",
-            `usual ${formatMetric(name, pair.usual)}`,
-          ),
-        );
-      if (compare) caption.append(trendBadge(pair, name, label));
+      const value = compare
+        ? pair
+          ? pair.value
+          : average(list, name)
+        : median(list, name);
+      const line = element("div", "xt-trend-line");
+      line.append(element("span", "xt-trend-value", formatMetric(name, value)));
+      const caption = element("div", "xt-trend-note");
+      let description = `${formatMetric(name, value)} ${label}`;
+      if (!compare) {
+        caption.textContent = `avg ${formatMetric(name, average(list, name))}`;
+        description = `Median ${description}; ${caption.textContent}`;
+      } else if (pair && pair.usual > 0) {
+        const badge = trendBadge(pair, name, label, list.length);
+        line.append(badge);
+        description += `; ${badge.title}; ${badge.textContent}`;
+        if (pair.count < list.length)
+          caption.textContent = `${pair.count} of ${list.length} compared`;
+      } else if (list.length) {
+        caption.textContent = pair ? "no comparison" : "too new to compare";
+        description += `; ${caption.textContent}`;
+      }
       block.append(line);
-      block.append(caption);
+      if (caption.textContent && (!compare || !sharedCoverage))
+        block.append(caption);
+      block.title = description;
+      block.setAttribute("aria-label", description);
+      block.tabIndex = 0;
       return block;
     }
 
-    // Your average teaser first, then recent periods, each compared with
-    // what teasers usually had at the same age.
+    // Shared metric rows make periods directly comparable. Overall is the
+    // median; period values and deltas use the same age-matched cohort.
     function renderTrends() {
-      const row = element("ul", "xt-trends");
-      row.setAttribute("aria-label", "Average numbers per teaser");
+      const wrap = element("div", "xt-trends-wrap");
+      const table = element("table", "xt-trends");
+      table.setAttribute("aria-label", "Teaser performance by period");
+      const header = element("thead", "");
+      const heading = element("tr", "");
+      const metricHeading = element("th", "xt-trend-row-label", "Per teaser");
+      metricHeading.scope = "col";
+      heading.append(metricHeading);
       const at = now().getTime();
       const periods = [[null, "Overall"], ...TREND_PERIODS];
-      for (const [days, label] of periods) {
-        const list =
-          days === null ? posts() : postsBetween(at - days * DAY_MS, at);
-        const card = element("li", "xt-trend-card");
-        if (days === null) card.dataset.baseline = "true";
+      const lists = periods.map(([days]) =>
+        days === null ? posts() : postsBetween(at - days * DAY_MS, at),
+      );
+      // Shared coverage is explained once, in the column header.
+      const coverage = lists.map((list, index) => {
+        if (index === 0 || !list.length) return null;
+        const counts = ["views", "likes", "reposts", "rate"].map((name) => {
+          const pair = averageAgainstUsual(list, name);
+          return pair ? (pair.usual > 0 ? pair.count : null) : 0;
+        });
+        return counts.every((count) => count === counts[0]) ? counts[0] : null;
+      });
+      for (let index = 0; index < periods.length; index++) {
+        const [days, label] = periods[index];
+        const list = lists[index];
+        const cell = element("th", "xt-trend-column");
+        cell.scope = "col";
+        if (days === null) cell.dataset.baseline = "true";
         const head = element("div", "xt-trend-head");
         head.append(
           element("span", "xt-trend-label", label),
@@ -760,16 +807,46 @@
             `${list.length} ${list.length === 1 ? "teaser" : "teasers"}`,
           ),
         );
-        card.append(
-          head,
-          trendMetric(list, "views", "views", days !== null),
-          trendMetric(list, "likes", "likes", days !== null),
-          trendMetric(list, "reposts", "reposts", days !== null),
-          trendMetric(list, "rate", "engagement", days !== null),
-        );
-        row.append(card);
+        if (coverage[index] !== null && coverage[index] < list.length)
+          head.append(
+            element(
+              "span",
+              "xt-trend-note",
+              coverage[index] === 0
+                ? "too new to compare"
+                : `${coverage[index]} of ${list.length} compared`,
+            ),
+          );
+        cell.append(head);
+        heading.append(cell);
       }
-      return row;
+      header.append(heading);
+      const body = element("tbody", "");
+      for (const [name, label] of [
+        ["views", "Views"],
+        ["likes", "Likes"],
+        ["reposts", "Reposts"],
+        ["rate", "Engagement"],
+      ]) {
+        const row = element("tr", "");
+        const rowLabel = element("th", "xt-trend-row-label", label);
+        rowLabel.scope = "row";
+        row.append(rowLabel);
+        for (let index = 0; index < periods.length; index++)
+          row.append(
+            trendMetric(
+              lists[index],
+              name,
+              label.toLowerCase(),
+              periods[index][0] !== null,
+              coverage[index] !== null,
+            ),
+          );
+        body.append(row);
+      }
+      table.append(header, body);
+      wrap.append(table);
+      return wrap;
     }
 
     function historyTile(date) {
@@ -831,7 +908,7 @@
         element(
           "span",
           "xt-past-range",
-          "Average per teaser; usual is what teasers had at the same age.",
+          "Overall median · recent averages vs usual at the same age",
         ),
       );
       section.append(head, renderTrends());

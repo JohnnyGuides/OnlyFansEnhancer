@@ -101,10 +101,11 @@ async function main() {
         (await page.locator("nav [data-view]").allTextContents()).map((text) =>
           text.trim(),
         ),
-        ["Catalogue", "Uploads", "Teasers", "Twitter", "Settings"],
+        ["Catalogue", "Uploads", "Teasers", "Settings"],
         `${viewport.name} navigation excludes Attention`,
       );
       assert.equal(await page.locator('[data-panel="attention"]').count(), 0);
+      assert.equal(await page.locator('[data-panel="teasers"]').count(), 0);
       assert.equal(
         await page.getByRole("button", { name: "Upload a video" }).count(),
         1,
@@ -124,6 +125,12 @@ async function main() {
         `${viewport.name} focus`,
       );
       await page.getByRole("button", { name: "Teasers" }).click();
+      assert.equal(
+        await page
+          .getByRole("heading", { name: "Teasers", exact: true })
+          .count(),
+        1,
+      );
       assert.equal(
         await page
           .getByRole("button", { name: "Teasers" })
