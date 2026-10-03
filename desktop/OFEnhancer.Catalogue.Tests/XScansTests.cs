@@ -197,6 +197,7 @@ public sealed class XScansTests
             running with { Outcome = "posted" },
             running with { UpdatedUtc = "" },
             running with { Pages = -1 },
+            running with { Expected = -1 },
             running with { Posts = [post with { PosterUrl = "https://example.com/a.jpg" }] },
             running with { Posts = [post with { PosterUrl = "http://pbs.twimg.com/a.jpg" }] },
             running with { Posts = [post with { StatusId = "x1" }] },
@@ -221,6 +222,12 @@ public sealed class XScansTests
         using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
         XScanPlan plan = store.GetXScanPlan(Now);
         Assert.IsNull(plan.DesktopStartedUtc);
+        Assert.AreEqual((0, 0), (plan.KnownPosts, plan.KnownPostsInWindow));
+        // The progress total: owner posts recorded overall and in the 35-day window.
+        store.RecordXObservations(new(Owner, [Post("501", Now.AddDays(-2)), Post("502", Now.AddDays(-34)),
+            Post("503", Now.AddDays(-40))]), Now);
+        XScanPlan counted = store.GetXScanPlan(Now);
+        Assert.AreEqual((3, 2), (counted.KnownPosts, counted.KnownPostsInWindow));
         Assert.AreEqual("2026-10-01T11:00:00.0000000+00:00",
             (plan with { DesktopStartedUtc = Now.AddHours(-1).ToString("O", CultureInfo.InvariantCulture) }).DesktopStartedUtc);
     }

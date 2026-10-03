@@ -20,9 +20,11 @@ public sealed record XScanOwner(string AccountId, string Handle);
 
 // What the extension's background scanner needs to decide whether a scan is due.
 // DesktopStartedUtc: when this OFEnhancer process started; the scanner runs one
-// scan after each start.
+// scan after each start. KnownPosts / KnownPostsInWindow: how many of the
+// owner's posts the catalogue already holds in total and within the routine
+// scan window, so progress can be shown against a recorded count.
 public sealed record XScanPlan(XScanOwner? Owner, string? RequestedUtc, IReadOnlyList<string> RecentPostsUtc,
-    string? DesktopStartedUtc = null);
+    string? DesktopStartedUtc = null, int KnownPosts = 0, int KnownPostsInWindow = 0);
 
 // BackoffUntilUtc: automatic scans are paused until then after a rate-limit or
 // authorization answer ("" when not paused).
@@ -39,6 +41,8 @@ public sealed partial class CatalogueStore
     internal const int MaxOverviewScheduled = 50;
     internal const int MaxScanPlanPosts = 200;
     internal static readonly TimeSpan XScanPlanWindow = TimeSpan.FromDays(31);
+    // Matches the scanner's routine window (ROUTINE_WINDOW_MS).
+    internal static readonly TimeSpan XScanRoutineWindow = TimeSpan.FromDays(35);
     private static readonly Regex XScanDetail = new("^[a-z0-9-]{0,40}$", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> XScheduledMediaTypes = new(StringComparer.Ordinal)
         { "video", "photo", "animated_gif", "unknown" };
@@ -132,7 +136,22 @@ public sealed partial class CatalogueStore
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read()) recent.Add(reader.GetString(0));
         }
-        return new(owner, GetXScanStatus().RequestedUtc, recent);
+        int known = 0, inWindow = 0;
+        if (owner is not null)
+        {
+            // x_posts holds only the recorded owner's posts (DOM rows carry no author id).
+            using SqliteCommand count = connection.CreateCommand();
+            count.CommandText = """
+                SELECT COUNT(*), COALESCE(SUM(posted_utc >= $since), 0) FROM x_posts
+                WHERE author_id = $owner OR author_id IS NULL
+                """;
+            count.Parameters.AddWithValue("$owner", owner.AccountId);
+            count.Parameters.AddWithValue("$since",
+                now.ToUniversalTime().Subtract(XScanRoutineWindow).ToString("O", CultureInfo.InvariantCulture));
+            using SqliteDataReader reader = count.ExecuteReader();
+            if (reader.Read()) (known, inWindow) = (reader.GetInt32(0), reader.GetInt32(1));
+        }
+        return new(owner, GetXScanStatus().RequestedUtc, recent, KnownPosts: known, KnownPostsInWindow: inWindow);
     }
 
     // Stores the extension's scan outcome; a request made before the scan

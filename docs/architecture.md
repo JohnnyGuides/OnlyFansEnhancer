@@ -158,7 +158,9 @@ Background scans (`x-collector-scanner.js`) keep the data fresh without the
 owner browsing. A one-minute `creator-x-scan` alarm asks the desktop
 (`getXScanPlan`: the recorded owner with its account id, a pending "Scan now"
 request, the owner's own non-reply posts of the last 31 days, and
-`desktopStartedUtc`, when this OFEnhancer process started). A scan is due once
+`desktopStartedUtc`, when this OFEnhancer process started, and `knownPosts` /
+`knownPostsInWindow`, the owner posts the catalogue holds overall and in the
+35-day routine window). A scan is due once
 after every OFEnhancer start (trigger `startup`: the start is later than the
 last attempt, at least 2 minutes after it, outside a rate-limit pause), every 6
 hours, when one of those posts passes 24 h, 72 h, 7 d or 30 d of age
@@ -200,10 +202,11 @@ picks up.
 
 Every scan writes a live activity log (`activity` in the scanner): the trigger,
 mode, phase (`starting`, `opening`, `loading`, `reading`, `waiting`, `paging`,
-`scheduled`, `closing`, `done`), pages and posts so far, and up to 150 lines of
-plain text naming each step, each page read, and each owner post read with the
-counters X sent for it. Each page reply from the page script carries up to 40
-post previews (`scanPreview` in the contract: id, time, kind, a 140-character
+`scheduled`, `closing`, `done`), pages and posts read so far, `expected` (the
+known-post count for the scan's range, 0 when none) and up to 150 plain-text
+lines naming each step, each page and each owner post read with the counters X
+sent for it. Each page reply from the page script carries up to 40 post
+previews (`scanPreview` in the contract: id, time, kind, a 140-character
 excerpt, first media type, a `pbs.twimg.com` poster URL and the six counters
 exactly as parsed); the worker keeps only previews that pass
 `validScanPreviews`. The log is informative only and never alters a scan. The
@@ -213,9 +216,12 @@ sends it, at most once a second and always at the end, with
 keeps it in memory only (`XScanActivityBoard`), never in the catalogue. Both
 dashboards read it with `getXScanActivity` (the extension page from the worker,
 the desktop workspace from the board), every 1.5 s while a scan runs and every
-10 s otherwise, and reload the overview when a scan finishes. A log that claims
-to be running but has not been updated for 90 seconds is shown as interrupted,
-never as an active scan.
+10 s otherwise. While a scan runs, the scan line beside "Scan" is replaced by a
+spinner and `Scanning <read>/<total>`, where the total is `expected` raised to
+the count read if the scan finds more (`Scanning <read> posts` when nothing is
+recorded yet); the current step is its tooltip. When the scan finishes the
+overview reloads. A log that claims to be running but has not been updated for
+90 seconds is never shown as an active scan.
 
 Catalogue migration 9 adds `x_scheduled_posts` (one row per scheduled post: time,
 text excerpt, media summary, first/last seen; a post missing from a later list is

@@ -82,22 +82,6 @@
   // A running log that has not moved for this long means Chrome stopped
   // reporting; it is never shown as an active scan.
   const LIVE_STALE_MS = 90_000;
-  const STATUS_ID = /^\d{1,25}$/;
-  const LIVE_TRIGGERS = {
-    startup: "Startup",
-    routine: "Every 6 h",
-    checkpoint: "Checkpoint",
-    requested: "Scan now",
-    manual: "Scan now",
-  };
-  const LIVE_COUNTS = [
-    ["views", "Views"],
-    ["likes", "Likes"],
-    ["reposts", "Reposts"],
-    ["replies", "Replies"],
-    ["bookmarks", "Bookmarks"],
-    ["quotes", "Quotes"],
-  ];
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -173,25 +157,6 @@
       hour: "2-digit",
       minute: "2-digit",
     }).format(new Date(value));
-  }
-
-  function exact(value) {
-    return new Intl.NumberFormat(undefined).format(value);
-  }
-
-  function clockLabel(value) {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(value));
-  }
-
-  function durationLabel(ms) {
-    const seconds = Math.max(Math.round(ms / 1000), 0);
-    return seconds < 60
-      ? `${seconds} s`
-      : `${Math.floor(seconds / 60)} m ${pad(seconds % 60)} s`;
   }
 
   function compact(value) {
@@ -298,13 +263,9 @@
       timer: null,
       polling: false,
       wasRunning: false,
-      selected: "",
-      open: null,
-      drawn: "",
-      panel: element("section", "xt-live"),
+      line: element("span", "xt-scan-live"),
     };
-    live.panel.hidden = true;
-    live.panel.setAttribute("aria-label", "Background scan");
+    live.line.setAttribute("role", "status");
 
     root.classList.add("xt");
     root.addEventListener("keydown", (event) => {
@@ -635,229 +596,29 @@
       scheduleLive(300);
     }
 
-    function livePhase(activity, running) {
-      const next = activity.pages + 1;
-      if (!running && activity.phase !== "done")
-        return "Interrupted: Chrome stopped reporting";
-      return (
-        {
-          starting: "Starting",
-          opening: "Opening a background tab",
-          loading: "Waiting for X to load your timeline",
-          reading: `Reading page ${activity.pages}`,
-          waiting: `Pausing before page ${next}`,
-          paging: `Requesting page ${next}`,
-          scheduled: "Reading scheduled posts",
-          closing: "Closing the background tab",
-          done: SCAN_FINISHED.includes(activity.outcome)
-            ? "Finished"
-            : `Stopped: ${SCAN_PROBLEMS[activity.outcome] || activity.outcome}`,
-        }[activity.phase] || "Idle"
-      );
-    }
-
-    function livePost(activity) {
-      const posts = activity.posts || [];
-      const chosen = posts.find((post) => post.statusId === live.selected);
-      if (chosen) return chosen;
-      for (let index = activity.events.length - 1; index >= 0; index -= 1)
-        if (activity.events[index].post) return activity.events[index].post;
-      return null;
-    }
-
-    function postKind(post) {
-      if (post.kind === "repost") return "Repost";
-      if (post.kind === "reply") return "Reply";
-      if (post.mediaType === "video") return "Video post";
-      return post.mediaType ? "Image post" : "Text post";
-    }
-
-    function renderNow(post) {
-      const card = element("figure", "xt-live-now");
-      if (!post) {
-        card.append(
-          element("span", "xt-live-poster xt-fallback"),
-          element(
-            "figcaption",
-            "xt-live-caption",
-            "Posts appear here as each page is read.",
-          ),
-        );
-        return card;
-      }
-      card.append(poster(post, "xt-live-poster"));
-      const caption = element("figcaption", "xt-live-caption");
-      const head = element("p", "xt-live-kind");
-      head.append(
-        element("strong", "", postKind(post)),
-        element("span", "", ` · posted ${stampLabel(post.postedUtc)}`),
-      );
-      caption.append(head);
-      if (post.text) caption.append(element("p", "xt-live-excerpt", post.text));
-      const counts = element("dl", "xt-live-counts");
-      if (post.metrics)
-        for (const [key, label] of LIVE_COUNTS) {
-          if (post.metrics[key] === null || post.metrics[key] === undefined)
-            continue;
-          const cell = element("div", "xt-live-count");
-          cell.append(
-            element("dt", "", label),
-            element("dd", "", exact(post.metrics[key])),
-          );
-          counts.append(cell);
-        }
-      if (counts.children.length) caption.append(counts);
-      else
-        caption.append(
-          element("p", "xt-live-excerpt", "X sent no counters for this post."),
-        );
-      if (STATUS_ID.test(post.statusId)) {
-        const link = element("a", "xt-live-link", "Open on X");
-        link.href = `https://x.com/i/status/${post.statusId}`;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        caption.append(link);
-      }
-      card.append(caption);
-      return card;
-    }
-
-    function renderLiveStrip(activity, current) {
-      const strip = element("div", "xt-live-strip");
-      strip.setAttribute("aria-label", `Posts on page ${activity.pages}`);
-      for (const post of activity.posts || []) {
-        const thumb = button(
-          "xt-live-thumb",
-          `${postKind(post)} posted ${stampLabel(post.postedUtc)}`,
-        );
-        thumb.dataset.key = `live-${post.statusId}`;
-        thumb.setAttribute(
-          "aria-pressed",
-          String(post.statusId === current?.statusId),
-        );
-        thumb.append(poster(post, "xt-live-thumb-image"));
-        if (post.metrics?.views !== null && post.metrics?.views !== undefined)
-          thumb.append(
-            element("span", "xt-live-thumb-views", compact(post.metrics.views)),
-          );
-        thumb.addEventListener("click", () => {
-          live.selected = post.statusId;
-          renderLive(true);
-          live.panel
-            .querySelector(`[data-key="live-${CSS.escape(post.statusId)}"]`)
-            ?.focus();
-        });
-        strip.append(thumb);
-      }
-      return strip;
-    }
-
-    function renderLiveLog(activity) {
-      const log = element("ol", "xt-live-log");
-      log.setAttribute("role", "log");
-      log.setAttribute("aria-label", "Scan steps, newest first");
-      for (const entry of [...activity.events].reverse()) {
-        const line = element("li", "xt-live-line");
-        line.dataset.kind = entry.kind;
-        line.append(element("time", "xt-live-time", clockLabel(entry.at)));
-        if (entry.post) line.append(poster(entry.post, "xt-live-mini"));
-        line.append(element("span", "xt-live-text", entry.text));
-        log.append(line);
-      }
-      return log;
-    }
-
-    // Redraws only the live panel, and only when the log moved.
-    function renderLive(force = false) {
+    // One line beside "Scan": a spinner and posts read against the posts
+    // the catalogue already holds for this scan's range (raised to the
+    // count read if the scan finds more). The current step is the tooltip.
+    function renderLive() {
       const activity = live.activity;
-      const panel = live.panel;
-      if (!activity || !activity.startedUtc) {
-        panel.hidden = true;
-        panel.replaceChildren();
-        live.drawn = "none";
-        return;
-      }
-      const running = liveRunning(activity);
-      const key = `${activity.runId}|${activity.updatedUtc}|${running}|${live.selected}|${live.open}`;
-      if (!force && key === live.drawn) return;
-      live.drawn = key;
-      const previousLog = panel.querySelector(".xt-live-log");
-      const scrollTop = previousLog?.scrollTop || 0;
-      panel.hidden = false;
-      panel.dataset.running = String(running);
-      panel.dataset.tone =
-        activity.phase === "done"
-          ? SCAN_FINISHED.includes(activity.outcome)
-            ? "good"
-            : "warn"
-          : !running
-            ? "warn"
-            : "live";
-      const head = element("header", "xt-live-head");
-      head.append(element("span", "xt-live-dot"));
-      const title = element("div", "xt-live-title");
-      title.append(
-        element(
-          "strong",
-          "",
-          running ? "Scanning your X profile" : "Last background scan",
-        ),
-      );
-      const started = Date.parse(activity.startedUtc);
-      const ended = running ? now().getTime() : Date.parse(activity.updatedUtc);
-      const phaseLine = element(
+      if (!liveRunning(activity)) return;
+      const rows = Number(activity.rows) || 0;
+      const expected = Number(activity.expected) || 0;
+      const total = expected ? Math.max(expected, rows) : 0;
+      const label = element(
         "span",
-        "xt-live-phase",
-        `${livePhase(activity, running)} · ${
-          running
-            ? `${durationLabel(ended - started)} so far`
-            : `${stampLabel(started)}, took ${durationLabel(ended - started)}`
-        }`,
+        "xt-scan-live-text",
+        total ? `Scanning ${rows}/${total}` : `Scanning ${rows} posts`,
       );
-      phaseLine.setAttribute("role", "status");
-      title.append(phaseLine);
-      const stats = element("div", "xt-live-stats");
-      stats.append(
-        element(
-          "span",
-          "xt-live-chip",
-          `${exact(activity.pages)} ${activity.pages === 1 ? "page" : "pages"}`,
-        ),
-        element(
-          "span",
-          "xt-live-chip",
-          `${exact(activity.rows)} ${activity.rows === 1 ? "post" : "posts"}`,
-        ),
-      );
-      if (LIVE_TRIGGERS[activity.trigger])
-        stats.append(
-          element("span", "xt-live-chip", LIVE_TRIGGERS[activity.trigger]),
-        );
-      const open = live.open ?? running;
-      const toggle = button(
-        "xt-live-toggle",
-        "",
-        open ? "Hide steps" : "Show steps",
-      );
-      toggle.dataset.key = "live-toggle";
-      toggle.setAttribute("aria-expanded", String(open));
-      toggle.addEventListener("click", () => {
-        live.open = !open;
-        renderLive(true);
-        live.panel.querySelector('[data-key="live-toggle"]')?.focus();
-      });
-      head.append(title, stats, toggle);
-      const current = livePost(activity);
-      const body = element("div", "xt-live-body");
-      body.append(renderNow(current));
-      if ((activity.posts || []).length)
-        body.append(renderLiveStrip(activity, current));
-      panel.replaceChildren(head, body);
-      if (open) {
-        const log = renderLiveLog(activity);
-        panel.append(log);
-        log.scrollTop = scrollTop;
-      }
+      const spinner = element("span", "xt-spinner");
+      spinner.setAttribute("aria-hidden", "true");
+      live.line.replaceChildren(spinner, label);
+      const step = activity.events?.at(-1)?.text || "";
+      live.line.title = `${step}${step ? "\n" : ""}Page ${activity.pages}${
+        activity.expected
+          ? ` · ${activity.expected} posts already recorded for this range`
+          : ""
+      }`;
     }
 
     function renderScan() {
@@ -867,7 +628,6 @@
       // One line: when, then the counts, or what stopped it.
       const parts = [];
       const finished = last && SCAN_FINISHED.includes(last.outcome);
-      if (live.wasRunning) parts.push("Scan running now");
       if (last) {
         parts.push(stampLabel(last.finishedUtc || last.startedUtc));
         if (finished) {
@@ -883,7 +643,7 @@
         const backoff = Date.parse(String(last.backoffUntilUtc || ""));
         if (Number.isFinite(backoff) && backoff > now().getTime())
           parts.push(`automatic scans paused until ${stampLabel(backoff)}`);
-      } else if (!live.wasRunning) parts.push("No scan yet");
+      } else parts.push("No scan yet");
       const text = element("p", "xt-scan-text", parts.join(" · "));
       text.setAttribute("role", "status");
       if (last?.outcome === "user-took-over")
@@ -899,7 +659,11 @@
       const action = button("xt-action", "", "Scan");
       action.dataset.key = "scan-now";
       action.addEventListener("click", () => void scanNow());
-      bar.append(text, pending, action);
+      if (live.wasRunning) {
+        // While a scan runs only the progress line shows.
+        renderLive();
+        bar.append(live.line, action);
+      } else bar.append(text, pending, action);
       return bar;
     }
 
@@ -1949,8 +1713,7 @@
       detail.setAttribute("role", "status");
       if (heading) heading.append(renderScan());
       else root.append(renderScan());
-      // The live scan panel sits at the top of the dashboard body.
-      root.append(live.panel, renderStrip());
+      root.append(renderStrip());
       if (state.picking) {
         const picker = element("dialog", "xt-picker");
         picker.dataset.entering = String(!previousPicker);

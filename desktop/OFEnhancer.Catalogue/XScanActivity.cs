@@ -16,7 +16,7 @@ public sealed record XScanActivityEvent(string At, string Kind, string Text, XSc
 
 public sealed record XScanActivity(int Version, string RunId, bool Running, string Trigger, string Mode, string Phase,
     string StartedUtc, string UpdatedUtc, int Pages, int Rows, string Outcome, IReadOnlyList<XScanActivityPost> Posts,
-    IReadOnlyList<XScanActivityEvent> Events);
+    IReadOnlyList<XScanActivityEvent> Events, int Expected = 0);
 
 // Holds the latest live log in memory only; nothing here is written to the
 // catalogue. A log that claims to be running but has not been updated for
@@ -78,7 +78,8 @@ public sealed class XScanActivityBoard
         Require(activity.Phase is not null && Phases.Contains(activity.Phase));
         Require(activity.Outcome is not null && Outcomes.Contains(activity.Outcome));
         Require(Utc(activity.StartedUtc, allowEmpty: true) && Utc(activity.UpdatedUtc, allowEmpty: false));
-        Require(activity.Pages is >= 0 and <= 1000 && activity.Rows is >= 0 and <= 100_000);
+        Require(activity.Pages is >= 0 and <= 1000 && activity.Rows is >= 0 and <= 100_000
+            && activity.Expected is >= 0 and <= 1_000_000);
         Require(activity.Posts is not null && activity.Posts.Count <= MaxPosts && activity.Posts.All(ValidPost));
         Require(activity.Events is not null && activity.Events.Count <= MaxEvents && activity.Events.All(item =>
             item is not null && Utc(item.At, allowEmpty: false) && item.Kind is not null && EventKinds.Contains(item.Kind)

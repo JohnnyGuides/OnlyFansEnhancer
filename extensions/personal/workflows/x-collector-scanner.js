@@ -215,10 +215,20 @@
         updatedUtc: "",
         pages: 0,
         rows: 0,
+        // Owner posts the catalogue already holds for this scan's range
+        // (0 when unknown): the progress total shown beside "Scan".
+        expected: 0,
         outcome: "",
         posts: [],
         events: [],
       };
+    }
+
+    function knownCount(value) {
+      const count = Number(value);
+      return Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000
+        ? count
+        : 0;
     }
 
     function iso(value = now()) {
@@ -416,6 +426,9 @@
         mode: backfill ? "backfill" : "routine",
         phase: "starting",
         startedUtc: iso(at),
+        expected: knownCount(
+          backfill ? plan?.knownPosts : plan?.knownPostsInWindow,
+        ),
       };
       note(
         "step",

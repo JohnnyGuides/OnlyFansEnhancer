@@ -2515,34 +2515,7 @@ test("a failed load offers a retry", async () => {
   }
 });
 
-function livePost(statusId, views, mediaType = "video") {
-  return {
-    statusId,
-    postedUtc: "2026-09-30T18:00:00.000Z",
-    kind: "post",
-    text: `Benign scan preview ${statusId}`,
-    mediaType,
-    posterUrl: mediaType
-      ? `https://pbs.twimg.com/ext_tw_video_thumb/${statusId}/pu/img/poster.jpg`
-      : "",
-    metrics: {
-      views,
-      likes: 1204,
-      reposts: 37,
-      replies: 12,
-      quotes: 0,
-      bookmarks: 88,
-    },
-  };
-}
-
 function liveActivity(extra = {}) {
-  const posts = [
-    livePost("9101", 12345),
-    livePost("9102", 980),
-    livePost("9103", 45210),
-    livePost("9104", 3, ""),
-  ];
   return {
     version: 1,
     runId: "0123456789abcdef0123456789abcdef",
@@ -2554,30 +2527,10 @@ function liveActivity(extra = {}) {
     updatedUtc: "2026-10-01T11:59:58.000Z",
     pages: 2,
     rows: 24,
+    expected: 45,
     outcome: "",
-    posts,
+    posts: [],
     events: [
-      {
-        at: "2026-10-01T11:59:10.000Z",
-        kind: "step",
-        text: "Scan started because OFEnhancer was started — reading the last 35 days (up to 10 pages)",
-      },
-      {
-        at: "2026-10-01T11:59:11.000Z",
-        kind: "step",
-        text: "Opening an inactive background tab on x.com/Owner_Handle/with_replies using your existing Chrome sign-in",
-      },
-      {
-        at: "2026-10-01T11:59:55.000Z",
-        kind: "step",
-        text: "Page 2: read 4 posts, 4 new in this scan, newest from Sep 30, 6:00 PM",
-      },
-      ...posts.map((post, index) => ({
-        at: `2026-10-01T11:59:5${5 + Math.min(index, 2)}.000Z`,
-        kind: "post",
-        text: `Page 2: Video post ${post.statusId} — ${post.metrics.views.toLocaleString("en-US")} views`,
-        post,
-      })),
       {
         at: "2026-10-01T11:59:58.000Z",
         kind: "step",
@@ -2588,84 +2541,34 @@ function liveActivity(extra = {}) {
   };
 }
 
-test("the live scan panel shows each step and the post being read with exact counts", async () => {
+test("a running scan shows one line beside Scan: a spinner and posts read of those recorded", async () => {
   const { page, context, errors } = await openDashboard({
     activity: liveActivity(),
   });
   try {
-    const panel = page.locator(".xt-live");
-    await panel.waitFor();
-    assert.equal(await panel.getAttribute("data-running"), "true");
-    assert.equal(await panel.getAttribute("data-tone"), "live");
-    await page
-      .locator(".xt-scan-text", { hasText: "Scan running now" })
-      .waitFor();
+    const line = page.locator(".xt-scan .xt-scan-live");
+    await line.waitFor();
+    assert.equal(await line.textContent(), "Scanning 24/45");
+    assert.equal(await line.locator(".xt-spinner").count(), 1);
     assert.equal(
-      await panel.locator(".xt-live-title strong").textContent(),
-      "Scanning your X profile",
+      await line.getAttribute("title"),
+      "Pausing 3.1 s before page 3 so requests stay gentle\nPage 2 · 45 posts already recorded for this range",
     );
-    assert.equal(
-      await panel.locator(".xt-live-phase").textContent(),
-      "Pausing before page 3 · 50 s so far",
-    );
-    assert.deepEqual(await panel.locator(".xt-live-chip").allTextContents(), [
-      "2 pages",
-      "24 posts",
-      "Startup",
-    ]);
-    // The newest post read is shown large, with X's exact numbers.
-    const now = panel.locator(".xt-live-now");
-    assert.match(
-      await now.locator(".xt-live-kind").textContent(),
-      /^Text post/,
-    );
-    assert.equal(
-      await panel
-        .locator('[data-key="live-9104"]')
-        .getAttribute("aria-pressed"),
-      "true",
-    );
-    await panel.locator('[data-key="live-9101"]').click();
-    assert.match(
-      await now.locator(".xt-live-kind").textContent(),
-      /^Video post/,
-    );
-    assert.deepEqual(await now.locator(".xt-live-count").allTextContents(), [
-      "Views12,345",
-      "Likes1,204",
-      "Reposts37",
-      "Replies12",
-      "Bookmarks88",
-      "Quotes0",
-    ]);
-    assert.equal(
-      await now.locator(".xt-live-poster").getAttribute("src"),
-      "https://pbs.twimg.com/ext_tw_video_thumb/9101/pu/img/poster.jpg",
-    );
-    assert.equal(
-      await now.locator(".xt-live-link").getAttribute("href"),
-      "https://x.com/i/status/9101",
-    );
-    assert.equal(await panel.locator(".xt-live-thumb").count(), 4);
-    // Steps newest first, the post lines with their own thumbnail.
-    const lines = panel.locator(".xt-live-line");
-    assert.equal(await lines.count(), 8);
-    assert.match(
-      await lines.first().textContent(),
-      /Pausing 3\.1 s before page 3 so requests stay gentle$/,
-    );
-    assert.equal(await panel.locator(".xt-live-line .xt-live-mini").count(), 4);
+    // Only the line and the button: no panel, no last-scan text.
+    assert.equal(await page.locator(".xt-scan .xt-scan-text").count(), 0);
+    assert.equal(await page.locator(".xt-live").count(), 0);
     await screenshot(page, "teaser-live-scan.png");
-    await page.locator('[data-key="live-toggle"]').click();
-    assert.equal(await panel.locator(".xt-live-log").count(), 0);
-    assert.equal(
-      await page
-        .locator('[data-key="live-toggle"]')
-        .getAttribute("aria-expanded"),
-      "false",
-    );
 
-    // The scan finishes: the panel says so and the dashboard reloads its numbers.
+    // More posts than recorded: the total follows the count read.
+    await page.evaluate(
+      (activity) => globalThis.__setScanActivity(activity),
+      liveActivity({ rows: 52, updatedUtc: "2026-10-01T11:59:59.000Z" }),
+    );
+    await page
+      .locator(".xt-scan-live", { hasText: "Scanning 52/52" })
+      .waitFor({ timeout: 5000 });
+
+    // The scan finishes: the line goes and the dashboard reloads its numbers.
     const before = (await calls(page, "getTeaserOverview")).length;
     await page.evaluate(
       (activity) => globalThis.__setScanActivity(activity),
@@ -2673,20 +2576,11 @@ test("the live scan panel shows each step and the post being read with exact cou
         running: false,
         phase: "done",
         outcome: "complete",
-        pages: 3,
-        rows: 31,
         updatedUtc: "2026-10-01T12:00:00.000Z",
       }),
     );
-    await page.locator('.xt-live[data-tone="good"]').waitFor({ timeout: 5000 });
-    assert.equal(
-      await panel.locator(".xt-live-title strong").textContent(),
-      "Last background scan",
-    );
-    assert.match(
-      await panel.locator(".xt-live-phase").textContent(),
-      /^Finished · 1 Oct, 11:59, took 50 s$/,
-    );
+    await page.locator(".xt-scan .xt-scan-text").waitFor({ timeout: 5000 });
+    assert.equal(await page.locator(".xt-spinner").count(), 0);
     await page.waitForFunction(
       (count) =>
         globalThis.__teaserCalls.filter(
@@ -2700,37 +2594,34 @@ test("the live scan panel shows each step and the post being read with exact cou
   }
 });
 
-test("a live log that stopped updating is never shown as a running scan", async () => {
+test("before any post is recorded the line counts posts read without a total", async () => {
   const { page, context, errors } = await openDashboard({
     area: "extension",
-    activity: liveActivity({ updatedUtc: "2026-10-01T11:55:00.000Z" }),
+    activity: liveActivity({ expected: 0, rows: 7 }),
   });
   try {
-    const panel = page.locator(".xt-live");
-    await panel.waitFor();
-    assert.equal(await panel.getAttribute("data-running"), "false");
-    assert.equal(await panel.getAttribute("data-tone"), "warn");
-    assert.match(
-      await panel.locator(".xt-live-phase").textContent(),
-      /^Interrupted: Chrome stopped reporting/,
-    );
-    // Steps stay collapsed for a scan that is not running.
-    assert.equal(await panel.locator(".xt-live-log").count(), 0);
+    const line = page.locator(".xt-scan-live");
+    await line.waitFor();
+    assert.equal(await line.textContent(), "Scanning 7 posts");
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
   }
 });
 
-test("no live panel before the first scan", async () => {
-  const { page, context, errors } = await openDashboard();
+test("a scan log that stopped updating never shows a spinner", async () => {
+  const { page, context, errors } = await openDashboard({
+    activity: liveActivity({ updatedUtc: "2026-10-01T11:55:00.000Z" }),
+  });
   try {
     await page.waitForFunction(() =>
       globalThis.__teaserCalls.some(
         (call) => call.operation === "getXScanActivity",
       ),
     );
-    assert.equal(await page.locator(".xt-live").isVisible(), false);
+    await page.waitForTimeout(300);
+    assert.equal(await page.locator(".xt-spinner").count(), 0);
+    assert.equal(await page.locator(".xt-scan .xt-scan-text").count(), 1);
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
