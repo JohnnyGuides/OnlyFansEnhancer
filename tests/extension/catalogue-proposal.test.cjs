@@ -515,10 +515,238 @@ test("unknown and conflicting season hints do not establish a verified series", 
     loadProposal().rankRows({ filename: "S9E11.mp4" }, rows, { 5: "Tower" }),
   );
   assert.ok(unknown.every((value) => value.identityRank === 2));
+  const unknownSelected = plain(
+    loadProposal().rankRows(
+      { filename: "S9E11.mp4", seasonArc: "Tower" },
+      rows,
+      { 5: "Tower" },
+    ),
+  );
+  assert.ok(unknownSelected.every((value) => value.identityRank !== 3));
+  assert.equal(
+    loadProposal().proposeNaming(
+      { filename: "S9E11.mp4", seasonArc: "Tower" },
+      { rows, seasonAliases: { 5: "Tower" } },
+    ).status,
+    "needs-review",
+  );
   const conflicting = plain(
     loadProposal().rankRows({ filename: "S5E11.mp4", title: "S5E12" }, rows, {
       5: "Tower",
     }),
   );
   assert.ok(conflicting.every((value) => value.identityRank === 0));
+});
+
+test("mixed episode formats and selected series conflicts are never verified", () => {
+  const proposal = loadProposal();
+  const rows = [
+    row({ seasonArc: "Tower", episode: "11" }),
+    row({ row: 2, seasonArc: "Other", episode: "11" }),
+  ];
+  for (const draft of [
+    { filename: "S5E11.mp4", title: "Episode 12", seasonArc: "Tower" },
+    { filename: "S5E11 Ep12.mp4", seasonArc: "Tower" },
+    { filename: "S5E11.mp4", seasonArc: "Other" },
+  ]) {
+    const naming = proposal.proposeNaming(draft, {
+      rows,
+      seasonAliases: { 5: "Tower" },
+    });
+    assert.equal(naming.status, "needs-review");
+    assert.equal(naming.episode, "");
+    assert.ok(
+      proposal
+        .rankRows(draft, rows, { 5: "Tower" })
+        .every(
+          (value) =>
+            value.identityRank !== 3 &&
+            !value.reasons.includes("Verified series and episode"),
+        ),
+    );
+  }
+});
+
+test("naming preserves grounded standalone subjects and never supplies a next number", () => {
+  const proposal = loadProposal();
+  assert.equal(
+    proposal.proposeNaming({ filename: "Final_battle (full).mp4" }).title,
+    "Final battle",
+  );
+  assert.equal(
+    proposal.proposeNaming({
+      filename: "Studio_tour.mp4",
+      title: "My own title",
+    }).title,
+    "My own title",
+  );
+  const result = proposal.proposeNaming(
+    { filename: "New adventure.mp4", seasonArc: "Tower" },
+    { rows: [row({ seasonArc: "Tower", episode: "11" })] },
+  );
+  assert.equal(result.episode, "");
+  assert.equal(result.title, "New adventure");
+  for (const filename of [
+    "Ep0.mp4",
+    "S0E2.mp4",
+    "Ep1000.mp4",
+    "S100E2.mp4",
+    "Ep9007199254740992.mp4",
+  ]) {
+    assert.equal(proposal.proposeNaming({ filename }).status, "needs-review");
+  }
+});
+
+test("episode title patterns require distinct consistent numbered siblings", () => {
+  const proposal = loadProposal();
+  const siblings = [
+    row({
+      title: "Tower Episode 01: Journey",
+      episode: "1",
+      seasonArc: "Tower",
+    }),
+    row({
+      row: 2,
+      title: "Tower Episode 02: Journey",
+      episode: "2",
+      seasonArc: "Tower",
+    }),
+  ];
+  const draft = { filename: "S5E3 - A climb.mp4", seasonArc: "Tower" };
+  const snapshot = { rows: siblings, seasonAliases: { 5: "Tower" } };
+  assert.equal(proposal.proposeNaming(draft, snapshot).title, "S5E3 A climb");
+  assert.equal(
+    proposal.proposeNaming({ ...draft, filename: "S5E3 Journey.mp4" }, snapshot)
+      .title,
+    "Tower Episode 03: Journey",
+  );
+  assert.equal(
+    proposal.proposeNaming(draft, { ...snapshot, rows: siblings.slice(0, 1) })
+      .title,
+    "S5E3 A climb",
+  );
+  assert.equal(
+    proposal.proposeNaming(draft, {
+      ...snapshot,
+      rows: [
+        siblings[0],
+        { ...siblings[1], title: "Tower Episode 02: Different" },
+      ],
+    }).title,
+    "S5E3 A climb",
+  );
+  assert.equal(
+    proposal.proposeNaming(draft, {
+      ...snapshot,
+      rows: [siblings[0], { ...siblings[0], row: 2 }],
+    }).title,
+    "S5E3 A climb",
+  );
+});
+
+test("canonical explicit selection retains catalogue title and reports contradictory hints", () => {
+  const proposal = loadProposal();
+  const canonical = row({
+    row: 42,
+    title: "Canonical title",
+    seasonArc: "Tower",
+    episode: "11",
+  });
+  const snapshot = { rows: [canonical], seasonAliases: { 5: "Tower" } };
+  const result = proposal.proposeNaming({ filename: "S5E11.mp4" }, snapshot, {
+    selectedRow: 42,
+  });
+  assert.equal(result.title, canonical.title);
+  assert.equal(result.episode, "11");
+  assert.equal(result.status, "suggested");
+  assert.equal(
+    proposal.proposeNaming({ filename: "S5E12.mp4" }, snapshot, {
+      selectedRow: 42,
+    }).status,
+    "needs-review",
+  );
+});
+
+test("title templates cannot replace an explicit season with a sibling season", () => {
+  const proposal = loadProposal();
+  const snapshot = {
+    seasonAliases: { 5: "Tower", 6: "Tower" },
+    rows: [
+      row({ title: "S5E01 Tower", episode: "1", seasonArc: "Tower" }),
+      row({ row: 2, title: "S5E02 Tower", episode: "2", seasonArc: "Tower" }),
+    ],
+  };
+  assert.equal(
+    proposal.proposeNaming(
+      { filename: "S6E03 Climb.mp4", seasonArc: "Tower" },
+      snapshot,
+    ).title,
+    "S6E03 Climb",
+  );
+});
+
+test("new candidate retains selected series and only reconciled explicit episode", () => {
+  const proposal = loadProposal();
+  const snapshot = {
+    rows: [],
+    emptyRow: emptyRow(136),
+    seasonAliases: { 5: "Tower" },
+  };
+  const draft = {
+    title: "Episode 11",
+    filename: "S5E11.mp4",
+    seasonArc: "Tower",
+  };
+  assert.equal(proposal.buildNewCandidate(draft, snapshot).seasonArc, "Tower");
+  assert.equal(proposal.buildNewCandidate(draft, snapshot).episode, "11");
+  assert.equal(
+    proposal.buildNewCandidate({ ...draft, title: "Episode 12" }, snapshot)
+      .episode,
+    "",
+  );
+});
+
+test("written season hints reconcile with filename codes without inventing an episode", () => {
+  const proposal = loadProposal();
+  const snapshot = { rows: [], seasonAliases: { 5: "Tower" } };
+  const consistent = proposal.proposeNaming(
+    { filename: "S5E11.mp4", title: "Season 5 Episode 11" },
+    snapshot,
+  );
+  assert.equal(consistent.episode, "11");
+  assert.equal(consistent.conflicts.length, 0);
+  assert.equal(
+    proposal.proposeNaming(
+      { filename: "S5E11.mp4", title: "Season 6 Episode 11" },
+      snapshot,
+    ).conflicts.length > 0,
+    true,
+  );
+  assert.equal(
+    proposal.proposeNaming({ title: "Season 5" }, snapshot).episode,
+    "",
+  );
+});
+
+test("series identity preserves meaningful words ignored by fuzzy filename search", () => {
+  const proposal = loadProposal();
+  const result = proposal.proposeNaming(
+    { filename: "S5E11.mp4", seasonArc: "Final Tower" },
+    { seasonAliases: { 5: "Tower" } },
+  );
+  assert.equal(result.status, "needs-review");
+  assert.match(result.conflicts.join(" "), /Selected series conflicts/);
+  assert.equal(
+    proposal.findPredecessor(row({ seasonArc: "Final Tower", episode: "12" }), [
+      row({ seasonArc: "Tower", episode: "11" }),
+    ]),
+    null,
+  );
+  assert.equal(
+    proposal.proposeNaming(
+      { filename: "S5E11.mp4", seasonArc: "東京" },
+      { seasonAliases: { 5: "京都" } },
+    ).status,
+    "needs-review",
+  );
 });

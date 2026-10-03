@@ -58,7 +58,7 @@ async function main() {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus") {
             return {
-              productVersion: "0.20.93",
+              productVersion: "0.20.94",
               protocolVersion: 1,
               capabilities: [
                 "desktop-shell",
@@ -97,6 +97,15 @@ async function main() {
         1,
         viewport.name,
       );
+      assert.deepEqual(
+        (await page.locator("nav [data-view]").allTextContents()).map((text) =>
+          text.trim(),
+        ),
+        ["Catalogue", "Uploads", "Teasers", "Settings"],
+        `${viewport.name} navigation excludes Attention`,
+      );
+      assert.equal(await page.locator('[data-panel="attention"]').count(), 0);
+      assert.equal(await page.locator('[data-panel="teasers"]').count(), 0);
       assert.equal(
         await page.getByRole("button", { name: "Upload a video" }).count(),
         1,
@@ -116,6 +125,12 @@ async function main() {
         `${viewport.name} focus`,
       );
       await page.getByRole("button", { name: "Teasers" }).click();
+      assert.equal(
+        await page
+          .getByRole("heading", { name: "Teasers", exact: true })
+          .count(),
+        1,
+      );
       assert.equal(
         await page
           .getByRole("button", { name: "Teasers" })
@@ -161,7 +176,7 @@ async function testChromeExtensionsCopyAndConnectedAction(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.93",
+          productVersion: "0.20.94",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };
@@ -217,7 +232,7 @@ async function testChromeReadinessStates(browser, port) {
         globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
           if (operation === "getStatus")
             return {
-              productVersion: "0.20.93",
+              productVersion: "0.20.94",
               protocolVersion: 1,
               capabilities: ["chrome-readiness"],
             };
@@ -276,7 +291,7 @@ async function testStaleChromeObservation(browser, port) {
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
       if (operation === "getStatus")
         return {
-          productVersion: "0.20.93",
+          productVersion: "0.20.94",
           protocolVersion: 1,
           capabilities: ["chrome-readiness"],
         };
@@ -327,12 +342,10 @@ async function testOfflineBridgeRecovery(browser, port) {
     .getByText("Desktop agent unavailable", { exact: true })
     .waitFor();
 
-  await page.getByRole("button", { name: "Attention" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page
-    .getByRole("heading", { name: "Desktop agent unavailable", exact: true })
-    .waitFor();
-  await page
-    .getByText("Start OFEnhancer to reconnect.", { exact: true })
+    .locator("#extensionSetting")
+    .getByText("Start OFEnhancer to reconnect.", { exact: false })
     .waitFor();
   assert.equal(
     await page
@@ -341,7 +354,7 @@ async function testOfflineBridgeRecovery(browser, port) {
     0,
   );
 
-  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page.getByRole("button", { name: "Catalogue", exact: true }).click();
   await page
     .locator("#googleCatalogue")
     .getByText(

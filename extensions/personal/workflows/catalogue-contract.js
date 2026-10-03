@@ -75,7 +75,16 @@
   }
 
   function slugify(value) {
-    return normalizedText(value).replace(/\s+/g, "-") || "untitled-video";
+    // IDs preserve meaningful words; fuzzy search normalization deliberately
+    // ignores some filename tokens and must not define catalogue identity.
+    return (
+      clean(value)
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "untitled-video"
+    );
   }
 
   function canonicalPostUrl(platform, value) {

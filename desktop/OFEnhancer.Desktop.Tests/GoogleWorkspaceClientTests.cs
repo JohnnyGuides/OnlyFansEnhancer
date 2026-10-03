@@ -24,16 +24,121 @@ public sealed class GoogleWorkspaceClientTests
             Item("setaria-ep20", "Episode 20", "Setaria", 3),
             Item("setaria-ep21", "Episode 21", "Setaria", 4),
         ];
-        Assert.AreEqual("toy-reviews-pair-of-legs", GoogleUploadEntryWriter.NewId(
+        Assert.AreEqual("toy-reviews-fucking-a-pair-of-legs", GoogleUploadEntryWriter.NewId(
             new("new", "fucking a pair of legs", "Description", "2026-09-25",
                 "clip.mp4", 5, 123, Category: "Review", SeasonArc: "Toy Reviews"), existing));
         Assert.AreEqual("setaria-ep22", GoogleUploadEntryWriter.NewId(
             new("new", "Final battle", "Description", "2026-09-25",
                 "S5E22 - final.mp4", 5, 123, Category: "GameSync", SeasonArc: "Setaria"), existing));
-        Assert.AreEqual("toy-reviews-pair-of-legs-2", GoogleUploadEntryWriter.NewId(
+        Assert.AreEqual("toy-reviews-fucking-a-pair-of-legs-2", GoogleUploadEntryWriter.NewId(
             new("new", "fucking a pair of legs", "Description", "2026-09-26",
                 "clip2.mp4", 5, 123, Category: "Review", SeasonArc: "Toy Reviews"),
-            [.. existing, Item("toy-reviews-pair-of-legs", "Different review", "Toy Reviews", 5)]));
+            [.. existing, Item("toy-reviews-fucking-a-pair-of-legs", "Different review", "Toy Reviews", 5)]));
+    }
+
+    [TestMethod]
+    public void NewCatalogueIdsUseOnlyStableCompleteSiblingPrefixes()
+    {
+        static WorkbookCatalogueItem Item(string id, string title, string series, int row) =>
+            new(row, id, title, "Other description", "2026-08-01", series, null, 0, 0,
+                new Dictionary<string, string>(), null);
+
+        WorkbookCatalogueItem[] siblings = [
+            Item("the-very-long-season-brand-name-ep01", "Episode 1", "The Very Long Season Brand Name", 1),
+            Item("the-very-long-season-brand-name-ep02", "Episode 2", "The Very Long Season Brand Name", 2),
+        ];
+        Assert.AreEqual("the-very-long-season-brand-name-ep03", GoogleUploadEntryWriter.NewId(
+            new("new", "Episode 3", "Description", "2026-09-25",
+                "EP03.mp4", 5, 123, Category: "Review", SeasonArc: "The Very Long Season Brand Name"), siblings));
+
+        WorkbookCatalogueItem[] unrelated = [
+            Item("common-prefix-with-many-words-first-item", "One", "Toy Reviews", 1),
+            Item("common-prefix-with-many-words-second-item", "Two", "Toy Reviews", 2),
+        ];
+        Assert.AreEqual("toy-reviews-a-new-gadget", GoogleUploadEntryWriter.NewId(
+            new("new", "A new gadget", "Description", "2026-09-25",
+                "clip.mp4", 5, 123, Category: "Review", SeasonArc: "Toy Reviews"), unrelated));
+
+        WorkbookCatalogueItem[] disagreeing = [
+            Item("tower-ep01", "Episode 1", "Tower", 1),
+            Item("tower-ep02", "Episode 2", "Tower", 2),
+            Item("alternate-ep03", "Episode 3", "Tower", 3),
+        ];
+        Assert.AreEqual("tower-ep04", GoogleUploadEntryWriter.NewId(
+            new("new", "Episode 4", "Description", "2026-09-25",
+                "EP04.mp4", 5, 123, Category: "Review", SeasonArc: "Tower"), disagreeing));
+
+        WorkbookCatalogueItem[] malformedHistory = [
+            Item("tower-ep00", "Episode 0", "Tower", 1),
+            Item("tower-ep02", "Episode 2", "Tower", 2),
+        ];
+        Assert.AreEqual("tower-ep03", GoogleUploadEntryWriter.NewId(
+            new("new", "Episode 3", "Description", "2026-09-25",
+                "EP03.mp4", 5, 123, Category: "Review", SeasonArc: "Tower"), malformedHistory));
+    }
+
+    [TestMethod]
+    public void NewCatalogueIdsRejectConflictingAndInvalidFilenameOrTitleHints()
+    {
+        static GoogleUploadEntryRequest Request(string title, string fileName) =>
+            new("new", title, "Description", "2026-09-25", fileName, 5, 123,
+                Category: "Review", SeasonArc: "Toy Reviews");
+
+        foreach ((GoogleUploadEntryRequest Request, string Code) input in new[]
+        {
+            (Request: Request("Episode 3", "EP02.mp4"), Code: "catalogue-new-entry-hint-conflict"),
+            (Request: Request("Season 3 Episode 2", "S02E02.mp4"), Code: "catalogue-new-entry-hint-conflict"),
+            (Request: Request("Episode 3", "EP0.mp4"), Code: "catalogue-invalid-episode-hint"),
+            (Request: Request("Episode 3", "S00E03.mp4"), Code: "catalogue-invalid-season-hint"),
+            (Request: Request("Episode 1000", "clip.mp4"), Code: "catalogue-invalid-episode-hint"),
+            (Request: Request("Season 100 Episode 2", "clip.mp4"), Code: "catalogue-invalid-season-hint"),
+        })
+        {
+            GoogleCatalogueException error = Assert.ThrowsException<GoogleCatalogueException>(() =>
+                GoogleUploadEntryWriter.NewId(input.Request, []));
+            Assert.AreEqual(input.Code, error.Code);
+        }
+    }
+
+    [TestMethod]
+    public void NewCatalogueIdsReconcileTheSupportedSeasonEpisodeFilenameForms()
+    {
+        static GoogleUploadEntryRequest Request(string title, string fileName) =>
+            new("new", title, "Description", "2026-09-25", fileName, 5, 123,
+                Category: "Review", SeasonArc: "Tower");
+
+        foreach (string fileName in new[]
+        {
+            "S5E11.mp4", "s05ep011.mp4", "S5 E11.mp4", "S5-E11.mp4", "_S5E11_full.mp4",
+        })
+            Assert.AreEqual("tower-ep11", GoogleUploadEntryWriter.NewId(
+                Request("The final boss", fileName), []), fileName);
+
+        Assert.AreEqual("tower-ep11", GoogleUploadEntryWriter.NewId(
+            Request("S5EP011", "EP11.mp4"), []));
+        Assert.AreEqual("tower-ep11", GoogleUploadEntryWriter.NewId(
+            Request("Season 5 Episode 11", "EP11.mp4"), []));
+    }
+
+    [TestMethod]
+    public void NewCatalogueIdsStayWithinEightyCharactersAndRemainIdempotent()
+    {
+        string title = string.Join(' ', Enumerable.Repeat("grounded", 38));
+        GoogleUploadEntryRequest request = new("new", title, "Description", "2026-09-25",
+            "clip.mp4", 5, 123, Category: "Review", SeasonArc: "A Long Series Name");
+        string expected = GoogleUploadEntryWriter.NewId(request, []);
+        Assert.AreEqual(80, expected.Length);
+        string collided = GoogleUploadEntryWriter.NewId(request,
+            [new(1, expected, "Other title", "Other description", "2026-08-01", "A Long Series Name", null,
+                0, 0, new Dictionary<string, string>(), null)]);
+        Assert.AreNotEqual(expected, collided);
+        Assert.AreEqual(80, collided.Length);
+        Assert.IsTrue(collided.EndsWith("-2", StringComparison.Ordinal));
+
+        WorkbookCatalogueItem exact = new(2, expected, title, "Description", "2026-09-25",
+            "A Long Series Name", null, 0, 0, new Dictionary<string, string>(), null);
+        Assert.AreEqual(expected, GoogleUploadEntryWriter.NewId(request, [exact]));
+
     }
 
     [TestMethod]

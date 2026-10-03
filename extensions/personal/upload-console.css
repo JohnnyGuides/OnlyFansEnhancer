@@ -3010,6 +3010,34 @@ a {
 }
 
 /* Link to the extension's teaser dashboard page beside the workspace tabs. */
+.naming-advice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+  color: #aeb6c3;
+  font-size: 0.8rem;
+}
+
+.naming-advice[hidden] {
+  display: none;
+}
+
+.naming-advice[data-state="review"] {
+  color: #ffd28a;
+}
+
+.naming-advice button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid #36404c;
+  border-radius: 6px;
+  background: #151a23;
+  color: #c6d2de;
+  font-size: inherit;
+}
+
 .workspace-link {
   display: inline-flex;
   align-items: center;

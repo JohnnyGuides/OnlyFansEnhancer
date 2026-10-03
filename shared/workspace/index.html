@@ -30,9 +30,7 @@
           <button type="button" data-view="uploads" aria-current="page">
             Uploads
           </button>
-          <button type="button" data-view="teasers">Teasers</button>
-          <button type="button" data-view="twitter">Twitter</button>
-          <button type="button" data-view="attention">Attention</button>
+          <button type="button" data-view="twitter">Teasers</button>
           <button type="button" data-view="settings">Settings</button>
         </nav>
 
@@ -224,46 +222,11 @@
           </div>
         </section>
 
-        <section data-panel="teasers" hidden>
-          <header class="page-heading">
-            <h1 tabindex="-1">Teasers</h1>
-            <p>Teaser preparation uses the existing Chrome workflows.</p>
-          </header>
-          <div class="empty-state">
-            <h2>Chrome still handles teaser posts</h2>
-            <p>
-              Use the personal extension's existing teaser tools in Chrome. The
-              separate X recorder native host requires its own setup.
-            </p>
-          </div>
-          <p class="chrome-readiness-message">Checking Chrome…</p>
-          <button type="button" class="secondary-button chrome-setup-trigger">
-            Check Chrome setup
-          </button>
-        </section>
-
         <section data-panel="twitter" hidden>
           <header class="page-heading twitter-heading">
-            <h1 tabindex="-1">Twitter</h1>
+            <h1 tabindex="-1">Teasers</h1>
           </header>
           <div id="teaserDashboard"></div>
-        </section>
-
-        <section data-panel="attention" hidden>
-          <header class="page-heading">
-            <h1 tabindex="-1">Attention</h1>
-            <p>
-              Problems and decisions will collect here without sensitive desktop
-              notifications.
-            </p>
-          </header>
-          <div class="empty-state">
-            <h2 id="attentionHeading">Checking desktop agent</h2>
-            <p id="attentionStatus">Please wait.</p>
-            <button type="button" class="secondary-button chrome-setup-trigger">
-              Check Chrome setup
-            </button>
-          </div>
         </section>
 
         <section data-panel="settings" hidden>

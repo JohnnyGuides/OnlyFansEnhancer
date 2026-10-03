@@ -1747,6 +1747,13 @@
         pornhubMode: pornhubVideoType.value,
         pornhubCertificationsConfirmed: pornhubCertificationsConfirmed.checked,
       });
+      if (workflowMode?.value !== "teaser" && selectedCatalogueRow === "new") {
+        const naming = namingRecommendation();
+        if (naming?.conflicts.length) {
+          value.errors.push(...naming.conflicts);
+          value.valid = false;
+        }
+      }
       if (
         workflowMode?.value === "both" &&
         !value.targets.length &&
@@ -2154,6 +2161,41 @@
       };
     }
 
+    function namingRecommendation() {
+      if (workflowMode?.value === "teaser") return null;
+      return globalThis.CreatorCatalogueProposal?.proposeNaming(
+        proposalDraft(),
+        currentSnapshot || {},
+      );
+    }
+
+    function renderNamingAdvice() {
+      const panel = get("#namingAdvice");
+      const text = get("#namingAdviceText");
+      const apply = get("#applyNamingAdvice");
+      const naming = namingRecommendation();
+      const isNew =
+        selectedCatalogueRow === null || selectedCatalogueRow === "new";
+      const conflict = isNew && naming?.status === "needs-review";
+      const suggestion =
+        isNew &&
+        !conflict &&
+        naming?.title &&
+        naming.title !== title.value.trim();
+      panel.hidden = Boolean(
+        runBusy || activeSession || (!conflict && !suggestion),
+      );
+      text.textContent = conflict
+        ? [...naming.conflicts, ...naming.reasons].join(" ")
+        : suggestion
+          ? naming.title
+          : "";
+      panel.dataset.state = conflict ? "review" : "suggested";
+      text.title = naming?.reasons.join(" ") || "";
+      apply.hidden = !suggestion;
+      apply.disabled = Boolean(runBusy || activeSession);
+    }
+
     function currentQueueEvidence() {
       try {
         return globalThis.CreatorUploadQueueEvidence?.snapshot?.() || {};
@@ -2203,6 +2245,7 @@
     }
 
     function renderPicker() {
+      renderNamingAdvice();
       if (!currentSnapshot) return;
       const engine = globalThis.CreatorCatalogueProposal;
       const query = engine
@@ -3176,6 +3219,7 @@
 
     function scheduleMatch() {
       if (runBusy || activeSession) return;
+      renderNamingAdvice();
       clearTimeout(matchTimer);
       invalidateMatch();
       refreshReleaseSummary();
@@ -6299,6 +6343,14 @@
       });
     }
     uploadButton.addEventListener("click", () => startUpload());
+    get("#applyNamingAdvice").addEventListener("click", () => {
+      if (runBusy || activeSession) return;
+      const naming = namingRecommendation();
+      if (!naming || naming.status !== "suggested" || !naming.title) return;
+      title.value = naming.title;
+      scheduleMatch();
+      title.focus();
+    });
     catalogueBrowseToggle.addEventListener("click", () => {
       catalogueBrowseSearch.value = catalogueSearch.value;
       catalogueBrowseDialog.showModal();

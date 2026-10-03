@@ -1,7 +1,7 @@
 "use strict";
 
 // Renders the shared X teaser dashboard with synthetic overview data in the
-// desktop workspace's Twitter view and in the extension's dashboard page.
+// desktop workspace's Teasers view and in the extension's dashboard page.
 // Set OFENHANCER_TEASER_SCREENSHOTS to a folder to also save review images.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -102,11 +102,11 @@ function fixture() {
     episode("Dolls", "Series B", 5, 0, 1),
     episode("Reviews", "Series D", 1, 1, 0),
     episode("Reviews", "Series D", 2),
-    episode("Reviews", "Series G", 1, 0, 1),
+    episode("Reviews", "Series G", 1, 0, 1, { thumb: "asset-g1" }),
     episode("Reviews", "Series G", 2),
     episode("Specials", "Series E", 1, 1, 0),
-    episode("Specials", "Series H", 1, 0, 1),
-    episode("Toys", "Series F", 1, 0, 1),
+    episode("Specials", "Series H", 1, 0, 1, { thumb: "asset-h1" }),
+    episode("Toys", "Series F", 1, 0, 1, { thumb: "asset-f1" }),
     episode("Toys", "Series F", 2),
     episode("Toys", "Series F", 3, 1, 0),
   ];
@@ -296,7 +296,7 @@ async function openDashboard({
       switch (operation) {
         case "getStatus":
           return {
-            productVersion: "0.20.93",
+            productVersion: "0.20.94",
             protocolVersion: 1,
             capabilities: [
               "desktop-shell",
@@ -357,7 +357,7 @@ async function openDashboard({
   });
   if (area === "desktop") {
     await page.goto(`http://127.0.0.1:${port}/desktop/index.html`);
-    await page.getByRole("button", { name: "Twitter", exact: true }).click();
+    await page.getByRole("button", { name: "Teasers", exact: true }).click();
   } else {
     await page.goto(`http://127.0.0.1:${port}/extension/teaser-dashboard.html`);
   }
@@ -458,6 +458,49 @@ test("timeline strip orders 7 square days and colours numbers by the usual", asy
       );
     assert.notEqual(colours[0], colours[1]);
     assert.notEqual(colours[1], colours[2]);
+    assert.equal(
+      colours[1],
+      "rgb(198, 210, 222)",
+      "neutral metrics use a brighter foreground",
+    );
+    const metricStyles = await past
+      .nth(0)
+      .locator(".xt-number")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const style = getComputedStyle(node);
+          return {
+            size: parseFloat(style.fontSize),
+            weight: parseInt(style.fontWeight),
+            fits: node.scrollWidth <= node.clientWidth,
+          };
+        }),
+      );
+    assert.ok(
+      metricStyles.every(
+        (style) => style.size >= 12 && style.weight >= 600 && style.fits,
+      ),
+      "week metrics are legible and fit their tile width",
+    );
+    const metricLayout = await past
+      .nth(0)
+      .locator(".xt-number")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const box = node.getBoundingClientRect();
+          return {
+            x: box.x,
+            y: box.y,
+            icon: node.querySelector('svg[aria-hidden="true"]') !== null,
+          };
+        }),
+      );
+    assert.ok(metricLayout.every((metric) => metric.icon));
+    assert.equal(metricLayout[0].y, metricLayout[1].y);
+    assert.equal(metricLayout[2].y, metricLayout[3].y);
+    assert.ok(metricLayout[2].y > metricLayout[0].y);
+    assert.equal(metricLayout[0].x, metricLayout[2].x);
+    assert.equal(metricLayout[1].x, metricLayout[3].x);
     assert.match(
       await past
         .nth(0)
@@ -574,6 +617,36 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
       games.filter(([, end]) => end).map(([season]) => season),
       ["Series A", "Series C"],
     );
+    const seasonAccents = await page
+      .locator(".xt-card")
+      .evaluateAll((cards) =>
+        Object.fromEntries(
+          cards.map((card) => [
+            card.dataset.season,
+            card.style.getPropertyValue("--xt-season"),
+          ]),
+        ),
+      );
+    assert.notEqual(
+      seasonAccents["Games\u0000Series A"],
+      seasonAccents["Games\u0000Series C"],
+      "seasons within one category have distinct accents",
+    );
+    assert.ok(
+      await page.locator(".xt-card").evaluateAll((cards) =>
+        cards.every(
+          (card) =>
+            getComputedStyle(card, "::before").borderTopColor ===
+            getComputedStyle(
+              cards.find(
+                (other) => other.dataset.season === card.dataset.season,
+              ),
+              "::before",
+            ).borderTopColor,
+        ),
+      ),
+      "season accents remain consistent across episode tiles and wrapped rows",
+    );
     // The category line bridges gaps inside a season but never past its end.
     await page.locator(".xt-card[data-join]").first().waitFor();
     const joins = await page
@@ -654,6 +727,81 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     );
 
     const filters = page.locator(".xt-flow-bar .xt-segment");
+    await page.waitForFunction(
+      () => document.querySelector(".xt-flow-bar").style.width,
+    );
+    const catalogueEdges = await page.evaluate(() => ({
+      gallery: Math.max(
+        ...[...document.querySelectorAll(".xt-card")].map(
+          (node) => node.getBoundingClientRect().right,
+        ),
+      ),
+      filters: Math.max(
+        ...[...document.querySelectorAll(".xt-flow-bar .xt-segment")].map(
+          (node) => node.getBoundingClientRect().right,
+        ),
+      ),
+      header: document.querySelector(".xt-flow-bar").getBoundingClientRect()
+        .right,
+      sections: [
+        ".twitter-heading",
+        ".xt-trends-wrap",
+        ".xt-past-scroll",
+        ".xt-strip",
+        "#teaserDashboard",
+      ].map(
+        (selector) =>
+          document.querySelector(selector).getBoundingClientRect().right,
+      ),
+    }));
+    assert.ok(
+      catalogueEdges.filters <= catalogueEdges.gallery + 1,
+      "filter pills stay within the gallery edge",
+    );
+    assert.ok(
+      Math.abs(catalogueEdges.header - catalogueEdges.gallery) <= 1,
+      "catalogue header aligns with full tile columns",
+    );
+    assert.ok(
+      catalogueEdges.sections.every(
+        (right) => Math.abs(right - catalogueEdges.gallery) <= 1,
+      ),
+      "title, summary, history and calendar share the catalogue's right edge",
+    );
+    for (const width of [1440, 1120, 390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForFunction(() => {
+        const root = document.querySelector("#teaserDashboard");
+        const parent = root.parentElement;
+        const style = getComputedStyle(parent);
+        const available =
+          parent.clientWidth -
+          parseFloat(style.paddingLeft) -
+          parseFloat(style.paddingRight);
+        return (
+          Math.abs(
+            root.getBoundingClientRect().width -
+              (available >= 600
+                ? Math.floor((available + 6) / 102) * 102 - 6
+                : available),
+          ) < 1
+        );
+      });
+      const geometry = await page
+        .locator(".xt-day .xt-tile")
+        .first()
+        .boundingBox();
+      assert.ok(
+        Math.abs(geometry.width - geometry.height) < 1,
+        "calendar tiles remain square after container alignment and resizing",
+      );
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        true,
+      );
+    }
     assert.deepEqual(await filters.allTextContents(), [
       "Needs teasers 9",
       "Ready to post 8",
@@ -687,6 +835,27 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     );
     await page.locator('.xt-segment[data-coverage="ready"]').click();
     assert.equal(await tiles.count(), 8);
+    assert.deepEqual(
+      await page
+        .locator(".xt-card")
+        .evaluateAll((cards) =>
+          cards.map((card) => [
+            card.dataset.season,
+            card.style.getPropertyValue("--xt-season"),
+          ]),
+        ),
+      await page
+        .locator(".xt-card")
+        .evaluateAll(
+          (cards, accents) =>
+            cards.map((card) => [
+              card.dataset.season,
+              accents[card.dataset.season],
+            ]),
+          seasonAccents,
+        ),
+      "filtering preserves each season's accent",
+    );
     await page.locator('.xt-segment[data-coverage="posted"]').click();
     assert.deepEqual(await shown(), Array(9).fill("used"));
     await screenshot(page, "M5-catalogue.png", true);
@@ -703,10 +872,285 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
   }
 });
 
+test("summary compares the same cohort and resists viral skew", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      posts: [
+        post(
+          "8001",
+          1,
+          "series-a-e1",
+          metrics(1000, 100, 10),
+          usual(1001, 100, 10, 0.115),
+        ),
+        post("8002", 2, "series-a-e2", metrics(3000, 300, 30), null),
+        post("8003", 10, "series-b-e1", metrics(100000, 10000, 1000), null),
+      ],
+    },
+  });
+  try {
+    const compact = await page.evaluate(() => {
+      const format = new Intl.NumberFormat(undefined, {
+        notation: "compact",
+        maximumSignificantDigits: 3,
+      });
+      return [1000, 3000, 104000 / 3].map((value) => format.format(value));
+    });
+    const overall = page
+      .locator(".xt-trends tbody tr")
+      .first()
+      .locator("td")
+      .nth(0);
+    assert.equal(
+      await overall.locator(".xt-trend-value").textContent(),
+      compact[1],
+    );
+    assert.equal(
+      await overall.locator(".xt-trend-average").textContent(),
+      compact[2],
+    );
+    assert.equal(await overall.locator(".xt-trend").textContent(), "\u221291%");
+    assert.equal(
+      await overall.locator(".xt-trend").getAttribute("data-tone"),
+      "bad",
+    );
+    assert.equal(
+      await overall.locator(".xt-trend").getAttribute("title"),
+      `Median views vs average ${compact[2]}`,
+    );
+    const recent = page
+      .locator(".xt-trends tbody tr")
+      .first()
+      .locator("td")
+      .nth(1);
+    assert.equal(
+      await recent.locator(".xt-trend-value").textContent(),
+      compact[0],
+      "headline uses the compared teaser, excluding the unpaired viral post",
+    );
+    assert.equal(
+      await recent.locator(".xt-trend").textContent(),
+      "0%",
+      "rounded zero has no misleading sign",
+    );
+    assert.match(
+      await recent.locator(".xt-trend").getAttribute("title"),
+      /1 of 2 teasers compared/,
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trend-column")
+        .nth(1)
+        .locator(".xt-trend-note")
+        .count(),
+      0,
+    );
+    assert.doesNotMatch(
+      await page.locator(".xt-trends").textContent(),
+      /\d+ of \d+ compared/,
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("young teasers omit comparison copy and preserve even medians", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      posts: [
+        post("8001", 1, "series-a-e1", metrics(100, 10, 1), null),
+        post("8002", 2, "series-a-e2", metrics(300, 30, 3), null),
+      ],
+    },
+  });
+  try {
+    const cells = page.locator(".xt-trends tbody tr").first().locator("td");
+    assert.equal(
+      await cells.nth(0).locator(".xt-trend-value").textContent(),
+      "200",
+    );
+    assert.equal(
+      await cells.nth(1).locator(".xt-trend-value").textContent(),
+      "200",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trend-column")
+        .nth(1)
+        .locator(".xt-trend-note")
+        .count(),
+      0,
+    );
+    assert.doesNotMatch(
+      await page.locator(".xt-trends").textContent(),
+      /too new to compare/,
+    );
+    assert.equal(await cells.nth(1).locator(".xt-trend").count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      "summary scrolls locally on narrow screens",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trends-wrap")
+        .evaluate((node) => node.scrollWidth > node.clientWidth),
+      true,
+    );
+    await screenshot(page, "M6-summary-narrow.png");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("page sections distinguish history, recent days, upcoming days and catalogue", async () => {
+  const { page, context, errors } = await openDashboard({
+    viewport: { width: 1280, height: 1100 },
+  });
+  try {
+    assert.deepEqual(
+      await page.locator(".xt-section-title, .xt-flow-title").allTextContents(),
+      ["Catalogue"],
+    );
+    assert.deepEqual(
+      await page
+        .locator(".xt-history-region, .xt-week-section")
+        .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label"))),
+      ["History", "Last 7 days", "Next 7 days"],
+      "regions remain named for accessibility",
+    );
+    const surfaces = await page
+      .locator(
+        ".xt-calendar, .xt-week-section[data-period='next'], .xt-history-region",
+      )
+      .evaluateAll((nodes) =>
+        nodes.map((n) => getComputedStyle(n).backgroundColor),
+      );
+    assert.equal(
+      new Set(surfaces).size,
+      3,
+      "history, posted days and upcoming days use distinct surfaces",
+    );
+    assert.ok(
+      await page.locator(".xt-week-section").evaluateAll((nodes) =>
+        nodes.every((node) => {
+          const style = getComputedStyle(node);
+          return (
+            style.paddingTop === "8px" &&
+            style.paddingBottom === "8px" &&
+            style.paddingLeft === "8px"
+          );
+        }),
+      ),
+      "calendar padding stays compact",
+    );
+    assert.equal(
+      await page
+        .locator(
+          '.xt-week-section[data-period="past"] .xt-tile[data-kind="posted"]',
+        )
+        .first()
+        .evaluate((n) => getComputedStyle(n).borderTopStyle),
+      "solid",
+    );
+    assert.equal(
+      await page
+        .locator(
+          '.xt-week-section[data-period="next"] .xt-tile[data-kind="empty"]',
+        )
+        .first()
+        .evaluate((n) => getComputedStyle(n).borderTopStyle),
+      "dashed",
+    );
+    const regions = await page
+      .locator(".xt-history-region, .xt-calendar, .xt-flow")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const box = node.getBoundingClientRect();
+          return {
+            top: box.top,
+            bottom: box.bottom,
+            left: box.left,
+            right: box.right,
+          };
+        }),
+      );
+    assert.ok(
+      regions.every(
+        (region) =>
+          Math.abs(region.left - regions[0].left) < 1 &&
+          Math.abs(region.right - regions[0].right) < 1,
+      ),
+      "page sections retain a shared content edge",
+    );
+    for (let index = 1; index < regions.length; index++)
+      assert.ok(
+        regions[index].top - regions[index - 1].bottom >= 19,
+        "distinct sections have more breathing room than their internal elements",
+      );
+    assert.equal(
+      await page
+        .locator(".xt-trends-wrap")
+        .getAttribute("data-comparison-style"),
+      null,
+      "comparison table retains the accepted design",
+    );
+    await screenshot(page, "page-section-hierarchy.png");
+    await page.setViewportSize({ width: 390, height: 900 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await screenshot(page, "page-section-hierarchy-mobile.png");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test("history calendar lines up with the week row and trend cards compare periods", async () => {
   const { page, context, errors } = await openDashboard();
   try {
-    const cards = page.locator(".xt-trend-card");
+    // Compact suffixes vary with the browser's locale data (en-GB uses k).
+    const [overallViews, usualViews, tileViews] = await page.evaluate(() => {
+      const formatter = new Intl.NumberFormat(undefined, {
+        notation: "compact",
+        maximumSignificantDigits: 3,
+      });
+      return [1050, 1000, 2100].map((value) => formatter.format(value));
+    });
+    const cards = page.locator(".xt-trend-column");
+    for (const header of await cards.all()) {
+      const [label, count] = await Promise.all([
+        header.locator(".xt-trend-label").boundingBox(),
+        header.locator(".xt-trend-count").boundingBox(),
+      ]);
+      assert.ok(
+        Math.abs(count.x - label.x - label.width - 8) < 1,
+        "teaser count sits beside the period with a consistent compact gap",
+      );
+      assert.ok(
+        Math.abs(count.y - label.y) < 4,
+        "teaser count shares the heading line",
+      );
+    }
+    assert.equal(
+      await page.locator(".xt-trends thead th").first().textContent(),
+      "",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trends thead th")
+        .first()
+        .getAttribute("aria-label"),
+      "Metric",
+    );
     assert.deepEqual(
       await cards.evaluateAll((nodes) =>
         nodes.map((node) => [
@@ -722,50 +1166,262 @@ test("history calendar lines up with the week row and trend cards compare period
         ["30 days", "8 teasers"],
       ],
     );
-    const metricsOf = (card) =>
-      card
-        .locator(".xt-trend-metric")
+    const metricsOf = (column) =>
+      page
+        .locator(`.xt-trends tbody tr > td:nth-child(${column + 2})`)
         .evaluateAll((nodes) =>
           nodes.map((node) => [
             node.querySelector(".xt-trend-value").textContent,
-            node.querySelector(".xt-trend-unit").textContent,
+            node.dataset.metric === "rate" ? "engagement" : node.dataset.metric,
             node.querySelector(".xt-trend")?.dataset.tone ?? null,
             node.querySelector(".xt-trend")?.textContent ?? null,
             node.querySelector(".xt-trend")?.title ?? null,
           ]),
         );
-    // The overall card is the plain average teaser, with nothing to beat.
-    assert.deepEqual(await metricsOf(cards.nth(0)), [
-      ["1.05K", "views", null, null, null],
-      ["11%", "engagement", null, null, null],
+    // Overall leads with the median while retaining the mean as a caption.
+    assert.deepEqual(await metricsOf(0), [
+      [
+        "980",
+        "views",
+        "neutral",
+        "\u22127%",
+        `Median views vs average ${overallViews}`,
+      ],
+      ["96", "likes", "neutral", "\u22124%", "Median likes vs average 100"],
+      ["9", "reposts", "neutral", "\u221210%", "Median reposts vs average 10"],
+      [
+        "10%",
+        "engagement",
+        "neutral",
+        "\u22120.7 pts",
+        "Median engagement vs average 11%",
+      ],
     ]);
+    assert.equal(
+      await page
+        .locator('.xt-trend-metric[data-baseline="true"]')
+        .first()
+        .locator(".xt-trend-average")
+        .textContent(),
+      overallViews,
+    );
+    for (const cell of await page
+      .locator('.xt-trend-metric[data-baseline="true"]')
+      .all()) {
+      assert.deepEqual(
+        await cell
+          .locator(".xt-trend-line > span")
+          .evaluateAll((nodes) => nodes.map((node) => node.className)),
+        ["xt-trend-value", "xt-trend-average", "xt-trend"],
+      );
+      const [value, average, delta] = await Promise.all([
+        cell.locator(".xt-trend-value").boundingBox(),
+        cell.locator(".xt-trend-average").boundingBox(),
+        cell.locator(".xt-trend").boundingBox(),
+      ]);
+      assert.ok(
+        average.x >= value.x + value.width &&
+          delta.x >= average.x + average.width,
+        "average pill follows the value, then the change",
+      );
+      assert.ok(
+        Math.abs(value.y + value.height / 2 - average.y - average.height / 2) <=
+          1,
+        "average pill stays on the value's line",
+      );
+      assert.equal(
+        await cell
+          .locator(".xt-trend-average")
+          .evaluate((node) => getComputedStyle(node).borderRadius),
+        "999px",
+      );
+      assert.equal(average.height, 18, "average pills use a slim height");
+      assert.match(
+        await cell.locator(".xt-trend-average").getAttribute("aria-label"),
+        /^Average /,
+      );
+      assert.equal(
+        await cell.locator(".xt-trend-average").getAttribute("title"),
+        await cell.locator(".xt-trend-average").getAttribute("aria-label"),
+      );
+    }
+    const pillGeometry = await page
+      .locator(".xt-trend-average")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const rect = node.getBoundingClientRect();
+          return [rect.x, rect.width, rect.height];
+        }),
+      );
+    assert.ok(
+      pillGeometry.every((geometry) =>
+        geometry.every(
+          (value, index) => Math.abs(value - pillGeometry[0][index]) < 1,
+        ),
+      ),
+      "average pills have uniform size and alignment",
+    );
+    for (const row of await page.locator(".xt-trends tbody tr").all()) {
+      for (const cell of await row.locator("td").all()) {
+        const delta = cell.locator(".xt-trend");
+        if (!(await delta.count())) continue;
+        const [cellBox, valueBox, deltaBox] = await Promise.all([
+          cell.boundingBox(),
+          cell.locator(".xt-trend-value").boundingBox(),
+          delta.boundingBox(),
+        ]);
+        const overall = (await cell.getAttribute("data-baseline")) === "true";
+        assert.ok(
+          Math.abs(valueBox.x - cellBox.x - 14) < 1 &&
+            Math.abs(deltaBox.x - valueBox.x - (overall ? 146 : 56)) < 1,
+          "values and changes use compact, uniform tracks anchored left",
+        );
+        assert.equal(
+          await delta.evaluate((node) => getComputedStyle(node).textAlign),
+          "start",
+          "change text starts at the same position regardless of its length",
+        );
+      }
+    }
     // 3 days (6004-6006) against their usual at the same age: within the
     // grey band, so neither green nor red.
-    assert.deepEqual(await metricsOf(cards.nth(1)), [
+    assert.deepEqual(await metricsOf(1), [
       [
         "943",
-        "viewsusual 1K",
+        "views",
         "neutral",
         "\u22126%",
-        "Usual views at the same age: 1K",
+        `Usual views at the same age: ${usualViews} · 3 of 3 teasers compared`,
+      ],
+      [
+        "96",
+        "likes",
+        "neutral",
+        "\u22124%",
+        "Usual likes at the same age: 100 · 3 of 3 teasers compared",
+      ],
+      [
+        "9",
+        "reposts",
+        "neutral",
+        "\u221210%",
+        "Usual reposts at the same age: 10 · 3 of 3 teasers compared",
       ],
       [
         "11%",
-        "engagementusual 11%",
+        "engagement",
         "neutral",
         "+0.3 pts",
-        "Usual engagement at the same age: 11%",
+        "Usual engagement at the same age: 11% · 3 of 3 teasers compared",
       ],
     ]);
     // 7 days engages 19% more than usual: green, in points.
-    assert.deepEqual((await metricsOf(cards.nth(2)))[1].slice(2, 4), [
-      "good",
-      "+2.1 pts",
-    ]);
+    assert.deepEqual((await metricsOf(2))[3].slice(2, 4), ["good", "+2.1 pts"]);
+    assert.deepEqual(
+      await page.locator('.xt-trends tbody th[scope="row"]').allTextContents(),
+      ["Views", "Likes", "Reposts", "Engagement"],
+    );
+    assert.ok(
+      await page.locator(".xt-trends th, .xt-trends td").evaluateAll((nodes) =>
+        nodes.every((node) => {
+          const style = getComputedStyle(node);
+          return (
+            parseFloat(style.borderTopWidth) === 0 &&
+            parseFloat(style.borderBottomWidth) === 0
+          );
+        }),
+      ),
+      "summary has no horizontal dividers",
+    );
+    assert.ok(
+      await page
+        .locator(".xt-trends tr > * + *")
+        .evaluateAll((nodes) =>
+          nodes.every(
+            (node) => getComputedStyle(node).borderInlineStartWidth === "1px",
+          ),
+        ),
+      "vertical separators distinguish each comparison column",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-trend-column")
+        .nth(1)
+        .evaluate((node) => getComputedStyle(node).backgroundColor),
+      await page
+        .locator(".xt-trends tbody td")
+        .nth(1)
+        .evaluate((node) => getComputedStyle(node).backgroundColor),
+      "period headers share the metrics' background",
+    );
+    for (const row of await page.locator(".xt-trends tbody tr").all()) {
+      const rowTops = await row
+        .locator("td")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getBoundingClientRect().top),
+        );
+      assert.ok(
+        Math.max(...rowTops) - Math.min(...rowTops) <= 1,
+        "metric rows align across all periods",
+      );
+    }
 
     // Days before the 7-day row, oldest first, in two-week rows ending the
     // day before the row; the first post (3 Jun) falls in the oldest row.
     const days = page.locator(".xt-past-list > li > .xt-past-tile");
+    assert.equal(
+      await days.count(),
+      14,
+      "history starts with only the newest row",
+    );
+    const expand = page.getByRole("button", {
+      name: "Expand history",
+      exact: true,
+    });
+    assert.equal(await expand.getAttribute("aria-expanded"), "false");
+    await expand.click();
+    const menu = page.getByRole("group", { name: "Earlier history period" });
+    assert.deepEqual(await menu.getByRole("button").allTextContents(), [
+      "Last 30 days",
+      "Last 90 days",
+      "All",
+    ]);
+    assert.equal(
+      await days.count(),
+      23,
+      "last 30 days excludes the main seven-day row",
+    );
+    assert.ok(
+      await page
+        .locator(".xt-past-scroll")
+        .evaluate((node) =>
+          node
+            .getAnimations()
+            .some((animation) =>
+              animation.effect
+                .getKeyframes()
+                .every((frame) => typeof frame.height === "string"),
+            ),
+        ),
+      "expansion animates the panel height",
+    );
+    await menu
+      .getByRole("button", { name: "Last 90 days", exact: true })
+      .click();
+    assert.equal(await days.count(), 83);
+    await menu.getByRole("button", { name: "All", exact: true }).click();
+    await page.locator(".xt-past-scroll").evaluate(async (node) => {
+      await Promise.all(
+        node.getAnimations().map((animation) => animation.finished),
+      );
+    });
+    await screenshot(page, "M5-expanded-history.png");
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Collapse history", exact: true })
+        .getAttribute("aria-expanded"),
+      "true",
+    );
     const dates = await page
       .locator(".xt-past-list > li")
       .evaluateAll((nodes) => nodes.length);
@@ -774,13 +1430,13 @@ test("history calendar lines up with the week row and trend cards compare period
       await days.first().getAttribute("aria-label"),
       /^Fri,? 22 May: no teaser$/,
     );
-    assert.equal(
+    assert.match(
       await days.last().getAttribute("aria-label"),
-      "Thu, 24 Sept: no teaser",
+      /^Thu,? 24 Sept: no teaser$/,
     );
     assert.equal(
-      await page.locator(".xt-past-range").last().textContent(),
-      "5 earlier teasers since Wed, 3 Jun",
+      await page.locator(".xt-past-head, .xt-past-range").count(),
+      0,
     );
     const posted = page.locator(".xt-past-tile[data-key]");
     assert.deepEqual(
@@ -791,21 +1447,14 @@ test("history calendar lines up with the week row and trend cards compare period
     );
     const tile = page.locator('.xt-past-tile[data-key="past-5002"]');
     assert.equal(await tile.getAttribute("data-verdict"), "good");
-    // The date sits above the picture, never on it; the month starts each
-    // two-week row and marks the 1st.
-    assert.equal(await tile.locator(".xt-past-date").count(), 0);
+    // Posted tiles have no visible dates; empty tiles retain the day and month.
+    assert.equal(await posted.locator(".xt-past-date").count(), 0);
+    assert.equal(await page.locator(".xt-past-day > .xt-past-date").count(), 0);
     assert.equal(
-      await tile.locator("xpath=preceding-sibling::span").textContent(),
-      "11 Sept",
+      await days.first().locator(".xt-past-date").textContent(),
+      "22 May",
     );
-    assert.equal(
-      await page
-        .locator(".xt-past-list > li > .xt-past-date[data-month]")
-        .first()
-        .textContent(),
-      "1 Jun",
-    );
-    assert.equal(await tile.locator(".xt-past-views").textContent(), "2.1K");
+    assert.equal(await tile.locator(".xt-past-views").textContent(), tileViews);
     assert.equal(
       await tile.locator(".xt-past-views").getAttribute("data-tone"),
       "good",
@@ -828,29 +1477,132 @@ test("history calendar lines up with the week row and trend cards compare period
         .evaluate((node) => getComputedStyle(node).borderTopStyle),
       "dashed",
     );
-    // Each history row is two weeks wide with the same weekday columns as the 7-day row.
+    // Each history row has seven larger tiles aligned with the 7-day row.
     const [firstPast, firstHistory] = await Promise.all([
       page.locator('[data-row="past"] > li').first().boundingBox(),
       page.locator(".xt-past-list > li").nth(14).boundingBox(),
     ]);
-    assert.ok(Math.abs(firstPast.x - firstHistory.x) <= 1, "columns line up");
-
+    assert.ok(
+      Math.abs(
+        (await page.locator(".xt-past-expand").boundingBox()).x +
+          28 -
+          firstHistory.x,
+      ) <= 1,
+      "history leaves a slim control on the left",
+    );
+    assert.ok(
+      postedBox.width < firstPast.width,
+      "history keeps the compact two-week layout",
+    );
+    assert.ok(
+      Math.abs(postedBox.height - postedBox.width) < 1,
+      "history tiles remain square",
+    );
     await tile.click();
     assert.match(
       await page.locator(".xt-detail").textContent(),
       /^Series B E1 · posted .* · 2\.1K views/i,
     );
+    await page
+      .getByRole("button", { name: "Collapse history", exact: true })
+      .click();
+    await page.locator(".xt-past-scroll").evaluate(async (node) => {
+      await Promise.all(
+        node.getAnimations().map((animation) => animation.finished),
+      );
+    });
+    assert.equal(await days.count(), 14);
+    assert.equal(
+      await page
+        .locator(".xt-past-scroll")
+        .evaluate(
+          (node) =>
+            node.scrollHeight === node.clientHeight &&
+            getComputedStyle(node).overflowY === "visible",
+        ),
+      true,
+      "collapsed history has no internal scrolling",
+    );
+    const visibleHistory = await page
+      .locator(".xt-past-scroll")
+      .evaluate((node) => {
+        const viewport = node.getBoundingClientRect();
+        const visible = [...node.querySelectorAll(".xt-past-tile")]
+          .map((tile) => tile.getBoundingClientRect())
+          .filter(
+            (tile) => tile.bottom > viewport.top && tile.top < viewport.bottom,
+          );
+        return {
+          height: viewport.height,
+          count: visible.length,
+          rows: new Set(visible.map((tile) => tile.top)).size,
+          complete: visible.every(
+            (tile) =>
+              tile.top >= viewport.top && tile.bottom <= viewport.bottom,
+          ),
+        };
+      });
+    assert.ok(
+      visibleHistory.height <= firstPast.width + 0.1,
+      "the history row fits within the main tile height",
+    );
+    assert.equal(visibleHistory.count, 14, "exactly two weeks are visible");
+    assert.equal(visibleHistory.rows, 1, "one weekly row is visible");
+    assert.ok(visibleHistory.complete, "no partial older row appears");
+    const comparison = await page.locator(".xt-trends-wrap").boundingBox();
+    const history = await page.locator(".xt-past-scroll").boundingBox();
+    assert.ok(
+      history.y - comparison.y - comparison.height >= 20,
+      "comparison and history have breathing room",
+    );
+
     await page.locator(".xt-past").scrollIntoViewIfNeeded();
     await screenshot(page, "M5-history.png");
+    for (const width of [900, 1400]) {
+      await page.setViewportSize({ width, height: 900 });
+      const sizes = await page.evaluate(() => ({
+        history: document
+          .querySelector(".xt-past-scroll")
+          .getBoundingClientRect().height,
+        main: document
+          .querySelector('[data-row="past"] .xt-tile')
+          .getBoundingClientRect().height,
+        tile: (() => {
+          const r = document
+            .querySelector(".xt-past-tile")
+            .getBoundingClientRect();
+          return [r.width, r.height];
+        })(),
+      }));
+      assert.ok(
+        sizes.history <= sizes.main + 0.1,
+        `history fits the main tile at ${width}px`,
+      );
+      assert.ok(
+        Math.abs(sizes.tile[0] - sizes.tile[1]) < 1,
+        `history stays square at ${width}px`,
+      );
+    }
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
   }
 });
 
-test("picking mode hides recent seasons, dims busy categories and persists picks", async () => {
+test("focused picker recommends unused ready clips and preserves planning rules", async () => {
   const { page, context, errors } = await openDashboard();
   try {
+    const normalOrder = await page
+      .locator(".xt-episode")
+      .evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId));
+    const colours = await page
+      .locator(".xt-card")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.querySelector(".xt-episode").dataset.itemId,
+          node.style.getPropertyValue("--xt-season"),
+        ]),
+      );
     await page
       .locator('[data-row="past"] > li')
       .nth(6)
@@ -858,7 +1610,7 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
       .click();
     assert.match(
       await page.locator(".xt-picking-text").textContent(),
-      /Picking for/,
+      /Choose a teaser/,
     );
     const pick = (key) =>
       page
@@ -876,16 +1628,90 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
     assert.equal(await pick("series-h-e1"), "recommended");
     assert.equal(await pick("series-f-e2"), "neutral");
     const hidden = page.locator('.xt-episode[data-item-id="item-series-a-e3"]');
-    assert.ok(
-      Number(await hidden.evaluate((node) => getComputedStyle(node).opacity)) <
-        0.2,
+    assert.equal(
+      await hidden.evaluate((node) => getComputedStyle(node).opacity),
+      "1",
+    );
+    assert.equal(
+      await page
+        .locator(".xt-picker")
+        .evaluate((node) => node.matches(":modal")),
+      true,
+    );
+    assert.equal(
+      await page.locator(".xt-episode[data-recommendation-rank]").count(),
+      3,
+    );
+    assert.deepEqual(
+      await page
+        .locator(".xt-episode[data-recommendation-rank]")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
+      ["series-g-e1", "series-h-e1", "series-f-e1"],
+    );
+    assert.equal(
+      await page.locator(".xt-shortlist, .xt-suggestion").count(),
+      0,
+    );
+    assert.equal(await page.locator(".xt-shortlist-label").count(), 0);
+    assert.deepEqual(
+      await page
+        .locator(".xt-episode")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
+      ["series-g-e1", "series-h-e1", "series-f-e1"],
+      "recommendations lead the actual catalogue grid",
+    );
+    assert.deepEqual(
+      await page
+        .locator(".xt-card")
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) => [
+              node.querySelector(".xt-episode").dataset.itemId,
+              node.style.getPropertyValue("--xt-season"),
+            ])
+            .sort(),
+        ),
+      [...colours].sort(),
+      "ranking preserves series accents",
+    );
+    assert.match(
+      await page
+        .locator(".xt-episode[data-recommendation-rank]")
+        .first()
+        .getAttribute("aria-description"),
+      /1 ready clip/,
+    );
+    assert.equal(
+      await page
+        .locator(".xt-picker img")
+        .evaluateAll(
+          (nodes) =>
+            nodes.length > 0 &&
+            nodes.every(
+              (node) =>
+                getComputedStyle(node).opacity === "1" &&
+                getComputedStyle(node).filter === "none",
+            ),
+        ),
+      true,
     );
     assert.equal(await hidden.getAttribute("aria-disabled"), "true");
+    await page
+      .locator(".xt-picker")
+      .evaluate((node) =>
+        Promise.all(
+          node.getAnimations().map((animation) => animation.finished),
+        ),
+      );
     await hidden.click({ force: true });
     assert.equal(
       (await calls(page, "setTeaserPlanSlot")).length,
       0,
-      "hidden squares cannot be picked",
+      "recently used series cannot be picked",
     );
 
     await page.locator('.xt-episode[data-item-id="item-series-f-e1"]').click();
@@ -904,6 +1730,10 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
       "2026-10-02",
     );
     assert.equal(await pick("series-f-e2"), "hidden");
+    assert.equal(
+      await page.locator(".xt-picker").getAttribute("data-entering"),
+      "false",
+    );
     await screenshot(page, "M3-picking.png");
 
     await page.locator('.xt-episode[data-item-id="item-series-h-e1"]').click();
@@ -921,6 +1751,13 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
     await page.getByRole("button", { name: "Done" }).click();
     assert.equal(await page.locator(".xt-picking").isHidden(), true);
     assert.equal(await page.locator(".xt-episode[data-pick]").count(), 0);
+    assert.deepEqual(
+      await page
+        .locator(".xt-episode")
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId)),
+      normalOrder,
+      "browsing restores the normal catalogue order",
+    );
     assert.equal(
       await page
         .locator('[data-row="next"] .xt-tile[data-date="2026-10-02"]')
@@ -943,6 +1780,285 @@ test("picking mode hides recent seasons, dims busy categories and persists picks
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
+  }
+});
+
+test("picker stays within the viewport, traps focus and cancels without changing the plan", async () => {
+  for (const options of [
+    {},
+    { area: "extension" },
+    { viewport: { width: 390, height: 844 } },
+  ]) {
+    const { page, context, errors } = await openDashboard(options);
+    try {
+      await page.locator('.xt-segment[data-coverage="needs"]').click();
+      const day = page.locator('.xt-tile[data-date="2026-10-02"]');
+      await day.click();
+      const picker = page.getByRole("dialog", { name: "Choose a teaser" });
+      await picker.waitFor();
+      await picker.evaluate((node) =>
+        Promise.all(
+          node.getAnimations().map((animation) => animation.finished),
+        ),
+      );
+      assert.equal(
+        await picker
+          .locator('[data-coverage="ready"]')
+          .getAttribute("aria-pressed"),
+        "true",
+      );
+      assert.equal(
+        await picker.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return (
+            rect.left >= 0 &&
+            rect.right <= innerWidth &&
+            node.scrollWidth <= node.clientWidth
+          );
+        }),
+        true,
+      );
+      assert.equal(
+        await picker.evaluate((node) => {
+          const card = node.querySelector(".xt-card").getBoundingClientRect();
+          const cards = [...node.querySelectorAll(".xt-card")].map((card) =>
+            card.getBoundingClientRect(),
+          );
+          const bar = node
+            .querySelector(".xt-flow-bar")
+            .getBoundingClientRect();
+          return (
+            card.width === 96 &&
+            bar.right <= Math.max(...cards.map((card) => card.right)) + 1
+          );
+        }),
+        true,
+      );
+      assert.equal(
+        await page.evaluate(
+          () => getComputedStyle(document.documentElement).overflow,
+        ),
+        "hidden",
+      );
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(
+        await picker.evaluate((node) => node.contains(document.activeElement)),
+        true,
+      );
+      await screenshot(
+        page,
+        options.viewport
+          ? "M3-picker-mobile.png"
+          : options.area
+            ? "M3-picker-extension.png"
+            : "M3-picker-desktop.png",
+      );
+      await page.keyboard.press("Escape");
+      assert.equal(await picker.count(), 0);
+      assert.equal(
+        await day.evaluate((node) => node === document.activeElement),
+        true,
+      );
+      assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+      if (!options.viewport) {
+        await day.click();
+        await page.mouse.click(5, 5);
+        assert.equal(await picker.count(), 0);
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test("picker slides in once, keeps its place during filtering and respects reduced motion", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    const day = page.locator('.xt-tile[data-date="2026-10-02"]');
+    const animations = await day.evaluate((node) => {
+      node.click();
+      return document
+        .querySelector(".xt-picker")
+        .getAnimations()
+        .map((animation) => ({
+          name: animation.animationName,
+          frames: animation.effect.getKeyframes(),
+        }));
+    });
+    const slide = animations.find(
+      (animation) => animation.name === "xt-picker-enter",
+    );
+    assert.ok(slide, "opening starts an actual drawer animation");
+    assert.equal(slide.frames[0].transform, "translateX(100%)");
+    assert.equal(slide.frames.at(-1).transform, "translateX(0px)");
+    const picker = page.locator(".xt-picker");
+    await picker.evaluate((node) =>
+      Promise.all(node.getAnimations().map((animation) => animation.finished)),
+    );
+    await picker.locator('[data-coverage="ready"]').click();
+    assert.equal(await picker.getAttribute("data-entering"), "false");
+    assert.equal(
+      await picker.evaluate((node) => node.getAnimations().length),
+      0,
+    );
+    await page.keyboard.press("Escape");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reducedAnimations = await day.evaluate((node) => {
+      node.click();
+      return document
+        .querySelector(".xt-picker")
+        .getAnimations()
+        .map((animation) => animation.animationName);
+    });
+    assert.equal(reducedAnimations.includes("xt-picker-enter"), false);
+    assert.equal(await picker.getAttribute("data-entering"), "true");
+    await page.keyboard.press("Escape");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("recommendations use age-matched history, resist viral outliers and fall back carefully", async () => {
+  const candidates = [
+    episode("Steady", "Zulu", 4, 0, 1),
+    episode("Unknown", "Beta", 1, 0, 1),
+    episode("Viral", "Alpha", 4, 0, 1),
+    episode("Insufficient", "Sparse", 2, 0, 1),
+    episode("Young", "Young", 4, 0, 1),
+    episode("Fallback", "New", 1, 0, 1),
+    episode("Fallback", "Weak", 4, 0, 1),
+  ];
+  const historyEpisodes = [];
+  const history = [];
+  const addHistory = (category, series, views, comparable = true) => {
+    views.forEach((value, index) => {
+      const entry = episode(category, series, index + 1, 1, 0);
+      historyEpisodes.push(entry);
+      history.push(
+        post(
+          `${series}-${index}`,
+          12 + index,
+          entry.sourceKey,
+          metrics(value, value / 100, 0, 0, 0),
+          comparable ? usual(1000, 10, 0, 0.01) : null,
+        ),
+      );
+    });
+  };
+  addHistory("Steady", "Zulu", [2000, 2000, 2000]);
+  addHistory("Viral", "Alpha", [500, 500, 1000000000]);
+  addHistory("Insufficient", "Sparse", [1000000000]);
+  addHistory("Young", "Young", [1000000000, 1000000000, 1000000000], false);
+  addHistory("Fallback", "Old", [4000, 4000, 4000, 4000, 4000]);
+  addHistory("Fallback", "Weak", [100, 100, 100]);
+  const { page, context, errors } = await openDashboard({
+    slots: [],
+    overviewExtra: {
+      episodes: [...candidates, ...historyEpisodes],
+      posts: history,
+    },
+  });
+  try {
+    await page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    const suggestions = page.locator(".xt-episode[data-recommendation-rank]");
+    assert.deepEqual(
+      await suggestions.evaluateAll((nodes) =>
+        nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+      ),
+      ["new-e1", "zulu-e4", "sparse-e2"],
+    );
+    assert.match(
+      await suggestions.nth(0).getAttribute("title"),
+      /Category above usual/,
+    );
+    assert.match(
+      await suggestions.nth(1).getAttribute("title"),
+      /3 comparable posts/,
+    );
+    assert.match(
+      await suggestions.nth(1).getAttribute("title"),
+      /Series above usual/,
+    );
+    assert.match(
+      await suggestions.nth(2).getAttribute("title"),
+      /No comparable history/,
+    );
+    // Remove the insufficient/unknown candidates to reveal the weaker series.
+    // Its own series evidence must take precedence over its stronger category.
+    await page.keyboard.press("Escape");
+    assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+  const second = await openDashboard({
+    slots: [],
+    overviewExtra: {
+      episodes: [
+        ...candidates.filter((candidate) =>
+          ["alpha-e4", "weak-e4", "young-e4"].includes(candidate.sourceKey),
+        ),
+        ...historyEpisodes,
+      ],
+      posts: history,
+    },
+  });
+  try {
+    await second.page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    assert.deepEqual(
+      await second.page
+        .locator(".xt-episode[data-recommendation-rank]")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
+      ["young-e4", "alpha-e4", "weak-e4"],
+    );
+    assert.match(
+      await second.page
+        .locator('[data-episode-key="weak-e4"]')
+        .getAttribute("title"),
+      /Series below usual/,
+    );
+    assert.deepEqual(second.errors, []);
+  } finally {
+    await second.context.close();
+  }
+  const third = await openDashboard({
+    slots: [],
+    overviewExtra: {
+      episodes: [
+        ...candidates.filter((candidate) =>
+          ["zulu-e4", "new-e1", "sparse-e2"].includes(candidate.sourceKey),
+        ),
+        ...historyEpisodes,
+      ],
+      posts: history.map((entry) =>
+        entry.sourceKey.startsWith("zulu-")
+          ? {
+              ...entry,
+              latest: { ...entry.latest, likes: entry.latest.likes * 4 },
+            }
+          : entry,
+      ),
+    },
+  });
+  try {
+    await third.page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    assert.deepEqual(
+      await third.page
+        .locator(".xt-episode[data-recommendation-rank]")
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
+        ),
+      ["zulu-e4", "new-e1", "sparse-e2"],
+      "stronger engagement changes the ranking even with unchanged view counts",
+    );
+    assert.deepEqual(third.errors, []);
+  } finally {
+    await third.context.close();
   }
 });
 
@@ -1033,6 +2149,8 @@ test("history toggles its period, sorts worst first, plans remakes and undoes ve
 test("the extension page mounts the same dashboard and the console links to it", async () => {
   const { page, context, errors } = await openDashboard({ area: "extension" });
   try {
+    assert.equal(await page.locator("h1").textContent(), "Teasers");
+    assert.equal(await page.title(), "Teasers · OFEnhancer");
     assert.equal(
       await page.locator(".xt-flow .xt-episode").count(),
       fixture().overview.episodes.length,
@@ -1050,6 +2168,7 @@ test("the extension page mounts the same dashboard and the console links to it",
     consoleHtml,
     /<a[^>]+href="teaser-dashboard\.html"[^>]*data-chrome-only/,
   );
+  assert.match(consoleHtml, /href="teaser-dashboard\.html"[^>]*>Teasers<\/a/s);
   const background = fs.readFileSync(
     path.join(repositoryRoot, "extensions/personal/background.js"),
     "utf8",
@@ -1070,6 +2189,64 @@ test("the extension page mounts the same dashboard and the console links to it",
         .includes(`"${operation}"`),
       operation,
     );
+});
+
+test("refresh cleans up layout observers through empty and failed results", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    await page.evaluate(async () => {
+      const container = document.createElement("div");
+      container.style.width = "1000px";
+      const root = document.createElement("div");
+      container.append(root);
+      document.body.append(container);
+      let response = {
+        overview: {
+          episodes: [
+            {
+              itemId: "test-item",
+              sourceKey: "test",
+              title: "Test",
+              series: "Test",
+              category: "Games",
+              readyClips: 0,
+              usedCount: 0,
+            },
+          ],
+          posts: [],
+          recentMoves: [],
+        },
+      };
+      let fail = false;
+      const dashboard = globalThis.OFEnhancerTeaserDashboard.mount(root, {
+        request: async (operation) => {
+          if (fail) throw new Error("offline");
+          return operation === "getTeaserOverview" ? response : { slots: [] };
+        },
+      });
+      await dashboard.load();
+      response = { overview: { episodes: [], posts: [], recentMoves: [] } };
+      await dashboard.load();
+      container.style.width = "800px";
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      if (root.style.width !== "708px")
+        throw new Error("Empty catalogue did not resize");
+      fail = true;
+      await dashboard.load();
+      container.style.width = "700px";
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      if (root.dataset.state !== "error")
+        throw new Error("Expected load error");
+      container.remove();
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
 });
 
 test("X scheduled posts outline their day in row 2 and Scan now asks for a scan", async () => {
@@ -1147,12 +2324,20 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
       const scan = page.locator(".xt-scan-text");
       assert.equal(
         await scan.textContent(),
-        "Last scan 1 Oct, 11:01 · 41 posts · 2 scheduled",
+        "1 Oct, 11:01 · 41 posts · 2 scheduled",
       );
       const pending = page.locator(".xt-scan-state");
       assert.equal(await pending.isVisible(), false);
-      // Text, muted pending state and a right-aligned button share one row.
-      const button = page.getByRole("button", { name: "Scan now" });
+      // Scan aligns with the title; status is secondary beneath it.
+      const button = page.getByRole("button", { name: "Scan", exact: true });
+      assert.equal(
+        await page
+          .locator(".twitter-heading")
+          .getByRole("button", { name: "Scan", exact: true })
+          .count(),
+        1,
+        "scan action belongs to the title header",
+      );
       await button.click();
       await page.waitForFunction(
         () =>
@@ -1160,26 +2345,35 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
           "Scan requested…",
       );
       assert.equal(await pending.isVisible(), true);
-      const [textBox, pendingBox, buttonBox, barBox] = await Promise.all([
-        scan.boundingBox(),
-        pending.boundingBox(),
-        button.boundingBox(),
-        page.locator(".xt-scan").boundingBox(),
-      ]);
+      const [textBox, pendingBox, buttonBox, headingBox, titleBox] =
+        await Promise.all([
+          scan.boundingBox(),
+          pending.boundingBox(),
+          button.boundingBox(),
+          page.locator(".twitter-heading").boundingBox(),
+          page.locator(".twitter-heading h1").boundingBox(),
+        ]);
       assert.ok(
         Math.abs(
-          textBox.y + textBox.height / 2 - (buttonBox.y + buttonBox.height / 2),
-        ) < 4,
-      );
-      assert.ok(
-        Math.abs(
-          pendingBox.y +
-            pendingBox.height / 2 -
+          titleBox.y +
+            titleBox.height / 2 -
             (buttonBox.y + buttonBox.height / 2),
-        ) < 4,
+        ) < 1,
+        "Scan is vertically aligned with the title",
       );
       assert.ok(
-        Math.abs(buttonBox.x + buttonBox.width - (barBox.x + barBox.width)) < 2,
+        Math.abs(
+          textBox.y + textBox.height / 2 - buttonBox.y - buttonBox.height / 2,
+        ) < 1 &&
+          Math.abs(buttonBox.x - textBox.x - textBox.width - 16) < 1 &&
+          pendingBox.y >= buttonBox.y + buttonBox.height,
+        "status sits directly left of Scan, with pending feedback underneath",
+      );
+      assert.ok(
+        Math.abs(
+          buttonBox.x + buttonBox.width - (headingBox.x + headingBox.width),
+        ) < 2,
+        "Scan aligns with the dashboard's right edge",
       );
       assert.equal(
         await pending.evaluate((node) => getComputedStyle(node).color),
@@ -1232,10 +2426,40 @@ test("a failed scan is shown plainly", async () => {
     const scan = page.locator(".xt-scan-text");
     assert.equal(
       await scan.textContent(),
-      "Last scan 1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
+      "1 Oct, 11:00 · X error (http-429) · automatic scans paused until 1 Oct, 17:00",
     );
     assert.equal(await page.locator(".xt-scan-state").isVisible(), false);
     assert.equal(await scan.getAttribute("data-tone"), "warn");
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+test("an interrupted scan uses concise status copy", async () => {
+  const { page, context, errors } = await openDashboard({
+    overviewExtra: {
+      scan: {
+        last: {
+          startedUtc: "2026-10-01T11:00:00.000Z",
+          outcome: "user-took-over",
+        },
+      },
+    },
+  });
+  try {
+    assert.equal(
+      await page.locator(".xt-scan-text").textContent(),
+      "1 Oct, 11:00 · stopped",
+    );
+    assert.equal(
+      await page.locator(".xt-scan-text").getAttribute("title"),
+      "Scan stopped because you opened the scan tab.",
+    );
+    assert.equal(
+      await page.locator(".xt-scan-text").getAttribute("data-tone"),
+      null,
+    );
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
@@ -1263,7 +2487,7 @@ test("a failed load offers a retry", async () => {
         if (operation === "getTeaserPlan") return { slots: [] };
         if (operation === "getStatus")
           return {
-            productVersion: "0.20.93",
+            productVersion: "0.20.94",
             protocolVersion: 1,
             capabilities: [],
           };

@@ -191,26 +191,16 @@ internal sealed class GoogleUploadEntryWriter(
     {
         static string Slug(string value) => Regex.Replace(value.ToLowerInvariant().Normalize(NormalizationForm.FormKD),
             "[^a-z0-9]+", "-").Trim('-');
+        NamingHints hints = ReadNamingHints(request.FileName ?? "", request.Title);
         string title = Slug(request.Title);
         string series = Slug(request.SeasonArc);
         if (series.Length > 0)
         {
-            string[][] siblingIds = items.Where(item => item.Series == request.SeasonArc)
-                .Select(item => item.SourceKey.Split('-', StringSplitOptions.RemoveEmptyEntries)).ToArray();
-            if (siblingIds.Length >= 2)
-            {
-                string[] common = siblingIds[0].Take(4).TakeWhile((part, index) =>
-                    siblingIds.All(parts => parts.Length > index && parts[index] == part)).ToArray();
-                if (common.Length > 0) series = string.Join('-', common);
-            }
+            string? siblingPrefix = InferSiblingPrefix(request.SeasonArc, items);
+            if (siblingPrefix is not null) series = siblingPrefix;
         }
-        Match episode = Regex.Match(request.FileName ?? "", @"(?:^|[^a-z0-9])(?:s\d{1,2}e|ep(?:isode)?[\s._-]*)(\d{1,3})(?:[^a-z0-9]|$)", RegexOptions.IgnoreCase);
-        if (!episode.Success)
-            episode = Regex.Match(request.Title, @"\b(?:s\d{1,2}e|ep(?:isode)?[\s._-]*)(\d{1,3})\b", RegexOptions.IgnoreCase);
-        if (series.Length > 0 && episode.Success && int.TryParse(episode.Groups[1].Value, out int number) && number > 0)
+        if (series.Length > 0 && hints.Episode is int number)
             title = $"ep{number:00}";
-        else if (series.Length > 0)
-            title = Regex.Replace(title, @"^(?:fucking|reviewing|testing|trying|using)-(?:a-|an-|the-|my-)?", "");
         if (title.StartsWith(series + "-", StringComparison.Ordinal)) title = title[(series.Length + 1)..];
         if (title.Length == 0) title = "video";
         string basis = series.Length == 0 ? title : series + "-" + title;
@@ -225,6 +215,104 @@ internal sealed class GoogleUploadEntryWriter(
             candidate = basis[..Math.Min(basis.Length, 80 - ending.Length)].TrimEnd('-') + ending;
         }
         return candidate;
+    }
+
+    private sealed record NamingHints(int? Episode, int? Season);
+
+    private static NamingHints ReadNamingHints(string fileName, string title)
+    {
+        List<int> episodes = [];
+        List<int> seasons = [];
+        foreach (string source in new[] { fileName, title })
+        {
+            string normalized = source.Replace('_', ' ').Replace('-', ' ');
+            AddPairs(Regex.Matches(normalized,
+                @"\bs\s*(\d+)\s*[. ]*e(?:p(?:isode)?)?\s*(\d+)\b",
+                RegexOptions.IgnoreCase), seasons, episodes);
+            AddPairs(Regex.Matches(normalized,
+                @"\bseason\s*(\d+)\s+(?:ep|episode)\s*[. ]*(\d+)\b",
+                RegexOptions.IgnoreCase), seasons, episodes);
+            foreach (Match match in Regex.Matches(normalized,
+                @"\b(?:season\s*|s\s*)(\d+)\b",
+                RegexOptions.IgnoreCase))
+                seasons.Add(ParseHint(match.Groups[1].Value, 99, "catalogue-invalid-season-hint"));
+            foreach (Match match in Regex.Matches(normalized,
+                @"\b(?:ep|episode)\s*[. ]*(\d+)\b", RegexOptions.IgnoreCase))
+                episodes.Add(ParseHint(match.Groups[1].Value, 999, "catalogue-invalid-episode-hint"));
+        }
+
+        return new(
+            OneConsistentHint(episodes, "catalogue-new-entry-hint-conflict"),
+            OneConsistentHint(seasons, "catalogue-new-entry-hint-conflict"));
+    }
+
+    private static void AddPairs(MatchCollection matches, List<int> seasons, List<int> episodes)
+    {
+        foreach (Match match in matches)
+        {
+            seasons.Add(ParseHint(match.Groups[1].Value, 99, "catalogue-invalid-season-hint"));
+            episodes.Add(ParseHint(match.Groups[2].Value, 999, "catalogue-invalid-episode-hint"));
+        }
+    }
+
+    private static int ParseHint(string value, int maximum, string errorCode)
+    {
+        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+            || number < 1 || number > maximum)
+            throw new GoogleCatalogueException(errorCode);
+        return number;
+    }
+
+    private static int? OneConsistentHint(IEnumerable<int> values, string conflictCode)
+    {
+        int[] distinct = values.Distinct().ToArray();
+        if (distinct.Length > 1) throw new GoogleCatalogueException(conflictCode);
+        return distinct.Length == 0 ? null : distinct[0];
+    }
+
+    private static string? InferSiblingPrefix(string seasonArc, IReadOnlyList<WorkbookCatalogueItem> items)
+    {
+        // Only explicit terminal episode forms establish an ID convention. Shared leading words
+        // and trailing numeric fragments alone are not enough evidence to replace the season slug.
+        Regex suffix = new(@"^(?<prefix>.+)-(?:ep(?<episode>\d{1,3})|episode-(?<longEpisode>\d{1,3})|s(?<season>\d{1,2})e(?<seasonEpisode>\d{1,3}))$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        WorkbookCatalogueItem[] siblings = items
+            .Where(item => string.Equals(item.Series, seasonArc, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (siblings.Length < 2) return null;
+
+        string? prefix = null;
+        string? convention = null;
+        HashSet<int> episodes = [];
+        foreach (WorkbookCatalogueItem sibling in siblings)
+        {
+            Match match = suffix.Match(sibling.SourceKey);
+            if (!match.Success) return null;
+            Group episodeGroup = match.Groups["episode"].Success
+                ? match.Groups["episode"]
+                : match.Groups["longEpisode"].Success
+                    ? match.Groups["longEpisode"] : match.Groups["seasonEpisode"];
+            if (!int.TryParse(episodeGroup.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int episode)
+                || episode < 1 || episode > 999
+                || match.Groups["season"].Success
+                    && (!int.TryParse(match.Groups["season"].Value, NumberStyles.None,
+                        CultureInfo.InvariantCulture, out int season) || season < 1 || season > 99))
+                return null;
+
+            string currentPrefix = match.Groups["prefix"].Value;
+            string currentConvention = match.Groups["episode"].Success ? "ep"
+                : match.Groups["longEpisode"].Success ? "episode" : "season-episode";
+            if (prefix is not null && (!string.Equals(prefix, currentPrefix, StringComparison.OrdinalIgnoreCase)
+                || convention != currentConvention)) return null;
+
+            if (!string.IsNullOrWhiteSpace(sibling.Episode)
+                && (!int.TryParse(sibling.Episode, NumberStyles.None, CultureInfo.InvariantCulture, out int declaredEpisode)
+                    || declaredEpisode != episode)) return null;
+            prefix = currentPrefix;
+            convention = currentConvention;
+            episodes.Add(episode);
+        }
+        return episodes.Count >= 2 ? prefix!.ToLowerInvariant() : null;
     }
 
     private static void Validate(GoogleUploadEntryRequest request)

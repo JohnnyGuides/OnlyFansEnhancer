@@ -64,6 +64,13 @@ title, description, release date, and inferred missing destinations. Later edits
 remain intact until another row is selected. A new title requires no suggestion
 selection: Upload creates and verifies a new Work row before preparing drafts.
 An exact existing title requires review rather than silently creating a duplicate.
+New-entry title suggestions use the filename and selected series. An episode
+title pattern requires at least two consistent numbered catalogue entries;
+episode and season numbers are never invented. Suggestions apply only when the
+owner clicks Use title. Conflicting explicit hints require correction, while an
+unknown season mapping remains visible for review. Catalogue IDs preserve
+meaningful title words, use confirmed series prefixes when available, and retain
+collision and retry protections.
 If the catalogue is unavailable, Upload keeps results local without requiring a
 separate continuation button. Manual draft preparation does not claim verified
 queue availability; automatic publishing still requires that verification.

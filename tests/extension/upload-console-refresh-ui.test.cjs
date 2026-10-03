@@ -127,6 +127,91 @@ async function mount(page) {
   );
 }
 
+test("naming advice applies only on request and preserves edits during refresh", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 900 },
+    });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await mount(page);
+    await page.evaluate(() => {
+      globalThis.CreatorCatalogueClient = {
+        loadConfig: async () => ({ connected: true }),
+        getCatalogueSnapshot: async () => ({
+          status: "snapshot",
+          source: "google",
+          seasonAliases: {},
+          rows: [1, 2].map((episode) => ({
+            row: episode + 1,
+            id: `setaria-ep0${episode}`,
+            title: `Setaria Episode 0${episode}`,
+            seasonArc: "Setaria",
+            episode: String(episode),
+            description: "Fixture",
+            releaseDate: "2026-09-25",
+            fingerprint: "a".repeat(64),
+            publicationState: {},
+          })),
+          emptyRow: { row: 4, fingerprint: "b".repeat(64) },
+        }),
+      };
+    });
+    await page.locator("#uploadFullVideo").setInputFiles({
+      name: "Episode 3.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign fixture"),
+    });
+    await page.locator("#cataloguePicker").waitFor({ state: "visible" });
+    await page.locator("#seasonTrigger").click();
+    await page.getByRole("option", { name: "Setaria", exact: true }).click();
+    await page.locator("#uploadTitle").fill("Episode 3");
+    await page.locator("#applyNamingAdvice").waitFor({ state: "visible" });
+    assert.equal(
+      await page.locator("#namingAdviceText").textContent(),
+      "Setaria Episode 03",
+    );
+    assert.equal(await page.locator("#uploadTitle").inputValue(), "Episode 3");
+    await page.locator("#applyNamingAdvice").click();
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "Setaria Episode 03",
+    );
+    await page.locator("#uploadTitle").fill("My Episode 3 title");
+    await page.locator("#catalogueBrowseToggle").click();
+    await page.locator("#refreshCatalogue").click();
+    await page.waitForFunction(
+      () => !document.querySelector("#refreshCatalogue").disabled,
+    );
+    await page.locator("#closeCatalogueBrowse").click();
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "My Episode 3 title",
+    );
+    await page.locator("#uploadTitle").fill("Episode 3 Episode 4");
+    assert.match(
+      await page.locator("#namingAdviceText").textContent(),
+      /conflicting episode hints/,
+    );
+    assert.equal(await page.locator("#applyNamingAdvice").isVisible(), false);
+    const folder = process.env.OFENHANCER_TEASER_SCREENSHOTS;
+    if (folder) {
+      fs.mkdirSync(folder, { recursive: true });
+      await page
+        .locator(".metadata-title")
+        .screenshot({ path: path.join(folder, "naming-conflict.png") });
+      await page.locator("#uploadTitle").fill("Episode 3");
+      await page
+        .locator(".metadata-title")
+        .screenshot({ path: path.join(folder, "naming-suggestion.png") });
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("compact uploader keeps real accessible pickers, two keyboard choices and one descriptor template", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
