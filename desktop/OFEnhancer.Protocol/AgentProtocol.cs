@@ -35,7 +35,7 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
             );
         if (request.Operation is not (AgentProtocol.GetStatusOperation or "getCatalogue" or "getUploadCatalogueSnapshot"
             or "getUploadThumbnailOptions" or "getUploadThumbnailPreview" or "resolveUploadThumbnail" or "getCatalogueThumbnailPreviews"
-            or "recordUploadResult" or "writeUploadCatalogueEntry" or "getSubredditPresets" or "browserExchange" or "showChromeSetup"
+            or "recordUploadResult" or "writeUploadCatalogueEntry" or "getSubredditPresets" or "browserExchange" or "showChromeSetup" or "showWindow"
             or "loadDevelopmentFixtures" or "resolveDevelopmentFixture" or "recordXObservations"
             or "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult" or "recordXScanActivity"
             or "getTeaserOverview" or "undoTeaserClipMove" or "getTeaserReplyQueue" or "getTeaserPlan" or "setTeaserPlanSlot" or "clearTeaserPlanSlot"))
@@ -87,7 +87,7 @@ public static class AgentProtocol
 {
     public const int Version = 1;
     public const int MaxFrameBytes = 1_048_576;
-    public const string ProductVersion = "0.20.94";
+    public const string ProductVersion = "0.20.95";
     public const string GetStatusOperation = "getStatus";
 
     internal static JsonSerializerOptions JsonOptions { get; } =

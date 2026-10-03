@@ -225,7 +225,7 @@ test("scans are due every 6 hours, at checkpoint ages and on request, never clos
   );
 });
 
-test("the first scan is a capped full backfill, later scans a capped 35-day window", async () => {
+test("a capped full backfill remains incomplete and the next due scan retries it", async () => {
   const h = harness();
   const first = plain(await h.scanner.tick());
   assert.equal(first.mode, "backfill");
@@ -253,13 +253,12 @@ test("the first scan is a capped full backfill, later scans a capped 35-day wind
   h.clock.now += 6 * HOUR;
   h.log.length = 0;
   const routine = plain(await h.scanner.tick());
-  assert.equal(routine.mode, "routine");
-  // Pages are 1, 2, 3... days old; the window is 35 days but the cap is 10.
+  assert.equal(routine.mode, "backfill");
   assert.equal(routine.outcome, "page-cap");
-  assert.equal(routine.pages, h.Scanner.ROUTINE_PAGE_CAP);
-  assert.equal(h.pageCommands(), h.Scanner.ROUTINE_PAGE_CAP - 1);
+  assert.equal(routine.pages, h.Scanner.BACKFILL_PAGE_CAP);
+  assert.equal(h.pageCommands(), h.Scanner.BACKFILL_PAGE_CAP - 1);
   const stored = h.storage.data[h.Scanner.STORAGE_KEY];
-  assert.equal(stored.backfillDone, true);
+  assert.equal(stored.backfillDone, false);
   assert.equal(stored.running, null);
 });
 
@@ -868,21 +867,29 @@ test("one scan runs after every OFEnhancer start, but not during a pause or righ
   );
 });
 
-test("a startup tick runs the scan and records the startup trigger", async () => {
+test("every desktop opening refreshes old posts even after a recent full scan", async () => {
   const { scanner, recorded } = harness({
     plan: {
       owner: OWNER,
       requestedUtc: null,
       recentPostsUtc: [],
       desktopStartedUtc: new Date(START - MINUTE).toISOString(),
+      knownPosts: 700,
+      knownPostsInWindow: 20,
     },
+    pages: (page) => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      cursor: page < 45,
+      statusIds: ids(1000 + page * 20, 20),
+      newestUtc: new Date(START - page * 10 * DAY).toISOString(),
+    }),
     storage: memoryStorage({
       creatorXScanV1: {
         version: 1,
         lastAttemptAt: START - HOUR,
         lastSuccessAt: START - HOUR,
         backfillDone: true,
-        lastFullAt: START - DAY,
         lastFullAt: START - DAY,
         running: null,
         last: null,
@@ -893,6 +900,9 @@ test("a startup tick runs the scan and records the startup trigger", async () =>
   const result = await scanner.tick();
   assert.equal(result.ran, true);
   assert.equal(recorded[0].trigger, "startup");
+  assert.equal(recorded[0].mode, "backfill");
+  assert.equal(recorded[0].outcome, "complete");
+  assert.equal(recorded[0].pages, 46);
 });
 
 test("the live log says what the scan does and lists every post read with X's exact counters", async () => {
@@ -1051,7 +1061,14 @@ test("the first scan reads the whole history until X has no older page, then aga
 });
 
 test("a full scan that does not finish is retried as a full scan", async () => {
-  const storage = memoryStorage();
+  const storage = memoryStorage({
+    creatorXScanV1: {
+      version: 1,
+      backfillDone: true,
+      lastFullAt: START - DAY,
+      lastAttemptAt: START - HOUR,
+    },
+  });
   const h = harness({
     storage,
     pages: (n) =>
@@ -1062,7 +1079,35 @@ test("a full scan that does not finish is retried as a full scan", async () => {
   const broken = plain(await h.scanner.run("startup"));
   assert.equal(broken.outcome, "error");
   assert.equal(storage.data.creatorXScanV1.backfillDone, false);
+  assert.equal(storage.data.creatorXScanV1.lastFullAt, START - DAY);
   h.clock.now += 6 * HOUR;
   const retried = plain(await h.scanner.run("routine"));
   assert.equal(retried.mode, "backfill");
 });
+
+for (const trigger of ["manual", "requested"]) {
+  test(`${trigger} refreshes posts older than 35 days after a recent full scan`, async () => {
+    const h = harness({
+      storage: memoryStorage({
+        creatorXScanV1: {
+          version: 1,
+          backfillDone: true,
+          lastFullAt: START - DAY,
+          lastAttemptAt: START - HOUR,
+        },
+      }),
+      pages: (page) => ({
+        ok: true,
+        ownerId: OWNER.accountId,
+        cursor: page < 12,
+        statusIds: ids(1000 + page * 20, 20),
+        newestUtc: new Date(START - page * 20 * DAY).toISOString(),
+      }),
+    });
+    const result = await h.scanner.run(trigger);
+    assert.equal(result.mode, "backfill");
+    assert.equal(result.outcome, "complete");
+    assert.equal(result.pages, 13);
+    assert.equal(h.pageCommands(), 12);
+  });
+}

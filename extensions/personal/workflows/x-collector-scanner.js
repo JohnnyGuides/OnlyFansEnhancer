@@ -424,9 +424,12 @@
         }
       }
       const owner = validOwner(plan);
-      // The first scan and then one a week read the entire history; a full
-      // scan that did not finish is retried by the next scan.
+      // Every desktop opening refreshes the entire history. Background ticks
+      // keep the shorter window, with a weekly full pass and interrupted retry.
       const backfill =
+        trigger === "startup" ||
+        trigger === "requested" ||
+        trigger === "manual" ||
         !state.backfillDone ||
         at - (Number(state.lastFullAt) || 0) >= FULL_INTERVAL_MS;
       activity = {
@@ -445,7 +448,11 @@
         `Scan started because ${TRIGGER_LABELS[trigger] || trigger}${
           backfill
             ? state.backfillDone
-              ? " — weekly full read of your whole history to refresh every post's counters"
+              ? trigger === "startup" ||
+                trigger === "requested" ||
+                trigger === "manual"
+                ? " — full read of your whole history to refresh every post's counters"
+                : " — weekly full read of your whole history to refresh every post's counters"
               : " — first full read of your whole history"
             : " — reading the last 35 days (up to 10 pages)"
         }`,
@@ -605,10 +612,13 @@
         }
         state.running = null;
         result.finishedUtc = new Date(now()).toISOString();
+        if (backfill)
+          state.backfillDone = ["complete", "no-new-posts"].includes(
+            result.outcome,
+          );
         if (SUCCESS.includes(result.outcome)) {
           state.lastSuccessAt = at;
-          if (backfill) {
-            state.backfillDone = true;
+          if (backfill && state.backfillDone) {
             state.lastFullAt = at;
           }
           state.backoffErrors = 0;

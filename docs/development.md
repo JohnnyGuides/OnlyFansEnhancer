@@ -268,6 +268,28 @@ separately authorized runtime checks.
 
 Uploader recovery preserves launcher identity and legacy publication hashes. Fansly home-route aliases require the original composer and top document. ManyVids continuation requires completion on the owned upload card and an exact Edit destination; missing destination evidence stops preparation before Edit. Pornhub uses one device activation per transport and the confirmed optional file or full-file fallback. Current semantic ownership fixtures are reconstructed, not authenticated captures.
 
+## Local X archive import
+
+The desktop supports an owner-invoked maintenance command for an extracted X
+archive. Exit the tray agent first; the maintenance writer refuses to run while
+the ordinary desktop owns its mutex. The archive account ID must match the
+already recorded X owner. It inserts missing post metadata without replacing
+live content or adding metric samples: archive counters lack a reliable
+observation timestamp and cannot establish historical engagement or fresh counts.
+Only account and tweet data are read; messages, credentials and local media are
+outside this import. It does not write Google or move media.
+
+```powershell
+& '<install-root>\desktop\OFEnhancer.Desktop.exe' --import-x-archive '<archive-folder>' --result '.local\x-archive-preview.json'
+# Apply after reviewing the aggregate preview, using a fresh report path.
+& '<install-root>\desktop\OFEnhancer.Desktop.exe' --import-x-archive '<archive-folder>' --result '.local\x-archive-import.json' --apply
+```
+
+An apply creates a SQLite backup beside its report before opening the writer.
+The report contains aggregate counts, not post text. Repeat imports preserve
+existing rows. Restart the desktop afterwards; current counts require Chrome's
+live collector and are separate from the archive import.
+
 ## Repository-local browser cache
 
 When Playwright browsers have been installed under `.local/playwright`, point

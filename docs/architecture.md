@@ -158,7 +158,7 @@ Background scans (`x-collector-scanner.js`) keep the data fresh without the
 owner browsing. A one-minute `creator-x-scan` alarm asks the desktop
 (`getXScanPlan`: the recorded owner with its account id, a pending "Scan now"
 request, the owner's own non-reply posts of the last 31 days, and
-`desktopStartedUtc`, when this OFEnhancer process started, and `knownPosts` /
+`desktopStartedUtc`, the latest process start or deliberate window opening, and `knownPosts` /
 `knownPostsInWindow`, the owner posts the catalogue holds overall and in the
 35-day routine window). A scan is due once
 after every OFEnhancer start (trigger `startup`: the start is later than the
@@ -193,9 +193,13 @@ window (`window-reached`; 35 days for routine scans, none for a full scan) or at
 the page cap (`page-cap`: 10 pages for routine scans; 500 for a full scan, a
 guard against a cursor that never ends), and after 8 minutes (75 for a full
 scan, `timeout`). A full scan (mode `backfill`) reads the whole profile
-timeline until X returns no older page; it is the first scan, then one scan a
-week (`lastFullAt` in `creatorXScanV1`) so older posts' counters refresh too,
-and a full scan that does not finish is retried by the next scan. X decides how
+timeline until X returns no older page: on the first scan, on every desktop
+opening, on every Scan now request, and weekly between openings (`lastFullAt`
+in `creatorXScanV1`) so older posts' counters refresh too,
+and a full scan that does not finish is retried by the next scan. Reopening the
+tray window or launching the app while its agent is already running updates the
+startup trigger; merely switching focus does not. A full scan hitting the page cap
+is incomplete and does not advance the last-full timestamp. X decides how
 far back its profile timeline goes; the scan reads everything X serves. The scan
 tab is marked `autoDiscardable: false` so Chrome does not unload it. After a finished scan the same tab opens
 `https://x.com/compose/post/unsent/scheduled` so the collector reads the scheduled

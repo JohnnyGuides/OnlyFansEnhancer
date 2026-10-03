@@ -22,6 +22,11 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs eventArgs)
     {
         base.OnStartup(eventArgs);
+        if (XArchiveMaintenance.TryRun(eventArgs.Args, out int archiveExit))
+        {
+            Shutdown(archiveExit);
+            return;
+        }
         if (ThumbnailMaintenance.TryRun(eventArgs.Args, out int thumbnailExit))
         {
             Shutdown(thumbnailExit);
@@ -78,6 +83,16 @@ public partial class App : System.Windows.Application
                     if (!response.Ok) throw new InvalidOperationException("The running desktop does not support setup activation.");
                 }
                 catch { System.Windows.MessageBox.Show("Open the running OFEnhancer window and select its Chrome connection button.", "Chrome setup"); }
+            }
+            else if (!eventArgs.Args.Contains("--background", StringComparer.Ordinal))
+            {
+                try
+                {
+                    using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(3));
+                    new AgentPipeClient(DesktopAgent.DefaultPipeName(userKey)).SendAsync(
+                        new AgentRequest(AgentProtocol.Version, Guid.NewGuid(), "showWindow"), timeout.Token).GetAwaiter().GetResult();
+                }
+                catch { /* An older running release may not support activation yet. */ }
             }
             Shutdown();
             return;
@@ -162,6 +177,7 @@ public partial class App : System.Windows.Application
     {
         if (window is null)
             return;
+        window.NotifyOpened();
         window.Show();
         window.ShowInTaskbar = true;
         window.WindowState = WindowState.Normal;

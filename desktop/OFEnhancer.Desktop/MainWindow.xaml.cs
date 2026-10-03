@@ -139,6 +139,20 @@ public partial class MainWindow : Window, IDisposable
         try
         {
             if (request.Operation == "getStatus") return AgentResponse.Success(request, AgentStatus.Current);
+            if (request.Operation == "showWindow")
+            {
+                if (request.Payload is JsonElement openPayload && openPayload.ValueKind == JsonValueKind.Object && openPayload.EnumerateObject().Any())
+                    return AgentResponse.Failure(request.RequestId.ToString(), "invalid-payload");
+                _ = Dispatcher.BeginInvoke(() =>
+                {
+                    NotifyOpened();
+                    Show();
+                    ShowInTaskbar = true;
+                    WindowState = WindowState.Normal;
+                    Activate();
+                });
+                return AgentResponse.SuccessResult(request, new { opened = true });
+            }
             if (request.Operation == "showChromeSetup")
             {
                 if (request.Payload is JsonElement setupPayload && setupPayload.ValueKind == JsonValueKind.Object && setupPayload.EnumerateObject().Any())
@@ -217,6 +231,12 @@ public partial class MainWindow : Window, IDisposable
             return AgentResponse.Failure(request.RequestId.ToString(), error is GoogleCatalogueControllerException googleError ? googleError.Code : error is InvalidOperationException ? error.Message : "desktop-operation-failed");
         }
     }
+
+    internal void NotifyOpened() => _ = dispatcher.EnqueueAsync(() =>
+    {
+        xObservations.MarkOpened();
+        return true;
+    });
 
     // The desktop workspace's Twitter view uses the same teaser operations as the agent pipe.
     private async Task<string> HandleTeaserMessage(JsonElement root, string operation)

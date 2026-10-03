@@ -31,6 +31,7 @@ public sealed class XObservationControllerTests
     [DataRow("getXScanPlan")]
     [DataRow("recordXScanResult")]
     [DataRow("recordXScanActivity")]
+    [DataRow("showWindow")]
     public void BackgroundScanOperationsAreAllowedAgentOperations(string operation)
     {
         AgentRequest request = AgentRequest.Parse(
@@ -55,6 +56,9 @@ public sealed class XObservationControllerTests
             // The scanner runs one scan after each OFEnhancer start.
             Assert.AreEqual(now.AddMinutes(-3).ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 plan.DesktopStartedUtc);
+            controller.MarkOpened();
+            Assert.AreEqual(now.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                controller.ScanPlan(JsonDocument.Parse("{}").RootElement).DesktopStartedUtc);
 
             const string activity = """
                 {"version":1,"runId":"0123456789abcdef0123456789abcdef","running":true,"trigger":"startup",

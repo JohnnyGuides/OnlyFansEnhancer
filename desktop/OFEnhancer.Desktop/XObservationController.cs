@@ -9,8 +9,11 @@ namespace OFEnhancer.Desktop;
 internal sealed class XObservationController(CatalogueStore store, Func<DateTimeOffset>? clock=null,
     XScanActivityBoard? scanActivity=null, DateTimeOffset? startedUtc=null)
 {
-    // When this OFEnhancer process started: the scanner runs one scan after each start.
-    private readonly DateTimeOffset started=(startedUtc ?? (clock ?? (() => DateTimeOffset.UtcNow))()).ToUniversalTime();
+    // Most recent process start or deliberate window opening; serialized with scan plans.
+    private DateTimeOffset started=(startedUtc ?? (clock ?? (() => DateTimeOffset.UtcNow))()).ToUniversalTime();
+
+    // Reopening the tray window is a fresh scan trigger, even if the agent stayed alive.
+    internal void MarkOpened() => started=Now.ToUniversalTime();
 
     private static readonly JsonSerializerOptions JsonOptions=new()
     {
