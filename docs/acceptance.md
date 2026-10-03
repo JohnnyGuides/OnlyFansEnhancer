@@ -1,5 +1,27 @@
 # Acceptance and platform evidence
 
+## Inline scan feedback — installed 0.20.98, 3 October 2026
+
+The owner reviewed and approved the scan header layout. Last-scan status,
+request feedback and Scan share one row; long status text truncates with its
+full text available on hover. Browser fixtures cover 1200, 800 and 390 px.
+
+- Release gates passed: lint, typecheck and formatting; portable suite 885 passed
+  with one pre-stage skip; .NET 611 passed; native 31 passed; Windows packaging
+  16 passed with two pre-stage skips. All three post-build installer/browser
+  lifecycle tests passed without skips.
+- Setup SHA-256: `702f415064b07a7e64dd6a305670a59274cca9fee4a7a77d9c1b29a004541fc4`.
+  Stage manifest SHA-256:
+  `4fb9f813bd9d6b2d30ec1516c7ec857a8389d64cb787c83d979f6ab5d1b22971`.
+- Silent normal update exited 0 and logged installation success. All 1,301
+  installed inventory files match the stage. Twelve fingerprinted settings/data
+  files were byte-identical before restarting the app; both extension manifest
+  keys were preserved. Installed dashboard CSS/JavaScript match reviewed source.
+- The restarted desktop runs from the permanent installation folder and shows
+  v0.20.98. Its actual Teasers view showed the existing HTTP-429/backoff status,
+  Scan requested feedback and Scan inline. Chrome was not connected; the owner
+  must reload the existing extension entry. No new scan or upload was exercised.
+
 ## Reviewed Teasers dashboard — installed 0.20.94, 2 October 2026
 
 The owner approved the dashboard mockup and requested a normal installed update.
