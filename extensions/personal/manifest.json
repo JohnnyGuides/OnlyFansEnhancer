@@ -4,6 +4,12 @@
   "version": "0.20.98",
   "minimum_chrome_version": "116",
   "description": "Local identity masking and workflow helpers for adult creators across supported publishing and community sites.",
+  "icons": {
+    "16": "app/finalLogo.png",
+    "32": "app/finalLogo.png",
+    "48": "app/finalLogo.png",
+    "128": "app/finalLogo.png"
+  },
   "permissions": [
     "storage",
     "scripting",
@@ -49,6 +55,10 @@
   },
   "action": {
     "default_title": "Creator Workflow Toolkit",
+    "default_icon": {
+      "16": "app/finalLogo.png",
+      "32": "app/finalLogo.png"
+    },
     "default_popup": "popup.html"
   },
   "options_page": "options.html",
