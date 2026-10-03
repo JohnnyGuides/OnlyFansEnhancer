@@ -1,5 +1,30 @@
 # Acceptance and platform evidence
 
+## Desktop logo in the personal extension — installed 0.20.99, 3 October 2026
+
+The owner approved the 16, 32, 48 and 128 px logo preview. Both personal
+extension compositions now use the existing desktop logo for toolbar and
+extension-management icons, without changing their identities.
+
+- Final release gates passed: lint, typecheck and formatting; portable 885 passed
+  with one pre-stage skip; .NET 611 passed; native 31 passed; Windows packaging
+  16 passed with two pre-stage skips. All three post-build installer/browser
+  lifecycle tests passed without skips.
+- The first portable run exposed a synthetic first-reply fixture race: it
+  displayed the result article before its click-recording fetch completed, so
+  tab closure could cancel that fetch. The fixture now awaits the response before
+  displaying success. Production upload logic and assertions are unchanged;
+  the focused test and full final portable run passed.
+- Setup SHA-256: `6ad271f49cf0c19da1e0c29ae091d0ef0d9a5077b488bd5cdf2b342e1f3eb7c8`.
+  Stage manifest SHA-256:
+  `9df10a6515eaa787cb80029cbae2d649356fd5bbfb192e412924086461db67d0`.
+- Silent normal update exited 0 and logged success. All 1,301 installed inventory
+  files match the stage. Twelve fingerprinted settings/data files were unchanged
+  before restart, and both extension manifest keys were preserved. Every installed
+  icon reference resolves to bytes identical to the desktop logo source.
+- The desktop restarted from its permanent install folder. The owner must reload
+  the existing Chrome extension; its live toolbar icon is not yet verified.
+
 ## Inline scan feedback — installed 0.20.98, 3 October 2026
 
 The owner reviewed and approved the scan header layout. Last-scan status,

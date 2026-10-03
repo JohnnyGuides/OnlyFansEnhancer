@@ -34,8 +34,8 @@ const statusPage = `<!doctype html>
         document.querySelector('#cards').append(card);
       }, 50);
     });
-    document.querySelector('[data-testid="tweetButtonInline"]').addEventListener('click', () => {
-      fetch('/__fixture/reply-clicked?text=' + encodeURIComponent(editor.innerText));
+    document.querySelector('[data-testid="tweetButtonInline"]').addEventListener('click', async () => {
+      await fetch('/__fixture/reply-clicked?text=' + encodeURIComponent(editor.innerText));
       const reply = document.createElement('article');
       reply.innerHTML = '<a href="/Owner_Handle/status/150"><time>now</time></a>';
       document.body.append(reply);
