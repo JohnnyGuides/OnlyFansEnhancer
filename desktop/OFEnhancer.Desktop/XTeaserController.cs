@@ -17,7 +17,7 @@ internal sealed record XTeaserOverviewResult(bool Active, XTeaserOverview Overvi
 // the teaser root.
 internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatcher dispatcher,
     Func<DesktopSettings> settings, Func<DateTimeOffset>? clock = null,
-    Func<DateTimeOffset, XSheetWritebackRun>? sheetWriteback = null) : IDisposable
+    Func<DateTimeOffset, XSheetWritebackRun>? sheetWriteback = null, XScanActivityBoard? scanActivity = null) : IDisposable
 {
     internal static readonly TimeSpan FirstRunDelay = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan RunInterval = TimeSpan.FromHours(1);
@@ -107,7 +107,7 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
     internal static readonly IReadOnlySet<string> Operations = new HashSet<string>(StringComparer.Ordinal)
     {
         "getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
-        "requestXScan",
+        "requestXScan", "getXScanActivity",
     };
 
     internal const int MaxPlanDaysAhead = 60;
@@ -123,6 +123,7 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
         "setTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => SetPlanSlot(payload)).ConfigureAwait(false),
         "clearTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => ClearPlanSlot(payload)).ConfigureAwait(false),
         "requestXScan" => await dispatcher.EnqueueAsync<object>(() => RequestScan(payload)).ConfigureAwait(false),
+        "getXScanActivity" => ScanActivity(payload),
         _ => throw new GoogleCatalogueControllerException("unsupported-operation"),
     };
 
@@ -134,6 +135,15 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
             throw new GoogleCatalogueControllerException("invalid-teaser-request");
         XScanStatus status = store.RequestXScan(Now);
         return new { requested = true, started = false, requestedUtc = status.RequestedUtc };
+    }
+
+    // The background scanner's live log (in memory; null before the first scan
+    // of this session). Does not touch the catalogue, so it skips the dispatcher.
+    internal object ScanActivity(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        return new { activity = scanActivity?.Latest(Now) };
     }
 
     // Plan dates are the owner's local calendar days; one day of slack either

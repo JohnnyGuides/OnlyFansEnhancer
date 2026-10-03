@@ -75,9 +75,11 @@ public partial class MainWindow : Window, IDisposable
         );
         queuedRouter = router;
         uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets);
-        xObservations = new XObservationController(catalogue);
+        XScanActivityBoard scanActivity = new();
+        xObservations = new XObservationController(catalogue, scanActivity: scanActivity,
+            startedUtc: System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime());
         xTeasers = new XTeaserController(catalogue, dispatcher, settings.Load,
-            sheetWriteback: googleCatalogue.WriteBackTeaserLinks);
+            sheetWriteback: googleCatalogue.WriteBackTeaserLinks, scanActivity: scanActivity);
         xTeasers.Start();
         uploadThumbnails = new UploadThumbnailCatalogue(catalogue);
         uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>
@@ -187,6 +189,8 @@ public partial class MainWindow : Window, IDisposable
                 object recorded = await dispatcher.EnqueueAsync(() => xObservations.Record(WithoutTransportMetadata(payload)));
                 return AgentResponse.SuccessResult(request, recorded);
             }
+            if (request.Operation == "recordXScanActivity")
+                return AgentResponse.SuccessResult(request, xObservations.RecordActivity(WithoutTransportMetadata(payload)));
             if (request.Operation is "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult")
             {
                 JsonElement scanPayload = WithoutTransportMetadata(payload);

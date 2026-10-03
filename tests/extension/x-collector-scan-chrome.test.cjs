@@ -229,10 +229,11 @@ test("real Chrome runs one background scan of the owner's own profile and closes
         outcome,
         openTabs: tabs.length,
         desktop: globalThis.__desktop,
+        activity: await xScanActivity(),
       };
     }, OWNER_ID);
 
-    assert.equal(result.alarm?.periodInMinutes, 5);
+    assert.equal(result.alarm?.periodInMinutes, 1);
     assert.equal(result.outcome.outcome, "complete", JSON.stringify(result));
     assert.equal(result.outcome.pages, 3);
     assert.equal(result.outcome.rows, 4);
@@ -271,6 +272,39 @@ test("real Chrome runs one background scan of the owner's own profile and closes
     assert.equal(report.payload.outcome, "complete");
     assert.equal(report.payload.trigger, "manual");
     assert.equal(report.payload.mode, "backfill");
+    // The live log reached the desktop while the scan ran and at its end,
+    // naming every post read with the counters X sent.
+    const live = result.desktop.filter(
+      (entry) => entry.operation === "recordXScanActivity",
+    );
+    assert.ok(live.length >= 2, JSON.stringify(operations));
+    assert.ok(live.some((entry) => entry.payload.running));
+    const final = live.at(-1).payload;
+    assert.equal(final.running, false);
+    assert.equal(final.phase, "done");
+    assert.equal(final.outcome, "complete");
+    assert.deepEqual(final, result.activity.activity);
+    const posts = final.events.filter((event) => event.kind === "post");
+    assert.deepEqual(posts.map((event) => event.post.statusId).sort(), [
+      "301",
+      "302",
+      "303",
+      "304",
+    ]);
+    for (const event of posts) {
+      assert.deepEqual(event.post.metrics, {
+        views: 100,
+        likes: 1,
+        reposts: 0,
+        replies: 0,
+        quotes: 0,
+        bookmarks: 0,
+      });
+      assert.match(
+        event.text,
+        /— 100 views · 1 like · 0 reposts · 0 replies · 0 bookmarks$/,
+      );
+    }
   } finally {
     await context?.close();
     fs.rmSync(profile, { recursive: true, force: true });

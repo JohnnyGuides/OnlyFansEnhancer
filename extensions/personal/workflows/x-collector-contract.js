@@ -350,7 +350,10 @@
     return id ? id[1] : null;
   }
 
-  // "12 replies, 3 reposts, 45 likes, 6 bookmarks, 7890 views"
+  // "12 replies, 3 reposts, 45 likes, 6 bookmarks, 7890 views". Only exact
+  // counts are read: plain digits or digits in thousands groups ("7,890").
+  // A decimal or abbreviated figure ("1.2K", "12,5") is never turned into a
+  // number; that metric stays unknown (null) rather than approximated.
   function parseMetricLabel(label) {
     const metrics = Object.fromEntries(METRIC_KEYS.map((key) => [key, null]));
     const names = {
@@ -369,7 +372,7 @@
     };
     let matched = 0;
     for (const match of String(label || "").matchAll(
-      /(\d[\d.,]*)\s+([A-Za-z]+)/g,
+      /(?<![\d.,])(\d{1,3}(?:[.,]\d{3})+|\d+)(?![\d.,]*\d)\s+([A-Za-z]+)/g,
     )) {
       const key = names[match[2].toLowerCase()];
       const value = count(match[1].replace(/[.,]/g, ""));
@@ -783,6 +786,88 @@
     return JSON.parse(JSON.stringify(batch));
   }
 
+  // A background scan's per-post preview for the live activity feed: what
+  // the scanner read, with X's own counters exactly as received (null when X
+  // sent none). Built in the page from parsed owner posts and re-validated in
+  // the worker; nothing here is derived or estimated.
+  const MAX_SCAN_PREVIEWS = 40;
+  const MAX_PREVIEW_TEXT = 140;
+  const PREVIEW_KEYS = Object.freeze([
+    "statusId",
+    "postedUtc",
+    "kind",
+    "text",
+    "mediaType",
+    "posterUrl",
+    "metrics",
+  ]);
+  const PREVIEW_KINDS = new Set(["post", "reply", "repost"]);
+  const POSTER_HOSTS = new Set(["pbs.twimg.com"]);
+
+  function scanPreview(tweet) {
+    const media = Array.isArray(tweet?.media) ? tweet.media : [];
+    const first =
+      media.find((item) => item?.type === "video" && item.posterUrl) ||
+      media.find((item) => item?.posterUrl) ||
+      media[0] ||
+      null;
+    return {
+      statusId: String(tweet?.statusId || ""),
+      postedUtc: String(tweet?.createdAt || ""),
+      kind: tweet?.isRetweet
+        ? "repost"
+        : tweet?.inReplyToStatusId
+          ? "reply"
+          : "post",
+      text: capText(
+        String(tweet?.text || "")
+          .replace(/\s+/g, " ")
+          .trim(),
+        MAX_PREVIEW_TEXT,
+      ),
+      mediaType: MEDIA_TYPES.has(first?.type) ? first.type : "",
+      posterUrl: safeUrl(first?.posterUrl, POSTER_HOSTS) || "",
+      metrics: tweet?.metrics ? { ...tweet.metrics } : null,
+    };
+  }
+
+  // Worker-side check of the previews a page reply carries; anything that
+  // does not match exactly is dropped (the scan itself is unaffected).
+  function validScanPreviews(value) {
+    if (!Array.isArray(value)) return [];
+    const kept = [];
+    const ids = new Set();
+    for (const row of value.slice(0, MAX_SCAN_PREVIEWS)) {
+      if (
+        !exactKeys(row, PREVIEW_KEYS) ||
+        typeof row.statusId !== "string" ||
+        !ID.test(row.statusId) ||
+        ids.has(row.statusId) ||
+        typeof row.postedUtc !== "string" ||
+        isoDate(row.postedUtc) !== row.postedUtc ||
+        !PREVIEW_KINDS.has(row.kind) ||
+        typeof row.text !== "string" ||
+        row.text.length > MAX_PREVIEW_TEXT ||
+        !(row.mediaType === "" || MEDIA_TYPES.has(row.mediaType)) ||
+        typeof row.posterUrl !== "string" ||
+        (row.posterUrl !== "" &&
+          safeUrl(row.posterUrl, POSTER_HOSTS) !== row.posterUrl) ||
+        !(
+          row.metrics === null ||
+          (exactKeys(row.metrics, METRIC_KEYS) &&
+            METRIC_KEYS.every((key) => validMetric(row.metrics[key])))
+        )
+      )
+        continue;
+      ids.add(row.statusId);
+      kept.push({
+        ...row,
+        metrics: row.metrics ? { ...row.metrics } : null,
+      });
+    }
+    return kept;
+  }
+
   globalThis.CreatorXCollectorContract = Object.freeze({
     TWEET_OPERATIONS,
     VIEWER_OPERATIONS,
@@ -793,6 +878,9 @@
     PAGE_EVENT,
     MAX_BATCH,
     MAX_TEXT,
+    MAX_SCAN_PREVIEWS,
+    MAX_PREVIEW_TEXT,
+    METRIC_KEYS,
     operationName,
     operationKind,
     parseTweetResult,
@@ -808,5 +896,7 @@
     replayHeaders,
     extractScheduled,
     validateScheduledBatch,
+    scanPreview,
+    validScanPreviews,
   });
 })();

@@ -134,7 +134,7 @@ public sealed class XTeaserControllerTests
         }
         using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
         Assert.IsTrue(XTeaserController.Operations.SetEquals(["getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue",
-            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot", "requestXScan"]));
+            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot", "requestXScan", "getXScanActivity"]));
 
         var slot = (XTeaserPlanSlot)await controller.HandleAsync("setTeaserPlanSlot",
             Json("""{"date":"2026-09-29","episodeKey":"series-a-e3"}"""));
@@ -188,6 +188,27 @@ public sealed class XTeaserControllerTests
         // Only the desktop workspace asks; Chrome's own page starts the scan itself.
         Assert.AreEqual("unsupported-operation", Assert.ThrowsException<AgentProtocolException>(() => AgentRequest.Parse(
             $$$"""{"protocolVersion":1,"requestId":"{{{Guid.NewGuid()}}}","operation":"requestXScan","payload":{}}""")).Code);
+    }
+
+    [TestMethod]
+    public async Task TheWorkspaceReadsTheLiveScanLogWhichIsNotAnAgentOperation()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        XScanActivityBoard board = new();
+        using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now,
+            scanActivity: board);
+        StringAssert.Contains(JsonSerializer.Serialize(await controller.HandleAsync("getXScanActivity", Json("{}"))),
+            "\"activity\":null");
+        string at = Now.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        board.Record(new(1, "", true, "startup", "routine", "opening", at, at, 0, 0, "", [],
+            [new(at, "step", "Opening an inactive background tab")]));
+        StringAssert.Contains(JsonSerializer.Serialize(await controller.HandleAsync("getXScanActivity", Json("{}"))),
+            "Opening an inactive background tab");
+        Assert.AreEqual("invalid-teaser-request", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("getXScanActivity", Json("""{"all":true}""")))).Code);
+        Assert.AreEqual("unsupported-operation", Assert.ThrowsException<AgentProtocolException>(() => AgentRequest.Parse(
+            $$$"""{"protocolVersion":1,"requestId":"{{{Guid.NewGuid()}}}","operation":"getXScanActivity","payload":{}}""")).Code);
     }
 
     private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement;

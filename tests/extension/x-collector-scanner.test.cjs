@@ -18,8 +18,17 @@ const DAY = 24 * HOUR;
 const START = Date.parse("2026-10-01T12:00:00Z");
 const MARKER = "0123456789abcdef0123456789abcdef";
 
-function loadScanner() {
+function loadScanner({ contract = false } = {}) {
   const context = vm.createContext({ URL, setTimeout, Promise, Date, crypto });
+  if (contract)
+    vm.runInContext(
+      fs.readFileSync(
+        path.join(repositoryRoot, "workflows/x-collector-contract.js"),
+        "utf8",
+      ),
+      context,
+      { filename: "x-collector-contract.js" },
+    );
   vm.runInContext(
     fs.readFileSync(
       path.join(repositoryRoot, "workflows/x-collector-scanner.js"),
@@ -58,8 +67,10 @@ function harness({
   pages = () => null,
   storage = memoryStorage(),
   takeover = () => false,
+  contract = false,
 } = {}) {
-  const Scanner = loadScanner();
+  const Scanner = loadScanner({ contract });
+  const activity = [];
   const clock = { now: START };
   const log = [];
   const delays = [];
@@ -121,6 +132,7 @@ function harness({
     now: () => clock.now,
     random: () => 0.5,
     marker: () => MARKER,
+    onActivity: (snapshot) => activity.push(plain(snapshot)),
     sleep: async (ms) => {
       delays.push(ms);
       clock.now += ms;
@@ -136,6 +148,7 @@ function harness({
     storage,
     runner,
     desktop,
+    activity,
     planRef: plan,
     pageCommands: () => log.filter((entry) => entry[1] === "page").length,
   };
@@ -783,4 +796,199 @@ test("rate-limit and authorization errors pause automatic scans 6 h, doubling to
     },
   });
   assert.equal((await requested.scanner.tick()).trigger, "requested");
+});
+
+test("one scan runs after every OFEnhancer start, but not during a pause or right after another scan", () => {
+  const { dueReason } = loadScanner();
+  const started = new Date(START - 5 * MINUTE).toISOString();
+  const plan = {
+    recentPostsUtc: [],
+    requestedUtc: null,
+    desktopStartedUtc: started,
+  };
+  // The last scan was an hour ago, before this start: due now.
+  assert.equal(
+    dueReason({ lastAttemptAt: START - HOUR }, plan, START),
+    "startup",
+  );
+  // A scan already ran after this start: nothing more for the start.
+  assert.equal(
+    dueReason({ lastAttemptAt: START - 4 * MINUTE }, plan, START),
+    "",
+  );
+  // A scan that ran just before the start waits the two-minute gap.
+  assert.equal(
+    dueReason(
+      { lastAttemptAt: START - 6 * MINUTE },
+      { ...plan, desktopStartedUtc: new Date(START - MINUTE).toISOString() },
+      START - 5 * MINUTE,
+    ),
+    "",
+  );
+  // Rate-limit pauses still hold.
+  assert.equal(
+    dueReason(
+      { lastAttemptAt: START - HOUR, backoffUntil: START + HOUR },
+      plan,
+      START,
+    ),
+    "",
+  );
+  // A start time in the future (clock skew) or missing is ignored.
+  assert.equal(
+    dueReason(
+      { lastAttemptAt: START - HOUR },
+      { ...plan, desktopStartedUtc: new Date(START + HOUR).toISOString() },
+      START,
+    ),
+    "",
+  );
+  assert.equal(
+    dueReason(
+      { lastAttemptAt: START - HOUR },
+      { ...plan, desktopStartedUtc: "" },
+      START,
+    ),
+    "",
+  );
+});
+
+test("a startup tick runs the scan and records the startup trigger", async () => {
+  const { scanner, recorded } = harness({
+    plan: {
+      owner: OWNER,
+      requestedUtc: null,
+      recentPostsUtc: [],
+      desktopStartedUtc: new Date(START - MINUTE).toISOString(),
+    },
+    storage: memoryStorage({
+      creatorXScanV1: {
+        version: 1,
+        lastAttemptAt: START - HOUR,
+        lastSuccessAt: START - HOUR,
+        backfillDone: true,
+        running: null,
+        last: null,
+        log: [],
+      },
+    }),
+  });
+  const result = await scanner.tick();
+  assert.equal(result.ran, true);
+  assert.equal(recorded[0].trigger, "startup");
+});
+
+test("the live log says what the scan does and lists every post read with X's exact counters", async () => {
+  const preview = (id, views, mediaType = "video") => ({
+    statusId: id,
+    postedUtc: new Date(START - HOUR).toISOString(),
+    kind: "post",
+    text: `benign ${id}`,
+    mediaType,
+    posterUrl: mediaType
+      ? `https://pbs.twimg.com/ext_tw_video_thumb/${id}/pu/img/a.jpg`
+      : "",
+    metrics: {
+      views,
+      likes: 7,
+      reposts: 1,
+      replies: 0,
+      quotes: 0,
+      bookmarks: null,
+    },
+  });
+  const { scanner, activity } = harness({
+    contract: true,
+    status: () => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      ready: true,
+      cursor: true,
+      statusIds: ["101", "102"],
+      newestUtc: new Date(START - HOUR).toISOString(),
+      posts: [
+        preview("101", 12345),
+        preview("102", 9, ""),
+        // A forged poster host and a non-integer counter are dropped.
+        { ...preview("103", 5), posterUrl: "https://evil.example/a.jpg" },
+        {
+          ...preview("104", 5),
+          metrics: { ...preview("104", 5).metrics, views: 1.5 },
+        },
+      ],
+    }),
+    pages: () => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      cursor: false,
+      statusIds: ["201"],
+      newestUtc: new Date(START - 2 * HOUR).toISOString(),
+      posts: [preview("201", 1000000)],
+    }),
+  });
+  await scanner.run("startup");
+  const last = activity.at(-1);
+  assert.equal(last.running, false);
+  assert.equal(last.phase, "done");
+  assert.equal(last.trigger, "startup");
+  assert.equal(last.outcome, "complete");
+  assert.equal(last.pages, 2);
+  assert.equal(last.rows, 3);
+  const lines = last.events.map((event) => `${event.kind}: ${event.text}`);
+  const expected = [
+    /^step: Scan started because OFEnhancer was started/,
+    /^step: Opening an inactive background tab on x\.com\/Owner_Handle\/with_replies/,
+    /^step: Waiting for X to load your timeline/,
+    /^step: Signed in as account 1000000000000000001, the recorded owner @Owner_Handle/,
+    /^step: Page 1: read 2 posts of yours/,
+    /^post: Page 1: Video post 101 — 12,345 views · 7 likes · 1 repost · 0 replies$/,
+    /^post: Page 1: Text post 102 — 9 views · 7 likes · 1 repost · 0 replies$/,
+    /^step: Pausing 3\.0 s before page 2/,
+    /^step: Asking X for page 2/,
+    /^step: Page 2: read 1 post, 1 new in this scan/,
+    /^post: Page 2: Video post 201 — 1,000,000 views/,
+    /^step: Stopped paging: reached the end of your timeline/,
+    /^step: Opening your scheduled-posts list/,
+    /^step: Read 2 scheduled posts/,
+    /^step: Closing the background tab/,
+    /^done: Finished: 2 pages, 3 posts recorded with fresh counters/,
+  ];
+  assert.equal(lines.length, expected.length, lines.join("\n"));
+  expected.forEach((pattern, index) => assert.match(lines[index], pattern));
+  // The image the log shows is the post's own poster, counters untouched.
+  const post = last.events.find((event) => event.post?.statusId === "101").post;
+  assert.equal(
+    post.posterUrl,
+    "https://pbs.twimg.com/ext_tw_video_thumb/101/pu/img/a.jpg",
+  );
+  assert.deepEqual(post.metrics, preview("101", 12345).metrics);
+  assert.deepEqual(
+    last.posts.map((item) => item.statusId),
+    ["201"],
+  );
+  // The live state was published while the scan was still running.
+  assert.ok(
+    activity.some(
+      (snapshot) => snapshot.running && snapshot.phase === "waiting",
+    ),
+  );
+  assert.deepEqual(plain((await scanner.status()).activity), last);
+});
+
+test("a stopped scan says why in the live log", async () => {
+  const { scanner, activity } = harness({
+    pages: () => ({ ok: false, reason: "http-429", ownerId: OWNER.accountId }),
+  });
+  await scanner.run("routine");
+  const lines = activity.at(-1).events.map((event) => event.text);
+  assert.ok(
+    lines.includes(
+      "Scan stopped: X gave an answer the scan could not use (http-429)",
+    ),
+    lines.join("\n"),
+  );
+  assert.match(
+    lines.at(-1),
+    /^Ended: 1 page, 20 posts recorded with fresh counters in \d+ s — automatic scans paused until .+ after X's HTTP 429 answer$/,
+  );
 });

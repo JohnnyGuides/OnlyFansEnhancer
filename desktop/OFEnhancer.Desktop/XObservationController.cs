@@ -6,8 +6,12 @@ namespace OFEnhancer.Desktop;
 
 // Desktop end of the passive X collector: strict parsing of one
 // recordXObservations payload into the catalogue's X tables.
-internal sealed class XObservationController(CatalogueStore store, Func<DateTimeOffset>? clock=null)
+internal sealed class XObservationController(CatalogueStore store, Func<DateTimeOffset>? clock=null,
+    XScanActivityBoard? scanActivity=null, DateTimeOffset? startedUtc=null)
 {
+    // When this OFEnhancer process started: the scanner runs one scan after each start.
+    private readonly DateTimeOffset started=(startedUtc ?? (clock ?? (() => DateTimeOffset.UtcNow))()).ToUniversalTime();
+
     private static readonly JsonSerializerOptions JsonOptions=new()
     {
         PropertyNamingPolicy=JsonNamingPolicy.CamelCase,
@@ -36,8 +40,13 @@ internal sealed class XObservationController(CatalogueStore store, Func<DateTime
     {
         if(payload.ValueKind!=JsonValueKind.Object || payload.EnumerateObject().Any())
             throw new GoogleCatalogueControllerException("invalid-x-scan");
-        return store.GetXScanPlan(Now);
+        return store.GetXScanPlan(Now) with {DesktopStartedUtc=started.ToString("O",System.Globalization.CultureInfo.InvariantCulture)};
     }
+
+    // The scanner's live log, kept in memory for the workspace's Twitter view.
+    internal XScanActivity RecordActivity(JsonElement payload) =>
+        Parse<XScanActivity, XScanActivity>(payload, "invalid-x-scan-activity",
+            activity => (scanActivity ?? throw new GoogleCatalogueControllerException("unsupported-operation")).Record(activity));
 
     internal XScanStatus RecordScan(JsonElement payload) =>
         Parse<XScanReport, XScanStatus>(payload, "invalid-x-scan", store.RecordXScanResult);

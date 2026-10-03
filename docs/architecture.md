@@ -133,7 +133,9 @@ travel only over that port, which page scripts never see. Chrome injects one scr
 document across worlds, so the relay loads the same contract source as
 `x-collector-relay-contract.js`. When no network batch arrives, the relay reads
 rendered owner articles (status link, `time`, text, video, metrics `aria-label`)
-and tags them `dom`. Text and video come only from the outer post: anything
+and tags them `dom`. Only exact counts are read from the label (plain digits or
+digits in thousands groups); an abbreviated or decimal figure such as `1.2K`
+leaves that metric `null`, never an approximation. Text and video come only from the outer post: anything
 inside an embedded quote block (nested `article`, `div[role="link"]` or
 `quoteTweet`) is ignored, and when the outer post's text cannot be isolated (more
 than one remaining timestamp or text block) the row keeps no text or media. The worker validates every batch strictly
@@ -153,10 +155,13 @@ unexpected shape is `schema-drift` and nothing is sent. The list travels as a
 without retry, through `recordXScheduledPosts`.
 
 Background scans (`x-collector-scanner.js`) keep the data fresh without the
-owner browsing. A five-minute `creator-x-scan` alarm asks the desktop
+owner browsing. A one-minute `creator-x-scan` alarm asks the desktop
 (`getXScanPlan`: the recorded owner with its account id, a pending "Scan now"
-request, and the owner's own non-reply posts of the last 31 days). A scan is due
-every 6 hours, when one of those posts passes 24 h, 72 h, 7 d or 30 d of age
+request, the owner's own non-reply posts of the last 31 days, and
+`desktopStartedUtc`, when this OFEnhancer process started). A scan is due once
+after every OFEnhancer start (trigger `startup`: the start is later than the
+last attempt, at least 2 minutes after it, outside a rate-limit pause), every 6
+hours, when one of those posts passes 24 h, 72 h, 7 d or 30 d of age
 since the last attempt, or on request; automatic scans are at least 30 minutes
 apart and any two scans at least 2 minutes. An HTTP 401, 403 or 429 answer
 pauses automatic scans for 6 hours, doubling per consecutive such error up to
@@ -192,6 +197,25 @@ pages, new rows and scheduled count are kept in `chrome.storage.local`
 the extension's dashboard starts a scan directly (`requestXScan` handled by the
 worker); in the desktop workspace it records a request that the next alarm tick
 picks up.
+
+Every scan writes a live activity log (`activity` in the scanner): the trigger,
+mode, phase (`starting`, `opening`, `loading`, `reading`, `waiting`, `paging`,
+`scheduled`, `closing`, `done`), pages and posts so far, and up to 150 lines of
+plain text naming each step, each page read, and each owner post read with the
+counters X sent for it. Each page reply from the page script carries up to 40
+post previews (`scanPreview` in the contract: id, time, kind, a 140-character
+excerpt, first media type, a `pbs.twimg.com` poster URL and the six counters
+exactly as parsed); the worker keeps only previews that pass
+`validScanPreviews`. The log is informative only and never alters a scan. The
+worker keeps it in `chrome.storage.session` (`creatorXScanActivityV1`) and
+sends it, at most once a second and always at the end, with
+`recordXScanActivity` (newest 60 lines); the desktop validates it strictly and
+keeps it in memory only (`XScanActivityBoard`), never in the catalogue. Both
+dashboards read it with `getXScanActivity` (the extension page from the worker,
+the desktop workspace from the board), every 1.5 s while a scan runs and every
+10 s otherwise, and reload the overview when a scan finishes. A log that claims
+to be running but has not been updated for 90 seconds is shown as interrupted,
+never as an active scan.
 
 Catalogue migration 9 adds `x_scheduled_posts` (one row per scheduled post: time,
 text excerpt, media summary, first/last seen; a post missing from a later list is

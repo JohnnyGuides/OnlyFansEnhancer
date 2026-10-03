@@ -19,7 +19,10 @@ public sealed record XScheduledPost(string ScheduledId, string ScheduledUtc, str
 public sealed record XScanOwner(string AccountId, string Handle);
 
 // What the extension's background scanner needs to decide whether a scan is due.
-public sealed record XScanPlan(XScanOwner? Owner, string? RequestedUtc, IReadOnlyList<string> RecentPostsUtc);
+// DesktopStartedUtc: when this OFEnhancer process started; the scanner runs one
+// scan after each start.
+public sealed record XScanPlan(XScanOwner? Owner, string? RequestedUtc, IReadOnlyList<string> RecentPostsUtc,
+    string? DesktopStartedUtc = null);
 
 // BackoffUntilUtc: automatic scans are paused until then after a rate-limit or
 // authorization answer ("" when not paused).
@@ -40,7 +43,7 @@ public sealed partial class CatalogueStore
     private static readonly HashSet<string> XScheduledMediaTypes = new(StringComparer.Ordinal)
         { "video", "photo", "animated_gif", "unknown" };
     private static readonly HashSet<string> XScanTriggers = new(StringComparer.Ordinal)
-        { "routine", "checkpoint", "requested", "manual" };
+        { "startup", "routine", "checkpoint", "requested", "manual" };
     private static readonly HashSet<string> XScanModes = new(StringComparer.Ordinal) { "routine", "backfill" };
     private static readonly HashSet<string> XScanOutcomes = new(StringComparer.Ordinal)
     {

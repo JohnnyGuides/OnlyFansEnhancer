@@ -27,6 +27,7 @@
     cursor: null,
     statusIds: [],
     newestUtc: null,
+    posts: [],
     started: false,
     busy: false,
   };
@@ -136,6 +137,9 @@
       newestUtc: times.length
         ? new Date(Math.max(...times)).toISOString()
         : null,
+      posts: tweets
+        .slice(0, contract.MAX_SCAN_PREVIEWS)
+        .map((tweet) => contract.scanPreview(tweet)),
     };
   }
 
@@ -296,6 +300,7 @@
       cursor: Boolean(scan.cursor),
       statusIds: [...scan.statusIds],
       newestUtc: scan.newestUtc,
+      posts: scan.posts,
     };
   }
 
@@ -336,6 +341,7 @@
         cursor: Boolean(scan.cursor),
         statusIds: [...scan.statusIds],
         newestUtc: scan.newestUtc,
+        posts: scan.posts,
       };
     } finally {
       scan.busy = false;

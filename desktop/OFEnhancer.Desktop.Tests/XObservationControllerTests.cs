@@ -30,6 +30,7 @@ public sealed class XObservationControllerTests
     [DataRow("recordXScheduledPosts")]
     [DataRow("getXScanPlan")]
     [DataRow("recordXScanResult")]
+    [DataRow("recordXScanActivity")]
     public void BackgroundScanOperationsAreAllowedAgentOperations(string operation)
     {
         AgentRequest request = AgentRequest.Parse(
@@ -45,11 +46,32 @@ public sealed class XObservationControllerTests
         {
             using CatalogueStore store = CatalogueStore.Open(Path.Combine(directory, "catalogue.db"));
             DateTimeOffset now = new(2026, 9, 28, 12, 0, 0, TimeSpan.Zero);
-            XObservationController controller = new(store, () => now);
+            XScanActivityBoard board = new();
+            XObservationController controller = new(store, () => now, board, now.AddMinutes(-3));
             controller.Record(Payload(Row));
 
             XScanPlan plan = controller.ScanPlan(JsonDocument.Parse("{}").RootElement);
             Assert.AreEqual("Owner_Handle", plan.Owner!.Handle);
+            // The scanner runs one scan after each OFEnhancer start.
+            Assert.AreEqual(now.AddMinutes(-3).ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                plan.DesktopStartedUtc);
+
+            const string activity = """
+                {"version":1,"runId":"0123456789abcdef0123456789abcdef","running":true,"trigger":"startup",
+                 "mode":"routine","phase":"reading","startedUtc":"2026-09-28T11:59:00.000Z",
+                 "updatedUtc":"2026-09-28T11:59:30.000Z","pages":1,"rows":1,"outcome":"",
+                 "posts":[{"statusId":"9101","postedUtc":"2026-09-27T18:00:00.000Z","kind":"post","text":"benign",
+                           "mediaType":"","posterUrl":"",
+                           "metrics":{"views":100,"likes":10,"reposts":1,"replies":2,"quotes":0,"bookmarks":null}}],
+                 "events":[{"at":"2026-09-28T11:59:30.000Z","kind":"step","text":"Page 1: read 1 post of yours"}]}
+                """;
+            Assert.AreEqual(100L, controller.RecordActivity(JsonDocument.Parse(activity).RootElement).Posts[0].Metrics!.Views);
+            Assert.IsTrue(board.Latest(now)!.Running);
+            Assert.AreEqual("invalid-x-scan-activity", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.RecordActivity(JsonDocument.Parse(activity.Replace("\"rows\"", "\"tabId\":5,\"rows\"")).RootElement)).Message);
+            Assert.AreEqual("invalid-x-scan-activity", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                controller.RecordActivity(JsonDocument.Parse(activity.Replace("\"posterUrl\":\"\"",
+                    "\"posterUrl\":\"https://example.com/a.jpg\"")).RootElement)).Message);
             Assert.AreEqual("invalid-x-scan", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
                 controller.ScanPlan(JsonDocument.Parse("""{"since":1}""").RootElement)).Message);
 

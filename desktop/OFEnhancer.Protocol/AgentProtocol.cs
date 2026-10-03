@@ -37,7 +37,7 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
             or "getUploadThumbnailOptions" or "getUploadThumbnailPreview" or "resolveUploadThumbnail" or "getCatalogueThumbnailPreviews"
             or "recordUploadResult" or "writeUploadCatalogueEntry" or "getSubredditPresets" or "browserExchange" or "showChromeSetup"
             or "loadDevelopmentFixtures" or "resolveDevelopmentFixture" or "recordXObservations"
-            or "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult"
+            or "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult" or "recordXScanActivity"
             or "getTeaserOverview" or "undoTeaserClipMove" or "getTeaserReplyQueue" or "getTeaserPlan" or "setTeaserPlanSlot" or "clearTeaserPlanSlot"))
             throw new AgentProtocolException(
                 "unsupported-operation",

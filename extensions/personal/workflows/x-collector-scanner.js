@@ -3,19 +3,26 @@
 
   // Automatic background scans of the owner's own X profile, so posts and
   // metrics stay fresh without the owner browsing. A periodic alarm asks the
-  // desktop for the owner, recent post times and any "Scan now" request; a
-  // scan is due every 6 hours, when a recent post reaches a checkpoint age
-  // (24 h, 72 h, 7 d, 30 d) or on request. One scan at a time opens one
+  // desktop for the owner, recent post times, when OFEnhancer was started and
+  // any "Scan now" request; a scan is due once after every OFEnhancer start,
+  // every 6 hours, when a recent post reaches a checkpoint age (24 h, 72 h,
+  // 7 d, 30 d) or on request. One scan at a time opens one
   // inactive tab on the owner's with_replies page, lets the passive
   // collector read the first page, then asks the page for older pages one at
   // a time with a 2-4 s pause, stops at the window, the page cap, the end or
   // on the first error, reads the scheduled-post list and closes the tab.
   // Nothing is clicked, typed or posted, and no other account is opened.
+  //
+  // Every step is written to a live activity log (what the scan is doing,
+  // the page and the posts it just read, with X's exact counters) for
+  // the dashboards; the log only describes what happened.
   if (globalThis.CreatorXCollectorScanner) return;
 
   const STORAGE_KEY = "creatorXScanV1";
   const ALARM_NAME = "creator-x-scan";
-  const ALARM_PERIOD_MINUTES = 5;
+  // Short enough that the scan after an OFEnhancer start begins within about
+  // a minute; a tick that finds nothing due only asks the desktop.
+  const ALARM_PERIOD_MINUTES = 1;
   const MINUTE = 60_000;
   const HOUR = 60 * MINUTE;
   const DAY = 24 * HOUR;
@@ -39,6 +46,8 @@
   const READY_POLL_MS = 1_000;
   const MAX_SCAN_MS = 8 * MINUTE;
   const LOG_LIMIT = 20;
+  const ACTIVITY_LIMIT = 150;
+  const ACTIVITY_TEXT = 240;
   const SCHEDULED_URL = "https://x.com/compose/post/unsent/scheduled";
   // Rate-limit and authorization answers pause automatic scans: 6 h after
   // the first, doubling per consecutive one up to 48 h. "Scan now" still runs.
@@ -67,7 +76,31 @@
   ]);
   const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
   const ID = /^\d{1,25}$/;
+  const TRIGGER_LABELS = Object.freeze({
+    startup: "OFEnhancer was started",
+    routine: "six hours since the last scan",
+    checkpoint: "a recent post reached a 24 h / 72 h / 7 d / 30 d checkpoint",
+    requested: "Scan now was requested in OFEnhancer",
+    manual: "Scan now was pressed on the dashboard",
+  });
+  const OUTCOME_LABELS = Object.freeze({
+    complete: "reached the end of your timeline",
+    "window-reached": "reached posts older than the scan window",
+    "no-new-posts": "the last page brought no new posts",
+    "page-cap": "read the maximum number of pages for this scan",
+    "owner-unknown":
+      "your X account is not known yet; open x.com once while signed in",
+    "owner-mismatch":
+      "Chrome is signed in to a different X account than the recorded one",
+    "signed-out": "Chrome is not signed in to X",
+    "no-timeline": "X did not show your timeline",
+    timeout: "the scan ran longer than 8 minutes",
+    "user-took-over": "you opened the scan tab, so the scan stepped aside",
+    error: "X gave an answer the scan could not use",
+  });
   const DETAIL = /^[a-z0-9-]{1,40}$/;
+
+  const contract = globalThis.CreatorXCollectorContract;
 
   class ScanStop extends Error {
     constructor(code, detail = "") {
@@ -126,6 +159,10 @@
       return at - last >= MANUAL_MIN_GAP_MS ? "requested" : "";
     }
     if ((Number(state.backoffUntil) || 0) > at) return "";
+    // Once per OFEnhancer start: the first tick after the desktop started.
+    const started = Date.parse(String(plan?.desktopStartedUtc || ""));
+    if (Number.isFinite(started) && started > last && started <= at)
+      return at - last >= MANUAL_MIN_GAP_MS ? "startup" : "";
     if (last && at - last < MIN_GAP_MS) return "";
     if (!last || at - last >= ROUTINE_INTERVAL_MS) return "routine";
     const posts = Array.isArray(plan?.recentPostsUtc)
@@ -153,6 +190,7 @@
     random = Math.random,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     marker = makeMarker,
+    onActivity = (_snapshot) => {},
   }) {
     if (
       !storage ||
@@ -163,6 +201,118 @@
       throw new Error("The X scan dependencies are unavailable.");
     /** @type {Promise<any> | null} */
     let active = null;
+    let activity = emptyActivity();
+
+    function emptyActivity() {
+      return {
+        version: 1,
+        runId: "",
+        running: false,
+        trigger: "",
+        mode: "",
+        phase: "idle",
+        startedUtc: "",
+        updatedUtc: "",
+        pages: 0,
+        rows: 0,
+        outcome: "",
+        posts: [],
+        events: [],
+      };
+    }
+
+    function iso(value = now()) {
+      return new Date(value).toISOString();
+    }
+
+    function publish() {
+      activity.updatedUtc = iso();
+      try {
+        void Promise.resolve(onActivity(snapshot())).catch(() => {});
+      } catch {
+        // The log is informative only; a failing listener never stops a scan.
+      }
+    }
+
+    function snapshot() {
+      return JSON.parse(JSON.stringify(activity));
+    }
+
+    // One line of the live log; kind is step, post, warn or done.
+    function note(kind, text, extra = {}) {
+      activity.events.push({
+        at: iso(),
+        kind,
+        text: String(text).slice(0, ACTIVITY_TEXT),
+        ...extra,
+      });
+      if (activity.events.length > ACTIVITY_LIMIT)
+        activity.events.splice(0, activity.events.length - ACTIVITY_LIMIT);
+      publish();
+    }
+
+    function phase(name, text) {
+      activity.phase = name;
+      note("step", text);
+    }
+
+    // Local, readable time for log lines ("Oct 1, 11:00 AM" in en-US).
+    function when(value) {
+      const time = Date.parse(String(value || ""));
+      return Number.isFinite(time)
+        ? new Date(time).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })
+        : "";
+    }
+
+    function number(value) {
+      return Number(value).toLocaleString("en-US");
+    }
+
+    function plural(count, one, many = `${one}s`) {
+      return `${number(count)} ${count === 1 ? one : many}`;
+    }
+
+    function countsText(metrics) {
+      if (!metrics) return "no counters (X sends none for reposts)";
+      const parts = [
+        ["views", "view"],
+        ["likes", "like"],
+        ["reposts", "repost"],
+        ["replies", "reply", "replies"],
+        ["bookmarks", "bookmark"],
+      ]
+        .filter(([key]) => metrics[key] !== null && metrics[key] !== undefined)
+        .map(([key, one, many]) => plural(metrics[key], one, many));
+      return parts.length ? parts.join(" · ") : "X sent no counters";
+    }
+
+    // One "post" line per post the page brought, newest first, with the
+    // counters exactly as X sent them.
+    function notePosts(label, posts, fresh) {
+      activity.posts = posts;
+      for (const post of posts) {
+        const what =
+          post.kind === "repost"
+            ? "Repost"
+            : post.kind === "reply"
+              ? "Reply"
+              : post.mediaType === "video"
+                ? "Video post"
+                : post.mediaType
+                  ? "Image post"
+                  : "Text post";
+        note(
+          "post",
+          `${label}: ${what} ${post.statusId}${fresh.has(post.statusId) ? "" : " (already seen in this scan)"} — ${countsText(post.metrics)}`,
+          { post },
+        );
+      }
+    }
 
     async function load() {
       const stored = (await storage.get(STORAGE_KEY))[STORAGE_KEY];
@@ -195,6 +345,10 @@
     async function waitReady(handle, owner) {
       const startedAt = now();
       let lastReason = "";
+      phase(
+        "loading",
+        "Waiting for X to load your timeline in the background tab (up to 30 s)",
+      );
       for (;;) {
         await guard(handle);
         const status = await runner.command(handle, "status");
@@ -255,6 +409,22 @@
       }
       const owner = validOwner(plan);
       const backfill = !state.backfillDone;
+      activity = {
+        ...emptyActivity(),
+        running: true,
+        trigger,
+        mode: backfill ? "backfill" : "routine",
+        phase: "starting",
+        startedUtc: iso(at),
+      };
+      note(
+        "step",
+        `Scan started because ${TRIGGER_LABELS[trigger] || trigger}${
+          backfill
+            ? " — first full read of your history (up to 30 pages)"
+            : " — reading the last 35 days (up to 10 pages)"
+        }`,
+      );
       const result = {
         trigger,
         mode: backfill ? "backfill" : "routine",
@@ -274,6 +444,11 @@
       try {
         if (!owner) throw new ScanStop("owner-unknown");
         const runMarker = marker();
+        activity.runId = runMarker;
+        phase(
+          "opening",
+          `Opening an inactive background tab on x.com/${owner.handle}/with_replies using your existing Chrome sign-in`,
+        );
         state.running = {
           startedAt: at,
           trigger,
@@ -292,9 +467,25 @@
           runMarker,
         );
         const first = await waitReady(handle, owner);
+        note(
+          "step",
+          `Signed in as account ${first.ownerId}, the recorded owner @${owner.handle} — reading page 1 from X's own timeline answer`,
+        );
         const seen = new Set(first.statusIds || []);
         result.pages = 1;
         result.rows = seen.size;
+        activity.pages = 1;
+        activity.rows = seen.size;
+        activity.phase = "reading";
+        note(
+          "step",
+          `Page 1: read ${plural(seen.size, "post")} of yours${when(first.newestUtc) ? `, newest from ${when(first.newestUtc)}` : ""}`,
+        );
+        notePosts(
+          "Page 1",
+          contract?.validScanPreviews(first.posts) || [],
+          seen,
+        );
         let stop = pageStop(first, cutoff);
         while (!stop) {
           if (result.pages >= cap) {
@@ -303,8 +494,17 @@
           }
           if (now() - at >= MAX_SCAN_MS) throw new ScanStop("timeout");
           await guard(handle);
-          await sleep(pageDelay());
+          const delay = pageDelay();
+          phase(
+            "waiting",
+            `Pausing ${(delay / 1000).toFixed(1)} s before page ${result.pages + 1} so requests stay gentle`,
+          );
+          await sleep(delay);
           await guard(handle);
+          phase(
+            "paging",
+            `Asking X for page ${result.pages + 1} with the same timeline request X itself made`,
+          );
           const page = await runner.command(handle, "page");
           if (!page?.ok)
             throw new ScanStop(
@@ -317,11 +517,28 @@
           const fresh = (page.statusIds || []).filter((id) => !seen.has(id));
           for (const id of fresh) seen.add(id);
           result.rows += fresh.length;
+          activity.pages = result.pages;
+          activity.rows = result.rows;
+          activity.phase = "reading";
+          note(
+            "step",
+            `Page ${result.pages}: read ${plural((page.statusIds || []).length, "post")}, ${number(fresh.length)} new in this scan${when(page.newestUtc) ? `, newest from ${when(page.newestUtc)}` : ""}`,
+          );
+          notePosts(
+            `Page ${result.pages}`,
+            contract?.validScanPreviews(page.posts) || [],
+            new Set(fresh),
+          );
           stop = fresh.length ? pageStop(page, cutoff) : "no-new-posts";
         }
         result.outcome = stop;
+        note("step", `Stopped paging: ${OUTCOME_LABELS[stop] || stop}`);
         if (typeof runner.scheduled === "function") {
           await guard(handle);
+          phase(
+            "scheduled",
+            "Opening your scheduled-posts list in the same tab (up to 25 s)",
+          );
           const count = await Promise.resolve()
             .then(() => runner.scheduled(handle))
             .catch((error) => {
@@ -330,6 +547,12 @@
               return null;
             });
           result.scheduled = Number.isSafeInteger(count) ? count : null;
+          note(
+            result.scheduled === null ? "warn" : "step",
+            result.scheduled === null
+              ? "The scheduled-posts list did not arrive in time; it stays as last recorded"
+              : `Read ${plural(result.scheduled, "scheduled post")}`,
+          );
         }
       } catch (error) {
         result.outcome =
@@ -342,11 +565,18 @@
         if (!(error instanceof ScanStop))
           state.lastError = String(error?.message || error).slice(0, 200);
         leaveTab = result.outcome === "user-took-over";
+        note(
+          "warn",
+          `Scan stopped: ${OUTCOME_LABELS[result.outcome] || result.outcome}${result.detail ? ` (${result.detail})` : ""}`,
+        );
       } finally {
-        if (handle && !leaveTab)
+        if (handle && !leaveTab) {
+          activity.phase = "closing";
+          note("step", "Closing the background tab");
           await Promise.resolve()
             .then(() => runner.close(handle))
             .catch(() => {});
+        }
         state.running = null;
         result.finishedUtc = new Date(now()).toISOString();
         if (SUCCESS.includes(result.outcome)) {
@@ -367,6 +597,21 @@
         state.log.unshift(result);
         state.log.length = Math.min(state.log.length, LOG_LIMIT);
         await save(state);
+        const seconds = Math.max(
+          Math.round((Date.parse(result.finishedUtc) - at) / 1000),
+          0,
+        );
+        activity.running = false;
+        activity.phase = "done";
+        activity.outcome = result.outcome;
+        note(
+          SUCCESS.includes(result.outcome) ? "done" : "warn",
+          `${SUCCESS.includes(result.outcome) ? "Finished" : "Ended"}: ${plural(result.pages, "page")}, ${plural(result.rows, "post")} recorded with fresh counters in ${seconds} s${
+            result.backoffUntilUtc
+              ? ` — automatic scans paused until ${when(result.backoffUntilUtc)} after X's ${result.detail.replace("http-", "HTTP ")} answer`
+              : ""
+          }`,
+        );
       }
       try {
         await desktop.record(result);
@@ -435,6 +680,7 @@
           (Number(state.backoffUntil) || 0) > now()
             ? new Date(state.backoffUntil).toISOString()
             : "",
+        activity: snapshot(),
       };
     }
 
@@ -447,6 +693,7 @@
       run,
       requestNow,
       status,
+      activity: snapshot,
       noteScheduled,
       idle: () => active ?? Promise.resolve(),
     });
@@ -612,6 +859,7 @@
     BACKOFF_MAX_MS,
     SCHEDULED_URL,
     OUTCOMES,
+    ACTIVITY_LIMIT,
     dueReason,
     create,
     createChromeRunner,

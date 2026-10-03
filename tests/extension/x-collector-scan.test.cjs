@@ -545,6 +545,7 @@ test("the page replays X's own timeline request with the next cursor and allowli
     cursor: false,
     statusIds: [],
     newestUtc: null,
+    posts: [],
   });
   // Another account's timeline never becomes the template.
   xOwnRequest(
@@ -586,12 +587,30 @@ test("the page replays X's own timeline request with the next cursor and allowli
     }, 5);
   };
   const first = plain(await command("page"));
+  // The preview for the live scan log carries X's counters unchanged.
+  const preview = {
+    statusId: "311",
+    postedUtc: "2026-09-29T10:00:00.000Z",
+    kind: "post",
+    text: "benign wrapped 311",
+    mediaType: "",
+    posterUrl: "",
+    metrics: {
+      views: 250,
+      likes: 9,
+      reposts: 2,
+      replies: 1,
+      quotes: 0,
+      bookmarks: 4,
+    },
+  };
   assert.deepEqual(first, {
     ok: true,
     ownerId: OWNER_ID,
     cursor: true,
     statusIds: ["311"],
     newestUtc: "2026-09-29T10:00:00.000Z",
+    posts: [preview],
   });
   const replay = server.instances.at(-1);
   assert.equal(replay.method, "GET");

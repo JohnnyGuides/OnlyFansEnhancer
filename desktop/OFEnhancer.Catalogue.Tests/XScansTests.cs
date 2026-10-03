@@ -128,6 +128,9 @@ public sealed class XScansTests
         string paused = Now.AddHours(9).ToString("O", CultureInfo.InvariantCulture);
         Assert.AreEqual(paused, store.RecordXScanResult(Report(Now.AddMinutes(4), "error") with
             { Detail = "http-429", BackoffUntilUtc = paused }).Last!.BackoffUntilUtc);
+        // The scan run after an OFEnhancer start is recorded as such.
+        Assert.AreEqual("startup", store.RecordXScanResult(Report(Now.AddMinutes(4), "complete") with
+            { Trigger = "startup" }).Last!.Trigger);
         XScanReport tookOver = Report(Now.AddMinutes(5), "user-took-over");
         Assert.AreEqual(tookOver, store.RecordXScanResult(tookOver).Last);
         Assert.AreEqual("", tookOver.BackoffUntilUtc);
@@ -163,6 +166,73 @@ public sealed class XScansTests
             Now.ToString("O", CultureInfo.InvariantCulture)), scheduled);
         Assert.AreEqual("page-cap", overview.Scan!.Last!.Outcome);
         Assert.IsNull(overview.Scan.RequestedUtc);
+    }
+
+    [TestMethod]
+    public void LiveScanLogIsKeptInMemoryValidatedAndNeverShownRunningOnceStale()
+    {
+        XScanActivityBoard board = new();
+        Assert.IsNull(board.Latest(Now));
+        XScanActivity running = Activity(Now, running: true);
+        Assert.AreEqual(running, board.Record(running));
+        XScanActivity latest = board.Latest(Now.AddSeconds(30))!;
+        Assert.IsTrue(latest.Running);
+        Assert.AreEqual(12345L, latest.Events.Single(item => item.Post is not null).Post!.Metrics!.Views);
+
+        // Chrome stopped reporting: the log is kept but no longer running.
+        XScanActivity stale = board.Latest(Now.Add(XScanActivityBoard.StaleAfter).AddSeconds(1))!;
+        Assert.IsFalse(stale.Running);
+        Assert.AreEqual("stale", stale.Phase);
+        XScanActivity done = Activity(Now.AddMinutes(1), running: false) with { Phase = "done", Outcome = "complete" };
+        board.Record(done);
+        Assert.AreEqual(done, board.Latest(Now.AddHours(5)));
+
+        XScanActivityPost post = running.Posts[0];
+        foreach (XScanActivity bad in new[]
+        {
+            running with { Version = 2 },
+            running with { RunId = "not-a-run" },
+            running with { Trigger = "sometime" },
+            running with { Phase = "posting" },
+            running with { Outcome = "posted" },
+            running with { UpdatedUtc = "" },
+            running with { Pages = -1 },
+            running with { Posts = [post with { PosterUrl = "https://example.com/a.jpg" }] },
+            running with { Posts = [post with { PosterUrl = "http://pbs.twimg.com/a.jpg" }] },
+            running with { Posts = [post with { StatusId = "x1" }] },
+            running with { Posts = [post with { Kind = "ad" }] },
+            running with { Posts = [post with { Metrics = post.Metrics! with { Views = -1 } }] },
+            running with { Posts = [post with { Text = new string('x', 141) }] },
+            running with { Posts = Enumerable.Repeat(post, 41).ToList() },
+            running with { Events = [new(running.UpdatedUtc, "post", "no post attached")] },
+            running with { Events = [new(running.UpdatedUtc, "step", "a step with a post", post)] },
+            running with { Events = [new(running.UpdatedUtc, "step", new string('x', 241))] },
+            running with { Events = Enumerable.Repeat(new XScanActivityEvent(running.UpdatedUtc, "step", "s"), 61).ToList() },
+        })
+            Assert.AreEqual("invalid-x-scan-activity", Assert.ThrowsException<XObservationException>(() =>
+                board.Record(bad)).Code);
+        Assert.AreEqual(done, board.Latest(Now.AddHours(5)), "A refused log leaves the last good one.");
+    }
+
+    [TestMethod]
+    public void ScanPlanCarriesNoDesktopStartUntilTheDesktopAddsIt()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        XScanPlan plan = store.GetXScanPlan(Now);
+        Assert.IsNull(plan.DesktopStartedUtc);
+        Assert.AreEqual("2026-10-01T11:00:00.0000000+00:00",
+            (plan with { DesktopStartedUtc = Now.AddHours(-1).ToString("O", CultureInfo.InvariantCulture) }).DesktopStartedUtc);
+    }
+
+    private static XScanActivity Activity(DateTimeOffset updated, bool running)
+    {
+        string at = updated.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        XScanActivityPost post = new("9101", "2026-09-30T18:00:00.000Z", "post", "benign preview", "video",
+            "https://pbs.twimg.com/ext_tw_video_thumb/9101/pu/img/poster.jpg", new(12345, 1204, 37, 12, 0, null));
+        return new(1, "0123456789abcdef0123456789abcdef", running, "startup", "routine", running ? "reading" : "done",
+            at, at, 1, 20, "", [post],
+            [new(at, "step", "Page 1: read 20 posts of yours"), new(at, "post", "Page 1: Video post 9101 — 12,345 views", post)]);
     }
 
     private static XScanReport Report(DateTimeOffset started, string outcome) =>

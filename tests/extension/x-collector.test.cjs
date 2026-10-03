@@ -377,6 +377,110 @@ test("metric labels and the owner profile link parse without page access", () =>
   );
 });
 
+test("metric labels yield exact counts only, never approximations", () => {
+  const contract = loadContract();
+  const parse = (label) =>
+    JSON.parse(JSON.stringify(contract.parseMetricLabel(label)));
+  assert.deepEqual(parse("1,234 likes, 12,345,678 views"), {
+    views: 12345678,
+    likes: 1234,
+    reposts: null,
+    replies: null,
+    quotes: null,
+    bookmarks: null,
+  });
+  // Abbreviated or decimal figures stay unknown instead of becoming numbers.
+  assert.deepEqual(parse("1.2K likes, 12.5 views, 3 replies"), {
+    views: null,
+    likes: null,
+    reposts: null,
+    replies: 3,
+    quotes: null,
+    bookmarks: null,
+  });
+  assert.equal(contract.parseMetricLabel("12,5 views"), null);
+  assert.equal(contract.parseMetricLabel("4 K views"), null);
+});
+
+test("scan previews mirror the parsed post and the worker keeps only exact, safe ones", () => {
+  const contract = loadContract();
+  const tweet = {
+    statusId: "501",
+    createdAt: "2026-09-30T10:00:00.000Z",
+    text: "benign   preview\ntext",
+    inReplyToStatusId: null,
+    isRetweet: false,
+    media: [
+      {
+        type: "photo",
+        mediaKey: null,
+        durationMs: null,
+        posterUrl: "https://pbs.twimg.com/media/photo.jpg",
+      },
+      {
+        type: "video",
+        mediaKey: null,
+        durationMs: 1000,
+        posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/v.jpg",
+      },
+    ],
+    metrics: {
+      views: 4321,
+      likes: 21,
+      reposts: 3,
+      replies: 2,
+      quotes: 0,
+      bookmarks: null,
+    },
+  };
+  const preview = JSON.parse(JSON.stringify(contract.scanPreview(tweet)));
+  assert.deepEqual(preview, {
+    statusId: "501",
+    postedUtc: "2026-09-30T10:00:00.000Z",
+    kind: "post",
+    text: "benign preview text",
+    mediaType: "video",
+    posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/v.jpg",
+    metrics: tweet.metrics,
+  });
+  assert.equal(
+    contract.scanPreview({ ...tweet, inReplyToStatusId: "1" }).kind,
+    "reply",
+  );
+  assert.equal(
+    contract.scanPreview({ ...tweet, isRetweet: true, metrics: null }).kind,
+    "repost",
+  );
+  const kept = (rows) =>
+    JSON.parse(JSON.stringify(contract.validScanPreviews(rows)));
+  assert.deepEqual(kept([preview]), [preview]);
+  for (const bad of [
+    { ...preview, posterUrl: "https://example.com/a.jpg" },
+    { ...preview, posterUrl: "http://pbs.twimg.com/a.jpg" },
+    { ...preview, metrics: { ...preview.metrics, views: 12.5 } },
+    { ...preview, metrics: { ...preview.metrics, views: "4321" } },
+    { ...preview, metrics: { views: 1 } },
+    { ...preview, statusId: "x1" },
+    { ...preview, postedUtc: "yesterday" },
+    { ...preview, kind: "ad" },
+    { ...preview, extra: true },
+    { ...preview, text: "x".repeat(contract.MAX_PREVIEW_TEXT + 1) },
+  ])
+    assert.deepEqual(kept([bad]), []);
+  // Duplicates and anything past the cap are dropped; non-arrays give none.
+  assert.equal(kept([preview, preview]).length, 1);
+  assert.equal(
+    kept(
+      Array.from({ length: contract.MAX_SCAN_PREVIEWS + 5 }, (_, index) => ({
+        ...preview,
+        statusId: String(1000 + index),
+      })),
+    ).length,
+    contract.MAX_SCAN_PREVIEWS,
+  );
+  assert.deepEqual(kept(null), []);
+});
+
 test("text is capped on a code-point boundary", () => {
   const contract = loadContract();
   const emoji = "\u{1F600}";

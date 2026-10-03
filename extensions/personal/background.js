@@ -144,6 +144,8 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
     return sendDesktopRequest(operation, payload);
   // "Scan now" on the extension's dashboard starts the scan right here.
   if (operation === "requestXScan") return xScanner().requestNow();
+  // The live scan log is kept by this worker.
+  if (operation === "getXScanActivity") return xScanActivity();
   throw new Error("unsupported-operation");
 }
 
@@ -209,7 +211,53 @@ function acceptXCollectorMessage(message, sender) {
 // Automatic background scans of the owner's own X profile: a periodic alarm
 // asks the desktop whether a scan is due; "Scan now" starts one at once.
 const X_SCANNER = globalThis.CreatorXCollectorScanner;
+const X_SCAN_ACTIVITY_KEY = "creatorXScanActivityV1";
+// The desktop gets the live log at most this often (the last step always).
+const X_SCAN_ACTIVITY_FORWARD_MS = 1_000;
+// Only the newest lines travel to the desktop workspace.
+const X_SCAN_ACTIVITY_FORWARD_EVENTS = 60;
 let xScannerInstance = null;
+let xScanActivityForward = { timer: null, pending: null, lastAt: 0 };
+
+function forwardXScanActivity(snapshot) {
+  const forward = xScanActivityForward;
+  forward.pending = {
+    ...snapshot,
+    events: snapshot.events.slice(-X_SCAN_ACTIVITY_FORWARD_EVENTS),
+  };
+  const send = () => {
+    forward.timer = null;
+    const value = forward.pending;
+    forward.pending = null;
+    forward.lastAt = Date.now();
+    if (value) sendDesktopRequest("recordXScanActivity", value).catch(() => {});
+  };
+  if (forward.timer) return;
+  const wait = forward.lastAt + X_SCAN_ACTIVITY_FORWARD_MS - Date.now();
+  // The final step of a scan goes out at once.
+  if (wait <= 0 || !snapshot.running) send();
+  else forward.timer = setTimeout(send, wait);
+}
+
+function recordXScanActivity(snapshot) {
+  chrome.storage.session
+    ?.set({ [X_SCAN_ACTIVITY_KEY]: snapshot })
+    .catch(() => {});
+  forwardXScanActivity(snapshot);
+}
+
+// The live log survives a worker restart within the browser session.
+async function xScanActivity() {
+  const live = xScannerInstance?.activity();
+  if (live?.startedUtc) return { activity: live };
+  const stored = (await chrome.storage.session?.get(X_SCAN_ACTIVITY_KEY))?.[
+    X_SCAN_ACTIVITY_KEY
+  ];
+  // A log left by a stopped worker is no longer running.
+  return {
+    activity: stored?.version === 1 ? { ...stored, running: false } : null,
+  };
+}
 
 function xScanner() {
   xScannerInstance ||= X_SCANNER.create({
@@ -219,15 +267,18 @@ function xScanner() {
       record: (result) => sendDesktopRequest("recordXScanResult", result),
     },
     runner: X_SCANNER.createChromeRunner({ chrome }),
+    onActivity: recordXScanActivity,
   });
   return xScannerInstance;
 }
 
 async function ensureXScanAlarm() {
   if (!X_SCANNER || !chrome.alarms) return;
-  if (await chrome.alarms.get(X_SCANNER.ALARM_NAME)) return;
+  const existing = await chrome.alarms.get(X_SCANNER.ALARM_NAME);
+  // Older versions checked every 5 minutes; reschedule to the current period.
+  if (existing?.periodInMinutes === X_SCANNER.ALARM_PERIOD_MINUTES) return;
   await chrome.alarms.create(X_SCANNER.ALARM_NAME, {
-    delayInMinutes: 2,
+    delayInMinutes: 1,
     periodInMinutes: X_SCANNER.ALARM_PERIOD_MINUTES,
   });
 }
