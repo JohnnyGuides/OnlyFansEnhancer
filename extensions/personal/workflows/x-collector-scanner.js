@@ -7,10 +7,10 @@
   // any "Scan now" request; a scan is due once after every OFEnhancer start,
   // every 6 hours, when a recent post reaches a checkpoint age (24 h, 72 h,
   // 7 d, 30 d) or on request. One scan at a time opens one
-  // inactive tab on the owner's with_replies page, lets the passive
-  // collector read the first page, then asks the page for older pages one at
-  // a time with a 2-4 s pause, stops at the window, the page cap, the end or
-  // on the first error, reads the scheduled-post list and closes the tab.
+  // inactive tab checks known status links first, confirming each desktop
+  // observation and saving the pending queue. A recent profile pass discovers
+  // new posts; an unknown history uses capped profile pagination. Checks pause
+  // 15-30 seconds, then read the scheduled-post list and close the owned tab.
   // Nothing is clicked, typed or posted, and no other account is opened.
   //
   // Every step is written to a live activity log (what the scan is doing,
@@ -42,20 +42,20 @@
   // A full scan reads the whole profile timeline until X has no older page;
   // this cap (about 10,000 posts) only guards against a cursor that never ends.
   const BACKFILL_PAGE_CAP = 500;
-  // The whole history is read again weekly so older posts' counters refresh.
+  // Fallback profile history is read weekly when there are no known targets.
   const FULL_INTERVAL_MS = 7 * DAY;
-  const PAGE_DELAY_MIN_MS = 2_000;
-  const PAGE_DELAY_MAX_MS = 4_000;
+  const PAGE_DELAY_MIN_MS = 15_000;
+  const PAGE_DELAY_MAX_MS = 30_000;
   const READY_TIMEOUT_MS = 30_000;
   const READY_POLL_MS = 1_000;
   const MAX_SCAN_MS = 8 * MINUTE;
-  const FULL_MAX_SCAN_MS = 75 * MINUTE;
+  const FULL_MAX_SCAN_MS = 5 * HOUR;
   const LOG_LIMIT = 20;
   const ACTIVITY_LIMIT = 150;
   const ACTIVITY_TEXT = 240;
   const SCHEDULED_URL = "https://x.com/compose/post/unsent/scheduled";
-  // Rate-limit and authorization answers pause automatic scans: 6 h after
-  // the first, doubling per consecutive one up to 48 h. "Scan now" still runs.
+  // Rate-limit and authorization answers pause all scans: 6 h after
+  // the first, doubling per consecutive one up to 48 h.
   const BACKOFF_BASE_MS = 6 * HOUR;
   const BACKOFF_MAX_MS = 48 * HOUR;
   const BACKOFF_DETAILS = Object.freeze(["http-401", "http-403", "http-429"]);
@@ -99,7 +99,7 @@
       "Chrome is signed in to a different X account than the recorded one",
     "signed-out": "Chrome is not signed in to X",
     "no-timeline": "X did not show your timeline",
-    timeout: "the scan ran out of time (8 minutes, 75 for a full scan)",
+    timeout: "the scan ran out of time (8 minutes, 300 for a full scan)",
     "user-took-over": "you opened the scan tab, so the scan stepped aside",
     error: "X gave an answer the scan could not use",
   });
@@ -128,6 +128,8 @@
       lastError: "",
       backoffErrors: 0,
       backoffUntil: 0,
+      refreshPending: [],
+      refreshOwnerId: "",
     };
   }
 
@@ -161,6 +163,7 @@
   function dueReason(state, plan, at) {
     const requested = Date.parse(String(plan?.requestedUtc || ""));
     const last = Number(state.lastAttemptAt) || 0;
+    if ((Number(state.backoffUntil) || 0) > at) return "";
     if (Number.isFinite(requested) && requested > last) {
       return at - last >= MANUAL_MIN_GAP_MS ? "requested" : "";
     }
@@ -170,7 +173,12 @@
     if (Number.isFinite(started) && started > last && started <= at)
       return at - last >= MANUAL_MIN_GAP_MS ? "startup" : "";
     if (last && at - last < MIN_GAP_MS) return "";
-    if (!last || at - last >= ROUTINE_INTERVAL_MS) return "routine";
+    if (
+      state.refreshPending?.length ||
+      !last ||
+      at - last >= ROUTINE_INTERVAL_MS
+    )
+      return "routine";
     const posts = Array.isArray(plan?.recentPostsUtc)
       ? plan.recentPostsUtc
       : [];
@@ -358,6 +366,21 @@
         throw new ScanStop("user-took-over");
     }
 
+    async function pacedSleep(handle, duration) {
+      // Chrome may retire an idle worker after 30 seconds. Keep the paced
+      // wait alive with local tab metadata reads, without requesting X.
+      const heartbeat = runner.keepAlive
+        ? setInterval(() => {
+            Promise.resolve(runner.keepAlive(handle)).catch(() => {});
+          }, 5_000)
+        : null;
+      try {
+        await sleep(duration);
+      } finally {
+        if (heartbeat !== null) clearInterval(heartbeat);
+      }
+    }
+
     async function waitReady(handle, owner) {
       const startedAt = now();
       let lastReason = "";
@@ -414,6 +437,12 @@
       const state = await load();
       await clearStaleRun(state, true);
       const at = now();
+      if ((Number(state.backoffUntil) || 0) > at)
+        return {
+          ran: false,
+          reason: "backoff",
+          backoffUntilUtc: iso(state.backoffUntil),
+        };
       if (!plan) {
         try {
           plan = await desktop.plan();
@@ -424,42 +453,55 @@
         }
       }
       const owner = validOwner(plan);
-      // Every desktop opening refreshes the entire history. Background ticks
-      // keep the shorter window, with a weekly full pass and interrupted retry.
+      const targets = Array.isArray(plan?.knownStatuses)
+        ? plan.knownStatuses.filter((row) => ID.test(row?.statusId || ""))
+        : [];
+      const knownRefresh = Boolean(
+        owner && targets.length && typeof runner.detail === "function",
+      );
+      // Known targets refresh on every scan. Without targets, desktop opening
+      // requests full profile discovery; background ticks use a shorter window.
       const backfill =
-        trigger === "startup" ||
-        trigger === "requested" ||
-        trigger === "manual" ||
-        !state.backfillDone ||
-        at - (Number(state.lastFullAt) || 0) >= FULL_INTERVAL_MS;
+        !knownRefresh &&
+        (trigger === "startup" ||
+          trigger === "requested" ||
+          trigger === "manual" ||
+          !state.backfillDone ||
+          at - (Number(state.lastFullAt) || 0) >= FULL_INTERVAL_MS);
       activity = {
         ...emptyActivity(),
         running: true,
         trigger,
-        mode: backfill ? "backfill" : "routine",
+        mode: knownRefresh ? "refresh" : backfill ? "backfill" : "routine",
         phase: "starting",
         startedUtc: iso(at),
         expected: knownCount(
-          backfill ? plan?.knownPosts : plan?.knownPostsInWindow,
+          knownRefresh
+            ? targets.length
+            : backfill
+              ? plan?.knownPosts
+              : plan?.knownPostsInWindow,
         ),
       };
       note(
         "step",
         `Scan started because ${TRIGGER_LABELS[trigger] || trigger}${
-          backfill
-            ? state.backfillDone
-              ? trigger === "startup" ||
-                trigger === "requested" ||
-                trigger === "manual"
-                ? " — full read of your whole history to refresh every post's counters"
-                : " — weekly full read of your whole history to refresh every post's counters"
-              : " — first full read of your whole history"
-            : " — reading the last 35 days (up to 10 pages)"
+          knownRefresh
+            ? " — refreshing known tweet links, then checking recent profile posts"
+            : backfill
+              ? state.backfillDone
+                ? trigger === "startup" ||
+                  trigger === "requested" ||
+                  trigger === "manual"
+                  ? " — full read of your whole history to refresh every post's counters"
+                  : " — weekly full read of your whole history to refresh every post's counters"
+                : " — first full read of your whole history"
+              : " — reading the last 35 days (up to 10 pages)"
         }`,
       );
       const result = {
         trigger,
-        mode: backfill ? "backfill" : "routine",
+        mode: knownRefresh ? "refresh" : backfill ? "backfill" : "routine",
         startedUtc: new Date(at).toISOString(),
         finishedUtc: "",
         outcome: "error",
@@ -479,7 +521,9 @@
         activity.runId = runMarker;
         phase(
           "opening",
-          `Opening an inactive background tab on x.com/${owner.handle}/with_replies using your existing Chrome sign-in`,
+          knownRefresh
+            ? `Opening an inactive background tab for @${owner.handle}'s known tweet links using your existing Chrome sign-in`
+            : `Opening an inactive background tab on x.com/${owner.handle}/with_replies using your existing Chrome sign-in`,
         );
         state.running = {
           startedAt: at,
@@ -488,6 +532,26 @@
           marker: runMarker,
         };
         await save(state);
+        if (knownRefresh) {
+          const allowed = new Set(targets.map((row) => row.statusId));
+          const pending =
+            state.refreshOwnerId === owner.accountId &&
+            Array.isArray(state.refreshPending)
+              ? state.refreshPending.filter((id) => allowed.has(id))
+              : [];
+          state.refreshPending =
+            pending.length && !state.refreshOnlyUnavailable
+              ? pending
+              : [
+                  ...new Set([
+                    ...pending,
+                    ...targets.map((row) => row.statusId),
+                  ]),
+                ];
+          state.refreshOnlyUnavailable = false;
+          state.refreshOwnerId = owner.accountId;
+          await save(state);
+        }
         const cutoff = backfill ? -Infinity : at - ROUTINE_WINDOW_MS;
         const cap = backfill ? BACKFILL_PAGE_CAP : ROUTINE_PAGE_CAP;
         handle = await runner.open(
@@ -497,13 +561,94 @@
             await save(state);
           },
           runMarker,
+          knownRefresh ? state.refreshPending[0] : "",
         );
+        const refreshed = new Set();
+        if (knownRefresh) {
+          const attempts = state.refreshPending.length;
+          for (let attempt = 0; attempt < attempts; attempt += 1) {
+            if (now() - at >= FULL_MAX_SCAN_MS) throw new ScanStop("timeout");
+            await guard(handle);
+            const statusId = state.refreshPending[0];
+            const startedAt = attempt ? now() : at;
+            if (attempt) {
+              phase("waiting", "Waiting before the next tweet check");
+              await pacedSleep(handle, pageDelay());
+            }
+            await guard(handle);
+            phase(
+              "reading",
+              `Checking tweet ${statusId} (${attempt + 1}/${activity.expected})`,
+            );
+            const detail = await runner.detail(
+              handle,
+              owner,
+              statusId,
+              attempt === 0,
+            );
+            if (detail?.reason === "detail-unavailable") {
+              note(
+                "warn",
+                `Tweet ${statusId} did not return owner counters; retained for a later check`,
+              );
+              state.refreshPending.push(state.refreshPending.shift());
+              await save(state);
+              continue;
+            }
+            if (!detail?.ok)
+              throw new ScanStop(
+                detail?.reason === "signed-out" ? "signed-out" : "error",
+                detail?.reason,
+              );
+            checkOwner(detail, owner);
+            if (detail.statusId !== statusId || !detail.ownerId)
+              throw new ScanStop("error", "detail-mismatch");
+            // Confirm desktop persistence, including unchanged-count observations
+            // that legitimately dedupe the metric sample.
+            const deadline = now() + READY_TIMEOUT_MS;
+            for (;;) {
+              await guard(handle);
+              const latest = await desktop.plan();
+              if (validOwner(latest)?.accountId !== owner.accountId)
+                throw new ScanStop("owner-mismatch");
+              const recorded = latest.knownStatuses?.find(
+                (row) => row.statusId === statusId,
+              );
+              if (
+                recorded?.lastMetricUtc &&
+                Date.parse(recorded.lastSeenUtc) >= startedAt
+              )
+                break;
+              if (now() >= deadline)
+                throw new ScanStop("error", "observation-unconfirmed");
+              await sleep(READY_POLL_MS);
+            }
+            refreshed.add(statusId);
+            state.refreshPending.shift();
+            await save(state);
+            result.rows = refreshed.size;
+            activity.rows = result.rows;
+            notePosts(
+              "Tweet",
+              contract?.validScanPreviews(detail.posts) || [],
+              new Set([statusId]),
+            );
+          }
+          state.refreshOnlyUnavailable = state.refreshPending.length > 0;
+          await save(state);
+          // A short profile pass discovers new posts; known history was checked
+          // by identity rather than repeated empty timeline pages.
+          await pacedSleep(handle, pageDelay());
+          await guard(handle);
+          await runner.profile(handle, owner.handle);
+        }
+        const profileAt = now();
         const first = await waitReady(handle, owner);
         note(
           "step",
           `Signed in as account ${first.ownerId}, the recorded owner @${owner.handle} — reading page 1 from X's own timeline answer`,
         );
-        const seen = new Set(first.statusIds || []);
+        const seen = new Set([...refreshed, ...(first.statusIds || [])]);
         result.pages = 1;
         result.rows = seen.size;
         activity.pages = 1;
@@ -524,7 +669,7 @@
             stop = "page-cap";
             break;
           }
-          if (now() - at >= (backfill ? FULL_MAX_SCAN_MS : MAX_SCAN_MS))
+          if (now() - profileAt >= (backfill ? FULL_MAX_SCAN_MS : MAX_SCAN_MS))
             throw new ScanStop("timeout");
           await guard(handle);
           const delay = pageDelay();
@@ -532,7 +677,7 @@
             "waiting",
             `Pausing ${(delay / 1000).toFixed(1)} s before page ${result.pages + 1} so requests stay gentle`,
           );
-          await sleep(delay);
+          await pacedSleep(handle, delay);
           await guard(handle);
           phase(
             "paging",
@@ -568,7 +713,20 @@
             backfill || fresh.length ? pageStop(page, cutoff) : "no-new-posts";
         }
         result.outcome = stop;
+        if (
+          knownRefresh &&
+          ["complete", "window-reached", "no-new-posts"].includes(stop)
+        )
+          result.detail = "known-posts-refreshed";
         note("step", `Stopped paging: ${OUTCOME_LABELS[stop] || stop}`);
+        if (knownRefresh && state.refreshPending.length) {
+          result.outcome = "error";
+          result.detail = "targets-unavailable";
+        }
+        if (knownRefresh && plan?.knownStatusesTruncated) {
+          result.outcome = "page-cap";
+          result.detail = "target-cap";
+        }
         if (typeof runner.scheduled === "function") {
           await guard(handle);
           phase(
@@ -695,6 +853,13 @@
       if (active !== null)
         return { requested: true, started: false, reason: "busy" };
       const state = await load();
+      if ((Number(state.backoffUntil) || 0) > now())
+        return {
+          requested: true,
+          started: false,
+          reason: "backoff",
+          backoffUntilUtc: iso(state.backoffUntil),
+        };
       if (
         state.lastAttemptAt &&
         now() - state.lastAttemptAt < MANUAL_MIN_GAP_MS
@@ -776,13 +941,33 @@
       }
     }
 
-    async function waitLoaded(tabId, handle) {
+    async function ownedTakenOver(handle) {
+      if (await takenOver(handle.tabId)) return true;
+      if (!handle.suffix) return false;
+      try {
+        const tab = await chrome.tabs.get(handle.tabId);
+        const url = new URL(tab.pendingUrl || tab.url || "");
+        return url.origin !== "https://x.com" || url.hash !== handle.suffix;
+      } catch {
+        return true;
+      }
+    }
+
+    async function waitLoaded(tabId, handle, statusId = "") {
       const startedAt = Date.now();
       while (Date.now() - startedAt < loadTimeoutMs) {
         if (await takenOver(tabId)) throw new ScanStop("user-took-over");
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === "complete" && tab.url && tab.url !== "about:blank") {
-          if (profileMatches(tab.url, handle)) return;
+          const url = new URL(tab.url);
+          if (
+            statusId
+              ? url.origin === "https://x.com" &&
+                url.pathname.toLowerCase() ===
+                  `/${handle.toLowerCase()}/status/${statusId}`
+              : profileMatches(tab.url, handle)
+          )
+            return;
           // X sent the tab elsewhere (signed out, suspended, renamed).
           throw new ScanStop("no-timeline", "redirected");
         }
@@ -792,7 +977,12 @@
     }
 
     return Object.freeze({
-      async open(handle, onTab = async (_tabId) => {}, marker = "") {
+      async open(
+        handle,
+        onTab = async (_tabId) => {},
+        marker = "",
+        statusId = "",
+      ) {
         // A blank background tab first, then an ordinary navigation of it,
         // so observers attached to the new tab also see the profile load.
         const tab = await chrome.tabs.create({
@@ -812,15 +1002,60 @@
           }
           if (await takenOver(tab.id)) throw new ScanStop("user-took-over");
           await chrome.tabs.update(tab.id, {
-            url: `https://x.com/${handle}/with_replies${suffix}`,
+            url: `https://x.com/${handle}/${ID.test(statusId) ? `status/${statusId}` : "with_replies"}${suffix}`,
           });
-          await waitLoaded(tab.id, handle);
+          await waitLoaded(tab.id, handle, statusId);
         } catch (error) {
           if (!(error instanceof ScanStop && error.code === "user-took-over"))
             await chrome.tabs.remove(tab.id).catch(() => {});
           throw error;
         }
         return { tabId: tab.id, suffix };
+      },
+      async profile(handle, ownerHandle) {
+        if (await ownedTakenOver(handle)) throw new ScanStop("user-took-over");
+        await chrome.tabs.update(handle.tabId, {
+          url: `https://x.com/${ownerHandle}/with_replies${handle.suffix || ""}`,
+        });
+        await waitLoaded(handle.tabId, ownerHandle);
+      },
+      async detail(handle, owner, statusId, alreadyOpen = false) {
+        if (!ID.test(statusId) || !HANDLE.test(owner.handle))
+          return { ok: false, reason: "invalid-status" };
+        if (await ownedTakenOver(handle)) throw new ScanStop("user-took-over");
+        if (!alreadyOpen) {
+          await chrome.tabs.update(handle.tabId, {
+            url: `https://x.com/${owner.handle}/status/${statusId}${handle.suffix || ""}`,
+          });
+          await waitLoaded(handle.tabId, owner.handle, statusId);
+        }
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < loadTimeoutMs) {
+          if (await ownedTakenOver(handle))
+            throw new ScanStop("user-took-over");
+          let reply;
+          try {
+            reply = await chrome.tabs.sendMessage(
+              handle.tabId,
+              { type: "CREATOR_X_SCAN_COMMAND", command: "detail-status" },
+              { frameId: 0 },
+            );
+          } catch {
+            reply = null;
+          }
+          if (reply?.ownerId && reply.ownerId !== owner.accountId)
+            throw new ScanStop("owner-mismatch");
+          if (
+            reply?.ok === false &&
+            (reply.reason === "signed-out" ||
+              BACKOFF_DETAILS.includes(reply.reason))
+          )
+            return reply;
+          if (reply?.ok && reply.ready && reply.statusId === statusId)
+            return reply;
+          await wait(pollMs);
+        }
+        return { ok: false, reason: "detail-unavailable" };
       },
       async command(handle, command) {
         try {
@@ -846,7 +1081,7 @@
           done = true;
         });
         try {
-          if (await takenOver(handle.tabId))
+          if (await ownedTakenOver(handle))
             throw new ScanStop("user-took-over");
           await chrome.tabs.update(handle.tabId, {
             url: `${SCHEDULED_URL}${handle.suffix || ""}`,
@@ -854,7 +1089,7 @@
           const startedAt = Date.now();
           while (!done && Date.now() - startedAt < scheduledTimeoutMs) {
             await wait(pollMs);
-            if (await takenOver(handle.tabId))
+            if (await ownedTakenOver(handle))
               throw new ScanStop("user-took-over");
           }
           return received;
@@ -865,8 +1100,12 @@
       noteScheduled(tabId, count) {
         scheduledWaiters.get(tabId)?.(count);
       },
-      takenOver: (handle) => takenOver(handle.tabId),
-      close: (handle) => chrome.tabs.remove(handle.tabId),
+      takenOver: ownedTakenOver,
+      keepAlive: (handle) => chrome.tabs.get(handle.tabId),
+      async close(handle) {
+        if (!(await ownedTakenOver(handle)))
+          await chrome.tabs.remove(handle.tabId);
+      },
       // After a worker restart, close the scan tab left behind only while it
       // is still inactive and its x.com URL carries that run's marker.
       async closeStale(tabId, marker) {

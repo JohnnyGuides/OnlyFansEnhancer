@@ -127,7 +127,8 @@
       if (message?.type !== SCAN_COMMAND_TYPE) return false;
       // Only the extension's own worker (never a tab) may command a scan.
       if (sender?.id !== chrome.runtime.id || sender.tab) return false;
-      if (!new Set(["status", "page"]).has(message.command)) return false;
+      if (!new Set(["status", "page", "detail-status"]).has(message.command))
+        return false;
       void relayScanCommand(message.command).then(sendResponse);
       return true;
     });

@@ -23,8 +23,10 @@ public sealed record XScanOwner(string AccountId, string Handle);
 // scan after each start. KnownPosts / KnownPostsInWindow: how many of the
 // owner's posts the catalogue already holds in total and within the routine
 // scan window, so progress can be shown against a recorded count.
+public sealed record XScanTarget(string StatusId, string LastSeenUtc, string? LastMetricUtc);
+
 public sealed record XScanPlan(XScanOwner? Owner, string? RequestedUtc, IReadOnlyList<string> RecentPostsUtc,
-    string? DesktopStartedUtc = null, int KnownPosts = 0, int KnownPostsInWindow = 0);
+    string? DesktopStartedUtc = null, int KnownPosts = 0, int KnownPostsInWindow = 0, IReadOnlyList<XScanTarget>? KnownStatuses = null, bool KnownStatusesTruncated = false);
 
 // BackoffUntilUtc: automatic scans are paused until then after a rate-limit or
 // authorization answer ("" when not paused).
@@ -48,7 +50,7 @@ public sealed partial class CatalogueStore
         { "video", "photo", "animated_gif", "unknown" };
     private static readonly HashSet<string> XScanTriggers = new(StringComparer.Ordinal)
         { "startup", "routine", "checkpoint", "requested", "manual" };
-    private static readonly HashSet<string> XScanModes = new(StringComparer.Ordinal) { "routine", "backfill" };
+    private static readonly HashSet<string> XScanModes = new(StringComparer.Ordinal) { "routine", "backfill", "refresh" };
     private static readonly HashSet<string> XScanOutcomes = new(StringComparer.Ordinal)
     {
         "complete", "window-reached", "no-new-posts", "page-cap", "owner-unknown", "owner-mismatch", "signed-out",
@@ -151,7 +153,23 @@ public sealed partial class CatalogueStore
             using SqliteDataReader reader = count.ExecuteReader();
             if (reader.Read()) (known, inWindow) = (reader.GetInt32(0), reader.GetInt32(1));
         }
-        return new(owner, GetXScanStatus().RequestedUtc, recent, KnownPosts: known, KnownPostsInWindow: inWindow);
+        List<XScanTarget> targets = [];
+        if (owner is not null)
+        {
+            using SqliteCommand target = connection.CreateCommand();
+            target.CommandText = """
+                SELECT p.status_id, p.last_seen_utc, MAX(m.observed_utc) AS latest
+                FROM x_posts p LEFT JOIN x_metric_samples m ON m.status_id = p.status_id
+                WHERE (p.author_id = $owner OR p.author_id IS NULL) AND p.is_retweet = 0
+                GROUP BY p.status_id ORDER BY latest IS NOT NULL, latest, p.posted_utc LIMIT 2001
+                """;
+            target.Parameters.AddWithValue("$owner", owner.AccountId);
+            using SqliteDataReader reader = target.ExecuteReader();
+            while (reader.Read()) targets.Add(new(reader.GetString(0), reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2)));
+        }
+        return new(owner, GetXScanStatus().RequestedUtc, recent, KnownPosts: known, KnownPostsInWindow: inWindow,
+            KnownStatuses: targets.Take(2000).ToArray(), KnownStatusesTruncated: targets.Count > 2000);
     }
 
     // Stores the extension's scan outcome; a request made before the scan

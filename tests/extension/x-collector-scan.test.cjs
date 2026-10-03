@@ -507,6 +507,42 @@ function worlds() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+test("detail status acknowledges only the requested owner's post with counters", async () => {
+  const { page, command } = worlds();
+  page.location = { pathname: "/Owner_Handle/status/390" };
+  const url = "https://x.com/i/api/graphql/q/TweetDetail?variables=%7B%7D";
+  xOwnRequest(
+    page,
+    url,
+    repliesTimeline([
+      itemEntry(wrapped(bareTweet("391"))),
+      itemEntry(
+        wrapped(bareTweet("390", { authorId: OTHER_ID, handle: "Other" })),
+      ),
+    ]),
+  );
+  assert.equal((await command("detail-status")).ready, false);
+  xOwnRequest(
+    page,
+    url,
+    repliesTimeline([itemEntry(wrapped(bareTweet("390")))]),
+  );
+  const reply = plain(await command("detail-status"));
+  assert.equal(reply.ready, true);
+  assert.equal(reply.statusId, "390");
+  assert.equal(reply.posts[0].metrics.views, 250);
+});
+
+test("detail status exposes X's rate-limit response instead of claiming an observation", async () => {
+  const { page, command } = worlds();
+  page.location = { pathname: "/Owner_Handle/status/390" };
+  const xhr = new page.XMLHttpRequest();
+  xhr.open("GET", "https://x.com/i/api/graphql/q/TweetDetail?variables=%7B%7D");
+  Object.assign(xhr, { status: 429 });
+  xhr.dispatchEvent(new Event("load"));
+  assert.equal((await command("detail-status")).reason, "http-429");
+});
+
 function timelineUrl(userId, extra = {}) {
   return `https://x.com/i/api/graphql/q9/UserRepliesTimeline?variables=${encodeURIComponent(
     JSON.stringify({ userId, count: 20, ...extra }),

@@ -33,7 +33,7 @@ public sealed class XScanActivityBoard
     private static readonly Regex StatusId = new(@"^\d{1,25}$", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> Triggers = new(StringComparer.Ordinal)
         { "", "startup", "routine", "checkpoint", "requested", "manual" };
-    private static readonly HashSet<string> Modes = new(StringComparer.Ordinal) { "", "routine", "backfill" };
+    private static readonly HashSet<string> Modes = new(StringComparer.Ordinal) { "", "routine", "backfill", "refresh" };
     private static readonly HashSet<string> Phases = new(StringComparer.Ordinal)
         { "idle", "starting", "opening", "loading", "reading", "waiting", "paging", "scheduled", "closing", "done" };
     private static readonly HashSet<string> Outcomes = new(StringComparer.Ordinal)

@@ -307,3 +307,16 @@ loading, not regular branded Chrome's removed side-loading flags. See the
 [official Playwright extension guide](https://playwright.dev/docs/chrome-extensions).
 These process-local settings do not modify the installed personal Chrome profile
 or establish authenticated browser acceptance.
+
+## Explicit local X teaser mappings
+
+`--map-x-teasers <choices.json> --result <preview.json>` previews owner-selected
+video-teaser mappings. Choices are a JSON array with `statusId`, stable `itemId`
+and `sourceKey`. Use the preview's `choices` array, including its frozen
+`fingerprint`, as input for the same command with `--apply`. Stop the tray agent
+first, as for archive maintenance. An apply backs up SQLite, validates the whole
+batch, records explicit owner bindings and appends missing local X links.
+Ordinary replies/text posts, stale catalogue identities and X links belonging to
+another catalogue entry are refused. No Google write or media move is performed.
+A conflicting first-reply paid link remains recorded as conflicting evidence;
+an explicit owner binding does not rewrite the public reply.

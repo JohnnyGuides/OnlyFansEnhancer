@@ -123,7 +123,7 @@ public sealed partial class CatalogueStore
     {
         using SqliteCommand command=connection.CreateCommand();
         command.Transaction=transaction;
-        command.CommandText="SELECT item_id,details_json FROM audit_events WHERE kind='upload-result' AND item_id IS NOT NULL ORDER BY event_id";
+        command.CommandText="SELECT item_id,details_json FROM audit_events WHERE kind IN ('upload-result','owner-x-link') AND item_id IS NOT NULL ORDER BY event_id";
         using SqliteDataReader reader=command.ExecuteReader();
         Dictionary<string,List<RecordedPublication>> evidence=new(StringComparer.Ordinal);
         while(reader.Read())

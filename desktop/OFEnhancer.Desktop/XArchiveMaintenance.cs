@@ -13,7 +13,8 @@ internal static class XArchiveMaintenance
     internal static bool TryRun(string[] args, out int exitCode)
     {
         exitCode = 0;
-        if (!args.Contains("--import-x-archive", StringComparer.Ordinal)) return false;
+        bool mapping = args.Contains("--map-x-teasers", StringComparer.Ordinal);
+        if (!mapping && !args.Contains("--import-x-archive", StringComparer.Ordinal)) return false;
         string? Option(string name)
         {
             int index = Array.IndexOf(args, name);
@@ -31,7 +32,7 @@ internal static class XArchiveMaintenance
             if (!acquired) throw new InvalidOperationException("desktop-must-be-stopped");
             try
             {
-                string folder = Path.GetFullPath(Option("--import-x-archive")
+                string folder = Path.GetFullPath(Option(mapping ? "--map-x-teasers" : "--import-x-archive")
                     ?? throw new InvalidOperationException("archive-folder-required"));
                 string database = Path.GetFullPath(Option("--catalogue-database") ?? AppConfiguration.CatalogueDatabasePath);
                 if (!File.Exists(database)) throw new InvalidOperationException("catalogue-required");
@@ -49,7 +50,17 @@ internal static class XArchiveMaintenance
                     source.BackupDatabase(target);
                 }
                 using CatalogueStore store = CatalogueStore.Open(database);
-                var result = store.ImportXArchive(folder, DateTimeOffset.UtcNow, apply);
+                object result;
+                if (mapping)
+                {
+                    if (new FileInfo(folder).Length > 131072) throw new InvalidOperationException("mapping-input-limit");
+                    var choices = JsonSerializer.Deserialize<List<XOwnerMapping>>(File.ReadAllText(folder),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true,
+                            UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
+                        ?? throw new InvalidOperationException("mapping-invalid");
+                    result = store.MapXTeasers(choices, DateTimeOffset.UtcNow, apply);
+                }
+                else result = store.ImportXArchive(folder, DateTimeOffset.UtcNow, apply);
                 File.WriteAllText(report, JsonSerializer.Serialize(result,
                     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true }));
             }
@@ -60,7 +71,7 @@ internal static class XArchiveMaintenance
             exitCode = 1;
             // Never export paths, post contents or private archive data in errors.
             string code = error is XObservationException x ? x.Code
-                : error is InvalidOperationException invalid && invalid.Message.StartsWith("archive-", StringComparison.Ordinal)
+                : error is InvalidOperationException invalid && (invalid.Message.StartsWith("archive-", StringComparison.Ordinal) || invalid.Message.StartsWith("mapping-", StringComparison.Ordinal))
                     ? invalid.Message : error.Message == "desktop-must-be-stopped" ? error.Message : "archive-import-failed";
             if (report is not null)
                 File.WriteAllText(report + ".error.json", JsonSerializer.Serialize(new { error = code }));

@@ -11,6 +11,47 @@ public sealed class XTeaserManagerTests
     private static readonly DateTimeOffset Now = new(2026, 9, 28, 12, 0, 0, TimeSpan.Zero);
     private static readonly XObservedMedia Video = new("video", "7_1900000000000000001", 15_000, null);
 
+    [TestMethod]
+    public void ExplicitOwnerMappingAddsLocalLinkAndSurvivesDerivedRefreshWithoutFabricatingUploadEvidence()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "item-a", "show-ep01", "Benign title");
+        store.RecordXObservations(new(Owner, [Post("101", Now.AddDays(-2))]), Now);
+        var preview = store.MapXTeasers([new("101", "item-a", "show-ep01")], Now, false);
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_post_bindings"));
+        store.MapXTeasers(preview.Choices, Now, true);
+        store.RefreshXBindings(Now.AddHours(1));
+        Assert.AreEqual("owner", Scalar(store, "SELECT evidence FROM x_post_bindings WHERE status_id='101'"));
+        Assert.AreEqual("https://x.com/Owner_Handle/status/101", store.GetUploadCatalogueSnapshot().Rows.Single().TwitterTeasers);
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM audit_events WHERE kind='upload-result'"));
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_metric_samples"));
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_clip_moves"));
+    }
+
+    [TestMethod]
+    public void OwnerMappingRefusesStaleChoicesForeignLinksAndOrdinaryRepliesBeforeAnyMutation()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "item-a", "show-ep01", "A");
+        AddItem(store, "item-b", "show-ep02", "B", sheetX: ["https://x.com/Owner_Handle/status/102"]);
+        store.RecordXObservations(new(Owner, [Post("101", Now.AddDays(-2)), Post("102", Now.AddDays(-1)),
+            Post("103", Now, inReplyTo: "101", video: false)]), Now);
+        Assert.AreEqual("mapping-link-conflict", Assert.ThrowsException<XObservationException>(() =>
+            store.MapXTeasers([new("101", "item-a", "show-ep01"), new("102", "item-a", "show-ep01")], Now, false)).Code);
+        Assert.AreEqual("mapping-not-video-teaser", Assert.ThrowsException<XObservationException>(() =>
+            store.MapXTeasers([new("103", "item-a", "show-ep01")], Now, false)).Code);
+        var preview = store.MapXTeasers([new("101", "item-a", "show-ep01")], Now, false);
+        Exec(store, "UPDATE catalogue_items SET title='Changed' WHERE item_id='item-a'");
+        Assert.AreEqual("mapping-item-stale", Assert.ThrowsException<XObservationException>(() =>
+            store.MapXTeasers(preview.Choices, Now, true)).Code);
+        Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_post_bindings"));
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_post_bindings WHERE status_id='101'"));
+        Assert.AreEqual("item-b", Scalar(store, "SELECT item_id FROM x_post_bindings WHERE status_id='102'"));
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM audit_events WHERE kind='owner-x-link'"));
+    }
+
     private static XObservation Post(string statusId, DateTimeOffset created, string text = "benign teaser",
         string? inReplyTo = null, string? conversationId = null, IReadOnlyList<string>? urls = null, bool video = true) =>
         new(statusId, OwnerId, "Owner_Handle", created.ToString("O", CultureInfo.InvariantCulture), text, inReplyTo,

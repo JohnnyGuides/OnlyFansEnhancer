@@ -154,62 +154,57 @@ unexpected shape is `schema-drift` and nothing is sent. The list travels as a
 `scheduled` relay message, is validated in the worker and forwarded at once,
 without retry, through `recordXScheduledPosts`.
 
-Background scans (`x-collector-scanner.js`) keep the data fresh without the
-owner browsing. A one-minute `creator-x-scan` alarm asks the desktop
-(`getXScanPlan`: the recorded owner with its account id, a pending "Scan now"
-request, the owner's own non-reply posts of the last 31 days, and
-`desktopStartedUtc`, the latest process start or deliberate window opening, and `knownPosts` /
-`knownPostsInWindow`, the owner posts the catalogue holds overall and in the
-35-day routine window). A scan is due once
-after every OFEnhancer start (trigger `startup`: the start is later than the
-last attempt, at least 2 minutes after it, outside a rate-limit pause), every 6
-hours, when one of those posts passes 24 h, 72 h, 7 d or 30 d of age
-since the last attempt, or on request; automatic scans are at least 30 minutes
-apart and any two scans at least 2 minutes. An HTTP 401, 403 or 429 answer
-pauses automatic scans for 6 hours, doubling per consecutive such error up to
-48 hours (a finished scan resets it); "Scan now" still runs and the dashboard
-shows the pause. Without a known owner account no tab
-is opened. One scan at a time (in memory; a run record left by a stopped worker
-has its tab closed) opens one inactive tab on `https://x.com/<owner>/with_replies`
-(blank first, then navigated to a URL ending in `#creator-scan=<run marker>`;
-after a worker restart only an inactive x.com tab whose URL still carries the
-recorded marker is closed). If the owner activates or closes the scan tab at any
-point, the scan stops at once (`user-took-over`) and the tab is neither
-navigated nor closed. The page script keeps X's own request for an
-allowlisted profile timeline (`UserRepliesTimeline` and the other profile
-timelines) as a template only when its `variables.userId` is the owner's account,
-with the request headers limited to `authorization`, `x-csrf-token`,
-`x-twitter-auth-type`, `x-twitter-active-user`, `x-twitter-client-language`,
-`x-client-transaction-id` and `content-type`. The worker sends `status`/`page`
-commands with `chrome.tabs.sendMessage`; only the worker (not a tab) may command,
-and the relay passes them over the private port. Each `page` replays the template
-once with the response's `Bottom` cursor; the response goes through the ordinary
-collector path. The worker waits 2–4 s (random) before every replay and stops on
-the first non-200, unreadable or drifted answer (`error`, no retry), when the page
-cookie's account is not the owner (`owner-mismatch`, checked before the first
-replay and on every page), when there is no next cursor (`complete`), a page
-brings no new owner post during a routine scan (`no-new-posts`), a page's newest post is older than the
-window (`window-reached`; 35 days for routine scans, none for a full scan) or at
-the page cap (`page-cap`: 10 pages for routine scans; 500 for a full scan, a
-guard against a cursor that never ends), and after 8 minutes (75 for a full
-scan, `timeout`). A full scan (mode `backfill`) reads the whole profile
-timeline until X returns no older page: on the first scan, on every desktop
-opening, on every Scan now request, and weekly between openings (`lastFullAt`
-in `creatorXScanV1`) so older posts' counters refresh too,
-and a full scan that does not finish is retried by the next scan. Reopening the
-tray window or launching the app while its agent is already running updates the
-startup trigger; merely switching focus does not. A full scan hitting the page cap
-is incomplete and does not advance the last-full timestamp. Full scans continue
-through duplicate or empty owner pages while X supplies a next cursor; only
-exhausting that cursor marks a full scan complete. A cursor that repeats unchanged
-ends the scan with `cursor-stalled` and leaves the full pass incomplete. X decides how
-far back its profile timeline goes; the scan reads everything X serves. The scan
-tab is marked `autoDiscardable: false` so Chrome does not unload it. After a finished scan the same tab opens
-`https://x.com/compose/post/unsent/scheduled` so the collector reads the scheduled
-list (waits up to 25 s). The tab is then closed in every case. The outcome,
-pages, new rows and scheduled count are kept in `chrome.storage.local`
-(`creatorXScanV1`, last 20 runs) and sent with `recordXScanResult`. "Scan now" on
-the extension's dashboard starts a scan directly (`requestXScan` handled by the
+Background scans (`x-collector-scanner.js`) keep the data fresh without the owner
+browsing. A one-minute alarm asks `getXScanPlan` for the recorded owner, opening
+and manual-request timestamps, recent post dates, counts, and known owner status
+IDs with their last-seen and last-metric timestamps. Known targets include replies
+and old posts, exclude reposts, and sort missing counters first, then oldest
+counters. At most 2,000 targets are returned; a truncated plan reports an
+incomplete `target-cap` result rather than claiming whole-account coverage.
+
+Opening OFEnhancer, Scan now, six-hour ticks and age checkpoints request a
+refresh. With known targets, mode `refresh` opens one inactive, marked tab on the
+first status, then checks the remaining known status URLs sequentially with
+15–30 seconds between checks. The page's private `detail-status` command accepts
+only a network observation of the requested owner-authored status with counters.
+The worker additionally rereads the desktop plan to confirm persistence before
+removing that ID from its durable pending queue. Unchanged metric samples may
+dedupe, but their post observation still updates `last_seen_utc`. Interrupted
+queues resume; the recorded owner ID must match. An unavailable detail stays
+pending while other known IDs continue; a pass with unavailable targets is
+incomplete. An unconfirmed write, changed account, HTTP
+rate-limit/authorization error or owner takeover stops the pass without
+acknowledging the pending ID. Profile discovery then reads up to ten pages of
+the last 35 days, followed by the scheduled-post list in the same tab.
+
+Without known targets, the scanner retains full timeline discovery (mode
+`backfill`, 500-page cap), with 15–30 seconds between pages. Full discovery follows
+cursors through duplicate/empty pages; only cursor exhaustion establishes
+completion. An unchanged cursor reports `cursor-stalled`. Detail refresh and full
+discovery each have a five-hour safety deadline; routine profile discovery has
+its own eight-minute deadline after target refresh. X decides what its profile
+timeline serves, so cursor exhaustion does not establish coverage of all account
+history. Known-link refresh avoids depending on that timeline for already known
+posts' counts.
+
+The owner cookie and account ID are checked on each page. Only the extension
+worker may send `status`, `page` or `detail-status` commands through the isolated
+relay's private port. Timeline replay uses only X's own owner timeline GET and
+seven allowlisted headers. The tab carries `#creator-scan=<run marker>` and is
+marked `autoDiscardable: false`; it closes at the end unless the owner activates
+or closes it. Cleanup after worker restart only closes an inactive X tab with
+that exact marker. During paced waits, tab metadata reads every five seconds
+keep Chrome's worker active without requesting X. Nothing is clicked, typed or
+posted by refresh.
+
+HTTP 401, 403 and 429 pause all scans, including manual requests, for six hours,
+doubling on consecutive such errors up to 48 hours. A successful pass resets
+backoff. Scans are single-flight, normally at least 30 minutes apart and at least
+two minutes between explicit requests; pending refresh queues are retried after
+the normal minimum gap and outside backoff. The outcome, pages, rows, scheduled
+count and last twenty reports remain in Chrome storage and are sent through
+`recordXScanResult`; pending target IDs are saved after every confirmed target.
+"Scan now" on the extension's dashboard starts a scan directly (`requestXScan` handled by the
 worker); in the desktop workspace it records a request that the next alarm tick
 picks up.
 

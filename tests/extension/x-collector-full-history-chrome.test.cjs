@@ -93,6 +93,149 @@ const profileHtml = `<!doctype html><html><head><script>
   xhr.send();
 </script></head><body>profile</body></html>`;
 
+test("real Chrome refreshes known status pages and confirms desktop delivery before profile discovery", async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "x-known-chrome-"));
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(profile, {
+      headless: false,
+      args: [
+        `--disable-extensions-except=${extensionRoot}`,
+        `--load-extension=${extensionRoot}`,
+        "--host-resolver-rules=MAP x.com ~NOTFOUND, MAP *.x.com ~NOTFOUND",
+        "--window-position=-32000,-32000",
+      ],
+    });
+    let [worker] = context.serviceWorkers();
+    worker ||= await context.waitForEvent("serviceworker", { timeout: 10000 });
+    // A worker can be announced before its extension scripts finish loading.
+    for (let n = 0; n < 100; n++) {
+      if (
+        await worker.evaluate(
+          () => typeof X_SCANNER !== "undefined" && Boolean(X_SCANNER),
+        )
+      )
+        break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await context.addCookies([
+      {
+        name: "twid",
+        value: `u%3D${OWNER_ID}`,
+        domain: ".x.com",
+        path: "/",
+        secure: true,
+      },
+    ]);
+    const requests = [];
+    await context.route("https://x.com/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/TweetDetail")) {
+        const id = JSON.parse(url.searchParams.get("variables")).focalTweetId;
+        requests.push(id);
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: { tweet_results: { result: tweet(id, 700) } },
+          }),
+        });
+      }
+      if (url.pathname.endsWith("/UserRepliesTimeline")) {
+        const body = timelinePage(PAGE_COUNT - 1);
+        body.data.user.result.timeline.timeline.instructions[0].entries = [];
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify(body),
+        });
+      }
+      const match = /^\/Owner_Handle\/status\/(\d+)$/.exec(url.pathname);
+      const body = match
+        ? `<!doctype html><script>
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/i/api/graphql/q/TweetDetail?variables="+encodeURIComponent(JSON.stringify({focalTweetId: "${match[1]}"})));
+        xhr.send();</script>benign status`
+        : url.pathname.endsWith("/with_replies")
+          ? profileHtml
+          : "";
+      return route.fulfill({
+        status: body ? 200 : 404,
+        contentType: "text/html",
+        body,
+      });
+    });
+    const result = await worker.evaluate(async (ownerId) => {
+      const targets = ["501", "502"].map((statusId) => ({
+        statusId,
+        lastSeenUtc: "2024-01-01T00:00:00Z",
+        lastMetricUtc: null,
+      }));
+      const recorded = [];
+      sendDesktopRequest = async (operation, payload) => {
+        if (operation === "getXScanPlan")
+          return {
+            owner: { accountId: ownerId, handle: "Owner_Handle" },
+            knownStatuses: targets,
+            knownPosts: 2,
+            recentPostsUtc: [],
+          };
+        if (operation === "recordXObservations")
+          for (const row of payload.observations) {
+            const target = targets.find(
+              (target) => target.statusId === row.statusId,
+            );
+            if (target) {
+              target.lastSeenUtc = new Date().toISOString();
+              target.lastMetricUtc = target.lastSeenUtc;
+              recorded.push(row.statusId);
+            }
+          }
+        return {};
+      };
+      for (let n = 0; n < 100; n++) {
+        if (
+          (
+            await chrome.scripting.getRegisteredContentScripts({
+              ids: ["creator-x-collector-page", "creator-x-collector-relay"],
+            })
+          ).length === 2
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      xScannerInstance = X_SCANNER.create({
+        storage: chrome.storage.local,
+        desktop: {
+          plan: () => sendDesktopRequest("getXScanPlan"),
+          record: (report) => sendDesktopRequest("recordXScanResult", report),
+        },
+        runner: X_SCANNER.createChromeRunner({
+          chrome,
+          scheduledTimeoutMs: 100,
+        }),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms / 40)),
+      });
+      const outcome = await xScanner().run("startup");
+      return {
+        outcome,
+        recorded,
+        pending: (await chrome.storage.local.get("creatorXScanV1"))
+          .creatorXScanV1.refreshPending,
+        tabs: (await chrome.tabs.query({ url: "https://x.com/*" })).length,
+      };
+    }, OWNER_ID);
+    assert.equal(result.outcome.mode, "refresh");
+    assert.equal(result.outcome.outcome, "complete", JSON.stringify(result));
+    assert.equal(result.outcome.rows, 2);
+    assert.deepEqual(requests, ["501", "502"]);
+    assert.deepEqual(result.recorded, ["501", "502"]);
+    assert.deepEqual(result.pending, []);
+    assert.equal(result.tabs, 0);
+  } finally {
+    await context?.close();
+    fs.rmSync(profile, { recursive: true, force: true });
+  }
+});
+
 test("real Chrome reads the owner's whole history, every page to the end", async () => {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "x-full-chrome-"));
   let context;

@@ -42,6 +42,133 @@ function loadScanner({ contract = false } = {}) {
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+function knownHarness() {
+  const h = harness({
+    plan: {
+      owner: OWNER,
+      recentPostsUtc: [],
+      knownStatuses: [
+        {
+          statusId: "501",
+          lastSeenUtc: "2024-01-01T00:00:00Z",
+          lastMetricUtc: null,
+        },
+        {
+          statusId: "502",
+          lastSeenUtc: "2024-01-01T00:00:00Z",
+          lastMetricUtc: "2024-01-01T00:00:00Z",
+        },
+      ],
+    },
+    status: () => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      ready: true,
+      cursor: false,
+      statusIds: ["501", "502"],
+    }),
+  });
+  h.runner.profile = async () => h.log.push(["profile"]);
+  h.runner.detail = async (_handle, _owner, statusId) => {
+    h.log.push(["detail", statusId]);
+    const row = h.planRef.knownStatuses.find(
+      (row) => row.statusId === statusId,
+    );
+    row.lastSeenUtc = new Date(h.clock.now).toISOString();
+    row.lastMetricUtc = row.lastSeenUtc;
+    return { ok: true, ownerId: OWNER.accountId, statusId };
+  };
+  return h;
+}
+
+test("known tweet refresh confirms desktop observations and waits 15–30 seconds between links", async () => {
+  const h = knownHarness();
+  const result = await h.scanner.run("startup");
+  assert.equal(result.mode, "refresh");
+  assert.equal(result.rows, 2);
+  assert.equal(result.detail, "known-posts-refreshed");
+  assert.deepEqual(
+    h.log.filter((row) => row[0] === "detail").map((row) => row[1]),
+    ["501", "502"],
+  );
+  assert.equal(h.delays.length, 2);
+  assert.ok(h.delays.every((ms) => ms >= 15000 && ms <= 30000));
+  assert.deepEqual(h.storage.data.creatorXScanV1.refreshPending, []);
+});
+
+test("rate limited known refresh retains pending IDs and resumes without repeating acknowledged tweets", async () => {
+  const h = knownHarness();
+  const detail = h.runner.detail;
+  h.runner.detail = async (...args) =>
+    args[2] === "502" ? { ok: false, reason: "http-429" } : detail(...args);
+  const failed = await h.scanner.run("startup");
+  assert.equal(failed.detail, "http-429");
+  assert.deepEqual(h.storage.data.creatorXScanV1.refreshPending, ["502"]);
+  assert.equal((await h.scanner.requestNow()).reason, "backoff");
+  h.clock.now = Date.parse(failed.backoffUntilUtc);
+  h.runner.detail = detail;
+  await h.scanner.run("startup");
+  assert.deepEqual(
+    h.log.filter((row) => row[0] === "detail").map((row) => row[1]),
+    ["501", "502"],
+  );
+  assert.deepEqual(h.storage.data.creatorXScanV1.refreshPending, []);
+});
+
+test("a page result without desktop persistence stays pending and is not reported refreshed", async () => {
+  const h = knownHarness();
+  h.runner.detail = async (_handle, _owner, statusId) => ({
+    ok: true,
+    ownerId: OWNER.accountId,
+    statusId,
+  });
+  const result = await h.scanner.run("startup");
+  assert.equal(result.detail, "observation-unconfirmed");
+  assert.equal(result.rows, 0);
+  assert.deepEqual(h.storage.data.creatorXScanV1.refreshPending, [
+    "501",
+    "502",
+  ]);
+  assert.equal(
+    h.log.some((row) => row[0] === "profile"),
+    false,
+  );
+});
+
+test("an unavailable tweet stays pending while other known tweets still refresh", async () => {
+  const h = knownHarness();
+  const detail = h.runner.detail;
+  h.runner.detail = async (...args) =>
+    args[2] === "501"
+      ? { ok: false, reason: "detail-unavailable" }
+      : detail(...args);
+  const result = await h.scanner.run("startup");
+  assert.equal(result.outcome, "error");
+  assert.equal(result.detail, "targets-unavailable");
+  assert.deepEqual(h.storage.data.creatorXScanV1.refreshPending, ["501"]);
+  assert.equal(
+    h.log.some((row) => row[0] === "detail" && row[1] === "502"),
+    true,
+  );
+  assert.equal(h.storage.data.creatorXScanV1.refreshOnlyUnavailable, true);
+});
+
+test("a changed owner on a detail page cannot acknowledge any queued target", async () => {
+  const h = knownHarness();
+  h.runner.detail = async () => ({
+    ok: true,
+    ownerId: "2000000000000000002",
+    statusId: "501",
+  });
+  const result = await h.scanner.run("startup");
+  assert.equal(result.outcome, "owner-mismatch");
+  assert.equal(result.rows, 0);
+  assert.deepEqual(h.storage.data.creatorXScanV1.refreshPending, [
+    "501",
+    "502",
+  ]);
+});
+
 function memoryStorage(initial = {}) {
   const data = { ...initial };
   return {
@@ -235,9 +362,9 @@ test("a capped full backfill remains incomplete and the next due scan retries it
   assert.equal(h.pageCommands(), h.Scanner.BACKFILL_PAGE_CAP - 1);
   assert.equal(first.rows, 20 * h.Scanner.BACKFILL_PAGE_CAP);
   assert.equal(first.scheduled, 2);
-  // Every replayed page waited 2-4 s first.
+  // Every replayed page waited 15-30 s first.
   assert.equal(h.delays.length, h.Scanner.BACKFILL_PAGE_CAP - 1);
-  assert.ok(h.delays.every((ms) => ms >= 2000 && ms <= 4000));
+  assert.ok(h.delays.every((ms) => ms >= 15000 && ms <= 30000));
   assert.deepEqual(h.log.at(-1), ["close", 77]);
   assert.deepEqual(
     h.recorded.map((result) => result.outcome),
@@ -744,7 +871,7 @@ test("the owner opening the scan tab stops the scan at once and leaves the tab a
   assert.equal(early.log[0][2], MARKER, "The scan tab carries its marker.");
 });
 
-test("rate-limit and authorization errors pause automatic scans 6 h, doubling to 48 h; Scan now still runs", async () => {
+test("rate-limit and authorization errors pause automatic scans 6 h, doubling to 48 h; Scan now respects the pause", async () => {
   const { BACKOFF_BASE_MS, BACKOFF_MAX_MS } = loadScanner();
   assert.equal(BACKOFF_BASE_MS, 6 * HOUR);
   assert.equal(BACKOFF_MAX_MS, 48 * HOUR);
@@ -774,9 +901,10 @@ test("rate-limit and authorization errors pause automatic scans 6 h, doubling to
       (await h.scanner.status()).backoffUntilUtc,
       result.backoffUntilUtc,
     );
-    // A desktop "Scan now" request is still answered.
+    assert.equal((await h.scanner.run("manual")).reason, "backoff");
+    assert.equal((await h.scanner.requestNow()).reason, "backoff");
     h.planRef.recentPostsUtc = [];
-    h.clock.now += 30_000;
+    h.clock.now = until;
   }
   // Other errors leave the pause as it is; a finished scan clears it.
   reason = "http-500";
@@ -809,6 +937,8 @@ test("rate-limit and authorization errors pause automatic scans 6 h, doubling to
       recentPostsUtc: [],
     },
   });
+  assert.equal((await requested.scanner.tick()).reason, "not-due");
+  requested.clock.now = START + 5 * HOUR;
   assert.equal((await requested.scanner.tick()).trigger, "requested");
 });
 
@@ -970,7 +1100,7 @@ test("the live log says what the scan does and lists every post read with X's ex
     /^step: Page 1: read 2 posts of yours/,
     /^post: Page 1: Video post 101 — 12,345 views · 7 likes · 1 repost · 0 replies$/,
     /^post: Page 1: Text post 102 — 9 views · 7 likes · 1 repost · 0 replies$/,
-    /^step: Pausing 3\.0 s before page 2/,
+    /^step: Pausing 22\.5 s before page 2/,
     /^step: Asking X for page 2/,
     /^step: Page 2: read 1 post, 1 new in this scan/,
     /^post: Page 2: Video post 201 — 1,000,000 views/,

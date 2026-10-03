@@ -11,6 +11,23 @@ public sealed class XScansTests
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
     [TestMethod]
+    public void KnownRefreshTargetsIncludeOldPostsAndPrioritizeMissingThenOldestCounts()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.RecordXObservations(new(Owner, [Post("502", Now.AddYears(-2)) with { Metrics = new(100, 2, 1, 0, 0, 1) }]), Now.AddDays(-2));
+        store.RecordXObservations(new(Owner, [Post("501", Now.AddYears(-1)) with { Metrics = null },
+            Post("503", Now.AddDays(-1)) with { Metrics = new(100, 2, 1, 0, 0, 1) }]), Now);
+        var targets = store.GetXScanPlan(Now).KnownStatuses!;
+        CollectionAssert.AreEqual(new[] { "501", "502", "503" }, targets.Select(row => row.StatusId).ToArray());
+        Assert.IsNull(targets[0].LastMetricUtc);
+        Assert.AreEqual(Now.ToString("O", CultureInfo.InvariantCulture), targets[0].LastSeenUtc);
+        Assert.IsNotNull(targets[1].LastMetricUtc);
+        store.RecordXScanResult(Report(Now, "complete") with { Mode = "refresh", Detail = "known-posts-refreshed" });
+        Assert.AreEqual("refresh", store.GetXScanStatus().Last!.Mode);
+    }
+
+    [TestMethod]
     public void VersionEightUpgradeAddsEmptyScheduledAndScanTablesWithVerifiedBackup()
     {
         using TempDirectory temp = new();

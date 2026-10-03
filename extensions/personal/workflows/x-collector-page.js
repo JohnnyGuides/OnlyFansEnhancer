@@ -18,6 +18,11 @@
 
   const MAX_RESPONSE_CHARS = 8_000_000;
   const REPLAY_TIMEOUT_MS = 30_000;
+  const DETAIL_OPERATIONS = new Set([
+    "TweetDetail",
+    "TweetResultByRestId",
+    "TweetResultsByRestIds",
+  ]);
   const channel = new MessageChannel();
   const owner = { accountId: null, handle: null };
   // The last owner profile-timeline request X made, its next cursor and a
@@ -32,6 +37,8 @@
     busy: false,
   };
   let handedOver = false;
+  let detailResult = null;
+  let detailError = "";
 
   // Messages queue on the port until the relay starts it; page scripts never
   // see the port, so they can neither read nor forge collector messages.
@@ -95,6 +102,22 @@
       return result;
     }
     if (!result.tweets.length) return result;
+    if (DETAIL_OPERATIONS.has(operation)) {
+      const match = /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,25})\/?$/.exec(
+        globalThis.location?.pathname || "",
+      );
+      const tweet =
+        match &&
+        result.tweets.find(
+          (row) =>
+            row.statusId === match[2] &&
+            row.authorId === ownerId &&
+            row.authorHandle.toLowerCase() === match[1].toLowerCase() &&
+            row.metrics &&
+            Object.values(row.metrics).some((value) => value !== null),
+        );
+      if (tweet) detailResult = tweet;
+    }
     owner.handle = result.tweets[0].authorHandle;
     for (
       let index = 0;
@@ -172,7 +195,15 @@
         if (operation && pending && typeof pending.then === "function") {
           pending.then(
             (response) => {
-              if (!response?.ok || typeof response.clone !== "function") return;
+              if (!response?.ok) {
+                if (
+                  DETAIL_OPERATIONS.has(operation) &&
+                  [401, 403, 429].includes(response?.status)
+                )
+                  detailError = `http-${response.status}`;
+                return;
+              }
+              if (typeof response.clone !== "function") return;
               response
                 .clone()
                 .json()
@@ -198,7 +229,14 @@
   if (XhrPrototype && typeof nativeOpen === "function") {
     const readXhr = (xhr, entry) => {
       const operation = entry.operation;
-      if (xhr.status < 200 || xhr.status >= 300) return;
+      if (xhr.status < 200 || xhr.status >= 300) {
+        if (
+          DETAIL_OPERATIONS.has(operation) &&
+          [401, 403, 429].includes(xhr.status)
+        )
+          detailError = `http-${xhr.status}`;
+        return;
+      }
       let payload;
       if (xhr.responseType === "json") payload = xhr.response;
       else if (xhr.responseType === "" || xhr.responseType === "text") {
@@ -358,7 +396,19 @@
       return;
     const reply = (value) =>
       announce({ kind: "scan-reply", id: detail.id, reply: value });
-    if (detail.command === "status") reply(scanStatus());
+    if (detail.command === "detail-status") {
+      const ownerId = currentOwnerId();
+      if (!ownerId) reply({ ok: false, reason: "signed-out" });
+      else if (detailError) reply({ ok: false, reason: detailError, ownerId });
+      else
+        reply({
+          ok: true,
+          ownerId,
+          ready: Boolean(detailResult && detailResult.authorId === ownerId),
+          statusId: detailResult?.statusId || "",
+          posts: detailResult ? [contract.scanPreview(detailResult)] : [],
+        });
+    } else if (detail.command === "status") reply(scanStatus());
     else if (detail.command === "page")
       replayPage().then(reply, () =>
         reply({ ok: false, reason: "replay-failed", ownerId: owner.accountId }),
