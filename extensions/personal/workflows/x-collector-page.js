@@ -310,7 +310,8 @@
     if (scan.busy) return { ok: false, reason: "busy", ownerId };
     if (!scan.template) return { ok: false, reason: "no-template", ownerId };
     if (!scan.cursor) return { ok: false, reason: "no-cursor", ownerId };
-    const url = contract.replayUrl(scan.template.url, scan.cursor, ownerId);
+    const requestedCursor = scan.cursor;
+    const url = contract.replayUrl(scan.template.url, requestedCursor, ownerId);
     if (!url) return { ok: false, reason: "not-owner-timeline", ownerId };
     scan.started = true;
     scan.busy = true;
@@ -335,6 +336,8 @@
         };
       scan.cursor = contract.bottomCursor(payload);
       Object.assign(scan, pageSummary(result));
+      if (scan.cursor === requestedCursor)
+        return { ok: false, reason: "cursor-stalled", ownerId };
       return {
         ok: true,
         ownerId,

@@ -651,6 +651,33 @@ test("the page replays X's own timeline request with the next cursor and allowli
   );
 });
 
+test("a repeated pagination cursor reports an incomplete scan instead of replaying indefinitely", async () => {
+  const { page, server, command } = worlds();
+  xOwnRequest(
+    page,
+    timelineUrl(OWNER_ID),
+    repliesTimeline([
+      itemEntry(wrapped(bareTweet("390"))),
+      cursorEntry("Bottom", "cursor-1"),
+    ]),
+  );
+  server.onSend = (xhr) =>
+    setTimeout(() => {
+      Object.assign(xhr, {
+        status: 200,
+        responseText: JSON.stringify(
+          repliesTimeline([cursorEntry("Bottom", "cursor-1")]),
+        ),
+      });
+      xhr.dispatchEvent(new Event("load"));
+    }, 1);
+  assert.deepEqual(plain(await command("page")), {
+    ok: false,
+    reason: "cursor-stalled",
+    ownerId: OWNER_ID,
+  });
+});
+
 test("a replay stops on a non-200 answer and commands come only from the worker", async () => {
   const { page, server, command } = worlds();
   xOwnRequest(

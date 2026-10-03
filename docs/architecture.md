@@ -188,7 +188,7 @@ collector path. The worker waits 2–4 s (random) before every replay and stops 
 the first non-200, unreadable or drifted answer (`error`, no retry), when the page
 cookie's account is not the owner (`owner-mismatch`, checked before the first
 replay and on every page), when there is no next cursor (`complete`), a page
-brings no new owner post (`no-new-posts`), a page's newest post is older than the
+brings no new owner post during a routine scan (`no-new-posts`), a page's newest post is older than the
 window (`window-reached`; 35 days for routine scans, none for a full scan) or at
 the page cap (`page-cap`: 10 pages for routine scans; 500 for a full scan, a
 guard against a cursor that never ends), and after 8 minutes (75 for a full
@@ -199,7 +199,10 @@ in `creatorXScanV1`) so older posts' counters refresh too,
 and a full scan that does not finish is retried by the next scan. Reopening the
 tray window or launching the app while its agent is already running updates the
 startup trigger; merely switching focus does not. A full scan hitting the page cap
-is incomplete and does not advance the last-full timestamp. X decides how
+is incomplete and does not advance the last-full timestamp. Full scans continue
+through duplicate or empty owner pages while X supplies a next cursor; only
+exhausting that cursor marks a full scan complete. A cursor that repeats unchanged
+ends the scan with `cursor-stalled` and leaves the full pass incomplete. X decides how
 far back its profile timeline goes; the scan reads everything X serves. The scan
 tab is marked `autoDiscardable: false` so Chrome does not unload it. After a finished scan the same tab opens
 `https://x.com/compose/post/unsent/scheduled` so the collector reads the scheduled

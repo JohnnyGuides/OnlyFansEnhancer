@@ -1085,6 +1085,40 @@ test("a full scan that does not finish is retried as a full scan", async () => {
   assert.equal(retried.mode, "backfill");
 });
 
+test("full scans follow cursors through duplicate and empty owner pages to older posts", async () => {
+  const h = harness({
+    pages: (page) => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      cursor: page < 3,
+      statusIds: page === 1 ? ids(100, 20) : page === 2 ? [] : ["987654321"],
+      newestUtc: page === 3 ? new Date(START - 700 * DAY).toISOString() : null,
+    }),
+  });
+  const result = await h.scanner.run("startup");
+  assert.equal(result.outcome, "complete");
+  assert.equal(result.pages, 4);
+  assert.equal(result.rows, 21);
+  assert.equal(h.storage.data.creatorXScanV1.backfillDone, true);
+});
+
+test("a repeating duplicate cursor cannot establish a completed full scan", async () => {
+  const h = harness({
+    pages: () => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      cursor: true,
+      statusIds: ids(100, 20),
+      newestUtc: null,
+    }),
+  });
+  const result = await h.scanner.run("startup");
+  assert.equal(result.outcome, "page-cap");
+  assert.equal(result.rows, 20);
+  assert.equal(h.storage.data.creatorXScanV1.backfillDone, false);
+  assert.equal(h.storage.data.creatorXScanV1.lastFullAt, 0);
+});
+
 for (const trigger of ["manual", "requested"]) {
   test(`${trigger} refreshes posts older than 35 days after a recent full scan`, async () => {
     const h = harness({

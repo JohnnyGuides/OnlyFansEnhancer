@@ -562,7 +562,10 @@
             contract?.validScanPreviews(page.posts) || [],
             new Set(fresh),
           );
-          stop = fresh.length ? pageStop(page, cutoff) : "no-new-posts";
+          // Duplicate/empty owner pages do not establish the end of history.
+          // X's next cursor can still lead to older posts during a full scan.
+          stop =
+            backfill || fresh.length ? pageStop(page, cutoff) : "no-new-posts";
         }
         result.outcome = stop;
         note("step", `Stopped paging: ${OUTCOME_LABELS[stop] || stop}`);
@@ -612,10 +615,7 @@
         }
         state.running = null;
         result.finishedUtc = new Date(now()).toISOString();
-        if (backfill)
-          state.backfillDone = ["complete", "no-new-posts"].includes(
-            result.outcome,
-          );
+        if (backfill) state.backfillDone = result.outcome === "complete";
         if (SUCCESS.includes(result.outcome)) {
           state.lastSuccessAt = at;
           if (backfill && state.backfillDone) {
