@@ -39,12 +39,17 @@
   const MANUAL_MIN_GAP_MS = 2 * MINUTE;
   const ROUTINE_WINDOW_MS = 35 * DAY;
   const ROUTINE_PAGE_CAP = 10;
-  const BACKFILL_PAGE_CAP = 30;
+  // A full scan reads the whole profile timeline until X has no older page;
+  // this cap (about 10,000 posts) only guards against a cursor that never ends.
+  const BACKFILL_PAGE_CAP = 500;
+  // The whole history is read again weekly so older posts' counters refresh.
+  const FULL_INTERVAL_MS = 7 * DAY;
   const PAGE_DELAY_MIN_MS = 2_000;
   const PAGE_DELAY_MAX_MS = 4_000;
   const READY_TIMEOUT_MS = 30_000;
   const READY_POLL_MS = 1_000;
   const MAX_SCAN_MS = 8 * MINUTE;
+  const FULL_MAX_SCAN_MS = 75 * MINUTE;
   const LOG_LIMIT = 20;
   const ACTIVITY_LIMIT = 150;
   const ACTIVITY_TEXT = 240;
@@ -94,7 +99,7 @@
       "Chrome is signed in to a different X account than the recorded one",
     "signed-out": "Chrome is not signed in to X",
     "no-timeline": "X did not show your timeline",
-    timeout: "the scan ran longer than 8 minutes",
+    timeout: "the scan ran out of time (8 minutes, 75 for a full scan)",
     "user-took-over": "you opened the scan tab, so the scan stepped aside",
     error: "X gave an answer the scan could not use",
   });
@@ -116,6 +121,7 @@
       lastAttemptAt: 0,
       lastSuccessAt: 0,
       backfillDone: false,
+      lastFullAt: 0,
       running: null,
       last: null,
       log: [],
@@ -418,7 +424,11 @@
         }
       }
       const owner = validOwner(plan);
-      const backfill = !state.backfillDone;
+      // The first scan and then one a week read the entire history; a full
+      // scan that did not finish is retried by the next scan.
+      const backfill =
+        !state.backfillDone ||
+        at - (Number(state.lastFullAt) || 0) >= FULL_INTERVAL_MS;
       activity = {
         ...emptyActivity(),
         running: true,
@@ -434,7 +444,9 @@
         "step",
         `Scan started because ${TRIGGER_LABELS[trigger] || trigger}${
           backfill
-            ? " — first full read of your history (up to 30 pages)"
+            ? state.backfillDone
+              ? " — weekly full read of your whole history to refresh every post's counters"
+              : " — first full read of your whole history"
             : " — reading the last 35 days (up to 10 pages)"
         }`,
       );
@@ -505,7 +517,8 @@
             stop = "page-cap";
             break;
           }
-          if (now() - at >= MAX_SCAN_MS) throw new ScanStop("timeout");
+          if (now() - at >= (backfill ? FULL_MAX_SCAN_MS : MAX_SCAN_MS))
+            throw new ScanStop("timeout");
           await guard(handle);
           const delay = pageDelay();
           phase(
@@ -594,7 +607,10 @@
         result.finishedUtc = new Date(now()).toISOString();
         if (SUCCESS.includes(result.outcome)) {
           state.lastSuccessAt = at;
-          if (backfill) state.backfillDone = true;
+          if (backfill) {
+            state.backfillDone = true;
+            state.lastFullAt = at;
+          }
           state.backoffErrors = 0;
           state.backoffUntil = 0;
         } else if (
@@ -683,6 +699,9 @@
       return {
         running: active !== null,
         backfillDone: state.backfillDone,
+        lastFullUtc: state.lastFullAt
+          ? new Date(state.lastFullAt).toISOString()
+          : "",
         lastAttemptUtc: state.lastAttemptAt
           ? new Date(state.lastAttemptAt).toISOString()
           : "",
@@ -770,6 +789,10 @@
           url: "about:blank",
           active: false,
         });
+        // A full scan can take a while; Chrome must not unload the tab.
+        await Promise.resolve()
+          .then(() => chrome.tabs.update(tab.id, { autoDiscardable: false }))
+          .catch(() => {});
         const suffix = MARKER.test(marker) ? `${MARKER_PREFIX}${marker}` : "";
         try {
           await onTab(tab.id);
@@ -864,6 +887,8 @@
     ROUTINE_WINDOW_MS,
     ROUTINE_PAGE_CAP,
     BACKFILL_PAGE_CAP,
+    FULL_INTERVAL_MS,
+    FULL_MAX_SCAN_MS,
     PAGE_DELAY_MIN_MS,
     PAGE_DELAY_MAX_MS,
     MIN_GAP_MS,

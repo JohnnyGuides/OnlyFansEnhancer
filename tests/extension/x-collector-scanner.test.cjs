@@ -268,6 +268,7 @@ test("a routine scan stops at the window, the end, or when a page brings nothing
     creatorXScanV1: {
       version: 1,
       backfillDone: true,
+      lastFullAt: START - DAY,
       lastAttemptAt: START - 7 * HOUR,
       log: [],
     },
@@ -500,7 +501,15 @@ test("one scan at a time, and a run left by a stopped worker has its tab closed"
 });
 
 test("Scan now starts at once unless a scan just ran", async () => {
-  const h = harness();
+  const h = harness({
+    pages: (n, clock) => ({
+      ok: true,
+      ownerId: OWNER.accountId,
+      cursor: false,
+      statusIds: ids(9000 + n * 20, 20),
+      newestUtc: new Date(clock.now - DAY).toISOString(),
+    }),
+  });
   assert.deepEqual(plain(await h.scanner.requestNow()), {
     requested: true,
     started: true,
@@ -527,6 +536,8 @@ test("a desktop request is answered by the next tick", async () => {
       creatorXScanV1: {
         version: 1,
         backfillDone: true,
+        lastFullAt: START - DAY,
+        lastFullAt: START - DAY,
         lastAttemptAt: START - HOUR,
         log: [],
       },
@@ -592,8 +603,10 @@ test("the Chrome runner opens one inactive with_replies tab and closes only its 
   const handle = await runner.open("Owner_Handle", async () => {}, MARKER);
   // A blank background tab first, then the owner's with_replies page
   // carrying this run's marker.
-  assert.deepEqual(plain(calls.slice(0, 2)), [
+  // The tab is kept from being discarded during a long full scan.
+  assert.deepEqual(plain(calls.slice(0, 3)), [
     ["create", { url: "about:blank", active: false }],
+    ["update", 9, { autoDiscardable: false }],
     [
       "update",
       9,
@@ -611,7 +624,7 @@ test("the Chrome runner opens one inactive with_replies tab and closes only its 
   const scheduled = runner.scheduled(handle);
   setTimeout(() => runner.noteScheduled(9, 3), 5);
   assert.equal(await scheduled, 3);
-  assert.deepEqual(plain(calls.filter((call) => call[0] === "update")[1]), [
+  assert.deepEqual(plain(calls.filter((call) => call[0] === "update")[2]), [
     "update",
     9,
     {
@@ -783,6 +796,8 @@ test("rate-limit and authorization errors pause automatic scans 6 h, doubling to
       creatorXScanV1: {
         version: 1,
         backfillDone: true,
+        lastFullAt: START - DAY,
+        lastFullAt: START - DAY,
         lastAttemptAt: START - HOUR,
         backoffErrors: 1,
         backoffUntil: START + 5 * HOUR,
@@ -867,6 +882,8 @@ test("a startup tick runs the scan and records the startup trigger", async () =>
         lastAttemptAt: START - HOUR,
         lastSuccessAt: START - HOUR,
         backfillDone: true,
+        lastFullAt: START - DAY,
+        lastFullAt: START - DAY,
         running: null,
         last: null,
         log: [],
@@ -991,4 +1008,61 @@ test("a stopped scan says why in the live log", async () => {
     lines.at(-1),
     /^Ended: 1 page, 20 posts recorded with fresh counters in \d+ s — automatic scans paused until .+ after X's HTTP 429 answer$/,
   );
+});
+
+test("the first scan reads the whole history until X has no older page, then again weekly", async () => {
+  const total = 120;
+  const pages = (n, clock) => ({
+    ok: true,
+    ownerId: OWNER.accountId,
+    cursor: n < total - 1,
+    statusIds: ids(100_000 + n * 20, 20),
+    newestUtc: new Date(clock.now - n * 30 * DAY).toISOString(),
+  });
+  const storage = memoryStorage();
+  const h = harness({ pages, storage });
+  const first = plain(await h.scanner.run("startup"));
+  assert.equal(first.mode, "backfill");
+  assert.equal(first.outcome, "complete");
+  // Page 1 from the profile load, then every older page to the end, far
+  // beyond both the 35-day window and the old 30-page cap.
+  assert.equal(first.pages, total);
+  assert.equal(first.rows, 20 + (total - 1) * 20);
+  const state = storage.data.creatorXScanV1;
+  assert.equal(state.backfillDone, true);
+  assert.equal(state.lastFullAt, START);
+
+  // Within the week, scans read the recent window only.
+  h.clock.now = START + 6 * HOUR + MINUTE;
+  assert.equal(plain(await h.scanner.run("routine")).mode, "routine");
+  // A week after the last full read, the whole history is read again.
+  h.clock.now = START + 7 * DAY;
+  const weekly = plain(await h.scanner.run("routine"));
+  assert.equal(weekly.mode, "backfill");
+  assert.equal(weekly.outcome, "complete");
+  // The log keeps its newest lines; the run's first snapshot names why.
+  const opening = h.activity.find(
+    (snapshot) => snapshot.startedUtc === weekly.startedUtc,
+  );
+  assert.match(
+    opening.events[0].text,
+    /weekly full read of your whole history/,
+  );
+});
+
+test("a full scan that does not finish is retried as a full scan", async () => {
+  const storage = memoryStorage();
+  const h = harness({
+    storage,
+    pages: (n) =>
+      n === 3
+        ? { ok: false, reason: "http-500", ownerId: OWNER.accountId }
+        : null,
+  });
+  const broken = plain(await h.scanner.run("startup"));
+  assert.equal(broken.outcome, "error");
+  assert.equal(storage.data.creatorXScanV1.backfillDone, false);
+  h.clock.now += 6 * HOUR;
+  const retried = plain(await h.scanner.run("routine"));
+  assert.equal(retried.mode, "backfill");
 });

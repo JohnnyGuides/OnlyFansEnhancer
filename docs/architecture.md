@@ -189,9 +189,15 @@ the first non-200, unreadable or drifted answer (`error`, no retry), when the pa
 cookie's account is not the owner (`owner-mismatch`, checked before the first
 replay and on every page), when there is no next cursor (`complete`), a page
 brings no new owner post (`no-new-posts`), a page's newest post is older than the
-window (`window-reached`; 35 days for routine scans, none for the first full
-backfill) or at the page cap (`page-cap`: 30 pages for the backfill, 10 after),
-and after 8 minutes (`timeout`). After a finished scan the same tab opens
+window (`window-reached`; 35 days for routine scans, none for a full scan) or at
+the page cap (`page-cap`: 10 pages for routine scans; 500 for a full scan, a
+guard against a cursor that never ends), and after 8 minutes (75 for a full
+scan, `timeout`). A full scan (mode `backfill`) reads the whole profile
+timeline until X returns no older page; it is the first scan, then one scan a
+week (`lastFullAt` in `creatorXScanV1`) so older posts' counters refresh too,
+and a full scan that does not finish is retried by the next scan. X decides how
+far back its profile timeline goes; the scan reads everything X serves. The scan
+tab is marked `autoDiscardable: false` so Chrome does not unload it. After a finished scan the same tab opens
 `https://x.com/compose/post/unsent/scheduled` so the collector reads the scheduled
 list (waits up to 25 s). The tab is then closed in every case. The outcome,
 pages, new rows and scheduled count are kept in `chrome.storage.local`
