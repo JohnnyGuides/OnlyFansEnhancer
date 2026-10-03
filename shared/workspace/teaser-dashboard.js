@@ -646,6 +646,7 @@
       } else parts.push("No scan yet");
       const text = element("p", "xt-scan-text", parts.join(" · "));
       text.setAttribute("role", "status");
+      text.title = text.textContent;
       if (last?.outcome === "user-took-over")
         text.title = "Scan stopped because you opened the scan tab.";
       else if (last && !finished) text.dataset.tone = "warn";

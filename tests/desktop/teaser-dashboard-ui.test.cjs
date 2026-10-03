@@ -2328,7 +2328,7 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
       );
       const pending = page.locator(".xt-scan-state");
       assert.equal(await pending.isVisible(), false);
-      // Scan aligns with the title; status is secondary beneath it.
+      // Scan, status and request feedback share one line.
       const button = page.getByRole("button", { name: "Scan", exact: true });
       assert.equal(
         await page
@@ -2365,9 +2365,14 @@ test("X scheduled posts outline their day in row 2 and Scan now asks for a scan"
         Math.abs(
           textBox.y + textBox.height / 2 - buttonBox.y - buttonBox.height / 2,
         ) < 1 &&
-          Math.abs(buttonBox.x - textBox.x - textBox.width - 16) < 1 &&
-          pendingBox.y >= buttonBox.y + buttonBox.height,
-        "status sits directly left of Scan, with pending feedback underneath",
+          Math.abs(
+            pendingBox.y +
+              pendingBox.height / 2 -
+              (buttonBox.y + buttonBox.height / 2),
+          ) < 1 &&
+          Math.abs(pendingBox.x - textBox.x - textBox.width - 16) < 1 &&
+          Math.abs(buttonBox.x - pendingBox.x - pendingBox.width - 16) < 1,
+        "status, pending feedback and Scan stay inline",
       );
       assert.ok(
         Math.abs(
@@ -2430,6 +2435,32 @@ test("a failed scan is shown plainly", async () => {
     );
     assert.equal(await page.locator(".xt-scan-state").isVisible(), false);
     assert.equal(await scan.getAttribute("data-tone"), "warn");
+    await page.getByRole("button", { name: "Scan", exact: true }).click();
+    await page.locator(".xt-scan-state").getByText("Scan requested…").waitFor();
+    for (const width of [1200, 800, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const boxes = await Promise.all(
+        [
+          ".xt-scan-text",
+          ".xt-scan-state",
+          '.xt-scan [data-key="scan-now"]',
+        ].map((selector) => page.locator(selector).boundingBox()),
+      );
+      const centres = boxes.map((box) => box.y + box.height / 2);
+      assert.ok(
+        Math.max(...centres) - Math.min(...centres) < 1,
+        `scan error, request feedback and button stay inline at ${width}px`,
+      );
+      assert.ok(
+        boxes.every((box) => box.x >= 0 && box.x + box.width <= width),
+        `scan row stays within ${width}px`,
+      );
+      if (width > 600) {
+        const title = await page.locator(".twitter-heading h1").boundingBox();
+        assert.ok(boxes[0].x >= title.x + title.width + 15);
+      }
+      await screenshot(page, `scan-request-error-${width}.png`);
+    }
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
