@@ -1,5 +1,7 @@
 {
   "personal": {
+    "icons/icon16.png": "extensions/personal/icons/icon16.png",
+    "icons/icon32.png": "extensions/personal/icons/icon32.png",
     "app/app.css": "shared/workspace/app.css",
     "app/app.js": "shared/workspace/app.js",
     "app/finalLogo.png": "shared/workspace/finalLogo.png",
