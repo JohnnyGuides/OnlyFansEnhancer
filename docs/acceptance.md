@@ -1,5 +1,32 @@
 # Acceptance and platform evidence
 
+## Smooth small extension icons — installed 0.20.100, 5 October 2026
+
+The owner approved the smooth 16 and 32 px designs on dark and light backgrounds.
+Both personal extension compositions use separate native-size PNGs with curves,
+gradients and antialiased edges. The 48, 64 and 128 px references use the owner's
+adjusted default logo. Editable SVG sources live under `packaging/personal-icons`.
+
+- Lint, typecheck and formatting passed. The portable aggregate reported 884
+  passes, one pre-stage skip and one source-composition failure: the editable
+  SVGs had been placed in the runtime source tree without package ownership.
+  Moving these authoring-only files to `packaging/personal-icons` fixed the
+  cause without changing the reviewed PNGs. All 15 repository/extension-packaging
+  checks passed on the corrected candidate; formatting passed again.
+- .NET 611, native 31 and Windows packaging 16 checks passed, with two pre-stage
+  packaging skips. The installer compiled successfully, and all three post-build
+  installer/browser lifecycle tests passed without skips.
+- Setup SHA-256: `baf490f1fec91d092c538ecd34bdd3f10a9fe1293056cd17dce58a5d2927884d`.
+  Stage manifest SHA-256:
+  `1592bbc16b5e1b1fbe712cfb356a8f8127dd9f41f944f5686818671eb9e004c0`.
+- Silent normal update exited 0 and logged success. All 1,305 installed inventory
+  files match the stage. Twelve settings/data files were unchanged before restart,
+  and both extension manifest identities were preserved. Installed small icons
+  and the shared default logo match the reviewed source bytes.
+- The desktop restarted from its permanent install folder. The owner must reload
+  the existing Chrome extension entry; its live toolbar appearance remains
+  unverified.
+
 ## Desktop logo in the personal extension — installed 0.20.99, 3 October 2026
 
 The owner approved the 16, 32, 48 and 128 px logo preview. Both personal
