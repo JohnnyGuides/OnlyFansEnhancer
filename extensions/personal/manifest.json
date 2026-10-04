@@ -8,6 +8,7 @@
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
     "48": "app/finalLogo.png",
+    "64": "app/finalLogo.png",
     "128": "app/finalLogo.png"
   },
   "permissions": [
