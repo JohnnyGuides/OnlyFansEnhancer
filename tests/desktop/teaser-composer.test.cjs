@@ -393,6 +393,39 @@ test("teaser editor fits a phone viewport and keeps draft actions reachable", as
   }
 });
 
+test("main uploader uses one compact social publishing checkbox", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 960 },
+  });
+  try {
+    const errors = await mount(page, true);
+    await page.goto(`${origin}/upload-console.html`);
+    await page.locator('input[name="workflowMode"][value="teaser"]').check();
+    const automatic = page.getByRole("checkbox", {
+      name: "Send automatically",
+      exact: true,
+    });
+    await automatic.waitFor();
+    assert.equal(await page.locator('input[name="socialMode"]').count(), 1);
+    assert.equal(await automatic.isChecked(), false);
+    await automatic.check();
+    assert.equal(await automatic.isChecked(), true);
+    await automatic.uncheck();
+    await page.locator("#uploadSocialTeaser").setInputFiles(VIDEO);
+    await automatic.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: path.join(
+        repositoryRoot,
+        "artifacts/teaser-hub-review/main-uploader-checkbox.png",
+      ),
+      fullPage: true,
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("episode without a teaser opens its folder and accepts a video in the same day modal", async () => {
   const page = await browser.newPage({
     viewport: { width: 1365, height: 960 },
@@ -435,19 +468,9 @@ test("episode without a teaser opens its folder and accepts a video in the same 
       exact: true,
     });
     await automatic.check();
-    assert.equal(
-      await frame
-        .locator('input[name="socialMode"][value="manual"]')
-        .isChecked(),
-      false,
-    );
+    assert.equal(await automatic.isChecked(), true);
     await automatic.uncheck();
-    assert.equal(
-      await frame
-        .locator('input[name="socialMode"][value="manual"]')
-        .isChecked(),
-      true,
-    );
+    assert.equal(await automatic.isChecked(), false);
     await frame.getByRole("button", { name: "Open episode folder" }).click();
     assert.deepEqual(
       await page.evaluate(() =>

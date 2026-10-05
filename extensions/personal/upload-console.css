@@ -125,24 +125,17 @@ body.calendar-teaser {
   min-height: 72px;
   height: 72px;
 }
-.calendar-teaser .mode-choice {
-  display: contents;
-}
-.calendar-teaser .mode-choice label {
-  grid-column: 1;
-  grid-row: 1;
-  display: flex;
+.social-auto-mode {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 0;
-  border: 0;
-  background: transparent;
   font-size: 13px;
   font-weight: 500;
 }
-.calendar-teaser .mode-choice legend,
-.calendar-teaser .mode-choice label[hidden] {
-  display: none;
+.calendar-teaser .social-auto-mode {
+  grid-column: 1;
+  grid-row: 1;
 }
 .calendar-teaser .teaser-association {
   display: contents;
@@ -214,7 +207,7 @@ body.calendar-teaser {
   .calendar-teaser .upload-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .calendar-teaser .mode-choice label {
+  .calendar-teaser .social-auto-mode {
     grid-column: 1 / -1;
   }
   .calendar-teaser .upload-actions > :is(#saveTeaserDraft, #uploadButton),

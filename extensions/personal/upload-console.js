@@ -1371,7 +1371,9 @@
     }
 
     function selectedSocialMode() {
-      return get('input[name="socialMode"]:checked')?.value || "manual";
+      return get('input[name="socialMode"][value="autonomous"]').checked
+        ? "autonomous"
+        : "manual";
     }
 
     function selectedRunTargets() {
@@ -5079,7 +5081,6 @@
         target.checked = target.defaultChecked;
       socialX.checked = false;
       socialReddit.checked = false;
-      get('input[name="socialMode"][value="manual"]').checked = true;
       get('input[name="socialMode"][value="autonomous"]').checked = false;
       lastAttempt = null;
       if (workflowMode) workflowMode.disabled = neutralTestMode;

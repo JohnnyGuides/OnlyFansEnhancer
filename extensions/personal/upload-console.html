@@ -1048,28 +1048,13 @@
               </div>
             </div>
 
-            <fieldset class="mode-choice">
-              <legend>Publishing mode</legend>
-              <label>
-                <input type="radio" name="socialMode" value="manual" checked />
-                <span
-                  ><strong>Confirm manually</strong
-                  ><small
-                    >Fill and upload, then stop before each final
-                    publish.</small
-                  ></span
-                >
-              </label>
-              <label>
-                <input type="radio" name="socialMode" value="autonomous" />
-                <span
-                  ><strong>Autonomous on Upload</strong
-                  ><small
-                    >Use only approved presets and click final controls.</small
-                  ></span
-                >
-              </label>
-            </fieldset>
+            <label
+              class="social-auto-mode"
+              title="Unchecked: prepare drafts for manual posting. Checked: publish or schedule automatically."
+            >
+              <input type="checkbox" name="socialMode" value="autonomous" />
+              Send automatically
+            </label>
 
             <div id="subredditFields" hidden>
               <div class="subreddit-heading">

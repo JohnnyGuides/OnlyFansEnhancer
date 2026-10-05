@@ -135,21 +135,10 @@
       setTimeout(updateLinked, 0),
     );
     get("#catalogueRow").addEventListener("change", updateLinked);
-    const manual = get('input[name="socialMode"][value="manual"]');
     const automatic = get('input[name="socialMode"][value="autonomous"]');
-    manual.closest("label").hidden = true;
-    automatic.type = "checkbox";
-    automatic.closest("label").replaceChildren(automatic, "Send automatically");
     automatic.closest("label").title =
       "Unchecked: prepare the Twitter draft for manual posting. Checked: post or schedule, then add the first reply.";
-    automatic.addEventListener(
-      "change",
-      () => {
-        manual.checked = !automatic.checked;
-      },
-      true,
-    );
-    get("#uploadActions").prepend(automatic.closest("fieldset"));
+    get("#uploadActions").prepend(automatic.closest("label"));
     folder.addEventListener("click", async () => {
       try {
         const key = hub.candidate()?.id;
