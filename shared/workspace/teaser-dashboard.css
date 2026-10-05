@@ -962,12 +962,14 @@ html:has(.xt-picker[open]) {
 .xt-picker .xt-segment {
   font-size: 0.75rem;
 }
-.xt-picker .xt-episode[data-pick] {
+.xt-picker .xt-episode[data-pick],
+.xt-composer-catalogue .xt-episode[data-pick] {
   opacity: 1;
   box-shadow: none;
 }
 .xt-picker .xt-thumb-image,
-.xt-picker .xt-episode[data-cover="empty"] .xt-thumb-image {
+.xt-picker .xt-episode[data-cover="empty"] .xt-thumb-image,
+.xt-composer-catalogue .xt-thumb-image {
   opacity: 1;
   filter: none;
 }
@@ -1184,6 +1186,37 @@ html:has(.xt-picker[open]) {
   padding: 8px 12px;
   cursor: pointer;
 }
+.xt-composer-dialog:has(.xt-composer-catalogue) {
+  width: min(620px, calc(100vw - 32px));
+}
+.xt-composer-catalogue .xt-flow-bar {
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
+.xt-composer-catalogue .xt-flow-title {
+  width: 100%;
+}
+.xt-composer-dialog:has(.xt-composer-catalogue) .xt-composer-heading {
+  padding: 16px 24px;
+}
+.xt-composer-dialog:has(.xt-composer-catalogue) .xt-composer-heading h2 {
+  font-size: 14px;
+}
+.xt-composer-catalogue .xt-segment {
+  font-size: 12px;
+}
+.xt-composer-catalogue .xt-episode {
+  font-size: 11px;
+}
+.xt-composer-catalogue .xt-clip-add {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: 74px;
+  background: #18212d;
+  border: 1px dashed #344253;
+}
 .xt-draft-cover {
   position: absolute;
   inset: 0;
@@ -1221,6 +1254,9 @@ html:has(.xt-picker[open]) {
   margin: 12px 24px 20px;
   color: #aebbd0;
 }
+.xt-composer-status:empty {
+  display: none;
+}
 .xt-composer-frame {
   width: 100%;
   height: min(710px, calc(100dvh - 190px));
@@ -1230,8 +1266,8 @@ html:has(.xt-picker[open]) {
 }
 .xt-clip-choices {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, 96px);
+  gap: 8px 6px;
   padding: 8px 0 16px;
 }
 .xt-clip-choice {
@@ -1239,13 +1275,14 @@ html:has(.xt-picker[open]) {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  gap: 8px;
-  min-height: 170px;
-  padding: 12px;
+  gap: 4px;
+  min-height: 90px;
+  padding: 6px;
   color: #edf3fc;
   background: #18212d;
   border: 1px solid #344253;
-  border-radius: 12px;
+  border-radius: 8px;
+  font-size: 11px;
   text-align: left;
   cursor: pointer;
 }
@@ -1301,7 +1338,7 @@ html:has(.xt-picker[open]) {
     height: calc(100dvh - 170px);
   }
   .xt-clip-choices {
-    grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+    grid-template-columns: repeat(auto-fill, 96px);
   }
 }
 

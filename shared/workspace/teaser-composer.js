@@ -81,6 +81,7 @@
     episodes = [],
     episode = null,
     recommendations = [],
+    renderCatalogue = null,
     request = global.OFEnhancerHost.request,
     onSaved = () => {},
   }) {
@@ -192,6 +193,23 @@
       content.replaceChildren(back, iframe);
       status.textContent = "";
     }
+    async function editClip(clip, linked) {
+      if (loading) return;
+      loading = true;
+      try {
+        const file = await clipFile(clip, request, status);
+        if (dialog.isConnected) edit(file, clip);
+      } catch (error) {
+        if (!dialog.isConnected) return;
+        if (linked) {
+          episode = linked;
+          edit();
+          status.textContent = `${error.message} Open the episode folder to edit a replacement teaser.`;
+        } else status.textContent = error.message;
+      } finally {
+        loading = false;
+      }
+    }
     async function choose() {
       const grid = node("div", "xt-clip-choices");
       const input = node("input", "");
@@ -258,6 +276,51 @@
           edit();
           return;
         }
+        if (renderCatalogue && !episode) {
+          const catalogue = renderCatalogue((item) => {
+            episode = item;
+            const available = clips.filter(
+              (clip) => clip.episodeKey === item.sourceKey,
+            );
+            if (available.length === 1) void editClip(available[0], item);
+            else void choose();
+          });
+          const upload = node("li", "xt-card xt-upload-choice");
+          add.className = "xt-episode xt-clip-add";
+          upload.append(add);
+          const wall = catalogue.querySelector(".xt-cards");
+          if (!wall) {
+            status.textContent = "";
+            return;
+          }
+          wall.prepend(upload);
+          for (const clip of clips.filter((item) => !item.episodeKey)) {
+            const item = node("li", "xt-card xt-unlinked-choice");
+            const choice = action("", "xt-episode");
+            choice.title = clip.name;
+            choice.setAttribute("aria-label", clip.name);
+            choice.append(
+              node("span", "xt-thumb"),
+              node("span", "xt-pick-reason", "Unlinked clip"),
+            );
+            choice.addEventListener("click", () => editClip(clip, null));
+            item.append(choice);
+            wall.append(item);
+          }
+          const wrapper = node("div", "xt xt-composer-catalogue");
+          wrapper.append(catalogue);
+          wrapper.addEventListener("dragover", (event) =>
+            event.preventDefault(),
+          );
+          wrapper.addEventListener("drop", (event) => {
+            event.preventDefault();
+            const file = event.dataTransfer?.files?.[0];
+            if (file && !loading) edit(file);
+          });
+          content.replaceChildren(wrapper, input);
+          status.textContent = "";
+          return;
+        }
         for (const clip of clips) {
           const choice = action("", "xt-clip-choice");
           const linked = episodes.find(
@@ -287,24 +350,7 @@
             ),
           );
           if (recommendation) choice.append(node("small", "", "Recommended"));
-          choice.addEventListener("click", async () => {
-            if (loading) return;
-            loading = true;
-            choice.disabled = true;
-            try {
-              const file = await clipFile(clip, request, status);
-              if (dialog.isConnected) edit(file, clip);
-            } catch (error) {
-              if (linked) {
-                episode = linked;
-                edit();
-                status.textContent = `${error.message} Open the episode folder to edit a replacement teaser.`;
-              } else status.textContent = error.message;
-            } finally {
-              loading = false;
-              choice.disabled = false;
-            }
-          });
+          choice.addEventListener("click", () => editClip(clip, linked));
           grid.append(choice);
         }
         const withoutClips = episodes

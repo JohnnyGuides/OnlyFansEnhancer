@@ -1632,7 +1632,7 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
       .getByRole("button", { name: "Choose a new teaser video" })
       .waitFor();
     const recommendations = modal.locator(
-      ".xt-clip-choice[data-recommendation-rank]",
+      ".xt-episode[data-recommendation-rank]",
     );
     await recommendations.first().waitFor();
     assert.deepEqual(
@@ -1658,15 +1658,35 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
     );
     assert.equal(
       await modal
-        .locator('.xt-clip-choice[data-episode-key="series-c-e2"]')
+        .locator('.xt-episode[data-episode-key="series-c-e2"]')
         .getAttribute("data-recommendation-rank"),
       null,
     );
     assert.ok(
-      (await modal.locator(".xt-clip-choice").count()) >
+      (await modal.locator(".xt-episode").count()) >
         (await recommendations.count()),
     );
     assert.equal(await page.locator(".xt-picker").count(), 0);
+    const allCount = await modal.locator(".xt-card").count();
+    assert.equal(
+      await modal.locator(".xt-season-name").first().isVisible(),
+      true,
+    );
+    assert.equal(
+      await modal
+        .locator(".xt-card")
+        .first()
+        .evaluate((card) => card.getBoundingClientRect().width),
+      96,
+    );
+    assert.ok(
+      await modal.evaluate((node) => node.getBoundingClientRect().width <= 620),
+    );
+    await modal.locator('[data-coverage="needs"]').click();
+    assert.ok((await modal.locator(".xt-card").count()) < allCount);
+    assert.equal(await modal.locator(".xt-upload-choice").count(), 1);
+    await modal.locator('[data-coverage="all"]').click();
+    assert.equal(await modal.locator(".xt-card").count(), allCount);
     assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
     assert.equal(await day.getAttribute("data-kind"), "empty");
     await screenshot(page, "M3-teaser-modal-desktop.png");
@@ -1815,7 +1835,7 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   try {
     await page.locator('.xt-tile[data-date="2026-10-02"]').click();
     const suggestions = page.locator(
-      ".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]",
+      ".xt-composer-dialog .xt-episode[data-recommendation-rank]",
     );
     await suggestions.first().waitFor();
     assert.deepEqual(
@@ -1863,14 +1883,12 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   try {
     await second.page.locator('.xt-tile[data-date="2026-10-02"]').click();
     await second.page
-      .locator(".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]")
+      .locator(".xt-composer-dialog .xt-episode[data-recommendation-rank]")
       .first()
       .waitFor();
     assert.deepEqual(
       await second.page
-        .locator(
-          ".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]",
-        )
+        .locator(".xt-composer-dialog .xt-episode[data-recommendation-rank]")
         .evaluateAll((nodes) =>
           nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
         ),
@@ -1908,14 +1926,12 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   try {
     await third.page.locator('.xt-tile[data-date="2026-10-02"]').click();
     await third.page
-      .locator(".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]")
+      .locator(".xt-composer-dialog .xt-episode[data-recommendation-rank]")
       .first()
       .waitFor();
     assert.deepEqual(
       await third.page
-        .locator(
-          ".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]",
-        )
+        .locator(".xt-composer-dialog .xt-episode[data-recommendation-rank]")
         .evaluateAll((nodes) =>
           nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
         ),

@@ -536,6 +536,7 @@
         episode,
         episodes: episodes(),
         recommendations: recommendations(pickContext(date)),
+        renderCatalogue: (select) => renderFlow(pickContext(date), select),
         request,
         onSaved: async () => {
           state.drafts = await global.OFEnhancerTeaserDrafts.list();
@@ -1390,7 +1391,7 @@
       return parts.join(" · ");
     }
 
-    function renderCoverageBar(all) {
+    function renderCoverageBar(all, onFilter = null) {
       const bar = element("div", "xt-flow-bar");
       bar.append(element("h2", "xt-flow-title", "Catalogue"));
       const filters = element("div", "xt-segments");
@@ -1407,7 +1408,8 @@
         choice.setAttribute("aria-pressed", String(value === state.coverage));
         choice.addEventListener("click", () => {
           state.coverage = value;
-          render(choice.dataset.key);
+          if (onFilter) onFilter();
+          else render(choice.dataset.key);
         });
         filters.append(choice);
       }
@@ -1415,7 +1417,7 @@
       return bar;
     }
 
-    function episodeCard(episode, context) {
+    function episodeCard(episode, context, onSelect = null) {
       const item = element("li", "xt-card");
       const card = button("xt-episode", describeEpisode(episode));
       card.dataset.key = `episode-${episode.itemId}`;
@@ -1427,22 +1429,29 @@
       card.append(frame);
       if (context) {
         const pick = pickState(episode, context);
-        card.dataset.pick = pick;
-        if (pick === "hidden") {
+        card.dataset.pick =
+          onSelect && pick !== "recommended" ? "available" : pick;
+        if (pick === "hidden" && !onSelect) {
           card.setAttribute("aria-disabled", "true");
           card.tabIndex = -1;
         }
         const reason =
-          pick === "hidden"
-            ? "Recent or planned"
-            : pick === "dimmed"
-              ? "Busy category"
-              : pick === "recommended"
-                ? "Recommended"
-                : `${episode.readyClips} ready`;
+          onSelect && pick !== "recommended"
+            ? `${episode.readyClips} ready`
+            : pick === "hidden"
+              ? "Recent or planned"
+              : pick === "dimmed"
+                ? "Busy category"
+                : pick === "recommended"
+                  ? "Recommended"
+                  : `${episode.readyClips} ready`;
         card.append(element("span", "xt-pick-reason", reason));
       }
       card.addEventListener("click", () => {
+        if (onSelect) {
+          onSelect(episode);
+          return;
+        }
         if (global.OFEnhancerTeaserComposer && state.picking) {
           void openComposer(state.picking.date, episode);
           return;
@@ -1460,10 +1469,10 @@
       return item;
     }
 
-    function renderFlow() {
+    function renderFlow(pickerContext = null, onSelect = null) {
       const flow = element("div", "xt-flow");
       flow.setAttribute("aria-label", "Catalogue coverage");
-      if (state.picking) flow.dataset.picking = "true";
+      if (state.picking || onSelect) flow.dataset.picking = "true";
       const ordered = orderEpisodes(episodes());
       if (!ordered.length) {
         flow.append(
@@ -1475,8 +1484,35 @@
         );
         return flow;
       }
-      flow.append(renderCoverageBar(ordered));
-      const context = state.picking ? pickContext(state.picking.date) : null;
+      flow.append(
+        renderCoverageBar(
+          ordered,
+          onSelect
+            ? () => {
+                const next = renderFlow(pickerContext, onSelect);
+                const extras = flow.querySelectorAll(
+                  ".xt-upload-choice, .xt-unlinked-choice",
+                );
+                if (extras.length) {
+                  let wall = next.querySelector(".xt-cards");
+                  if (!wall) {
+                    wall = element("ul", "xt-cards");
+                    next.append(wall);
+                  }
+                  wall.prepend(extras[0]);
+                  for (const item of [...extras].slice(1)) wall.append(item);
+                }
+                flow.replaceWith(next);
+                next
+                  .querySelector(`[data-coverage="${state.coverage}"]`)
+                  ?.focus();
+              }
+            : null,
+        ),
+      );
+      const context =
+        pickerContext ||
+        (state.picking ? pickContext(state.picking.date) : null);
       const ranked = context ? recommendations(context) : [];
       const ranks = new Map(
         ranked.map((entry, index) => [
@@ -1526,12 +1562,16 @@
         const first = season[0];
         const category = first.category || "Uncategorised";
         season.forEach((episode, position) => {
-          const card = episodeCard(episode, context);
+          const card = episodeCard(episode, context, onSelect);
+          card.querySelector(".xt-episode").dataset.episodeKey =
+            episode.sourceKey;
           const recommendation = ranks.get(episode.itemId);
           if (recommendation) {
             const description = `${episode.readyClips} ready ${episode.readyClips === 1 ? "clip" : "clips"} · ${recommendation.reason}. ${recommendation.detail}`;
             const choice = card.querySelector(".xt-episode");
-            choice.dataset.recommendationRank = String(recommendation.rank);
+            choice.dataset.recommendationRank = String(
+              recommendation.rank + (onSelect ? 1 : 0),
+            );
             choice.dataset.episodeKey = episode.sourceKey;
             choice.title = `${episode.title} · ${description}`;
             choice.setAttribute("aria-description", description);
