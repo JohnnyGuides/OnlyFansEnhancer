@@ -159,6 +159,7 @@
     save.type = "button";
     save.textContent = "Save draft";
     save.id = "saveTeaserDraft";
+    get("#uploadActions").prepend(association);
     get("#uploadButton").before(save);
     let thumbnail = null,
       context = null,

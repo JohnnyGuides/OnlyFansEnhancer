@@ -115,7 +115,7 @@ body.calendar-teaser {
 }
 .calendar-teaser .upload-actions {
   position: static;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
   padding: 0;
   border: 0;
   background: transparent;
@@ -135,21 +135,38 @@ body.calendar-teaser {
   display: none;
 }
 .calendar-teaser .teaser-association {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+  display: contents;
 }
 .calendar-teaser .teaser-association span {
-  flex: 1;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
   color: #afbed2;
 }
+.calendar-teaser
+  :is(.teaser-association button, #saveTeaserDraft, #uploadButton) {
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #344657;
+  background: #17222e;
+  color: #edf3fc;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.calendar-teaser #uploadButton {
+  background: #087ca5;
+  border-color: #087ca5;
+}
 .calendar-teaser .teaser-association button {
-  padding: 7px 10px;
-  font-size: 12px;
+  grid-column: 2;
+  grid-row: 1;
+}
+.calendar-teaser .teaser-association button:last-child {
+  grid-column: 3;
 }
 .calendar-teaser:not(.teaser-matching) #cataloguePicker,
 .calendar-teaser #catalogueBrowseToggle,
@@ -165,20 +182,23 @@ body.calendar-teaser {
   display: none;
 }
 .calendar-teaser .upload-actions > .action-status {
-  grid-column: 1;
-  grid-row: 1;
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.calendar-teaser .action-status:not(:has(p:not(:empty))) {
+  display: none;
 }
 .calendar-teaser .upload-actions > #saveTeaserDraft {
-  grid-column: 2;
+  grid-column: 4;
   grid-row: 1;
 }
 .calendar-teaser .upload-actions > #uploadButton {
-  grid-column: 3;
+  grid-column: 5;
   grid-row: 1;
 }
 .calendar-teaser .upload-actions > .action-secondary {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 3;
 }
 @media (max-width: 620px) {
   .calendar-teaser .teaser-schedule-row {
@@ -190,11 +210,19 @@ body.calendar-teaser {
     padding: 8px 4px;
     font-size: 12px;
   }
-  .calendar-teaser .upload-actions > .action-status {
+  .calendar-teaser .upload-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .calendar-teaser .teaser-association span {
     grid-column: 1 / -1;
   }
-  .calendar-teaser .upload-actions > :is(#saveTeaserDraft, #uploadButton) {
-    grid-row: 2;
+  .calendar-teaser .upload-actions > :is(#saveTeaserDraft, #uploadButton),
+  .calendar-teaser .teaser-association button {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .calendar-teaser .upload-actions > :is(.action-status, .action-secondary) {
+    grid-row: 5;
   }
   .calendar-teaser .teaser-preview-panel {
     grid-template-columns: 1fr;

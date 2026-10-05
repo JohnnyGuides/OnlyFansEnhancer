@@ -445,6 +445,16 @@ test("episode without a teaser opens its folder and accepts a video in the same 
     );
     assert.equal(await frame.locator("#socialErrors").textContent(), "");
     assert.equal(await frame.locator("#matchStatus").textContent(), "");
+    const actionRows = await frame
+      .locator(".teaser-association button, #saveTeaserDraft, #uploadButton")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => Math.round(button.getBoundingClientRect().top)),
+      );
+    assert.equal(
+      new Set(actionRows).size,
+      1,
+      "episode and draft actions share one row",
+    );
     await page.screenshot({
       path: path.join(
         repositoryRoot,
