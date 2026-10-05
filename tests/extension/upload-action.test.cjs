@@ -592,8 +592,13 @@ test("compact UI keeps media visible, with one Upload rail and no overflow at 20
   const page = fixture.page;
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
+    // The single rail action labels its existing catalogue operation after startup.
     assert.equal(
-      await page.getByRole("button", { name: "Upload", exact: true }).count(),
+      await page
+        .getByRole("button", {
+          name: /^(Upload|Create & upload|Update & upload)$/,
+        })
+        .count(),
       1,
     );
     assert.equal(await page.locator("#uploadButton").isDisabled(), true);

@@ -8,11 +8,11 @@
 [Setup]
 AppId={{D4702E08-310F-477A-91DA-DC45603DD6AF}
 AppName=OFEnhancer
-AppVersion=0.20.100
+AppVersion=0.20.101
 DefaultDirName={localappdata}\Programs\OFEnhancer
 DefaultGroupName=OFEnhancer
 OutputDir={#OutputRoot}
-OutputBaseFilename=OFEnhancer-Setup-0.20.100
+OutputBaseFilename=OFEnhancer-Setup-0.20.101
 PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
@@ -122,7 +122,7 @@ begin
   ErrorFile := ExpandConstant('{tmp}\ofenhancer-maintenance-error.txt');
   DeleteFile(ErrorFile);
   Helper := ExpandConstant('{tmp}\ofenhancer-maintenance\desktop\OFEnhancer.Desktop.exe');
-  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.100 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
+  Parameters := Operation + ' --install-root "' + WizardDirValue + '" --package-version 0.20.101 --error-file "' + ErrorFile + '" --resume-root-file "' + ExpandConstant('{tmp}\ofenhancer-resume-root.txt') + '"';
   Result := Exec(Helper, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
   if LoadStringFromFile(ErrorFile, ErrorText) then MaintenanceError := UTF8Decode(ErrorText);
   if not Result then MaintenanceError := SysErrorMessage(ExitCode);
@@ -263,7 +263,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  ExitCode: Integer;
+  ExitCode, UninstallWaitCount: Integer;
   PauseMarker: String;
 begin
   Result := '';
@@ -336,10 +336,26 @@ begin
   begin
     if not FileExists(ExistingUninstallerPath) then
       Log('Previous uninstaller is missing. Repairing the verified product root directly.')
-    else if not Exec(ExistingUninstallerPath, '/SILENT /NORESTART', ExistingInstallRoot, SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+    else
     begin
-      Result := 'The verified previous OFEnhancer uninstaller failed. The resumable Windows transaction was preserved.';
-      Exit;
+      if not Exec(ExistingUninstallerPath, '/SILENT /NORESTART', ExistingInstallRoot, SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+      begin
+        Result := 'The verified previous OFEnhancer uninstaller failed. The resumable Windows transaction was preserved.';
+        Exit;
+      end;
+      { Inno's launcher exits before its second phase deletes the old EXE.
+        Do not let that deferred deletion remove the newly installed uninstaller. }
+      UninstallWaitCount := 0;
+      while FileExists(ExistingUninstallerPath) and (UninstallWaitCount < 100) do
+      begin
+        Sleep(100);
+        UninstallWaitCount := UninstallWaitCount + 1;
+      end;
+      if FileExists(ExistingUninstallerPath) then
+      begin
+        Result := 'The verified previous OFEnhancer uninstaller failed. The resumable Windows transaction was preserved.';
+        Exit;
+      end;
     end;
   end;
   if not RunFreshHelper('--fresh-reinstall-previous-package-removed', ExitCode) or (ExitCode <> 0) then
@@ -364,7 +380,7 @@ var
 begin
   if (CurStep = ssPostInstall) and IsFreshReset() then
     if not Exec(ExpandConstant('{app}\desktop\OFEnhancer.Desktop.exe'),
-      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.100',
+      '--fresh-reinstall-installed --install-root "' + ExpandConstant('{app}') + '" --package-version 0.20.101',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
       RaiseException('The Windows package was copied, but verification or durable Chrome handoff failed. Run this installer again to resume.');
 end;

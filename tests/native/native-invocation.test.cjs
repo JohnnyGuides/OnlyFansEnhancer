@@ -65,7 +65,8 @@ test("realistic framed relay preserves correlation for repeated requests and EOF
   const result = spawnSync(exe, [origin, "--parent-window=0"], {
     input: Buffer.concat(frames),
     windowsHide: true,
-    timeout: 15000,
+    // Each Chrome request permits an eight-second desktop reconnect window.
+    timeout: requests.length * 8000 + 5000,
   });
   assert.equal(result.status, 0);
   let offset = 0;

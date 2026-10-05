@@ -1,26 +1,48 @@
 # Acceptance and platform evidence
 
-## Upload result sheet links — source candidate, 5 October 2026
+## Upload result sheet links — installed 0.20.101, 5 October 2026
 
 ManyVids manual capture now binds the final editor Save request to its video ID;
 OnlyFans and Fansly retain their Publish-response capture. Confirmed catalogue
 results queue exact workbook/tab link writes atomically with local evidence.
 Pending work retries only against the ready selection, and dispatched writes
 recover through read-only reconciliation. Formula, metadata, destination,
-hyperlink and conflicting-link checks protect existing sheet data.
+hyperlink and conflicting-link checks protect existing sheet data. Confirmed X
+teaser links use the same protected writeback path.
+
+The owner reviewed the existing upload-result badge and requested installation.
+The badge distinguishes a locally saved link from a verified sheet update; its
+existing error field explains pending writeback. No additional status panel was
+introduced. The separate uncommitted debloating changes were preserved and
+excluded from this release.
+
+- Final lint, typecheck and formatting passed. The portable aggregate reported
+  888 passes and one pre-stage skip; all 622 .NET and 31 native checks passed.
+  All 18 staged Windows packaging checks and all three serial post-stage
+  installer/browser lifecycle checks passed without skips.
+- The upload-action fixture accepts the existing catalogue-dependent button
+  labels. Offline native invocation deadlines allow each request's existing
+  eight-second reconnect window. Browser lifecycle checks run serially to avoid
+  competing integration fixtures; their assertions remain intact.
+- Installer recovery now waits for the verified old Inno uninstaller's deferred
+  self-deletion before creating its replacement. The recovery test verifies that
+  the new uninstaller remains present. Normal update behavior is unchanged.
+- Setup SHA-256:
+  `8684153fea20d5f52a47f4972b2e972c7e46c25915f52765fbc93926c1129761`.
+  Stage manifest SHA-256:
+  `f899cc74aae185061121eb38108a0da1281c54b2df063b1e07e8780b5cdce1a1`.
+- Silent normal update exited 0 and logged success. All 1,305 installed inventory
+  files match the stage; all 14 settings/data fingerprints were unchanged before
+  restart, and both extension manifest identities were preserved. The desktop
+  restarted from its permanent install folder, and its installed native bridge
+  returned a successful getStatus response with product version 0.20.101.
 
 The signed-in Chrome ManyVids editor and its public Save-handler source were
 inspected without editing or saving real content. A synthetic browser exercised
-the real XHR observer, including wrong-video and rejected-save responses. The
-portable aggregate passed all 891 checks; lint, typecheck and formatting passed.
-All 622 .NET desktop/catalogue checks passed. These checks remain separate from
-live acceptance.
-
-This is not an installed release. The owner's visual review of the changed
-upload-result status remains pending. The separate debloating changes and their
-installer qualification remain in the checkout. No real platform publication or
-Google sheet mutation was performed; installed publish-to-sheet acceptance is
-still outstanding.
+the real XHR observer, including wrong-video and rejected-save responses. No real
+platform publication or Google sheet mutation was performed. The owner must
+reload the existing Chrome extension entry; live publish-to-sheet acceptance
+remains outstanding.
 
 ## Smooth small extension icons — installed 0.20.100, 5 October 2026
 

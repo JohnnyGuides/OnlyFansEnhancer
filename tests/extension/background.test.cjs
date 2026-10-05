@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.100",
+          productVersion: "0.20.101",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -587,7 +587,7 @@ function send(message, sender = extensionPageSender) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.100",
+    productVersion: "0.20.101",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -607,7 +607,7 @@ function send(message, sender = extensionPageSender) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.100");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.101");
   for (const sender of [
     {},
     { id: "test-extension", tab: { id: 5 }, url: "https://x.com/Owner" },

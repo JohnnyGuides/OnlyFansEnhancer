@@ -154,7 +154,7 @@ keeps data. External media and Chrome profiles are outside installer ownership.
    `dotnet build-server shutdown`, and rerun `dotnet test desktop/OFEnhancer.sln -c Release -m:1`
    followed by the remaining `check:windows` steps.
 4. `npm run build:desktop`, then rerun the stage-dependent tests alone:
-   `node --test tests/packaging/windows/installer-recovery.test.cjs tests/browser/fresh-reinstall-lifecycle.test.cjs`.
+   `node --test --test-concurrency=1 tests/packaging/windows/installer-recovery.test.cjs tests/browser/fresh-reinstall-lifecycle.test.cjs`.
 5. Fingerprint `%LocalAppData%\OFEnhancer` settings/data files, then install as a
    silent normal update:
    `dist\OFEnhancer-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=.local\OFEnhancer-<version>-install.log`.
