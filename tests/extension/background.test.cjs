@@ -1312,10 +1312,13 @@ function send(message, sender = extensionPageSender) {
           frameId: 0,
           result: {
             status: "link-captured",
+            sessionId: details.args[0].sessionId,
             postUrl:
               platform === "onlyfans"
                 ? "https://onlyfans.com/123456789/johnny_guides"
-                : "https://fansly.com/post/987654321",
+                : platform === "manyvids"
+                  ? `https://www.manyvids.com/Video/${details.args[0].videoId}`
+                  : "https://fansly.com/post/987654321",
           },
         },
       ];
@@ -1449,11 +1452,8 @@ function send(message, sender = extensionPageSender) {
       },
       {
         platform: "manyvids",
-        manyvidsId: "7783271",
-        submitted: true,
-        status: "posted-link-unresolved",
-        error:
-          "ManyVids Save was attempted once. Site acceptance is unverified; recover the existing result before any retry.",
+        postUrl: "https://www.manyvids.com/Video/7783271",
+        status: "uploaded-no-sheet",
       },
     ]);
     assert.equal(directRun.retry[0].status, "uploaded-no-sheet");

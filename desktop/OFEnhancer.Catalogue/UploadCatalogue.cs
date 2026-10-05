@@ -15,7 +15,9 @@ public sealed record UploadResultMetadata(string Id, string? ReleaseDate = null,
 public sealed record UploadResultRequest(int Row, string Fingerprint, string Platform, string PostUrl,
     UploadResultMetadata? Metadata = null, string? ItemId = null, string? Id = null, string? Action=null,
     string? StatusUrl=null,string? RedditUrl=null,bool RepeatUploadConfirmed=false);
-public sealed record UploadResult(string Status, string? Fingerprint = null, bool GoogleSynced = false, string? PostUrl = null);
+public sealed record UploadResult(string Status, string? Fingerprint = null, bool GoogleSynced = false, string? PostUrl = null,
+    string? GoogleError = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] UploadSheetWriteback? SheetWriteback = null);
 public sealed record DistributionLedgerRequest(string EventId,string RunId,string JobId,string Platform,
     int CatalogueRow,string CatalogueId,string ResultId,string ResultUrl,string Status,long RecordedAt,
     string Action,string PostUrl,string? ParentResultId=null);
@@ -91,6 +93,9 @@ public sealed partial class CatalogueStore
         string? canonical = CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri);
         if (canonical is null) throw new WorkbookProjectionException("invalid-upload-result", "The upload result URL is invalid.");
 
+        GoogleCatalogueSelection? destination = request.Platform is "onlyfans" or "fansly" or "manyvids" or "x"
+            ? GetGoogleCatalogueSelection() : null;
+        if (destination is not { SheetId: not null }) destination = null;
         using SqliteTransaction transaction = connection.BeginTransaction();
         CatalogueItemSummary? item = ReadItems(false, transaction).SingleOrDefault(candidate =>
             candidate.SourceKey == id && candidate.SourceRow == request.Row
@@ -100,7 +105,14 @@ public sealed partial class CatalogueStore
         string state = current.PublicationState[request.Platform];
         if (state == "review") return new("conflict", current.Fingerprint);
         var knownUrls = SourceUrls(item, platform);
-        if (knownUrls.Contains(canonical, StringComparer.Ordinal)) return new("idempotent", current.Fingerprint, PostUrl: canonical);
+        if (knownUrls.Any(known => string.Equals(known, canonical, StringComparison.Ordinal)
+            || platform == "onlyfans" && new Uri(known).AbsolutePath.Split('/')[1] == new Uri(canonical).AbsolutePath.Split('/')[1]))
+        {
+            UploadSheetWriteback? existingIntent = destination is null ? null
+                : QueueUploadSheetWriteback(destination.WorkbookId, destination.SheetId, request, canonical, item, transaction);
+            transaction.Commit();
+            return new("idempotent", current.Fingerprint, PostUrl: canonical, SheetWriteback: existingIntent);
+        }
         if (!string.Equals(current.Fingerprint, request.Fingerprint, StringComparison.OrdinalIgnoreCase)) return new("stale", current.Fingerprint);
         bool append=request.Action is "appendTwitterTeaser" or "appendRedditPost";
         if (state == "published" && !append && !request.RepeatUploadConfirmed) return new("conflict", current.Fingerprint);
@@ -115,8 +127,10 @@ public sealed partial class CatalogueStore
         command.CommandText="INSERT INTO audit_events(occurred_utc,kind,item_id,details_json) VALUES ($utc,'upload-result',$id,$details)";
         command.Parameters.AddWithValue("$details",JsonSerializer.Serialize(new RecordedPublication(platform,canonical,request.RepeatUploadConfirmed ? knownUrls.ToArray() : null)));
         command.ExecuteNonQuery();
+        UploadSheetWriteback? intent = destination is null ? null
+            : QueueUploadSheetWriteback(destination.WorkbookId, destination.SheetId, request, canonical, item, transaction);
         transaction.Commit();
-        return new("recorded-local", ToUploadRow(GetItems().Single(value=>value.ItemId==item.ItemId)).Fingerprint, PostUrl: canonical);
+        return new("recorded-local", ToUploadRow(GetItems().Single(value=>value.ItemId==item.ItemId)).Fingerprint, PostUrl: canonical, SheetWriteback: intent);
     }
 
     private IReadOnlyList<CatalogueItemSummary> WithRecordedPublications(List<CatalogueItemSummary> items,SqliteTransaction? transaction)

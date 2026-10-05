@@ -12,6 +12,67 @@ namespace OFEnhancer.Desktop.Tests;
 public sealed class GoogleCatalogueControllerTests
 {
     [TestMethod]
+    public void UploadResultWritebackKeepsLocalEvidenceAndReconcilesAnAttemptReadOnly()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Store.SaveGoogleCatalogueProfile(WorkbookId, "17", "Catalogue", "catalogue-v1", true, DateTimeOffset.UtcNow);
+        harness.Store.ImportWorkbookProjection(new(WorkbookId, "17", true,
+            [new(2, "episode-1", "Episode 1", "", null, null, null, 0, 0, new Dictionary<string,string>(), null)]), false);
+        var row = harness.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/500", Id: row.Id);
+        var local = harness.Store.RecordUploadResult(request);
+        int calls = 0;
+        harness.Session.WriteUploadLinkAction = (intent, beforeWrite) =>
+        {
+            calls++;
+            if (intent.State == "pending")
+            {
+                beforeWrite(17);
+                Assert.AreEqual("attempted", harness.Store.GetUploadSheetWritebacks(WorkbookId).Single().State);
+                return Task.FromException<GoogleTeaserLinkResult>(new GoogleCatalogueException("google-row-write-unresolved"));
+            }
+            Assert.AreEqual("unresolved", intent.State);
+            Assert.AreEqual("17", intent.SheetId);
+            return Task.FromResult(new GoogleTeaserLinkResult("already-present",
+                new(new(WorkbookId, "17", true,
+                    [new(2, row.Id, row.Title, row.Description, null, null, null, 0, 0,
+                        new Dictionary<string,string> { ["fansly"] = request.PostUrl }, null)]),
+                    17, "Catalogue", 1, new Dictionary<string,int> { ["sourceKey"] = 1, ["title"] = 2, ["fansly"] = 3 })));
+        };
+        var first = harness.Controller.WriteBackUploadResult(request, local);
+        Assert.AreEqual("recorded-local", first.Status);
+        Assert.IsFalse(first.GoogleSynced);
+        Assert.AreEqual("google-row-write-unresolved", first.GoogleError);
+        Assert.AreEqual(request.PostUrl, harness.Store.GetUploadCatalogueSnapshot().Rows.Single().FanslyLink);
+        harness.Controller.WriteBackUploadLinks();
+        Assert.AreEqual(2, calls);
+        Assert.AreEqual(0, harness.Store.GetUploadSheetWritebacks(WorkbookId).Count);
+        Assert.IsTrue(harness.Controller.WriteBackUploadResult(request, local).GoogleSynced);
+        Assert.AreEqual(2, calls, "a completed intent never calls the writer again");
+    }
+
+    [TestMethod]
+    public void UnreadySelectionKeepsTheIntentWithoutMutatingGoogle()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Store.SaveGoogleCatalogueProfile(WorkbookId, "17", "Catalogue", "catalogue-v1", false, DateTimeOffset.UtcNow);
+        harness.Store.ImportWorkbookProjection(new(WorkbookId, "17", true,
+            [new(2, "episode-1", "Episode 1", "", null, null, null, 0, 0, new Dictionary<string, string>(), null)]), false);
+        var row = harness.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/500", Id: row.Id);
+        var local = harness.Store.RecordUploadResult(request);
+        Assert.AreEqual("17", local.SheetWriteback!.SheetId);
+        harness.Session.WriteUploadLinkAction = (_, _) => throw new AssertFailedException("Unready destination must not write.");
+        Assert.IsFalse(harness.Controller.WriteBackUploadResult(request, local).GoogleSynced);
+        harness.Controller.WriteBackUploadLinks();
+        Assert.AreEqual("pending", harness.Store.GetUploadSheetWritebacks(WorkbookId).Single().State);
+        harness.Store.SaveGoogleCatalogueWorkbook("another-workbook", "Other workbook");
+        harness.Controller.WriteBackUploadResult(request, local);
+        Assert.AreEqual(0, harness.Store.GetUploadSheetWritebacks("another-workbook").Count);
+        Assert.AreEqual("17", harness.Store.GetUploadSheetWritebacks(WorkbookId).Single().SheetId);
+    }
+
+    [TestMethod]
     public void PersistenceFailureAfterInspectionCannotRestoreStaleReadiness()
     {
         using ControllerHarness harness = ReadyHarness();
@@ -1585,6 +1646,9 @@ public sealed class GoogleCatalogueControllerTests
 
     private sealed class FakeSession : IGoogleCatalogueSession
     {
+        internal Func<UploadSheetWriteback, Action<int>, Task<GoogleTeaserLinkResult>>? WriteUploadLinkAction { get; set; }
+        public Task<GoogleTeaserLinkResult> WriteUploadLinkAsync(UploadSheetWriteback intent, Action<int> beforeWrite,
+            CancellationToken cancellationToken) => WriteUploadLinkAction!(intent, beforeWrite);
         internal WorkbookInspection Inspection { get; set; } =
             GoogleCatalogueControllerTests.Inspection(alreadyMigrated: false);
         internal WorkbookMigrationResult Migration { get; set; } =

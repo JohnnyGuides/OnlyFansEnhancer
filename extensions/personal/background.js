@@ -5047,12 +5047,18 @@ async function prepareCreatorUploadResponseObserver(tabId) {
   });
 }
 
-function startCreatorUploadResponseObserver(tabId, sessionId, platform) {
+function startCreatorUploadResponseObserver(
+  tabId,
+  sessionId,
+  platform,
+  videoId = "",
+  documentId = null,
+) {
   return chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, ...(documentId ? { documentIds: [documentId] } : {}) },
     world: "MAIN",
     func: installCreatorUploadResponseObserver,
-    args: [{ sessionId, platform, deferred: true }],
+    args: [{ sessionId, platform, videoId, deferred: true }],
   });
 }
 
@@ -5099,6 +5105,7 @@ async function commitCreatorUploadResult(session, platform, postUrl) {
 
 async function runCreatorManyVidsPlatform(session, target) {
   const platform = "manyvids";
+  let observation = null;
   try {
     if (!target.manyvidsId) {
       target.status = "uploading-full";
@@ -5182,6 +5189,19 @@ async function runCreatorManyVidsPlatform(session, target) {
       status: target.status,
     });
     await prepareCreatorManyVidsEdit(session, target);
+    if (session.draft.publishMode === "autonomous") {
+      await prepareCreatorUploadResponseObserver(target.tabId);
+      observation = startCreatorUploadResponseObserver(
+        target.tabId,
+        session.id,
+        platform,
+        target.manyvidsId,
+        target.documentId,
+      ).then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+    }
     const selectors = {
       ...(target.tokens.teaser
         ? { teaser: "input.noborder[name='file']" }
@@ -5223,7 +5243,14 @@ async function runCreatorManyVidsPlatform(session, target) {
       platform,
       status: target.status,
     });
-    if (editResult.accepted !== true) {
+    const receipt = observation ? await observation : null;
+    if (receipt?.error) throw receipt.error;
+    if (
+      receipt?.value?.[0]?.result?.status !== "link-captured" ||
+      receipt.value[0].result.sessionId !== session.id ||
+      receipt.value[0].result.postUrl !==
+        CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(platform, target.manyvidsId)
+    ) {
       throw new Error(
         "ManyVids Save was attempted once. Site acceptance is unverified; recover the existing result before any retry.",
       );
@@ -5243,6 +5270,11 @@ async function runCreatorManyVidsPlatform(session, target) {
         commit.status === "updated" || commit.status === "idempotent"
           ? "catalogue-updated"
           : commit.status,
+      ...(commit.googleError
+        ? {
+            error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
+          }
+        : {}),
       ...(commit.status === "conflict" || commit.status === "stale"
         ? { error: `Catalogue commit stopped: ${commit.status}.` }
         : {}),
@@ -5257,6 +5289,11 @@ async function runCreatorManyVidsPlatform(session, target) {
     return result;
   } catch (error) {
     // A cancel that ended this run before any save click keeps its status.
+    await cancelCreatorUploadResponseObserver(
+      target.tabId,
+      session.id,
+      platform,
+    );
     if (session.cancelled && !target.submitAttempted && !target.submitted)
       return target;
     const result = {
@@ -5528,6 +5565,11 @@ async function runCreatorUploadPlatform(session, platform) {
         commit.status === "updated" || commit.status === "idempotent"
           ? "catalogue-updated"
           : commit.status,
+      ...(commit.googleError
+        ? {
+            error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
+          }
+        : {}),
       ...(commit.status === "conflict" || commit.status === "stale"
         ? { error: `Catalogue commit stopped: ${commit.status}.` }
         : {}),
@@ -5642,6 +5684,11 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
             : commit.status,
         submitted: true,
         postUrl: target.postUrl,
+        ...(commit.googleError
+          ? {
+              error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
+            }
+          : {}),
         ...(commit.status === "conflict" || commit.status === "stale"
           ? { error: `Catalogue commit stopped: ${commit.status}.` }
           : {}),
@@ -5767,7 +5814,7 @@ async function checkpointCreatorUploadCommit(
     throw new Error("The creator upload commit checkpoint was not durable.");
   }
   await assertCreatorUploadPageBinding(session, target, sender);
-  if (platform === "onlyfans" || platform === "fansly") {
+  if (["onlyfans", "fansly", "manyvids"].includes(platform)) {
     const armed = await chrome.scripting.executeScript({
       target: { tabId: target.tabId, documentIds: [target.documentId] },
       world: "MAIN",
@@ -6699,7 +6746,12 @@ async function armCreatorManualPublishWatch(session, target) {
     tabId: target.tabId,
     documentIds: [target.documentId],
   };
-  const config = { sessionId: session.id, platform: target.platform, watchId };
+  const config = {
+    sessionId: session.id,
+    platform: target.platform,
+    watchId,
+    videoId: target.manyvidsId || "",
+  };
   const [bridge] =
     (await chrome.scripting.executeScript({
       target: documentTarget,
@@ -6791,6 +6843,11 @@ async function finishCreatorManualPublish(session, target, rawPostUrl) {
         commit.status === "updated" || commit.status === "idempotent"
           ? "catalogue-updated"
           : commit.status,
+      ...(commit.googleError
+        ? {
+            error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
+          }
+        : {}),
       ...(commit.status === "conflict" || commit.status === "stale"
         ? { error: `Catalogue commit stopped: ${commit.status}.` }
         : {}),
@@ -6817,7 +6874,7 @@ async function finishCreatorManualPublish(session, target, rawPostUrl) {
 async function acceptCreatorManualPublishOutcome(message, sender) {
   const session = await getCreatorUploadSession(message?.sessionId);
   const target = session?.platforms.get(message?.platform);
-  if (!target || !["onlyfans", "fansly"].includes(target.platform))
+  if (!target || !["onlyfans", "fansly", "manyvids"].includes(target.platform))
     return { accepted: false };
   if (
     sender?.frameId !== 0 ||
@@ -6826,6 +6883,13 @@ async function acceptCreatorManualPublishOutcome(message, sender) {
     sender.documentId !== target.documentId
   )
     throw new Error("Unauthorized manual publish observation.");
+  if (
+    target.platform === "manyvids" &&
+    message.outcome === "captured" &&
+    CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl("manyvids", message.postUrl) !==
+      CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl("manyvids", target.manyvidsId)
+  )
+    throw new Error("The ManyVids Save belongs to a different video.");
   // Duplicate, superseded and already ended watches are acknowledged inertly.
   if (
     target.status !== "awaiting-manual-publish" ||
@@ -6882,7 +6946,7 @@ async function recordCreatorManualPreparation(session, target) {
   };
   if (
     session.draft?.publishMode !== "autonomous" &&
-    (target.platform === "onlyfans" || target.platform === "fansly")
+    ["onlyfans", "fansly", "manyvids"].includes(target.platform)
   ) {
     try {
       await armCreatorManualPublishWatch(session, target);

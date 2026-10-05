@@ -44,6 +44,9 @@ internal interface IGoogleCatalogueSession : IDisposable
     Task<GoogleTeaserLinkResult> AppendTeaserLinkAsync(string sourceKey, string url,
         CancellationToken cancellationToken) =>
         throw new GoogleCatalogueException("google-teaser-write-unavailable");
+    Task<GoogleTeaserLinkResult> WriteUploadLinkAsync(UploadSheetWriteback intent, Action<int> beforeWrite,
+        CancellationToken cancellationToken) =>
+        throw new GoogleCatalogueException("google-upload-write-unavailable");
 }
 
 internal sealed class GoogleCatalogueController : IGoogleCatalogueController
@@ -501,6 +504,79 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         }
         catch (Exception exception) { throw SafeException(exception); }
         finally { ExitCatalogueOperation(); }
+    }
+
+    internal UploadResult WriteBackUploadResult(UploadResultRequest request, UploadResult local)
+    {
+        if (request.Platform is not ("onlyfans" or "fansly" or "manyvids" or "x")) return local;
+        UploadSheetWriteback? intent = local.SheetWriteback is { } queued
+            ? _store.GetUploadSheetWriteback(queued.Key) : null;
+        if (intent is null) return local with { Status = "recorded-local", GoogleError = "google-catalogue-disconnected" };
+        UploadSheetWriteback result = WriteBackUploadLink(intent);
+        return result.State == "completed"
+            ? local with { Status = "updated", GoogleSynced = true,
+                Fingerprint = _store.GetUploadCatalogueSnapshot().Rows.Single(row => row.Id == intent.SourceKey).Fingerprint }
+            : local with { Status = "recorded-local", GoogleError = result.ErrorCode ?? "google-link-write-pending" };
+    }
+
+    internal void WriteBackUploadLinks()
+    {
+        GoogleCatalogueSelection? selection = _store.GetGoogleCatalogueSelection();
+        if (selection is null) return;
+        foreach (UploadSheetWriteback intent in _store.GetUploadSheetWritebacks(selection.WorkbookId))
+            WriteBackUploadLink(intent);
+    }
+
+    private UploadSheetWriteback WriteBackUploadLink(UploadSheetWriteback intent)
+    {
+        if (intent.State is "completed" or "conflict") return intent;
+        if (intent.SheetId is null) return intent with { ErrorCode = "catalogue-layout-changed" };
+        GoogleCatalogueSelection? selection = _store.GetGoogleCatalogueSelection();
+        if (intent.State == "pending" && (selection is not { Ready: true }
+            || selection.WorkbookId != intent.WorkbookId || selection.SheetId != intent.SheetId))
+            return intent with { ErrorCode = "catalogue-layout-changed" };
+        IGoogleCatalogueSession session;
+        lock (_gate)
+        {
+            if (_disposed || _session is null) return intent with { ErrorCode = "google-catalogue-disconnected" };
+            session = _session;
+            if (Interlocked.CompareExchange(ref _catalogueOperationActive, 1, 0) != 0)
+                return intent with { ErrorCode = "google-operation-in-progress" };
+        }
+        UploadSheetWriteback outcome = intent;
+        try
+        {
+            GoogleTeaserLinkResult written = session.WriteUploadLinkAsync(intent, sheetId =>
+            {
+                lock (_gate)
+                {
+                    if (!ReferenceEquals(session, _session))
+                        throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                    // Durable before dispatch. Recovery of any attempted mutation is read-only.
+                    outcome = intent with { SheetId = sheetId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        State = "attempted", ErrorCode = null };
+                    _store.RecordUploadSheetWriteback(outcome);
+                }
+            }, _lifetime.Token).GetAwaiter().GetResult();
+            lock (_gate)
+            {
+                if (!ReferenceEquals(session, _session))
+                    throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                _store.ImportWorkbookProjection(written.Preview.Projection, updateGoogleBindings: false);
+            }
+            outcome = outcome with { State = "completed", ErrorCode = null };
+        }
+        catch (Exception error)
+        {
+            string code = SafeException(error).Code;
+            outcome = outcome with { State = outcome.State is "attempted" or "unresolved" ? "unresolved"
+                : code is "platform-link-conflict" or "catalogue-entry-changed" or "catalogue-layout-changed"
+                    or "teaser-cell-formula" or "teaser-cell-linked" or "teaser-status-elsewhere"
+                    ? "conflict" : "pending", ErrorCode = code };
+        }
+        finally { ExitCatalogueOperation(); }
+        if (outcome != intent) _store.RecordUploadSheetWriteback(outcome);
+        return outcome;
     }
 
     // Writes bound teaser links missing from the sheet, at most a few per run.
@@ -1199,6 +1275,11 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
         CancellationToken cancellationToken) =>
         new GoogleTeaserLinkWriter(_workbookId, _preferredSheetId, _workspace)
             .AppendAsync(sourceKey, url, cancellationToken);
+
+    public Task<GoogleTeaserLinkResult> WriteUploadLinkAsync(UploadSheetWriteback intent, Action<int> beforeWrite,
+        CancellationToken cancellationToken) =>
+        new GoogleTeaserLinkWriter(_workbookId, _preferredSheetId, _workspace)
+            .WriteResultAsync(intent, beforeWrite, cancellationToken);
 
     public void Dispose() => _authorization?.Dispose();
 }

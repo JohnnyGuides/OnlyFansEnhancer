@@ -1,5 +1,27 @@
 # Acceptance and platform evidence
 
+## Upload result sheet links — source candidate, 5 October 2026
+
+ManyVids manual capture now binds the final editor Save request to its video ID;
+OnlyFans and Fansly retain their Publish-response capture. Confirmed catalogue
+results queue exact workbook/tab link writes atomically with local evidence.
+Pending work retries only against the ready selection, and dispatched writes
+recover through read-only reconciliation. Formula, metadata, destination,
+hyperlink and conflicting-link checks protect existing sheet data.
+
+The signed-in Chrome ManyVids editor and its public Save-handler source were
+inspected without editing or saving real content. A synthetic browser exercised
+the real XHR observer, including wrong-video and rejected-save responses. The
+portable aggregate passed all 891 checks; lint, typecheck and formatting passed.
+All 622 .NET desktop/catalogue checks passed. These checks remain separate from
+live acceptance.
+
+This is not an installed release. The owner's visual review of the changed
+upload-result status remains pending. The separate debloating changes and their
+installer qualification remain in the checkout. No real platform publication or
+Google sheet mutation was performed; installed publish-to-sheet acceptance is
+still outstanding.
+
 ## Smooth small extension icons — installed 0.20.100, 5 October 2026
 
 The owner approved the smooth 16 and 32 px designs on dark and light backgrounds.

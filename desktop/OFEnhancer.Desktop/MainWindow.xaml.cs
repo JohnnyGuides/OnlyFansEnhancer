@@ -74,12 +74,17 @@ public partial class MainWindow : Window, IDisposable
             () => googleCatalogue.ImportGoogleClientConfiguration(() => Dispatcher.Invoke(ChooseGoogleClientConfiguration))
         );
         queuedRouter = router;
-        uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets);
+        uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets,
+            googleCatalogue.WriteBackUploadResult);
         XScanActivityBoard scanActivity = new();
         xObservations = new XObservationController(catalogue, scanActivity: scanActivity,
             startedUtc: System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime());
         xTeasers = new XTeaserController(catalogue, dispatcher, settings.Load,
-            sheetWriteback: googleCatalogue.WriteBackTeaserLinks, scanActivity: scanActivity);
+            sheetWriteback: now =>
+            {
+                googleCatalogue.WriteBackUploadLinks();
+                return googleCatalogue.WriteBackTeaserLinks(now);
+            }, scanActivity: scanActivity);
         xTeasers.Start();
         uploadThumbnails = new UploadThumbnailCatalogue(catalogue);
         uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>

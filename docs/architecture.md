@@ -104,6 +104,10 @@ Direct Google import and reviewed sync have different acceptance criteria.
 layout. Developer metadata locates stable item rows; fingerprints protect fields.
 The outbox never rewinds an attempted mutation to pending. Details, recovery, and
 operator procedures are maintained only in [Google catalogue](google-catalogue.md).
+Verified upload results also queue a destination-bound `upload-sheet-writeback`
+audit intent. The adaptive link writer shares the teaser cell protections,
+checkpoints before dispatch, and verifies readback. The existing hourly sheet
+worker processes pending intents and reconciles attempted ones read-only.
 
 The separate X host uses a basename plus identity proof within configured roots,
 not a caller-provided arbitrary path. Representative frames come from the selected

@@ -12,7 +12,7 @@ const manifestPath = path.resolve(personalRoot, "manifest.json");
 
 // --- Page observer ---------------------------------------------------------
 
-function loadObserver() {
+function loadObserver(videoId = null) {
   const timers = [];
   const events = [];
   class Xhr {
@@ -21,6 +21,7 @@ function loadObserver() {
       this.listeners.push(listener);
     }
     open() {}
+    send() {}
     complete(payload, status = 200) {
       this.status = status;
       this.responseType = "json";
@@ -36,9 +37,17 @@ function loadObserver() {
   }
   const context = vm.createContext({
     URL,
+    URLSearchParams,
     CustomEvent,
-    location: { href: "https://onlyfans.com/posts/create" },
+    location: {
+      href: videoId
+        ? `https://www.manyvids.com/Edit-vid/${videoId}`
+        : "https://onlyfans.com/posts/create",
+    },
     document: {
+      querySelector() {
+        return videoId ? { value: videoId } : null;
+      },
       dispatchEvent(event) {
         events.push({ type: event.type, ...JSON.parse(event.detail) });
       },
@@ -134,6 +143,66 @@ test("a manual watch survives a rejected publish and captures the retry", async 
   await settle();
   assert.equal(events.length, 1);
   assert.equal(events[0].postUrl, "https://fansly.com/post/987654321");
+});
+
+test("ManyVids records only the bound editor's accepted final Save", async () => {
+  const { api, Xhr, events, settle } = loadObserver("7470821");
+  assert.equal(
+    api.watch({
+      sessionId: OBSERVER_SESSION,
+      platform: "manyvids",
+      videoId: "7470821",
+      watchId: WATCH,
+      timeoutMs: 60_000,
+    }),
+    true,
+  );
+  const save = (body, payload, status = 200) => {
+    const xhr = post(Xhr, "https://www.manyvids.com/includes/saveVideo.php");
+    xhr.send(body);
+    xhr.complete(payload, status);
+  };
+  save("vid_id=999&edit_video=true", {});
+  save("vid_id=7470821&edit_video=false", {});
+  save("vid_id=7470821&edit_video=true", { error: "validation failed" });
+  save("vid_id=7470821&edit_video=true", {}, 500);
+  await settle();
+  assert.deepEqual(events, []);
+  save("vid_id=7470821&edit_video=true", {});
+  await settle();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].postUrl, "https://www.manyvids.com/Video/7470821");
+});
+
+test("ManyVids manual preparation watches Save and refuses a different video's result", async () => {
+  const env = await loadWorker();
+  const id = sessionId();
+  const session = addSession(env, id, { platforms: ["manyvids"] });
+  const target = session.platforms.get("manyvids");
+  target.manyvidsId = "7470821";
+  assert.equal(
+    (await prepare(env, id, "manyvids")).status,
+    "awaiting-manual-publish",
+  );
+  await assert.rejects(
+    deliver(
+      env,
+      outcome(id, target, {
+        postUrl: "https://www.manyvids.com/Video/999/",
+      }),
+      senderFor(target),
+    ),
+    /different video/,
+  );
+  assert.deepEqual(env.commits, []);
+  const captured = await deliver(
+    env,
+    outcome(id, target, {
+      postUrl: "https://www.manyvids.com/Video/7470821/",
+    }),
+    senderFor(target),
+  );
+  assert.equal(captured.result.status, "catalogue-updated");
 });
 
 test("a manual watch announces unresolved, cancelled and expired outcomes", async () => {

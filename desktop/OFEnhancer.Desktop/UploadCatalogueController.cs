@@ -4,7 +4,8 @@ using OFEnhancer.Catalogue;
 
 namespace OFEnhancer.Desktop;
 
-internal sealed class UploadCatalogueController(CatalogueStore store, Func<GoogleSubredditPresetSnapshot>? readSubredditPresets=null)
+internal sealed class UploadCatalogueController(CatalogueStore store, Func<GoogleSubredditPresetSnapshot>? readSubredditPresets=null,
+    Func<UploadResultRequest, UploadResult, UploadResult>? writeback=null)
 {
     private readonly UploadThumbnailCatalogue thumbnails = new(store);
     private static readonly JsonSerializerOptions JsonOptions=new()
@@ -26,7 +27,9 @@ internal sealed class UploadCatalogueController(CatalogueStore store, Func<Googl
                 && action.GetString()=="appendDistributionLedger")
                 return store.RecordDistributionLedger(payload.Deserialize<DistributionLedgerRequest>(JsonOptions) ?? throw new JsonException());
             UploadResultRequest request=payload.Deserialize<UploadResultRequest>(JsonOptions) ?? throw new JsonException();
-            return store.RecordUploadResult(request);
+            UploadResult result = store.RecordUploadResult(request);
+            return result.Status is "recorded-local" or "idempotent" && writeback is not null
+                ? writeback(request, result) : result;
         }
         catch(JsonException) {throw new GoogleCatalogueControllerException("invalid-upload-result");}
         catch(WorkbookProjectionException exception) {throw new GoogleCatalogueControllerException(exception.Code);}

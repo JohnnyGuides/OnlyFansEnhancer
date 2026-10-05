@@ -79,7 +79,12 @@ If the owner changes a selected row's title or description, Upload asks whether
 to update that row or create a new one. The run binds the resulting row and
 checks its fingerprint again before platform preparation. A verified platform
 result is recorded against that row; a prepared draft alone has no post link to
-record. The only main-video publishing control is an unchecked **Publish
+record. Manual OnlyFans and Fansly preparations watch the prepared document for
+the owner's successful publication; ManyVids watches the exact editor's accepted
+final Save. These watches last six hours and end when the document is left or
+the tab is closed. Confirmed links are saved locally, then written to the
+connected Google catalogue through the protected link write-back path.
+The only main-video publishing control is an unchecked **Publish
 immediately** checkbox. Unchecked prepares the composers and leaves each final
 Save or publish action to the owner. Checked authorizes the adapters' existing
 automatic final actions at the selected release time; Pornhub Submit remains

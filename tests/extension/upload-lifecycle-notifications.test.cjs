@@ -424,11 +424,15 @@ function siteEnvironment(platform, disconnectAt) {
   };
   env.run(`
     prepareCreatorManyVidsEdit = async () => {};
+    prepareCreatorUploadResponseObserver = async () => {};
+    startCreatorUploadResponseObserver = async (_tab, sessionId, platform, videoId) => [{
+      result: { sessionId, platform, status: "link-captured", postUrl: "https://www.manyvids.com/Video/" + videoId }
+    }];
     resolveCreatorUploadAdapterResult = async () => {
       if (disconnectAt === "adapter") disconnect();
       return ${
         platform === "manyvids"
-          ? '{ status: "save-clicked", accepted: true }'
+          ? '{ status: "save-clicked" }'
           : '{ status: "manual-submit-required" }'
       };
     };

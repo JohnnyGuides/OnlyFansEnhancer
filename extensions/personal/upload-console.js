@@ -3294,7 +3294,7 @@
           "catalogue-commit-failed": "Posted; sheet update failed",
           "catalogue-updated": "Sheet updated and verified",
           "uploaded-no-sheet": "Scheduled · sheet not connected",
-          "recorded-local": "Saved locally · sheet unchanged",
+          "recorded-local": "Saved locally · sheet unverified",
           "published-local": "Published · catalogue entry deferred",
           "review-required": "Draft prepared · review remaining fields",
           "waiting-for-redgifs": "Draft prepared · add the Redgifs link",

@@ -25,31 +25,59 @@ internal sealed class GoogleTeaserLinkWriter(
         "catalogue-row-moved", "teaser-status-elsewhere",
     };
 
-    internal async Task<GoogleTeaserLinkResult> AppendAsync(string sourceKey, string url,
-        CancellationToken cancellationToken)
+    internal Task<GoogleTeaserLinkResult> AppendAsync(string sourceKey, string url,
+        CancellationToken cancellationToken) => WriteAsync(sourceKey, url, "x", null, null, cancellationToken);
+
+    internal Task<GoogleTeaserLinkResult> WriteResultAsync(UploadSheetWriteback intent,
+        Action<int> beforeWrite, CancellationToken cancellationToken) =>
+        WriteAsync(intent.SourceKey, intent.Url, intent.Platform, intent, beforeWrite, cancellationToken);
+
+    private async Task<GoogleTeaserLinkResult> WriteAsync(string sourceKey, string url, string platform,
+        UploadSheetWriteback? intent, Action<int>? beforeWrite, CancellationToken cancellationToken)
     {
-        string statusId = CatalogueStore.XStatusIdFromUrl(url) is { } id && url.Length <= 2048 && !url.Any(char.IsWhiteSpace)
+        bool teaser = platform == "x";
+        string LinkKey(string value) => platform == "onlyfans" ? new Uri(value).AbsolutePath.Split('/')[1] : value;
+        string statusId = (teaser ? CatalogueStore.XStatusIdFromUrl(url)
+            : Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+                && platform is "onlyfans" or "fansly" or "manyvids"
+                ? CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri) : null) is { } id
+            && url.Length <= 2048 && !url.Any(char.IsWhiteSpace)
             ? id : throw new GoogleCatalogueException("invalid-teaser-link");
+        if (!teaser) statusId = LinkKey(statusId);
         (GoogleWorkbookSnapshot workbook, GoogleCatalogueImportPreview before) = await ReadAsync(cancellationToken)
             .ConfigureAwait(false);
-        if (!before.Columns.TryGetValue("x", out int column))
+        if (intent is not null && (intent.WorkbookId != before.Projection.WorkbookId ||
+            intent.SheetId is not null && intent.SheetId != before.Projection.SheetId))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        if (!before.Columns.TryGetValue(platform, out int column))
             throw new GoogleCatalogueException("catalogue-layout-changed");
         WorkbookCatalogueItem item = before.Projection.Items.SingleOrDefault(candidate => candidate.SourceKey == sourceKey)
             ?? throw new GoogleCatalogueException("catalogue-entry-missing");
         GoogleSheetSnapshot sheet = workbook.Sheets.Single(candidate => candidate.SheetId == before.CatalogueSheetId);
         GoogleWorkbookCellSnapshot? cell = CellAt(sheet, item.SourceRow, column);
         string text = cell?.Value ?? "";
-        if (StatusIds(text).Contains(statusId)
-            || cell?.Hyperlink is { } target && CatalogueStore.XStatusIdFromUrl(target) == statusId)
+        HashSet<string> Links(string value) => teaser ? StatusIds(value) :
+            [.. CellUrl.Matches(value).Select(match => Uri.TryCreate(match.Value, UriKind.Absolute, out Uri? parsed)
+                ? CatalogueSnapshotImporter.CanonicalPlatformLink(platform, parsed) : null).OfType<string>().Select(LinkKey)];
+        if (intent is not null && (item.Title != intent.Title || item.Description != intent.Description))
+            throw new GoogleCatalogueException("catalogue-entry-changed");
+        if (intent is not null && item.SourceLinkCells is { } sourceCells
+            && sourceCells.TryGetValue(platform, out CatalogueSourceLinkCell? sourceCell) && sourceCell.IssueCode is not null)
+            throw new GoogleCatalogueException("platform-link-conflict");
+        if (Links(text).Contains(statusId)
+            || cell?.Hyperlink is { } target && Links(target).Contains(statusId))
             return new("already-present", before);
+        if (!teaser && (!string.IsNullOrWhiteSpace(text) || cell?.Hyperlink is not null))
+            throw new GoogleCatalogueException("platform-link-conflict");
         // A status already linked from another row is never duplicated here.
         if (sheet.Rows.Any(row => row.RowNumber > before.HeaderRow && row.RowNumber != item.SourceRow
-            && StatusIds(row.Cells.ElementAtOrDefault(column - 1)?.Value ?? "").Contains(statusId)))
+            && (Links(row.Cells.ElementAtOrDefault(column - 1)?.Value ?? "").Contains(statusId)
+                || Links(row.Cells.ElementAtOrDefault(column - 1)?.Hyperlink ?? "").Contains(statusId))))
             throw new GoogleCatalogueException("teaser-status-elsewhere");
         if (text.Any(c => c is '\r' or '\t'))
             throw new GoogleCatalogueException("teaser-cell-unreadable");
         // A whole-cell link on non-link text would be lost by a value write.
-        if (cell?.Hyperlink is { } link && !StatusIds(text).Contains(CatalogueStore.XStatusIdFromUrl(link) ?? ""))
+        if (cell?.Hyperlink is not null)
             throw new GoogleCatalogueException("teaser-cell-linked");
 
         string existing = text.Trim();
@@ -60,7 +88,18 @@ internal sealed class GoogleTeaserLinkWriter(
         string idRange = $"{prefix}{(char)('A' + before.Columns["sourceKey"] - 1)}{item.SourceRow}";
         // The row's ID and teaser cell are read together just before the write,
         // so a row inserted, deleted or sorted since the full read is refused.
-        IReadOnlyList<GoogleProjectionCell> cells = await workspace.ReadProjectionCellsAsync(workbookId, [idRange, range],
+        List<(string Range, string Expected)> guards = [];
+        if (intent is not null)
+        {
+            string headerRange = $"{prefix}{(char)('A' + column - 1)}{before.HeaderRow}";
+            guards.Add((headerRange, CellAt(sheet, before.HeaderRow, column)?.Value ?? ""));
+            foreach ((string field, string expected) in new[] { ("title", intent.Title), ("description", intent.Description) })
+                if (before.Columns.TryGetValue(field, out int fieldColumn))
+                    guards.Add(($"{prefix}{(char)('A' + fieldColumn - 1)}{item.SourceRow}", expected));
+                else if (expected.Length > 0) throw new GoogleCatalogueException("catalogue-layout-changed");
+        }
+        IReadOnlyList<GoogleProjectionCell> cells = await workspace.ReadProjectionCellsAsync(workbookId,
+            [idRange, range, .. guards.Select(guard => guard.Range)],
             cancellationToken, allowTextWhitespace: true).ConfigureAwait(false);
         GoogleProjectionCell liveId = cells[0], live = cells[1];
         if (!GoogleUploadEntryWriter.SameCell(liveId.Range, before.CatalogueSheetTitle, idRange)
@@ -69,6 +108,13 @@ internal sealed class GoogleTeaserLinkWriter(
         if ((liveId.Value ?? "").Trim() != sourceKey) throw new GoogleCatalogueException("catalogue-row-moved");
         if ((live.Value ?? "").StartsWith('=')) throw new GoogleCatalogueException("teaser-cell-formula");
         if ((live.Value ?? "").Trim() != existing) throw new GoogleCatalogueException("catalogue-entry-changed");
+        for (int index = 0; index < guards.Count; index++)
+            if (!GoogleUploadEntryWriter.SameCell(cells[index + 2].Range, before.CatalogueSheetTitle, guards[index].Range)
+                || (cells[index + 2].Value ?? "").Trim() != guards[index].Expected.Trim())
+                throw new GoogleCatalogueException("catalogue-entry-changed");
+        if (intent is not null && intent.State != "pending")
+            throw new GoogleCatalogueException("google-row-write-unresolved");
+        beforeWrite?.Invoke(before.CatalogueSheetId);
         try
         {
             await workspace.UpdateValuesBatchAsync(new(workbookId, [new(range, updated)]), cancellationToken, raw: true)
@@ -85,7 +131,10 @@ internal sealed class GoogleTeaserLinkWriter(
         WorkbookCatalogueItem? written = after.Projection.Items.SingleOrDefault(candidate => candidate.SourceKey == sourceKey);
         string? writtenText = written is null ? null
             : CellAt(readback.Sheets.Single(candidate => candidate.SheetId == after.CatalogueSheetId), written.SourceRow, column)?.Value;
-        if (written is null || written.SourceRow != item.SourceRow || writtenText?.Trim() != updated)
+        if (written is null || written.SourceRow != item.SourceRow || writtenText?.Trim() != updated
+            || intent is not null && (written.Title != intent.Title || written.Description != intent.Description
+                || written.SourceLinkCells is { } writtenCells && writtenCells.TryGetValue(platform, out CatalogueSourceLinkCell? writtenCell)
+                    && writtenCell.IssueCode is not null))
             throw new GoogleCatalogueException("google-row-write-unresolved");
         return new("appended", after);
     }

@@ -12,6 +12,10 @@
       origin: "https://apiv3.fansly.com",
       path: "/api/v1/post",
     }),
+    manyvids: Object.freeze({
+      origin: "https://www.manyvids.com",
+      path: "/includes/saveVideo.php",
+    }),
   });
   const MANUAL_WATCH_EVENT = "creator-upload-manual-publish";
   const MANUAL_WATCH_MAX_MS = 12 * 60 * 60_000;
@@ -137,7 +141,8 @@
     for (const observer of [...observers]) {
       if (
         !meta?.epochs?.has(observer) ||
-        !matchesEndpoint(meta, observer.platform)
+        !matchesEndpoint(meta, observer.platform) ||
+        (observer.platform === "manyvids" && meta.videoId !== observer.videoId)
       )
         continue;
       if (xhr.status < 200 || xhr.status >= 300) {
@@ -153,7 +158,24 @@
         );
         continue;
       }
-      const postUrl = extractPostUrl(observer.platform, responsePayload(xhr));
+      const payload = responsePayload(xhr);
+      // ManyVids' current Save handler accepts a JSON object without an error.
+      // The ID comes from the exact editor's save request, never an upload card.
+      if (
+        observer.platform === "manyvids" &&
+        (!payload ||
+          typeof payload !== "object" ||
+          Array.isArray(payload) ||
+          payload.error)
+      ) {
+        if (observer.manual) continue;
+        settle(observer, null, new Error("ManyVids rejected the final Save."));
+        continue;
+      }
+      const postUrl =
+        observer.platform === "manyvids"
+          ? canonical("manyvids", observer.videoId)
+          : extractPostUrl(observer.platform, payload);
       settle(observer, {
         platform: observer.platform,
         postUrl,
@@ -167,6 +189,7 @@
     if (patched) return;
     patched = true;
     const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function creatorUploadObservedOpen(
       method,
       url,
@@ -182,6 +205,18 @@
       });
       return originalOpen.call(this, method, url, ...rest);
     };
+    XMLHttpRequest.prototype.send = function creatorUploadObservedSend(body) {
+      const meta = xhrMeta.get(this);
+      if (matchesEndpoint(meta, "manyvids") && typeof body === "string") {
+        const fields = new URLSearchParams(body);
+        if (
+          fields.getAll("vid_id").length === 1 &&
+          fields.get("edit_video") === "true"
+        )
+          meta.videoId = fields.get("vid_id");
+      }
+      return originalSend.call(this, body);
+    };
   }
 
   function install({
@@ -190,6 +225,7 @@
     timeoutMs = 30 * 60_000,
     deferred = false,
     manual = false,
+    videoId = "",
   }) {
     if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(sessionId || ""))) {
       return Promise.reject(new Error("Invalid upload response session."));
@@ -197,6 +233,17 @@
     if (!Object.hasOwn(ENDPOINTS, platform)) {
       return Promise.reject(new Error("Unsupported upload response platform."));
     }
+    if (
+      platform === "manyvids" &&
+      (!/^\d+$/.test(String(videoId)) ||
+        new URL(location.href).origin !== ENDPOINTS.manyvids.origin ||
+        new URL(location.href).pathname.replace(/\/$/, "") !==
+          `/Edit-vid/${videoId}` ||
+        /** @type {HTMLInputElement|null} */ (
+          document.querySelector("#videoSettingsForm #video_id")
+        )?.value !== String(videoId))
+    )
+      return Promise.reject(new Error("The ManyVids editor identity changed."));
     patchXhr();
     return new Promise((resolve, reject) => {
       const observer = {
@@ -208,6 +255,7 @@
         armed: false,
         timeoutMs,
         manual: manual === true,
+        videoId: String(videoId),
       };
       observers.add(observer);
       if (!deferred) arm(sessionId, platform);
@@ -255,7 +303,7 @@
   // Only requests opened after arming in this document count, and the first
   // matching response settles it. The outcome is announced to the isolated
   // bridge, and from there to the extension worker.
-  function watch({ sessionId, platform, watchId, timeoutMs }) {
+  function watch({ sessionId, platform, watchId, timeoutMs, videoId }) {
     if (!/^[a-f0-9]{32}$/.test(String(watchId || ""))) return false;
     cancel(sessionId, platform);
     const announce = (outcome, postUrl = "") =>
@@ -264,7 +312,7 @@
           detail: JSON.stringify({ watchId, outcome, postUrl }),
         }),
       );
-    install({ sessionId, platform, timeoutMs, manual: true }).then(
+    install({ sessionId, platform, timeoutMs, videoId, manual: true }).then(
       (receipt) =>
         announce(
           receipt?.postUrl ? "captured" : "unresolved",

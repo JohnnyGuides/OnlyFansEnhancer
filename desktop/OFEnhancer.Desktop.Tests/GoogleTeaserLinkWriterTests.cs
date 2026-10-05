@@ -12,6 +12,78 @@ public sealed class GoogleTeaserLinkWriterTests
     private const string Sheet = "2026 Video Catalogue";
     private const string NewLink = "https://x.com/Owner_Handle/status/500";
 
+    [DataTestMethod]
+    [DataRow("onlyfans", "OnlyFans", "https://onlyfans.com/500/johnny_guides")]
+    [DataRow("fansly", "Fansly", "https://fansly.com/post/500")]
+    [DataRow("manyvids", "ManyVids", "https://www.manyvids.com/Video/500")]
+    public async Task VerifiedPlatformLinkWritesOnlyItsEmptyCellAndNeverRepeatsAnAttempt(string platform, string header, string url)
+    {
+        FakeSheet sheet = Workbook();
+        sheet.SetCell(1, 4, header);
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            platform, url, "Episode A", "");
+        int attempts = 0;
+        GoogleTeaserLinkResult result = await Writer(sheet).WriteResultAsync(intent, _ => attempts++, CancellationToken.None);
+        Assert.AreEqual("appended", result.Status);
+        Assert.AreEqual(1, attempts);
+        Assert.AreEqual(url, sheet.Cell(2, 4));
+        Assert.AreEqual(1, sheet.Posts.Single().GetProperty("data").GetArrayLength());
+        Assert.AreEqual("already-present", (await Writer(sheet).WriteResultAsync(intent with { State = "attempted" },
+            _ => Assert.Fail("Reconciliation must not write"), CancellationToken.None)).Status);
+
+        FakeSheet unresolved = Workbook();
+        unresolved.SetCell(1, 4, header);
+        Assert.AreEqual("google-row-write-unresolved", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(unresolved).WriteResultAsync(intent with { State = "attempted" }, _ => Assert.Fail(), CancellationToken.None))).Code);
+        Assert.AreEqual(0, unresolved.Posts.Count);
+    }
+
+    [TestMethod]
+    public async Task PlatformResultRefusesConflictingCellChangedMetadataAndWrongSheet()
+    {
+        FakeSheet sheet = Workbook();
+        sheet.SetCell(1, 4, "Fansly");
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            "fansly", "https://fansly.com/post/500", "Episode A", "");
+        async Task Refused(OFEnhancer.Catalogue.UploadSheetWriteback job, string code) =>
+            Assert.AreEqual(code, (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+                Writer(sheet).WriteResultAsync(job, _ => Assert.Fail(), CancellationToken.None))).Code);
+        await Refused(intent with { SheetId = "99" }, "catalogue-layout-changed");
+        await Refused(intent with { Title = "Different episode" }, "catalogue-entry-changed");
+        sheet.SetCell(2, 4, "https://fansly.com/post/400");
+        await Refused(intent, "platform-link-conflict");
+        sheet.SetCell(2, 4, "", "https://fansly.com/post/400");
+        await Refused(intent, "platform-link-conflict");
+        sheet.SetCell(2, 4, intent.Url, "https://fansly.com/post/400");
+        await Refused(intent, "platform-link-conflict");
+        sheet.SetCell(2, 4, intent.Url);
+        await Refused(intent with { State = "attempted", Title = "Different episode" }, "catalogue-entry-changed");
+        Assert.AreEqual(0, sheet.Posts.Count);
+    }
+
+    [TestMethod]
+    public async Task MetadataChangedAfterDispatchLeavesTheWriteUnresolved()
+    {
+        FakeSheet sheet = Workbook();
+        sheet.SetCell(1, 4, "Fansly");
+        sheet.AfterWrite = () => sheet.SetCell(2, 2, "Changed episode");
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            "fansly", "https://fansly.com/post/500", "Episode A", "");
+        Assert.AreEqual("google-row-write-unresolved", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).WriteResultAsync(intent, _ => { }, CancellationToken.None))).Code);
+        Assert.AreEqual(1, sheet.Posts.Count);
+    }
+
+    [TestMethod]
+    public async Task AppendingToAWholeCellLinkedUrlIsRefused()
+    {
+        FakeSheet sheet = Workbook();
+        sheet.SetCell(4, 4, "https://x.com/Owner_Handle/status/13", "https://x.com/Owner_Handle/status/13");
+        Assert.AreEqual("teaser-cell-linked", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).AppendAsync("ep-c", NewLink, CancellationToken.None))).Code);
+        Assert.AreEqual(0, sheet.Posts.Count);
+    }
+
     [TestMethod]
     public async Task AppendsToAnEmptyCellAsTheOnlyLink()
     {
@@ -164,6 +236,7 @@ public sealed class GoogleTeaserLinkWriterTests
         internal Action? BeforeCellRead { get; set; }
         internal bool ApplyWrites { get; set; } = true;
         internal bool FailAfterWrite { get; set; }
+        internal Action? AfterWrite { get; set; }
         internal string? FormulaOverride { get; set; }
 
         internal string Cell(int row, int column) => row <= rows.Count ? rows[row - 1][column - 1] : "";
@@ -190,6 +263,7 @@ public sealed class GoogleTeaserLinkWriterTests
                         (int row, int column) = Address(update.GetProperty("range").GetString()!);
                         SetCell(row, column, update.GetProperty("values")[0][0].GetString()!);
                     }
+                AfterWrite?.Invoke();
                 if (FailAfterWrite) throw new TaskCanceledException("Accepted before the acknowledgement was lost.");
                 return Json(request, "{}");
             }

@@ -160,11 +160,35 @@ its fingerprint before a narrow write, then verifies readback. Missing/duplicate
 metadata, nonempty conflicting cells, changed identity, or fingerprint drift
 blocks the mutation instead of overwriting another system's work.
 
-## Teaser links the app writes
+## Upload result links the app writes
+
+Confirmed OnlyFans, Fansly, ManyVids and X upload results associated with a
+catalogue row are saved locally first. With a ready Google selection they also
+queue a narrow link write to that exact workbook and tab. Connected writes run immediately;
+pending work is checked on the hourly background run. No old local publication
+history is automatically enqueued.
+
+The writer resolves the row by its catalogue ID and detected column mapping,
+checks title/description, then rereads the row ID, destination cell, header and
+metadata immediately before writing. It refuses formulas, conflicting links,
+foreign linked text and a link already assigned to another row. Video links fill
+empty platform cells; X links append to `Twitter Teaser(s)` without changing its
+count column. Existing matching posts are idempotent, including an OnlyFans URL
+with a different handle suffix. Reimport happens only after verified readback.
+
+Intent, destination and the attempt checkpoint persist in the local audit log.
+After any dispatched write, recovery only reads the sheet: an identical link
+completes the intent, otherwise it stays unresolved. It never resends that
+mutation blindly. A disconnected or failed Google write preserves the local
+post link and reports that the sheet update is pending. Conflicting intents stop
+for review; automatic work does not overwrite an existing platform link even
+when a repeat upload was confirmed locally.
+
+## Discovered teaser links the app writes
 
 While Google is connected the app adds X teaser links it discovered to the
-catalogue's `Twitter Teaser(s)` column without a review step. This is the only
-automatic sheet write, it applies whether or not reviewed sync is set up, and the
+catalogue's `Twitter Teaser(s)` column without a review step. Like upload-result
+link writes, this applies whether or not reviewed sync is set up, and the
 **Import catalogue** step itself still never writes.
 
 - Source: owner video teasers bound to a row through the first-reply OnlyFans or
@@ -254,7 +278,7 @@ user-entered formula evidence. Foreign formulas are not empty cells. Projection
 writes use a row metadata ID with null entries for untouched columns and recheck
 the destination header. These checks are not atomic compare-and-swap: concurrent
 cell or column edits between validation and dispatch can still race the write.
-The optional writer has no automatic production enqueue path. Live use requires
+The optional reviewed projection writer has no automatic production enqueue path. Live use requires
 the separately authorized copy acceptance and exclusive editing coordination.
 
 X recorder sessions freeze the Apps Script endpoint, workbook and worksheet.

@@ -4,6 +4,51 @@ namespace OFEnhancer.Catalogue.Tests;
 public sealed class UploadCatalogueTests
 {
     [TestMethod]
+    public void UploadSheetIntentAndAttemptSurviveRestartWithoutLosingDestinationOrLocalLink()
+    {
+        using TestStore test = new();
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/123456789", Id: row.Id);
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
+        test.Store.SaveGoogleCatalogueProfile("work", "1", "Videos", "catalogue-v1", true, DateTimeOffset.UtcNow);
+        var local = test.Store.RecordUploadResult(request);
+        Assert.AreEqual(local.PostUrl, test.Store.GetUploadSheetWritebacks("work").Single().Url);
+        var intent = test.Store.QueueUploadSheetWriteback("work", "1", request, local.PostUrl!);
+        Assert.AreEqual(intent, test.Store.QueueUploadSheetWriteback("work", "1", request, local.PostUrl!));
+        test.Store.RecordUploadSheetWriteback(intent with { State = "attempted" });
+        using var reopened = CatalogueStore.Open(test.Store.DatabasePath);
+        Assert.AreEqual("attempted", reopened.GetUploadSheetWritebacks("work").Single().State);
+        Assert.AreEqual(0, reopened.GetUploadSheetWritebacks("different-workbook").Count);
+        Assert.AreEqual(local.PostUrl, reopened.GetUploadCatalogueSnapshot().Rows.Single().FanslyLink);
+        reopened.RecordUploadSheetWriteback(intent with { State = "completed" });
+        Assert.AreEqual(0, reopened.GetUploadSheetWritebacks("work").Count);
+    }
+    [TestMethod]
+    public void OnlyFansHandleSuffixIsTheSamePublishedPost()
+    {
+        using TestStore test = new();
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [new(2, "episode", "Title", "Description", null, null, null, 0, 0,
+            new Dictionary<string, string> { ["onlyfans"] = "https://onlyfans.com/500" }, null)]), false);
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "onlyfans", "https://onlyfans.com/500/johnny_guides", Id: row.Id);
+        Assert.AreEqual("idempotent", test.Store.RecordUploadResult(request).Status);
+        Assert.AreEqual(row.Fingerprint, test.Store.GetUploadCatalogueSnapshot().Rows.Single().Fingerprint);
+    }
+
+    [TestMethod]
+    public void UnresolvedIntentsDoNotHideLaterPendingLinks()
+    {
+        using TestStore test = new();
+        for (int index = 0; index < 6; index++)
+            test.Store.RecordUploadSheetWriteback(new(index.ToString(), "work", "1", "episode", "x",
+                $"https://x.com/owner/status/{index + 1}", "Title", "", State: "unresolved"));
+        test.Store.RecordUploadSheetWriteback(new("new", "work", "1", "episode", "x",
+            "https://x.com/owner/status/500", "Title", ""));
+        Assert.AreEqual(7, test.Store.GetUploadSheetWritebacks("work").Count);
+        Assert.IsTrue(test.Store.GetUploadSheetWritebacks("work").Any(intent => intent.Key == "new"));
+    }
+
+    [TestMethod]
     public void VerifiedSeasonAliasesSurviveReopeningWithoutChangingCatalogueRows()
     {
         using TestStore test=new();
