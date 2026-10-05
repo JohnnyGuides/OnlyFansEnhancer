@@ -112,15 +112,18 @@
     get("#catalogueControls").append(folder);
     const association = document.createElement("div");
     association.className = "teaser-association";
-    const linkedTitle = document.createElement("span");
     const changeMatch = document.createElement("button");
     changeMatch.type = "button";
     changeMatch.textContent = "Change episode";
     changeMatch.setAttribute("aria-expanded", "false");
-    association.append(linkedTitle, changeMatch, folder);
+    association.append(changeMatch, folder);
     get("#catalogueControls").prepend(association);
     const updateLinked = () => {
-      linkedTitle.textContent = hub.candidate()?.title || "No linked episode";
+      changeMatch.title = hub.candidate()?.title || "No linked episode";
+      changeMatch.setAttribute(
+        "aria-label",
+        `Change episode: ${changeMatch.title}`,
+      );
     };
     updateLinked();
     changeMatch.addEventListener("click", () => {
@@ -132,15 +135,21 @@
       setTimeout(updateLinked, 0),
     );
     get("#catalogueRow").addEventListener("change", updateLinked);
-    for (const radio of document.querySelectorAll('input[name="socialMode"]')) {
-      const label = radio.closest("label");
-      label.querySelector("strong").textContent =
-        radio.value === "manual" ? "Prepare only" : "Send automatically";
-      label.querySelector("small").textContent =
-        radio.value === "manual"
-          ? "Finish posting in Twitter."
-          : "Post or schedule, then reply.";
-    }
+    const manual = get('input[name="socialMode"][value="manual"]');
+    const automatic = get('input[name="socialMode"][value="autonomous"]');
+    manual.closest("label").hidden = true;
+    automatic.type = "checkbox";
+    automatic.closest("label").replaceChildren(automatic, "Send automatically");
+    automatic.closest("label").title =
+      "Unchecked: prepare the Twitter draft for manual posting. Checked: post or schedule, then add the first reply.";
+    automatic.addEventListener(
+      "change",
+      () => {
+        manual.checked = !automatic.checked;
+      },
+      true,
+    );
+    get("#uploadActions").prepend(automatic.closest("fieldset"));
     folder.addEventListener("click", async () => {
       try {
         const key = hub.candidate()?.id;

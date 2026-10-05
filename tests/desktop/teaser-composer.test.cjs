@@ -424,7 +424,30 @@ test("episode without a teaser opens its folder and accepts a video in the same 
           item.url().includes("upload-console.html?teaserDay="),
         ) ||
       (await new Promise((resolve) => page.once("framenavigated", resolve)));
-    await frame.getByText("Preview test", { exact: true }).waitFor();
+    await frame
+      .getByRole("button", {
+        name: "Change episode: Preview test",
+        exact: true,
+      })
+      .waitFor();
+    const automatic = frame.getByRole("checkbox", {
+      name: "Send automatically",
+      exact: true,
+    });
+    await automatic.check();
+    assert.equal(
+      await frame
+        .locator('input[name="socialMode"][value="manual"]')
+        .isChecked(),
+      false,
+    );
+    await automatic.uncheck();
+    assert.equal(
+      await frame
+        .locator('input[name="socialMode"][value="manual"]')
+        .isChecked(),
+      true,
+    );
     await frame.getByRole("button", { name: "Open episode folder" }).click();
     assert.deepEqual(
       await page.evaluate(() =>

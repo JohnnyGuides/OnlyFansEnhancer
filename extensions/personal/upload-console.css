@@ -126,25 +126,26 @@ body.calendar-teaser {
   height: 72px;
 }
 .calendar-teaser .mode-choice {
-  margin-top: 12px;
+  display: contents;
 }
 .calendar-teaser .mode-choice label {
-  padding: 8px 10px;
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
 }
-.calendar-teaser .mode-choice legend {
+.calendar-teaser .mode-choice legend,
+.calendar-teaser .mode-choice label[hidden] {
   display: none;
 }
 .calendar-teaser .teaser-association {
   display: contents;
-}
-.calendar-teaser .teaser-association span {
-  grid-column: 1;
-  grid-row: 1;
-  align-self: center;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 13px;
-  color: #afbed2;
 }
 .calendar-teaser
   :is(.teaser-association button, #saveTeaserDraft, #uploadButton) {
@@ -213,7 +214,7 @@ body.calendar-teaser {
   .calendar-teaser .upload-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .calendar-teaser .teaser-association span {
+  .calendar-teaser .mode-choice label {
     grid-column: 1 / -1;
   }
   .calendar-teaser .upload-actions > :is(#saveTeaserDraft, #uploadButton),

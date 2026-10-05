@@ -2936,7 +2936,7 @@
     function lockDraft(locked) {
       if (locked) {
         for (const control of document.querySelectorAll(
-          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #uploadDescription, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #refreshCatalogue",
+          "#workflowMode, .workflow-panel input, .workflow-panel button:not(#loadTemplate), .draft-card input, .draft-card select, .draft-card textarea, #uploadDescription, #mainDestinations input, #mainPublishMode, #cataloguePicker input, #cataloguePicker select, #cataloguePicker button, #catalogueCards button, .social-card input, .social-card select, .social-card textarea, .social-card button, #uploadActions input, #uploadActions .teaser-association button, #settingsPanel input, #settingsPanel select, #settingsPanel textarea, #settingsPanel button, #findCatalogueEntry, #refreshCatalogue",
         )) {
           if (control.closest("#uploadRecovery")) continue;
           if (!lockedControls.has(control))
