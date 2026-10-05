@@ -443,6 +443,8 @@ test("episode without a teaser opens its folder and accepts a video in the same 
       await frame.locator(".teaser-video-preview").isVisible(),
       false,
     );
+    assert.equal(await frame.locator("#socialErrors").textContent(), "");
+    assert.equal(await frame.locator("#matchStatus").textContent(), "");
     await page.screenshot({
       path: path.join(
         repositoryRoot,

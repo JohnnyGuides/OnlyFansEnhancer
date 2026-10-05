@@ -116,6 +116,10 @@ body.calendar-teaser {
 .calendar-teaser .upload-actions {
   position: static;
   grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .calendar-teaser #socialCaption {
   min-height: 72px;

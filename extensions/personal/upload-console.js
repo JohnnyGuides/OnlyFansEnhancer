@@ -1674,7 +1674,11 @@
         void loadSubredditPresets();
       }
       const value = socialDraft();
-      socialErrors.textContent = value.enabled ? value.errors.join(" ") : "";
+      socialErrors.textContent =
+        value.enabled &&
+        !(document.body.classList.contains("calendar-teaser") && !socialFile)
+          ? value.errors.join(" ")
+          : "";
       const missingTrace = value.errors.find((error) =>
         error.startsWith("Record successful"),
       );
@@ -2956,7 +2960,10 @@
       const blocker = draftBlocker(value, social);
       updateUploadAction();
       if (blocker) {
-        matchStatus.textContent = blocker;
+        matchStatus.textContent =
+          document.body.classList.contains("calendar-teaser") && !social.valid
+            ? ""
+            : blocker;
         return;
       }
       matchStatus.textContent =
@@ -6566,7 +6573,9 @@
           String(value || "")
             .toLowerCase()
             .replace(/[^a-z0-9]/g, "");
-        const filename = normalized(socialFile?.name?.replace(/\.[^.]+$/, "") || "");
+        const filename = normalized(
+          socialFile?.name?.replace(/\.[^.]+$/, "") || "",
+        );
         const matches = currentSnapshot.rows.filter((row) =>
           episodeKey
             ? row.id === episodeKey
