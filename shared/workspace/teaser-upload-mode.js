@@ -26,6 +26,20 @@
     caption.previousElementSibling.before(panel);
     const preview = panel.querySelector("video"),
       image = panel.querySelector("img");
+    const chooseVideo = document.createElement("button");
+    chooseVideo.type = "button";
+    chooseVideo.className = "teaser-choose-video";
+    chooseVideo.textContent = "Choose or drop teaser video";
+    preview.before(chooseVideo);
+    chooseVideo.addEventListener("click", () =>
+      get("#uploadSocialTeaser").click(),
+    );
+    panel.addEventListener("dragover", (event) => event.preventDefault());
+    panel.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer?.files?.[0];
+      if (file && !hub.busy() && !context?.draft?.sessionId) acceptFile(file);
+    });
     const timeLabel = document.createElement("label");
     timeLabel.textContent = "Posting time";
     timeLabel.className = "teaser-schedule-field";
@@ -166,6 +180,9 @@
       if (dirty) notify("dirty");
     }
     async function showFile(file, restored = null) {
+      preview.hidden = false;
+      panel.querySelector(".teaser-thumbnail-panel").hidden = false;
+      chooseVideo.hidden = true;
       const current = ++revision;
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       videoUrl = URL.createObjectURL(file);
@@ -261,12 +278,30 @@
         }
       }
     });
-    get("#uploadSocialTeaser").addEventListener("change", () => {
-      if (hub.file()) {
-        hub.file().source = "generated";
-        previewReady = showFile(hub.file());
-        notify("dirty");
+    function acceptFile(file) {
+      if (
+        !file.size ||
+        file.size >= 512 * 1024 * 1024 ||
+        !/\.(mp4|mov|m4v|webm)$/i.test(file.name)
+      ) {
+        fail(new Error("Choose an MP4, MOV, M4V or WebM video under 512 MB."));
+        return;
       }
+      file.source = "generated";
+      hub.setFile(file);
+      previewReady = showFile(file);
+      notify("dirty");
+      if (!hub.candidate())
+        void hub
+          .associate(context?.episodeKey || "", "")
+          .then(() => {
+            hub.preferLink(preferences.linkKind, preferences.customUrl);
+            updateLinked();
+          })
+          .catch(fail);
+    }
+    get("#uploadSocialTeaser").addEventListener("change", () => {
+      if (hub.file()) acceptFile(hub.file());
     });
     for (const control of [
       caption,
@@ -285,12 +320,17 @@
         event.origin !== location.origin ||
         event.data?.type !== "ofenhancer:teaser-context" ||
         event.data.date !== day ||
-        !(event.data.file instanceof File)
+        !(
+          event.data.file instanceof File ||
+          (event.data.file === null &&
+            typeof event.data.episodeKey === "string" &&
+            event.data.episodeKey)
+        )
       )
         return;
       accepted = true;
       context = event.data;
-      context.file.source = "generated";
+      if (context.file) context.file.source = "generated";
       hub.setFile(context.file);
       caption.value = context.draft?.caption || "";
       time.value =
@@ -306,7 +346,12 @@
             ? preferences.replyDelayMinutes
             : 15),
       );
-      previewReady = showFile(context.file, context.draft?.thumbnail);
+      if (context.file)
+        previewReady = showFile(context.file, context.draft?.thumbnail);
+      else {
+        preview.hidden = true;
+        panel.querySelector(".teaser-thumbnail-panel").hidden = true;
+      }
       if (context.draft?.sessionId) {
         save.disabled = true;
         get("#uploadButton").disabled = true;

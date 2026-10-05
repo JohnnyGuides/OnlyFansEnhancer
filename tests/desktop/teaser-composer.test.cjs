@@ -393,6 +393,146 @@ test("teaser editor fits a phone viewport and keeps draft actions reachable", as
   }
 });
 
+test("episode without a teaser opens its folder and accepts a video in the same day modal", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 960 },
+  });
+  try {
+    const errors = await mount(page, true);
+    await page.locator(".xt-composer-heading button").click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.evaluate(() => {
+      window.folderRequests = [];
+      window.OFEnhancerHost = {
+        request: async (op, payload) => {
+          window.folderRequests.push({ op, payload });
+          return op === "getTeaserClips" ? { clips: [] } : { ok: true };
+        },
+      };
+      return OFEnhancerTeaserComposer.open({
+        date: "2026-10-06",
+        episodes: [{ sourceKey: "preview-test", title: "Preview test" }],
+        request: OFEnhancerHost.request,
+      });
+    });
+    await page.locator(".xt-episode-choice").click();
+    await page.locator(".xt-composer-frame").waitFor();
+    const frame =
+      page
+        .frames()
+        .find((item) =>
+          item.url().includes("upload-console.html?teaserDay="),
+        ) ||
+      (await new Promise((resolve) => page.once("framenavigated", resolve)));
+    await frame.getByText("Preview test", { exact: true }).waitFor();
+    await frame.getByRole("button", { name: "Open episode folder" }).click();
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.folderRequests.filter(
+          (item) => item.op === "openTeaserEpisodeFolder",
+        ),
+      ),
+      [
+        {
+          op: "openTeaserEpisodeFolder",
+          payload: { episodeKey: "preview-test" },
+        },
+      ],
+    );
+    assert.equal(
+      await frame.locator(".teaser-video-preview").isVisible(),
+      false,
+    );
+    await page.screenshot({
+      path: path.join(
+        repositoryRoot,
+        "artifacts/teaser-hub-review/episode-without-teaser.png",
+      ),
+      fullPage: true,
+    });
+    await frame.locator("#uploadSocialTeaser").setInputFiles(VIDEO);
+    await frame.waitForFunction(
+      () =>
+        document.querySelector(".teaser-thumbnail-panel img")?.naturalWidth > 0,
+    );
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".xt-composer-status")?.textContent ===
+        "Draft saved for this day.",
+    );
+    assert.equal(
+      await frame.evaluate(
+        async () => (await OFEnhancerTeaserDrafts.get("2026-10-06")).episodeKey,
+      ),
+      "preview-test",
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("unavailable indexed teaser offers the linked episode folder", async () => {
+  const page = await browser.newPage();
+  try {
+    await mount(page, true);
+    await page.locator(".xt-composer-heading button").click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.evaluate(() => {
+      window.OFEnhancerHost = {
+        request: async (op) => {
+          if (op === "getTeaserClips")
+            return {
+              clips: [
+                {
+                  clipId: 1,
+                  episodeKey: "preview-test",
+                  name: "missing.mp4",
+                  size: 100,
+                  state: "ready",
+                },
+              ],
+            };
+          if (op === "getTeaserClipChunk")
+            throw new Error("This teaser is unavailable.");
+          return { ok: true };
+        },
+      };
+      return OFEnhancerTeaserComposer.open({
+        date: "2026-10-06",
+        episodes: [{ sourceKey: "preview-test", title: "Preview test" }],
+        request: OFEnhancerHost.request,
+      });
+    });
+    await page
+      .locator('.xt-clip-choice[data-episode-key="preview-test"]')
+      .click();
+    await page.locator(".xt-composer-frame").waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        ?.textContent.includes("Open the episode folder"),
+    );
+    const frame =
+      page
+        .frames()
+        .find((item) =>
+          item.url().includes("upload-console.html?teaserDay="),
+        ) ||
+      (await new Promise((resolve) => page.once("framenavigated", resolve)));
+    await frame.getByRole("button", { name: "Open episode folder" }).waitFor();
+    assert.equal(
+      await frame
+        .getByRole("button", { name: "Choose or drop teaser video" })
+        .isVisible(),
+      true,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
 test("draft store rejects impossible days and times and locks a draft after execution starts", async () => {
   const page = await browser.newPage();
   try {

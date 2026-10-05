@@ -155,17 +155,18 @@
       },
       { once: true },
     );
-    function edit(file, clip = null, draft = null) {
+    function edit(file = null, clip = null, draft = null) {
       if (
-        !file.size ||
-        file.size >= 512 * 1024 * 1024 ||
-        !/\.(mp4|mov|m4v|webm)$/i.test(file.name)
+        file &&
+        (!file.size ||
+          file.size >= 512 * 1024 * 1024 ||
+          !/\.(mp4|mov|m4v|webm)$/i.test(file.name))
       ) {
         status.textContent =
           "Choose an MP4, MOV, M4V or WebM video under 512 MB.";
         return;
       }
-      dirty = !draft;
+      dirty = Boolean(file && !draft);
       context = {
         date,
         file,
@@ -253,6 +254,10 @@
               (ranked.get(left.episodeKey)?.rank || Infinity) -
               (ranked.get(right.episodeKey)?.rank || Infinity),
           );
+        if (episode && !clips.length) {
+          edit();
+          return;
+        }
         for (const clip of clips) {
           const choice = action("", "xt-clip-choice");
           const linked = episodes.find(
@@ -290,7 +295,11 @@
               const file = await clipFile(clip, request, status);
               if (dialog.isConnected) edit(file, clip);
             } catch (error) {
-              status.textContent = error.message;
+              if (linked) {
+                episode = linked;
+                edit();
+                status.textContent = `${error.message} Open the episode folder to edit a replacement teaser.`;
+              } else status.textContent = error.message;
             } finally {
               loading = false;
               choice.disabled = false;
@@ -298,10 +307,35 @@
           });
           grid.append(choice);
         }
+        const withoutClips = episodes
+          .filter(
+            (item) =>
+              (!episode || item.sourceKey === episode.sourceKey) &&
+              !clips.some((clip) => clip.episodeKey === item.sourceKey),
+          )
+          .sort(
+            (left, right) =>
+              (ranked.get(left.sourceKey)?.rank || Infinity) -
+              (ranked.get(right.sourceKey)?.rank || Infinity),
+          );
+        for (const item of withoutClips) {
+          const choice = action("", "xt-clip-choice xt-episode-choice");
+          choice.dataset.episodeKey = item.sourceKey;
+          choice.append(
+            node("strong", "", item.title),
+            node("small", "", "Create teaser"),
+          );
+          choice.addEventListener("click", () => {
+            episode = item;
+            edit();
+          });
+          grid.append(choice);
+        }
         status.textContent = clips.length
           ? ""
           : "No ready clips here yet. Choose a video to start.";
       } catch {
+        if (episode) edit();
         status.textContent =
           "Ready clips are unavailable. You can still choose a video.";
       }

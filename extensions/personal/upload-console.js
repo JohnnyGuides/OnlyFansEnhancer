@@ -6566,7 +6566,7 @@
           String(value || "")
             .toLowerCase()
             .replace(/[^a-z0-9]/g, "");
-        const filename = normalized(socialFile.name.replace(/\.[^.]+$/, ""));
+        const filename = normalized(socialFile?.name?.replace(/\.[^.]+$/, "") || "");
         const matches = currentSnapshot.rows.filter((row) =>
           episodeKey
             ? row.id === episodeKey
