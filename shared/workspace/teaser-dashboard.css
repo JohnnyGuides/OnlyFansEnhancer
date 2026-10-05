@@ -1166,6 +1166,145 @@ html:has(.xt-picker[open]) {
   margin: 0;
 }
 
+.xt-composer-dialog {
+  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  width: min(1040px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  color: #edf3fc;
+  background: #0f151e;
+  border: 1px solid #344253;
+  border-radius: 16px;
+}
+.xt-composer-dialog .xt-action {
+  color: #edf3fc;
+  background: #18212d;
+  border: 1px solid #344253;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.xt-draft-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.xt-tile:has(.xt-draft-cover) .xt-tile-label {
+  position: relative;
+  z-index: 1;
+  align-self: end;
+  background: #0b101ae0;
+  padding: 5px;
+}
+.xt-composer-dialog::backdrop {
+  background: rgb(0 0 0 / 72%);
+}
+.xt-composer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 24px;
+}
+.xt-composer-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.xt-composer-content {
+  padding: 0 24px;
+}
+.xt-composer-status {
+  min-height: 1.5em;
+  margin: 12px 24px 20px;
+  color: #aebbd0;
+}
+.xt-composer-frame {
+  width: 100%;
+  height: min(710px, calc(100dvh - 190px));
+  border: 0;
+  margin-top: 12px;
+  color-scheme: dark;
+}
+.xt-clip-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+  padding: 8px 0 16px;
+}
+.xt-clip-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  min-height: 170px;
+  padding: 12px;
+  color: #edf3fc;
+  background: #18212d;
+  border: 1px solid #344253;
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.xt-clip-choice img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.xt-clip-choice strong,
+.xt-clip-choice small {
+  overflow-wrap: anywhere;
+}
+.xt-clip-choice small {
+  color: #afbed2;
+}
+.xt-clip-choice:hover {
+  background: #213146;
+}
+.xt-clip-choice:focus-visible {
+  outline: 2px solid #60cfff;
+  outline-offset: 3px;
+}
+.xt-clip-choice:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.xt-clip-add {
+  align-items: center;
+  text-align: center;
+  border-style: dashed;
+}
+.xt-clip-add .xt-plus {
+  font-size: 36px;
+}
+.xt-composer-episode {
+  color: #afbed2;
+  margin: 0 0 12px;
+}
+@media (max-width: 600px) {
+  .xt-composer-dialog {
+    width: calc(100vw - 12px);
+    max-height: calc(100dvh - 12px);
+  }
+  .xt-composer-heading {
+    padding: 16px;
+    gap: 12px;
+  }
+  .xt-composer-content {
+    padding: 0 12px;
+  }
+  .xt-composer-frame {
+    height: calc(100dvh - 170px);
+  }
+  .xt-clip-choices {
+    grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  }
+}
+
 .twitter-heading .teaser-dashboard-back {
   grid-column: 1;
   grid-row: 2;

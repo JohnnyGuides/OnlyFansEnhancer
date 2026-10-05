@@ -316,6 +316,23 @@ async function openDashboard({
           return data.overview;
         case "getTeaserPlan":
           return { slots: data.slots };
+        case "getTeaserClips":
+          return {
+            clips: data.overview.overview.episodes.flatMap((entry) =>
+              Array.from(
+                { length: Math.max(0, Number(entry.readyClips) || 0) },
+                (_, index) => ({
+                  clipId: `${entry.sourceKey}-${index + 1}`,
+                  episodeKey: entry.sourceKey,
+                  name: `${entry.sourceKey}__t${index + 1}.mp4`,
+                  size: 128,
+                  sha256: "a".repeat(64),
+                  lastModified: Date.parse("2026-10-01T12:00:00Z"),
+                  state: "ready",
+                }),
+              ),
+            ),
+          };
         case "setTeaserPlanSlot": {
           data.slots = data.slots
             .filter((slot) => slot.date !== payload.date)
@@ -717,13 +734,22 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     await tile("series-a-e1").click();
     assert.equal(
       await page.locator(".xt-detail").textContent(),
-      "Games · Series A · E1 · 2 used · 1 ready",
+      "Games · Series A · E1 · 2 used · 1 ready Open episode folder",
+    );
+    await page
+      .getByRole("button", { name: "Open episode folder", exact: true })
+      .click();
+    assert.deepEqual(
+      (await calls(page, "openTeaserEpisodeFolder")).map(
+        (call) => call.payload,
+      ),
+      [{ episodeKey: "series-a-e1" }],
     );
     await tile("series-a-e6").focus();
     await page.keyboard.press("Enter");
     assert.equal(
       await page.locator(".xt-detail").textContent(),
-      "Games · Series A · E6 · 0 used · 0 ready · 1 failed",
+      "Games · Series A · E6 · 0 used · 0 ready · 1 failed Open episode folder",
     );
 
     const filters = page.locator(".xt-flow-bar .xt-segment");
@@ -1589,335 +1615,160 @@ test("history calendar lines up with the week row and trend cards compare period
   }
 });
 
-test("focused picker recommends unused ready clips and preserves planning rules", async () => {
+test("day-scoped teaser modal ranks ready clips without mutating the calendar plan", async () => {
   const { page, context, errors } = await openDashboard();
   try {
-    const normalOrder = await page
-      .locator(".xt-episode")
-      .evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId));
-    const colours = await page
-      .locator(".xt-card")
-      .evaluateAll((nodes) =>
+    const day = page.locator('.xt-tile[data-date="2026-10-02"]');
+    await day.click();
+    const modal = page.locator(".xt-composer-dialog");
+    await modal.waitFor();
+    assert.match(await modal.getAttribute("aria-label"), /^Teaser for /);
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".xt-composer-status")?.textContent !==
+        "Loading ready clips…",
+    );
+    await modal
+      .getByRole("button", { name: "Choose a new teaser video" })
+      .waitFor();
+    const recommendations = modal.locator(
+      ".xt-clip-choice[data-recommendation-rank]",
+    );
+    await recommendations.first().waitFor();
+    assert.deepEqual(
+      await recommendations.evaluateAll((nodes) =>
         nodes.map((node) => [
-          node.querySelector(".xt-episode").dataset.itemId,
-          node.style.getPropertyValue("--xt-season"),
+          node.dataset.recommendationRank,
+          node.dataset.episodeKey,
         ]),
-      );
-    await page
-      .locator('[data-row="past"] > li')
-      .nth(6)
-      .locator(".xt-tile")
+      ),
+      [
+        ["1", "series-g-e1"],
+        ["2", "series-h-e1"],
+        ["3", "series-f-e1"],
+      ],
+    );
+    assert.match(
+      await recommendations.nth(0).getAttribute("title"),
+      /No comparable history/,
+    );
+    assert.match(
+      await recommendations.nth(1).getAttribute("title"),
+      /No comparable history/,
+    );
+    assert.equal(
+      await modal
+        .locator('.xt-clip-choice[data-episode-key="series-c-e2"]')
+        .getAttribute("data-recommendation-rank"),
+      null,
+    );
+    assert.ok(
+      (await modal.locator(".xt-clip-choice").count()) >
+        (await recommendations.count()),
+    );
+    assert.equal(await page.locator(".xt-picker").count(), 0);
+    assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+    assert.equal(await day.getAttribute("data-kind"), "empty");
+    await screenshot(page, "M3-teaser-modal-desktop.png");
+    await modal.getByRole("button", { name: "Close" }).click();
+    await page.waitForFunction(
+      () => !document.querySelector(".xt-composer-dialog"),
+    );
+    assert.equal(
+      await day.evaluate((node) => node === document.activeElement),
+      true,
+    );
+    const plannedDay = page.locator('.xt-tile[data-date="2026-10-04"]');
+    await plannedDay.click();
+    const planned = page.locator(".xt-composer-dialog");
+    await planned
+      .locator('.xt-clip-choice[data-episode-key="series-a-e1"]')
+      .waitFor();
+    assert.equal(
+      await planned
+        .locator(
+          '.xt-clip-choice[data-episode-key]:not([data-episode-key="series-a-e1"])',
+        )
+        .count(),
+      0,
+    );
+    await planned
+      .getByRole("button", { name: "Open episode folder", exact: true })
       .click();
-    assert.match(
-      await page.locator(".xt-picking-text").textContent(),
-      /Choose a teaser/,
+    assert.deepEqual(
+      (await calls(page, "openTeaserEpisodeFolder")).map(
+        (call) => call.payload,
+      ),
+      [{ episodeKey: "series-a-e1" }],
     );
-    const pick = (key) =>
-      page
-        .locator(`.xt-episode[data-item-id="item-${key}"]`)
-        .getAttribute("data-pick");
-    // Posted in the last 7 days: Series A, B, D, E; planned on 4 Oct: Series A.
-    assert.equal(await pick("series-a-e3"), "hidden");
-    assert.equal(await pick("series-b-e5"), "hidden");
-    assert.equal(await pick("series-d-e2"), "hidden");
-    // Games (3) and Dolls (2) have two or more recent/planned posts.
-    assert.equal(await pick("series-c-e2"), "dimmed");
-    // Fresh episodes with a ready clip in quiet categories are recommended.
-    assert.equal(await pick("series-f-e1"), "recommended");
-    assert.equal(await pick("series-g-e1"), "recommended");
-    assert.equal(await pick("series-h-e1"), "recommended");
-    assert.equal(await pick("series-f-e2"), "neutral");
-    const hidden = page.locator('.xt-episode[data-item-id="item-series-a-e3"]');
-    assert.equal(
-      await hidden.evaluate((node) => getComputedStyle(node).opacity),
-      "1",
+    assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+    await planned.getByRole("button", { name: "Close" }).click();
+    await page.waitForFunction(
+      () => !document.querySelector(".xt-composer-dialog"),
     );
+    assert.equal(await day.getAttribute("data-kind"), "empty");
     assert.equal(
-      await page
-        .locator(".xt-picker")
-        .evaluate((node) => node.matches(":modal")),
+      await plannedDay.evaluate((node) => node === document.activeElement),
       true,
     );
-    assert.equal(
-      await page.locator(".xt-episode[data-recommendation-rank]").count(),
-      3,
-    );
-    assert.deepEqual(
-      await page
-        .locator(".xt-episode[data-recommendation-rank]")
-        .evaluateAll((nodes) =>
-          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
-        ),
-      ["series-g-e1", "series-h-e1", "series-f-e1"],
-    );
-    assert.equal(
-      await page.locator(".xt-shortlist, .xt-suggestion").count(),
-      0,
-    );
-    assert.equal(await page.locator(".xt-shortlist-label").count(), 0);
-    assert.deepEqual(
-      await page
-        .locator(".xt-episode")
-        .evaluateAll((nodes) =>
-          nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
-        ),
-      ["series-g-e1", "series-h-e1", "series-f-e1"],
-      "recommendations lead the actual catalogue grid",
-    );
-    assert.deepEqual(
-      await page
-        .locator(".xt-card")
-        .evaluateAll((nodes) =>
-          nodes
-            .map((node) => [
-              node.querySelector(".xt-episode").dataset.itemId,
-              node.style.getPropertyValue("--xt-season"),
-            ])
-            .sort(),
-        ),
-      [...colours].sort(),
-      "ranking preserves series accents",
-    );
-    assert.match(
-      await page
-        .locator(".xt-episode[data-recommendation-rank]")
-        .first()
-        .getAttribute("aria-description"),
-      /1 ready clip/,
-    );
-    assert.equal(
-      await page
-        .locator(".xt-picker img")
-        .evaluateAll(
-          (nodes) =>
-            nodes.length > 0 &&
-            nodes.every(
-              (node) =>
-                getComputedStyle(node).opacity === "1" &&
-                getComputedStyle(node).filter === "none",
-            ),
-        ),
-      true,
-    );
-    assert.equal(await hidden.getAttribute("aria-disabled"), "true");
-    await page
-      .locator(".xt-picker")
-      .evaluate((node) =>
-        Promise.all(
-          node.getAnimations().map((animation) => animation.finished),
-        ),
-      );
-    await hidden.click({ force: true });
-    assert.equal(
-      (await calls(page, "setTeaserPlanSlot")).length,
-      0,
-      "recently used series cannot be picked",
-    );
-
-    await page.locator('.xt-episode[data-item-id="item-series-f-e1"]').click();
-    await page
-      .locator('.xt-tile[data-date="2026-10-01"][data-kind="planned"]')
-      .waitFor();
-    assert.deepEqual(
-      (await calls(page, "setTeaserPlanSlot")).map((call) => call.payload),
-      [{ date: "2026-10-01", episodeKey: "series-f-e1" }],
-    );
-    // The pick advances to the next empty day and updates the similarity rules.
-    assert.equal(
-      await page
-        .locator(".xt-tile[data-target='true']")
-        .getAttribute("data-date"),
-      "2026-10-02",
-    );
-    assert.equal(await pick("series-f-e2"), "hidden");
-    assert.equal(
-      await page.locator(".xt-picker").getAttribute("data-entering"),
-      "false",
-    );
-    await screenshot(page, "M3-picking.png");
-
-    await page.locator('.xt-episode[data-item-id="item-series-h-e1"]').click();
-    await page
-      .locator(".xt-tile[data-target='true'][data-date='2026-10-03']")
-      .waitFor();
-    assert.equal(await pick("series-g-e1"), "recommended");
-    assert.equal(await pick("series-h-e1"), "hidden");
-    assert.equal(
-      (await calls(page, "getTeaserPlan")).length >= 3,
-      true,
-      "plan reloaded after each pick",
-    );
-
-    await page.getByRole("button", { name: "Done" }).click();
-    assert.equal(await page.locator(".xt-picking").isHidden(), true);
-    assert.equal(await page.locator(".xt-episode[data-pick]").count(), 0);
-    assert.deepEqual(
-      await page
-        .locator(".xt-episode")
-        .evaluateAll((nodes) => nodes.map((node) => node.dataset.itemId)),
-      normalOrder,
-      "browsing restores the normal catalogue order",
-    );
-    assert.equal(
-      await page
-        .locator('[data-row="next"] .xt-tile[data-date="2026-10-02"]')
-        .getAttribute("data-kind"),
-      "planned",
-    );
-
-    // Re-entering a planned day can clear it.
-    await page.locator('.xt-tile[data-date="2026-10-02"]').click();
-    await page.getByRole("button", { name: "Clear day" }).click();
-    await page
-      .locator('.xt-tile[data-date="2026-10-02"][data-kind="empty"]')
-      .waitFor();
-    assert.deepEqual(
-      (await calls(page, "clearTeaserPlanSlot")).map((call) => call.payload),
-      [{ date: "2026-10-02" }],
-    );
-    await page.keyboard.press("Escape");
-    assert.equal(await page.locator(".xt-picking").isHidden(), true);
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
   }
 });
 
-test("picker stays within the viewport, traps focus and cancels without changing the plan", async () => {
-  for (const options of [
-    {},
-    { area: "extension" },
-    { viewport: { width: 390, height: 844 } },
-  ]) {
+test("teaser modal traps and restores focus, cancels cleanly and fits desktop and phone viewports", async () => {
+  for (const options of [{}, { viewport: { width: 390, height: 844 } }]) {
     const { page, context, errors } = await openDashboard(options);
     try {
-      await page.locator('.xt-segment[data-coverage="needs"]').click();
       const day = page.locator('.xt-tile[data-date="2026-10-02"]');
       await day.click();
-      const picker = page.getByRole("dialog", { name: "Choose a teaser" });
-      await picker.waitFor();
-      await picker.evaluate((node) =>
-        Promise.all(
-          node.getAnimations().map((animation) => animation.finished),
-        ),
+      const modal = page.locator(".xt-composer-dialog");
+      await modal.waitFor();
+      const dimensions = await modal.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        const add = node.querySelector(".xt-clip-add").getBoundingClientRect();
+        return {
+          left: box.left,
+          right: box.right,
+          width: box.width,
+          viewport: innerWidth,
+          scrollWidth: node.scrollWidth,
+          clientWidth: node.clientWidth,
+          addRight: add.right,
+        };
+      });
+      assert.ok(
+        dimensions.left >= 0 && dimensions.right <= dimensions.viewport,
       );
-      assert.equal(
-        await picker
-          .locator('[data-coverage="ready"]')
-          .getAttribute("aria-pressed"),
-        "true",
-      );
-      assert.equal(
-        await picker.evaluate((node) => {
-          const rect = node.getBoundingClientRect();
-          return (
-            rect.left >= 0 &&
-            rect.right <= innerWidth &&
-            node.scrollWidth <= node.clientWidth
-          );
-        }),
-        true,
-      );
-      assert.equal(
-        await picker.evaluate((node) => {
-          const card = node.querySelector(".xt-card").getBoundingClientRect();
-          const cards = [...node.querySelectorAll(".xt-card")].map((card) =>
-            card.getBoundingClientRect(),
-          );
-          const bar = node
-            .querySelector(".xt-flow-bar")
-            .getBoundingClientRect();
-          return (
-            card.width === 96 &&
-            bar.right <= Math.max(...cards.map((card) => card.right)) + 1
-          );
-        }),
-        true,
-      );
-      assert.equal(
-        await page.evaluate(
-          () => getComputedStyle(document.documentElement).overflow,
-        ),
-        "hidden",
-      );
+      assert.ok(dimensions.scrollWidth <= dimensions.clientWidth);
+      assert.ok(dimensions.addRight <= dimensions.right);
+      if (options.viewport) assert.ok(dimensions.width <= 390);
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
       assert.equal(
-        await picker.evaluate((node) => node.contains(document.activeElement)),
+        await modal.evaluate((node) => node.contains(document.activeElement)),
         true,
       );
       await screenshot(
         page,
         options.viewport
-          ? "M3-picker-mobile.png"
-          : options.area
-            ? "M3-picker-extension.png"
-            : "M3-picker-desktop.png",
+          ? "M3-teaser-modal-phone.png"
+          : "M3-teaser-modal-focus.png",
       );
       await page.keyboard.press("Escape");
-      assert.equal(await picker.count(), 0);
+      await page.waitForFunction(
+        () => !document.querySelector(".xt-composer-dialog"),
+      );
       assert.equal(
         await day.evaluate((node) => node === document.activeElement),
         true,
       );
       assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
-      if (!options.viewport) {
-        await day.click();
-        await page.mouse.click(5, 5);
-        assert.equal(await picker.count(), 0);
-      }
       assert.deepEqual(errors, []);
     } finally {
       await context.close();
     }
-  }
-});
-
-test("picker slides in once, keeps its place during filtering and respects reduced motion", async () => {
-  const { page, context, errors } = await openDashboard();
-  try {
-    const day = page.locator('.xt-tile[data-date="2026-10-02"]');
-    const animations = await day.evaluate((node) => {
-      node.click();
-      return document
-        .querySelector(".xt-picker")
-        .getAnimations()
-        .map((animation) => ({
-          name: animation.animationName,
-          frames: animation.effect.getKeyframes(),
-        }));
-    });
-    const slide = animations.find(
-      (animation) => animation.name === "xt-picker-enter",
-    );
-    assert.ok(slide, "opening starts an actual drawer animation");
-    assert.equal(slide.frames[0].transform, "translateX(100%)");
-    assert.equal(slide.frames.at(-1).transform, "translateX(0px)");
-    const picker = page.locator(".xt-picker");
-    await picker.evaluate((node) =>
-      Promise.all(node.getAnimations().map((animation) => animation.finished)),
-    );
-    await picker.locator('[data-coverage="ready"]').click();
-    assert.equal(await picker.getAttribute("data-entering"), "false");
-    assert.equal(
-      await picker.evaluate((node) => node.getAnimations().length),
-      0,
-    );
-    await page.keyboard.press("Escape");
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const reducedAnimations = await day.evaluate((node) => {
-      node.click();
-      return document
-        .querySelector(".xt-picker")
-        .getAnimations()
-        .map((animation) => animation.animationName);
-    });
-    assert.equal(reducedAnimations.includes("xt-picker-enter"), false);
-    assert.equal(await picker.getAttribute("data-entering"), "true");
-    await page.keyboard.press("Escape");
-    assert.deepEqual(errors, []);
-  } finally {
-    await context.close();
   }
 });
 
@@ -1963,7 +1814,10 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   });
   try {
     await page.locator('.xt-tile[data-date="2026-10-02"]').click();
-    const suggestions = page.locator(".xt-episode[data-recommendation-rank]");
+    const suggestions = page.locator(
+      ".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]",
+    );
+    await suggestions.first().waitFor();
     assert.deepEqual(
       await suggestions.evaluateAll((nodes) =>
         nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
@@ -2008,9 +1862,15 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   });
   try {
     await second.page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    await second.page
+      .locator(".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]")
+      .first()
+      .waitFor();
     assert.deepEqual(
       await second.page
-        .locator(".xt-episode[data-recommendation-rank]")
+        .locator(
+          ".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]",
+        )
         .evaluateAll((nodes) =>
           nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
         ),
@@ -2018,7 +1878,7 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
     );
     assert.match(
       await second.page
-        .locator('[data-episode-key="weak-e4"]')
+        .locator('.xt-composer-dialog [data-episode-key="weak-e4"]')
         .getAttribute("title"),
       /Series below usual/,
     );
@@ -2047,9 +1907,15 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
   });
   try {
     await third.page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    await third.page
+      .locator(".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]")
+      .first()
+      .waitFor();
     assert.deepEqual(
       await third.page
-        .locator(".xt-episode[data-recommendation-rank]")
+        .locator(
+          ".xt-composer-dialog .xt-clip-choice[data-recommendation-rank]",
+        )
         .evaluateAll((nodes) =>
           nodes.slice(0, 3).map((node) => node.dataset.episodeKey),
         ),

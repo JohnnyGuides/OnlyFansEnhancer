@@ -13,6 +13,10 @@
       <Link>app\app\upload-host.js</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="..\..\shared\workspace\teaser-draft-store.js;..\..\shared\workspace\teaser-upload-mode.js">
+      <Link>app\app\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <ProjectReference Include="..\OFEnhancer.Catalogue\OFEnhancer.Catalogue.csproj" />
     <ProjectReference Include="..\OFEnhancer.Protocol\OFEnhancer.Protocol.csproj" />
   </ItemGroup>

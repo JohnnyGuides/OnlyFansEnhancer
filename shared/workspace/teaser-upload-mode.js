@@ -1,0 +1,373 @@
+(function (global) {
+  "use strict";
+  function init(hub) {
+    const day = new URLSearchParams(location.search).get("teaserDay");
+    if (
+      !global.OFEnhancerTeaserDrafts.validDay(day) ||
+      window.parent === window
+    )
+      return null;
+    document.body.classList.add("calendar-teaser");
+    const get = (selector) => document.querySelector(selector);
+    const notify = (type, extra = {}) =>
+      window.parent.postMessage(
+        { type: `ofenhancer:teaser-${type}`, ...extra },
+        location.origin,
+      );
+    const caption = get("#socialCaption");
+    caption.maxLength = 280;
+    caption.placeholder = "Write the teaser caption…";
+    caption.previousElementSibling.textContent = "Caption";
+    get("#socialHeading").textContent = "Twitter teaser";
+    const panel = document.createElement("div");
+    panel.className = "teaser-preview-panel";
+    panel.innerHTML =
+      '<video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-thumbnail-panel"><img alt="Teaser thumbnail" hidden><button type="button" class="teaser-use-frame">Use current frame</button><label class="teaser-thumbnail-upload">Choose image<input type="file" accept="image/png,image/jpeg" hidden></label></div>';
+    caption.previousElementSibling.before(panel);
+    const preview = panel.querySelector("video"),
+      image = panel.querySelector("img");
+    const timeLabel = document.createElement("label");
+    timeLabel.textContent = "Posting time";
+    timeLabel.className = "teaser-schedule-field";
+    const time = document.createElement("input");
+    time.type = "time";
+    time.value = "18:00";
+    timeLabel.append(time);
+    caption.after(timeLabel);
+    const replyLabel = document.createElement("label");
+    replyLabel.textContent = "Reply (min)";
+    replyLabel.className = "teaser-schedule-field";
+    const replyDelay = document.createElement("input");
+    replyDelay.type = "number";
+    replyDelay.min = "1";
+    replyDelay.max = "1440";
+    replyDelay.value = "15";
+    replyLabel.append(replyDelay);
+    timeLabel.after(replyLabel);
+    const linkFields = get("#socialPaidLinkFields");
+    linkFields.querySelector('label[for="socialPaidLink"]').textContent =
+      "Video link";
+    const scheduleRow = document.createElement("div");
+    scheduleRow.className = "teaser-schedule-row";
+    caption.after(scheduleRow);
+    scheduleRow.append(timeLabel, replyLabel, linkFields);
+    const customLink = get("#socialCustomPaidLinkField");
+    scheduleRow.after(customLink);
+    const PREFS = "OFEnhancerTeaserPreferencesV1";
+    let preferences = {};
+    try {
+      preferences = JSON.parse(localStorage.getItem(PREFS) || "{}") || {};
+    } catch {
+      /* Use defaults. */
+    }
+    const remember = () => {
+      const option = get("#socialPaidLink").selectedOptions[0];
+      const linkKind =
+        option?.value === "custom"
+          ? "custom"
+          : /onlyfans/i.test(option?.textContent || "")
+            ? "onlyfans"
+            : /fansly/i.test(option?.textContent || "")
+              ? "fansly"
+              : "";
+      try {
+        localStorage.setItem(
+          PREFS,
+          JSON.stringify({
+            time: time.value,
+            replyDelayMinutes: Number(replyDelay.value),
+            linkKind,
+            customUrl:
+              linkKind === "custom" ? get("#socialCustomPaidLink").value : "",
+          }),
+        );
+      } catch {
+        /* The day draft can still be saved. */
+      }
+    };
+    for (const control of [
+      time,
+      replyDelay,
+      get("#socialPaidLink"),
+      get("#socialCustomPaidLink"),
+    ])
+      control.addEventListener("change", remember);
+    const folder = document.createElement("button");
+    folder.type = "button";
+    folder.textContent = "Open episode folder";
+    get("#catalogueControls").append(folder);
+    const association = document.createElement("div");
+    association.className = "teaser-association";
+    const linkedTitle = document.createElement("span");
+    const changeMatch = document.createElement("button");
+    changeMatch.type = "button";
+    changeMatch.textContent = "Change episode";
+    changeMatch.setAttribute("aria-expanded", "false");
+    association.append(linkedTitle, changeMatch, folder);
+    get("#catalogueControls").prepend(association);
+    const updateLinked = () => {
+      linkedTitle.textContent = hub.candidate()?.title || "No linked episode";
+    };
+    updateLinked();
+    changeMatch.addEventListener("click", () => {
+      const expanded = document.body.classList.toggle("teaser-matching");
+      changeMatch.setAttribute("aria-expanded", String(expanded));
+      if (expanded) get("#catalogueSearch").focus();
+    });
+    get("#catalogueControls").addEventListener("click", () =>
+      setTimeout(updateLinked, 0),
+    );
+    get("#catalogueRow").addEventListener("change", updateLinked);
+    for (const radio of document.querySelectorAll('input[name="socialMode"]')) {
+      const label = radio.closest("label");
+      label.querySelector("strong").textContent =
+        radio.value === "manual" ? "Prepare only" : "Send automatically";
+      label.querySelector("small").textContent =
+        radio.value === "manual"
+          ? "Finish posting in Twitter."
+          : "Post or schedule, then reply.";
+    }
+    folder.addEventListener("click", async () => {
+      try {
+        const key = hub.candidate()?.id;
+        if (!key) throw new Error("Choose a catalogue episode first.");
+        if (window.parent.OFEnhancerHost)
+          await window.parent.OFEnhancerHost.request(
+            "openTeaserEpisodeFolder",
+            { episodeKey: key },
+          );
+        else throw new Error("The episode folder is unavailable.");
+      } catch (error) {
+        fail(error);
+      }
+    });
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Save draft";
+    save.id = "saveTeaserDraft";
+    get("#uploadButton").before(save);
+    let thumbnail = null,
+      context = null,
+      revision = 0,
+      videoUrl = "",
+      imageUrl = "",
+      previewReady = Promise.resolve();
+    function fail(error) {
+      get("#uploadError").textContent = error.message;
+    }
+    function useThumbnail(file, dirty = true) {
+      ++revision;
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      thumbnail = file;
+      imageUrl = URL.createObjectURL(file);
+      image.src = imageUrl;
+      image.hidden = false;
+      preview.poster = imageUrl;
+      if (dirty) notify("dirty");
+    }
+    async function showFile(file, restored = null) {
+      const current = ++revision;
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      videoUrl = URL.createObjectURL(file);
+      preview.src = videoUrl;
+      try {
+        const frame =
+          restored ||
+          (await global.CreatorMediaGenerator.thumbnailFromVideo(file, 0));
+        if (current === revision) useThumbnail(frame, !restored);
+      } catch (error) {
+        fail(
+          new Error(
+            `Thumbnail unavailable: ${error.message} Choose an image or another frame.`,
+          ),
+        );
+      }
+    }
+    async function saveDraft() {
+      if (!hub.file()) throw new Error("Choose a teaser video.");
+      if (
+        !time.validity.valid ||
+        !time.value ||
+        !replyDelay.validity.valid ||
+        !Number.isInteger(Number(replyDelay.value))
+      )
+        throw new Error("Choose a valid posting time and reply delay.");
+      await previewReady;
+      const candidate = hub.candidate();
+      const saved = await global.OFEnhancerTeaserDrafts.save({
+        date: day,
+        file: hub.file(),
+        thumbnail,
+        caption: caption.value,
+        episodeKey: candidate?.id || "",
+        clipId: context?.clipId,
+        time: time.value,
+        replyDelayMinutes: Number(replyDelay.value),
+        paidUrl: hub.paidUrl(),
+      });
+      notify("saved");
+      remember();
+      if (candidate?.id && window.parent.OFEnhancerHost) {
+        try {
+          await window.parent.OFEnhancerHost.request("setTeaserPlanSlot", {
+            date: day,
+            episodeKey: candidate.id,
+            ...(context?.clipId && candidate.id === context.episodeKey
+              ? { clipId: context.clipId }
+              : {}),
+          });
+        } catch {
+          throw new Error(
+            "Draft saved. The catalogue calendar could not update; reconnect Chrome and save again.",
+          );
+        }
+      }
+      return saved;
+    }
+    save.addEventListener("click", async () => {
+      if (hub.busy()) return;
+      save.disabled = true;
+      try {
+        await saveDraft();
+        get("#uploadError").textContent = "";
+      } catch (error) {
+        fail(error);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    panel
+      .querySelector(".teaser-use-frame")
+      .addEventListener("click", async () => {
+        if (hub.busy() || !hub.file()) return;
+        try {
+          useThumbnail(
+            await global.CreatorMediaGenerator.thumbnailFromVideo(
+              hub.file(),
+              preview.currentTime,
+            ),
+          );
+        } catch (error) {
+          fail(error);
+        }
+      });
+    panel.querySelector("input").addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (file && !hub.busy()) {
+        try {
+          useThumbnail(await hub.normalizeThumbnail(file));
+        } catch (error) {
+          fail(error);
+        }
+      }
+    });
+    get("#uploadSocialTeaser").addEventListener("change", () => {
+      if (hub.file()) {
+        hub.file().source = "generated";
+        previewReady = showFile(hub.file());
+        notify("dirty");
+      }
+    });
+    for (const control of [
+      caption,
+      time,
+      replyDelay,
+      get("#socialPaidLink"),
+      get("#socialCustomPaidLink"),
+      get("#catalogueRow"),
+    ])
+      control.addEventListener("input", () => notify("dirty"));
+    let accepted = false;
+    window.addEventListener("message", async (event) => {
+      if (
+        accepted ||
+        event.source !== window.parent ||
+        event.origin !== location.origin ||
+        event.data?.type !== "ofenhancer:teaser-context" ||
+        event.data.date !== day ||
+        !(event.data.file instanceof File)
+      )
+        return;
+      accepted = true;
+      context = event.data;
+      context.file.source = "generated";
+      hub.setFile(context.file);
+      caption.value = context.draft?.caption || "";
+      time.value =
+        context.draft?.time ||
+        (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(preferences.time || "")
+          ? preferences.time
+          : "18:00");
+      replyDelay.value = String(
+        context.draft?.replyDelayMinutes ||
+          (Number.isInteger(preferences.replyDelayMinutes) &&
+          preferences.replyDelayMinutes >= 1 &&
+          preferences.replyDelayMinutes <= 1440
+            ? preferences.replyDelayMinutes
+            : 15),
+      );
+      previewReady = showFile(context.file, context.draft?.thumbnail);
+      if (context.draft?.sessionId) {
+        save.disabled = true;
+        get("#uploadButton").disabled = true;
+        get("#runNotice").textContent = "This teaser has a saved upload run.";
+        const review = document.createElement("button");
+        review.type = "button";
+        review.textContent = "Review saved run";
+        save.before(review);
+        review.addEventListener("click", async () => {
+          review.disabled = true;
+          notify("running", { running: true });
+          try {
+            await hub.resume(context.draft.sessionId);
+          } catch (error) {
+            fail(error);
+          } finally {
+            review.disabled = false;
+            notify("running", { running: false });
+          }
+        });
+      }
+      try {
+        await hub.associate(context.episodeKey, context.draft?.paidUrl || "");
+        if (!context.draft)
+          hub.preferLink(preferences.linkKind, preferences.customUrl);
+        updateLinked();
+      } catch (error) {
+        fail(error);
+      }
+    });
+    notify("ready");
+    window.addEventListener("pagehide", () => {
+      URL.revokeObjectURL(videoUrl);
+      URL.revokeObjectURL(imageUrl);
+    });
+    return {
+      day,
+      saveDraft,
+      notify,
+      locked: () => Boolean(context?.draft?.sessionId),
+      thumbnail: () => thumbnail,
+      options: () => {
+        if (
+          !time.validity.valid ||
+          !time.value ||
+          !replyDelay.validity.valid ||
+          !Number.isInteger(Number(replyDelay.value))
+        )
+          throw new Error("Choose a valid posting time and reply delay.");
+        const instant = new Date(`${day}T${time.value}:00`);
+        if (!Number.isFinite(instant.getTime()))
+          throw new Error("Choose a valid posting time.");
+        return {
+          sensitive: true,
+          scheduledUtc:
+            instant.getTime() > Date.now() ? instant.toISOString() : "",
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          replyDelayMinutes: Number(replyDelay.value),
+        };
+      },
+    };
+  }
+  global.OFEnhancerTeaserUploadMode = Object.freeze({ init });
+})(globalThis);

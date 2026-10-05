@@ -98,6 +98,42 @@ function plan() {
   };
 }
 
+test("X schedule attempts and reply due time are durable without implying a public result", async () => {
+  const { store } = loadStore();
+  const input = {
+    ...plan(),
+    xOptions: {
+      sensitive: true,
+      scheduledUtc: "2026-10-06T16:00:00.000Z",
+      timeZone: "Europe/Zurich",
+    },
+  };
+  await store.create(input);
+  await store.checkpoint(input.id, "x", {
+    stage: "prepared",
+    preparedComposerSha256: "c".repeat(64),
+  });
+  await store.checkpoint(input.id, "x", {
+    scheduleAttempted: true,
+    scheduleState: "unresolved",
+  });
+  await store.checkpoint(input.id, "x", { scheduleAttempted: false });
+  const job = (await store.load(input.id)).jobs.x;
+  assert.equal(job.stage, "prepared");
+  assert.equal(job.scheduleAttempted, true);
+  assert.equal(job.submitAttempted, false);
+  assert.equal(job.resultUrl, undefined);
+  await store.checkpoint(input.id, "x", { replyDueAt: 1_800_000_000_000 });
+  await assert.rejects(
+    store.checkpoint(input.id, "x", { replyDueAt: 1_800_000_000_001 }),
+    /cannot change/,
+  );
+  await assert.rejects(
+    store.checkpoint(input.id, "redgifs", { replyDueAt: 1_800_000_000_000 }),
+    /platform/,
+  );
+});
+
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }

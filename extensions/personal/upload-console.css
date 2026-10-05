@@ -12,6 +12,187 @@
   color: #f4f5f7;
 }
 
+body.calendar-teaser {
+  background: #101821;
+}
+.calendar-teaser main {
+  max-width: none;
+  padding: 12px;
+}
+.calendar-teaser .app-header,
+.calendar-teaser #mainDestinations,
+.calendar-teaser #mainPublishFields,
+.calendar-teaser .social-targets,
+.calendar-teaser .social-card > .file-picker,
+.calendar-teaser .social-card > .card-heading,
+.calendar-teaser #socialTraceStatus,
+.calendar-teaser #socialPaidLinkHint,
+.calendar-teaser #loadTemplate {
+  display: none;
+}
+.calendar-teaser [aria-labelledby="targetsHeading"],
+.calendar-teaser .social-card > .section-copy,
+.calendar-teaser .social-card > .section-heading {
+  display: none;
+}
+.calendar-teaser #uploadContent {
+  display: block;
+}
+.calendar-teaser .social-card {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.calendar-teaser .teaser-preview-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.calendar-teaser .teaser-video-preview {
+  width: 100%;
+  max-height: 180px;
+  background: #080d12;
+  border-radius: 10px;
+}
+.calendar-teaser .teaser-thumbnail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calendar-teaser .teaser-thumbnail-panel img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.calendar-teaser .teaser-thumbnail-upload {
+  cursor: pointer;
+  padding: 9px 12px;
+  border: 1px solid #344657;
+  border-radius: 8px;
+}
+.calendar-teaser .teaser-schedule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+.calendar-teaser .teaser-schedule-row {
+  display: grid;
+  grid-template-columns: 140px 130px minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0;
+}
+.calendar-teaser .teaser-schedule-row #socialPaidLinkFields {
+  min-width: 0;
+}
+.calendar-teaser .teaser-schedule-row select {
+  width: 100%;
+  min-width: 0;
+}
+.calendar-teaser .teaser-schedule-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #344657;
+  border-radius: 8px;
+  background: #0c121a;
+  color: #edf3fc;
+  font: inherit;
+}
+.calendar-teaser .upload-actions {
+  position: static;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.calendar-teaser #socialCaption {
+  min-height: 72px;
+  height: 72px;
+}
+.calendar-teaser .mode-choice {
+  margin-top: 12px;
+}
+.calendar-teaser .mode-choice label {
+  padding: 8px 10px;
+}
+.calendar-teaser .mode-choice legend {
+  display: none;
+}
+.calendar-teaser .teaser-association {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.calendar-teaser .teaser-association span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  color: #afbed2;
+}
+.calendar-teaser .teaser-association button {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.calendar-teaser:not(.teaser-matching) #cataloguePicker,
+.calendar-teaser #catalogueBrowseToggle,
+.calendar-teaser #findCatalogueEntry {
+  display: none;
+}
+.calendar-teaser #cataloguePicker {
+  max-height: 280px;
+  overflow: auto;
+}
+.calendar-teaser #catalogueSelectionStatus,
+.calendar-teaser #catalogueSuggestionStatus {
+  display: none;
+}
+.calendar-teaser .upload-actions > .action-status {
+  grid-column: 1;
+  grid-row: 1;
+}
+.calendar-teaser .upload-actions > #saveTeaserDraft {
+  grid-column: 2;
+  grid-row: 1;
+}
+.calendar-teaser .upload-actions > #uploadButton {
+  grid-column: 3;
+  grid-row: 1;
+}
+.calendar-teaser .upload-actions > .action-secondary {
+  grid-column: 1;
+  grid-row: 2;
+}
+@media (max-width: 620px) {
+  .calendar-teaser .teaser-schedule-row {
+    grid-template-columns: 95px 70px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 12px;
+  }
+  .calendar-teaser .teaser-schedule-row :is(input, select) {
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+  .calendar-teaser .upload-actions > .action-status {
+    grid-column: 1 / -1;
+  }
+  .calendar-teaser .upload-actions > :is(#saveTeaserDraft, #uploadButton) {
+    grid-row: 2;
+  }
+  .calendar-teaser .teaser-preview-panel {
+    grid-template-columns: 1fr;
+  }
+  .calendar-teaser .teaser-thumbnail-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .calendar-teaser .teaser-thumbnail-panel img {
+    grid-row: span 3;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

@@ -92,6 +92,294 @@ test("X preparation fills one composer and waits for the recorded upload-ready s
   }
 });
 
+test("X preparation enables and verifies only the Nudity content warning when requested", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/compose/post",
+      `
+        <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div>
+        <input type="file" data-testid="fileInput" />
+        <div role="progressbar" aria-valuenow="100"></div>
+        <button type="button" data-testid="tweetButton">Post</button>
+        <button type="button" aria-label="Edit media">Edit</button>
+        <section id="media-editor" hidden>
+          <div role="tab" aria-label="Captions">Captions</div>
+          <div role="tab" aria-label="Content warning">Content warning</div>
+          <div id="captions-panel">Captions</div>
+          <div id="warning-panel" hidden>
+            <label id="CHECKBOX_1_LABEL">Nudity</label>
+            <input id="nudity" type="checkbox" aria-describedby="CHECKBOX_1_LABEL" />
+            <label id="CHECKBOX_2_LABEL">Violence</label>
+            <input id="violence" type="checkbox" aria-describedby="CHECKBOX_2_LABEL" />
+          </div>
+          <button id="warning-done" type="button" hidden>Done</button>
+          <button id="captions-done" type="button">Done</button>
+        </section>
+        <script>
+          const editor = document.querySelector('#media-editor');
+          const captions = document.querySelector('#captions-panel');
+          const warning = document.querySelector('#warning-panel');
+          const warningDone = document.querySelector('#warning-done');
+          const captionsDone = document.querySelector('#captions-done');
+          document.querySelector('[aria-label="Edit media"]').addEventListener('click', () => {
+            editor.hidden = false;
+            document.querySelector('[data-testid="tweetTextarea_0"]').hidden = true;
+            warning.hidden = true;
+            captions.hidden = false;
+            warningDone.hidden = true;
+            captionsDone.hidden = false;
+          });
+          document.querySelector('[aria-label="Content warning"]').addEventListener('click', () => {
+            captions.hidden = true;
+            warning.hidden = false;
+            warningDone.hidden = false;
+            captionsDone.hidden = true;
+          });
+          warningDone.addEventListener('click', () => {
+            warning.hidden = true;
+            captions.hidden = false;
+            warningDone.hidden = true;
+            captionsDone.hidden = false;
+          });
+          captionsDone.addEventListener('click', () => {
+            editor.hidden = true;
+            document.querySelector('[data-testid="tweetTextarea_0"]').hidden = false;
+          });
+        </script>
+      `,
+    );
+    const result = await page.evaluate(async () => {
+      const prepared = await CreatorXPublisherAdapter.prepare({
+        caption: "Recorded caption",
+        xOptions: { sensitive: true },
+        async attachFile() {},
+      });
+      return {
+        prepared,
+        nudity: document.querySelector("#nudity").checked,
+        violence: document.querySelector("#violence").checked,
+        postClicks: 0,
+      };
+    });
+    assert.equal(result.prepared.status, "prepared");
+    assert.equal(result.nudity, true);
+    assert.equal(result.violence, false);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("X preparation accepts the selected filename Ready state with an enabled Post button", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/compose/post",
+      `
+        <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div>
+        <input type="file" data-testid="fileInput" />
+        <div role="status">preview-test.mp4: Ready</div>
+        <button type="button" data-testid="tweetButton">Post</button>
+      `,
+    );
+    const prepared = await page.evaluate(() =>
+      CreatorXPublisherAdapter.prepare({
+        caption: "Recorded caption",
+        async attachFile() {
+          return { name: "preview-test.mp4" };
+        },
+      }),
+    );
+    assert.equal(prepared.status, "prepared");
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("X scheduling prepares the named controls and final gated click stays unresolved until receipt evidence exists", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const scheduledDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    scheduledDate.setUTCMinutes(3, 0, 0);
+    const timeZone = "Europe/Zurich";
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(scheduledDate);
+    const value = (type) => parts.find((part) => part.type === type).value;
+    const scheduledUtc = scheduledDate.toISOString();
+    const zoneName = new Intl.DateTimeFormat("en", {
+      timeZone,
+      timeZoneName: "long",
+    })
+      .formatToParts(scheduledDate)
+      .find((part) => part.type === "timeZoneName").value;
+    const expectedSummary = `Will send on ${new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(scheduledDate)} at ${new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(scheduledDate)}`;
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/compose/post",
+      `
+        <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div>
+        <input type="file" data-testid="fileInput" />
+        <div role="status">preview-test.mp4: Ready</div>
+        <button type="button" data-testid="tweetButton">Post</button>
+        <button type="button" aria-label="Schedule post">Schedule post</button>
+        <section id="schedule" hidden>
+          <div>Time zone ${zoneName}</div>
+          <select aria-labelledby="SELECTOR_6_LABEL"><option value="${value("month")}">${value("month")}</option></select>
+          <span id="SELECTOR_6_LABEL">Month</span>
+          <select aria-labelledby="SELECTOR_7_LABEL"><option value="${value("day")}">${value("day")}</option></select>
+          <span id="SELECTOR_7_LABEL">Day</span>
+          <select aria-labelledby="SELECTOR_8_LABEL"><option value="${value("year")}">${value("year")}</option></select>
+          <span id="SELECTOR_8_LABEL">Year</span>
+          <select aria-labelledby="SELECTOR_9_LABEL"><option value="${String(Number(value("hour")))}">${String(Number(value("hour")))}</option></select>
+          <span id="SELECTOR_9_LABEL">Hour</span>
+            <select aria-labelledby="SELECTOR_10_LABEL"><option value="${String(Number(value("minute")))}">${value("minute")}</option></select>
+          <span id="SELECTOR_10_LABEL">Minute</span>
+          <button id="confirm" type="button">Confirm</button>
+        </section>
+        <button id="summary" type="button" hidden></button>
+        <script>
+          const dialog = document.querySelector('#schedule');
+          const finalButton = document.querySelector('[data-testid="tweetButton"]');
+          const summary = document.querySelector('#summary');
+          globalThis.__scheduleClicks = 0;
+          document.querySelector('[aria-label="Schedule post"]').addEventListener('click', () => { dialog.hidden = false; });
+          document.querySelector('#confirm').addEventListener('click', () => {
+            dialog.hidden = true;
+            summary.hidden = false;
+            summary.textContent = ${JSON.stringify(expectedSummary)};
+            finalButton.textContent = 'Schedule';
+          });
+          finalButton.addEventListener('click', () => { globalThis.__scheduleClicks += 1; });
+        </script>
+      `,
+    );
+    const result = await page.evaluate(
+      async ({ scheduledUtc, timeZone, captionSha256 }) => {
+        const xOptions = { sensitive: false, scheduledUtc, timeZone };
+        const prepared = await CreatorXPublisherAdapter.prepare({
+          caption: "Recorded caption",
+          xOptions,
+          async attachFile() {
+            return { name: "preview-test.mp4" };
+          },
+        });
+        const afterPrepare = {
+          summary: document.querySelector("#summary").textContent,
+          button: document.querySelector('[data-testid="tweetButton"]')
+            .textContent,
+          clicks: globalThis.__scheduleClicks,
+        };
+        const submitted = await CreatorXPublisherAdapter.submit({
+          xOptions,
+          captionSha256,
+          async beforeCommit() {
+            return { armed: true };
+          },
+        });
+        return {
+          prepared,
+          afterPrepare,
+          submitted,
+          clicks: globalThis.__scheduleClicks,
+        };
+      },
+      { scheduledUtc, timeZone, captionSha256: sha256Hex("Recorded caption") },
+    );
+    assert.equal(result.prepared.status, "prepared");
+    assert.equal(result.afterPrepare.summary, expectedSummary);
+    assert.equal(result.afterPrepare.button, "Schedule");
+    assert.equal(result.afterPrepare.clicks, 0);
+    assert.deepEqual(result.submitted, {
+      platform: "x",
+      status: "scheduled-unresolved",
+      scheduledUtc,
+    });
+    assert.equal(result.clicks, 1);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("X preparation fails closed when the requested Nudity warning is ambiguous", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/compose/post",
+      `
+        <div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div>
+        <input type="file" data-testid="fileInput" />
+        <div role="progressbar" aria-valuenow="100"></div>
+        <button type="button" data-testid="tweetButton">Post</button>
+        <button type="button" aria-label="Edit media">Edit</button>
+        <section id="media-editor" hidden>
+          <div role="tab" aria-label="Captions">Captions</div>
+          <div role="tab" aria-label="Content warning">Content warning</div>
+          <div id="captions-panel">Captions</div>
+          <div id="warning-panel" hidden>
+            <label id="CHECKBOX_1_LABEL">Nudity</label>
+            <input type="checkbox" aria-describedby="CHECKBOX_1_LABEL" />
+            <label id="CHECKBOX_2_LABEL">Nudity</label>
+            <input type="checkbox" aria-describedby="CHECKBOX_2_LABEL" />
+          </div>
+          <button id="warning-done" type="button" hidden>Done</button>
+          <button id="captions-done" type="button">Done</button>
+        </section>
+        <script>
+          const editor = document.querySelector('#media-editor');
+          const captions = document.querySelector('#captions-panel');
+          const warning = document.querySelector('#warning-panel');
+          document.querySelector('[aria-label="Edit media"]').addEventListener('click', () => {
+            editor.hidden = false;
+            document.querySelector('[data-testid="tweetTextarea_0"]').hidden = true;
+          });
+          document.querySelector('[aria-label="Content warning"]').addEventListener('click', () => {
+            captions.hidden = true;
+            warning.hidden = false;
+            document.querySelector('#warning-done').hidden = false;
+            document.querySelector('#captions-done').hidden = true;
+          });
+        </script>
+      `,
+    );
+    await assert.rejects(
+      page.evaluate(() =>
+        CreatorXPublisherAdapter.prepare({
+          caption: "Recorded caption",
+          xOptions: { sensitive: true },
+          async attachFile() {},
+        }),
+      ),
+      /Nudity warning checkbox is ambiguous/i,
+    );
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
 test("X submit clicks the recorded main Post only after durable arming", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

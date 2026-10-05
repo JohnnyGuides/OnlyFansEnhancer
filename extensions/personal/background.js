@@ -135,6 +135,10 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
       "writeUploadCatalogueEntry",
       "getSubredditPresets",
       "getTeaserOverview",
+      "getTeaserClips",
+      "getTeaserClipChunk",
+      "resolveScheduledTeaserResult",
+      "openTeaserEpisodeFolder",
       "undoTeaserClipMove",
       "getTeaserPlan",
       "setTeaserPlanSlot",
@@ -3990,9 +3994,47 @@ function getCreatorSocialRuntime() {
     catalogueClient: CREATOR_CATALOGUE_CLIENT,
     fileRequest: creatorSocialRequestFile,
     resolvePaidLink: resolveCreatorPaidUploadLink,
+    resolveScheduledResult: (payload) =>
+      sendDesktopRequest("resolveScheduledTeaserResult", payload),
   });
   return creatorSocialRuntime;
 }
+
+const SOCIAL_FOLLOW_UP_ALARM = "creator-social-follow-up";
+async function ensureSocialFollowUpAlarm() {
+  if (!chrome.alarms || (await chrome.alarms.get(SOCIAL_FOLLOW_UP_ALARM)))
+    return;
+  await chrome.alarms.create(SOCIAL_FOLLOW_UP_ALARM, { periodInMinutes: 1 });
+}
+void ensureSocialFollowUpAlarm();
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name !== SOCIAL_FOLLOW_UP_ALARM) return;
+  void (async () => {
+    for (const session of await CREATOR_SOCIAL_SESSION_STORE.list()) {
+      const job = session.jobs?.x;
+      if (
+        !session.plan?.xOptions ||
+        !job ||
+        ["sheet-complete", "result-captured", "failed", "blocked"].includes(
+          job.stage,
+        )
+      )
+        continue;
+      // Only runs already armed by Upload can survive closing the modal.
+      if (
+        !job.scheduleAttempted &&
+        !job.replyDueAt &&
+        !(session.plan.mode === "manual" && job.stage === "prepared")
+      )
+        continue;
+      try {
+        await getCreatorSocialRuntime().resume(session.id);
+      } catch {
+        /* Preserve armed checkpoints for visible recovery. */
+      }
+    }
+  })();
+});
 
 function creatorUploadHandlePortMessage(port, message) {
   if (message?.type === "bind-social-session") {

@@ -224,6 +224,30 @@ function plan(overrides = {}) {
   return { ...base, ...overrides };
 }
 
+test("future X scheduling arms once, stays pending, and never records a schedule as publication", async () => {
+  const runtime = loadRuntime({ behavior: { "capture:x": "missing" } });
+  const input = plan({
+    targets: { x: true, reddit: [] },
+    xOptions: {
+      sensitive: true,
+      scheduledUtc: "2026-10-06T16:00:00.000Z",
+      timeZone: "Europe/Zurich",
+    },
+  });
+  await runtime.store.create(input);
+  await runtime.orchestrator.startSocialDistribution(input.id);
+  await runtime.orchestrator.resumeSocialDistribution(input.id);
+  await runtime.orchestrator.resumeSocialDistribution(input.id);
+  const job = (await runtime.store.load(input.id)).jobs.x;
+  assert.equal(job.stage, "prepared");
+  assert.equal(job.scheduleState, "unresolved");
+  assert.equal(job.scheduleAttempted, true);
+  assert.equal(job.submitAttempted, false);
+  assert.equal(job.resultUrl, undefined);
+  assert.equal(runtime.sheetCalls.length, 0);
+  assert.equal(runtime.calls.filter((call) => call === "submit:x").length, 1);
+});
+
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }

@@ -1,6 +1,16 @@
 (() => {
   "use strict";
-  const webview = globalThis.chrome?.webview;
+  // Calendar embeds share the top-level desktop channel; native replies arrive there.
+  let webview = globalThis.chrome?.webview;
+  try {
+    if (
+      window.parent !== window &&
+      window.parent.location.origin === location.origin
+    )
+      webview = window.parent.chrome?.webview || webview;
+  } catch {
+    /* Standalone extension pages retain their own transport. */
+  }
   if (!webview) return;
   const pending = new Map();
   const ports = new Map();

@@ -38,7 +38,8 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
             or "recordUploadResult" or "writeUploadCatalogueEntry" or "getSubredditPresets" or "browserExchange" or "showChromeSetup" or "showWindow"
             or "loadDevelopmentFixtures" or "resolveDevelopmentFixture" or "recordXObservations"
             or "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult" or "recordXScanActivity"
-            or "getTeaserOverview" or "undoTeaserClipMove" or "getTeaserReplyQueue" or "getTeaserPlan" or "setTeaserPlanSlot" or "clearTeaserPlanSlot"))
+            or "getTeaserOverview" or "undoTeaserClipMove" or "getTeaserReplyQueue" or "getTeaserPlan" or "setTeaserPlanSlot" or "clearTeaserPlanSlot"
+            or "getTeaserClips" or "getTeaserClipChunk" or "openTeaserEpisodeFolder" or "resolveScheduledTeaserResult"))
             throw new AgentProtocolException(
                 "unsupported-operation",
                 "The desktop request uses an unsupported operation."

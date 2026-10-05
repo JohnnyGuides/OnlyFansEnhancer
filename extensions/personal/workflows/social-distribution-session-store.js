@@ -164,6 +164,18 @@
     if (Object.hasOwn(value, "replySubmitAttempted")) {
       output.replySubmitAttempted = value.replySubmitAttempted === true;
     }
+    if (Object.hasOwn(value, "scheduleAttempted"))
+      output.scheduleAttempted = value.scheduleAttempted === true;
+    if (Object.hasOwn(value, "scheduleState")) {
+      if (!["unresolved", "confirmed"].includes(value.scheduleState))
+        throw new Error("Invalid X schedule state.");
+      output.scheduleState = value.scheduleState;
+    }
+    if (Object.hasOwn(value, "replyDueAt")) {
+      if (!Number.isSafeInteger(value.replyDueAt) || value.replyDueAt < 1)
+        throw new Error("Invalid X reply due time.");
+      output.replyDueAt = value.replyDueAt;
+    }
     if (Object.hasOwn(value, "resultId")) {
       const resultId = clean(value.resultId, 200);
       if (!resultId) throw new Error("Invalid distribution result identity.");
@@ -248,6 +260,20 @@
     const output = { ...previous, ...patch };
     output.stage = mergeStage(previous.stage, patch.stage);
     if (previous.submitAttempted === true) output.submitAttempted = true;
+    if (previous.scheduleAttempted === true) output.scheduleAttempted = true;
+    if (output.scheduleAttempted || output.scheduleState) {
+      if (jobId !== "x" || !output.scheduleAttempted)
+        throw new Error("Invalid X schedule checkpoint.");
+      if (previous.scheduleState === "confirmed")
+        output.scheduleState = "confirmed";
+    }
+    if (output.replyDueAt && jobId !== "x")
+      throw new Error("Invalid reply due time for this platform.");
+    if (previous.replyDueAt) {
+      if (patch.replyDueAt && previous.replyDueAt !== patch.replyDueAt)
+        throw new Error("The X reply due time cannot change.");
+      output.replyDueAt = previous.replyDueAt;
+    }
     if (previous.replySubmitAttempted === true) {
       output.replySubmitAttempted = true;
     }
@@ -367,6 +393,11 @@
       if (!Object.hasOwn(previous.jobs, normalizedJobId)) {
         throw new Error("Unknown distribution job.");
       }
+      if (
+        (patch.scheduleAttempted || patch.scheduleState) &&
+        !previous.plan.xOptions?.scheduledUtc
+      )
+        throw new Error("This plan has no X schedule authorization.");
       if (
         normalizedJobId !== "x" &&
         (Object.hasOwn(patch, "replySubmitAttempted") ||

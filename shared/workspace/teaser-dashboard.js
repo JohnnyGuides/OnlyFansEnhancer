@@ -253,8 +253,10 @@
       coverage: "all",
       picking: null,
       detail: "",
+      detailEpisode: null,
       message: "",
       busy: false,
+      drafts: [],
     };
     let generation = 0;
     let wallObserver = null;
@@ -498,6 +500,8 @@
           request("getTeaserOverview", {}),
           request("getTeaserPlan", {}),
         ]);
+        if (global.OFEnhancerTeaserDrafts)
+          state.drafts = await global.OFEnhancerTeaserDrafts.list();
         if (current !== generation) return;
         applyOverview(overview, {
           episodes: [],
@@ -517,6 +521,29 @@
     async function reloadPlan() {
       const plan = await request("getTeaserPlan", {});
       state.slots = plan?.slots || [];
+    }
+
+    async function openComposer(date, episode = null) {
+      if (!global.OFEnhancerTeaserComposer) return false;
+      episode ||=
+        episodes().find(
+          (item) =>
+            item.sourceKey ===
+            state.slots.find((slot) => slot.date === date)?.episodeKey,
+        ) || null;
+      await global.OFEnhancerTeaserComposer.open({
+        date,
+        episode,
+        episodes: episodes(),
+        recommendations: recommendations(pickContext(date)),
+        request,
+        onSaved: async () => {
+          state.drafts = await global.OFEnhancerTeaserDrafts.list();
+          await reloadPlan();
+          render();
+        },
+      });
+      return true;
     }
 
     async function plan(date, episode, clipId) {
@@ -742,6 +769,7 @@
         if (post.verdict) tile.append(verdictBadge(post.verdict.verdict));
         tile.addEventListener("click", () => {
           state.detail = describePost(post);
+          state.detailEpisode = null;
           render(tile.dataset.key);
         });
         day.append(tile, numbers(post));
@@ -760,16 +788,25 @@
 
     function planTile(date) {
       const slot = slotOn(date);
+      const draft = state.drafts.find((item) => item.date === date);
       const scheduled = scheduledOn(date);
       const episode = slot ? episodeByKey(slot.episodeKey) : null;
       // A post already scheduled on X outlines the day; the plan's episode
       // title, else the post's own text, labels it.
       const title =
+        draft?.caption ||
+        draft?.name ||
         episode?.title ||
         slot?.episodeKey ||
         scheduled[0]?.text ||
         (scheduled.length ? "Scheduled post" : "");
-      const kind = scheduled.length ? "scheduled" : slot ? "planned" : "empty";
+      const kind = scheduled.length
+        ? "scheduled"
+        : draft
+          ? "draft"
+          : slot
+            ? "planned"
+            : "empty";
       const times = scheduled
         .map((post) => timeLabel(post.scheduledUtc))
         .join(", ");
@@ -790,7 +827,30 @@
         tile.append(
           element("span", "xt-tile-time", timeLabel(scheduled[0].scheduledUtc)),
         );
-      if (slot || scheduled.length) {
+      if (slot || draft || scheduled.length) {
+        if (draft?.hasThumbnail) {
+          const cover = element("img", "xt-draft-cover");
+          cover.alt = "";
+          tile.append(cover);
+          void global.OFEnhancerTeaserDrafts.get(date)
+            .then((saved) => {
+              if (!saved?.thumbnail || !cover.isConnected) return;
+              const url = URL.createObjectURL(saved.thumbnail);
+              cover.src = url;
+              cover.addEventListener("load", () => URL.revokeObjectURL(url), {
+                once: true,
+              });
+              cover.addEventListener(
+                "error",
+                () => {
+                  URL.revokeObjectURL(url);
+                  cover.remove();
+                },
+                { once: true },
+              );
+            })
+            .catch(() => cover.remove());
+        }
         tile.append(element("span", "xt-tile-label", title));
         if (slot?.reEdit) {
           const mark = element("span", "xt-scissors");
@@ -800,9 +860,14 @@
         }
       } else tile.append(element("span", "xt-plus", "+"));
       tile.addEventListener("click", () => {
+        if (global.OFEnhancerTeaserComposer) {
+          void openComposer(date);
+          return;
+        }
         state.picking = { date };
         if (state.coverage === "needs") state.coverage = "ready";
         state.detail = "";
+        state.detailEpisode = null;
         render("picking-start");
       });
       return tile;
@@ -1057,6 +1122,7 @@
       tile.append(viewCell, rateCell);
       tile.addEventListener("click", () => {
         state.detail = list.map(describePost).join(" | ");
+        state.detailEpisode = null;
         render(tile.dataset.key);
       });
       return tile;
@@ -1377,12 +1443,17 @@
         card.append(element("span", "xt-pick-reason", reason));
       }
       card.addEventListener("click", () => {
+        if (global.OFEnhancerTeaserComposer && state.picking) {
+          void openComposer(state.picking.date, episode);
+          return;
+        }
         if (state.picking) {
           if (card.dataset.pick === "hidden") return;
           void plan(state.picking.date, episode);
           return;
         }
         state.detail = describeEpisode(episode);
+        state.detailEpisode = episode;
         render(card.dataset.key);
       });
       item.append(card);
@@ -1610,6 +1681,7 @@
         if (post.verdict) tile.append(verdictBadge(post.verdict.verdict));
         tile.addEventListener("click", () => {
           state.detail = describePost(post);
+          state.detailEpisode = null;
           render(tile.dataset.key);
         });
         item.append(tile, numbers(post));
@@ -1711,6 +1783,24 @@
       }
       if (state.phase === "loading") return;
       const detail = element("p", "xt-detail", state.detail);
+      if (state.detailEpisode) {
+        const folder = button(
+          "xt-action",
+          "Open episode folder",
+          "Open episode folder",
+        );
+        folder.addEventListener("click", async () => {
+          try {
+            await request("openTeaserEpisodeFolder", {
+              episodeKey: state.detailEpisode.sourceKey,
+            });
+          } catch {
+            state.message = "The episode folder is unavailable.";
+            render();
+          }
+        });
+        detail.append(" ", folder);
+      }
       detail.setAttribute("role", "status");
       if (heading) heading.append(renderScan());
       else root.append(renderScan());

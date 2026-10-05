@@ -27,6 +27,8 @@
     if (args.action === "prepare") {
       return adapter.prepare({
         caption: args.caption,
+        xOptions: args.xOptions,
+        fileName: args.fileName,
         async attachFile(role, selector) {
           if (role !== "social" || selector !== args.fileSelector) {
             throw new Error(
@@ -43,6 +45,7 @@
     if (args.action === "submit") {
       return adapter.submit({
         captionSha256: args.captionSha256,
+        xOptions: args.xOptions,
         beforeCommit: async () => ({ armed: true }),
       });
     }
@@ -75,6 +78,7 @@
     catalogueClient,
     fileRequest,
     resolvePaidLink = null,
+    resolveScheduledResult = null,
     now = Date.now,
   }) {
     if (
@@ -184,14 +188,37 @@
 
     async function bindingFor(sessionId) {
       const current = bindings.get(sessionId);
-      if (current) return current;
       const session = await store.load(sessionId);
       if (!session?.jobs?.x)
         throw new Error("The X distribution session was not found.");
       const resultUrl = session.jobs.x.resultUrl || "";
+      async function restoreCapturedTab() {
+        const tab = await chrome.tabs.create({ url: resultUrl, active: false });
+        const restored = {
+          id: sessionId,
+          tabId: tab.id,
+          caption: "",
+          token: "",
+        };
+        bindings.set(sessionId, restored);
+        await saveBinding(restored);
+        return restored;
+      }
+      const mayRestoreCaptured = Boolean(
+        session.plan.xOptions && resultUrl && session.jobs.x.replyDueAt,
+      );
+      if (current) {
+        if (
+          mayRestoreCaptured &&
+          !(await chrome.tabs.get(current.tabId).catch(() => null))
+        )
+          return restoreCapturedTab();
+        return current;
+      }
       const saved = await savedBinding(sessionId);
       if (saved) {
         const tab = await chrome.tabs.get(saved.tabId).catch(() => null);
+        if (!tab && mayRestoreCaptured) return restoreCapturedTab();
         const canonical = canonicalXStatus(tab?.url);
         const expectedResult = resultUrl && canonical === resultUrl;
         const recoverableUncheckpointedTab =
@@ -216,6 +243,7 @@
       const candidates = (
         await chrome.tabs.query({ url: `${resultUrl}*` })
       ).filter((tab) => canonicalXStatus(tab.url) === resultUrl);
+      if (!candidates.length && mayRestoreCaptured) return restoreCapturedTab();
       if (candidates.length !== 1) {
         throw new Error("The exact X result tab could not be restored safely.");
       }
@@ -299,7 +327,11 @@
             role: "social",
             token: binding.token,
           });
-          return execute(binding, "prepare", { caption: binding.caption });
+          return execute(binding, "prepare", {
+            caption: binding.caption,
+            xOptions: input.plan.xOptions,
+            fileName: input.plan.socialFile.basename,
+          });
         },
         async submit(input) {
           const session = await store.load(input.plan.id);
@@ -317,9 +349,70 @@
           const binding = await bindingFor(input.plan.id);
           return execute(binding, "submit", {
             captionSha256: preparedCaptionSha256,
+            xOptions: input.plan.xOptions,
           });
         },
         async captureResult(input) {
+          let scheduled = await store.load(input.plan.id);
+          if (
+            input.plan.xOptions?.scheduledUtc &&
+            !scheduled.jobs.x.resultUrl &&
+            Date.parse(input.plan.xOptions.scheduledUtc) <= now() &&
+            resolveScheduledResult
+          ) {
+            const found = await resolveScheduledResult({
+              captionSha256: input.plan.caption.sha256,
+              scheduledUtc: input.plan.xOptions.scheduledUtc,
+              episodeKey: input.plan.catalogue?.id || "",
+            });
+            if (!found || found.matched === false) return null;
+            const verifiedUrl = canonicalXStatus(found.resultUrl);
+            if (!verifiedUrl || verifiedUrl.split("/").pop() !== found.resultId)
+              throw new Error("The scheduled X result identity is invalid.");
+            const postedAt = Date.parse(found.postedUtc);
+            if (
+              !Number.isFinite(postedAt) ||
+              Math.abs(
+                postedAt - Date.parse(input.plan.xOptions.scheduledUtc),
+              ) > 90_000
+            )
+              throw new Error("The scheduled X publication time is invalid.");
+            await store.checkpoint(input.plan.id, "x", {
+              resultId: found.resultId,
+              resultUrl: verifiedUrl,
+              replyDueAt:
+                postedAt + input.plan.xOptions.replyDelayMinutes * 60_000,
+            });
+            const saved = await savedBinding(input.plan.id);
+            let tab;
+            try {
+              tab = saved && (await chrome.tabs.get(saved.tabId));
+            } catch {
+              /* Closed scheduled composer. */
+            }
+            if (
+              tab &&
+              (!canonicalXStatus(tab.url) ||
+                canonicalXStatus(tab.url) === verifiedUrl)
+            )
+              tab = await chrome.tabs.update(tab.id, {
+                url: verifiedUrl,
+                active: false,
+              });
+            else
+              tab = await chrome.tabs.create({
+                url: verifiedUrl,
+                active: false,
+              });
+            const restored = {
+              id: input.plan.id,
+              tabId: tab.id,
+              caption: "",
+              token: "",
+            };
+            bindings.set(input.plan.id, restored);
+            await saveBinding(restored);
+          }
           const binding = await bindingFor(input.plan.id);
           const tab = await chrome.tabs.get(binding.tabId);
           const currentUrl = canonicalXStatus(tab?.url);
@@ -344,6 +437,24 @@
               mode: input.mode,
               paidUrl: input.paidUrl,
             });
+          }
+          if (input.plan.xOptions?.replyDelayMinutes) {
+            const job = session.jobs.x;
+            let due = job.replyDueAt;
+            if (!due) {
+              due = now() + input.plan.xOptions.replyDelayMinutes * 60_000;
+              await store.checkpoint(input.plan.id, "x", {
+                resultId: currentUrl.split("/").pop(),
+                resultUrl: currentUrl,
+                replyDueAt: due,
+              });
+            }
+            if (now() < due)
+              return {
+                status: "reply-prepared",
+                resultId: currentUrl.split("/").pop(),
+                resultUrl: currentUrl,
+              };
           }
           const prepared = await execute(binding, "prepare-reply", {
             paidUrl: input.paidUrl,

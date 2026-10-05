@@ -320,6 +320,25 @@ workspace directly. The overview also carries the owner's current X scheduled
 posts (at most 50), outlined on their day in the next-7-days row, and the scan
 status shown above the strip with a "Scan now" button (`requestXScan`).
 
+`teaser-composer.js` opens a day-bound dialog and embeds the existing Upload Hub
+in `teaser-upload-mode.js`. Same-origin, source-checked messages transfer the File
+and draft context. `teaser-draft-store.js` retains media and editable metadata in
+IndexedDB (61 drafts, 512 MB per video, 2 GB total); an execution checkpoint locks
+the draft to one upload session. `getTeaserClips` supplies bounded indexed ready
+and failed metadata. `getTeaserClipChunk` reads only root-contained indexed files,
+with size/mtime/hash validation and a bounded sequential read token. The episode
+folder operation validates the catalogue key and configured local parent.
+
+X plans optionally carry minute-aligned UTC time, IANA timezone, the sensitive
+warning and reply delay. The social ledger records scheduleAttempted before the
+final click; an uncertain result cannot click Schedule again. A one-minute Chrome
+alarm resumes existing authorized runs. `resolveScheduledTeaserResult` matches
+exact caption SHA-256 and publication time within 90 seconds against persisted
+owner video observations, refusing competing posts or contradictory bindings.
+Only a verified canonical live post can start the delayed reply; reply attempt
+checkpoints remain monotonic across worker restarts. Saving a calendar draft alone
+does not authorize either publication or reply.
+
 The automatic first reply uses the agent operation `getTeaserReplyQueue` (empty
 payload; at most 50 items): the owner handle and each teaser posted in the last
 24 hours that is bound without a recorded conflict and has no owner post replying

@@ -595,6 +595,7 @@
     preparationOnly = false,
     evidence,
     authorizationAt,
+    xOptions,
   }) {
     const contract = globalThis.CreatorSocialDistributionContract;
     if (!contract)
@@ -646,6 +647,7 @@
         x: targets.includes("x"),
         reddit: targets.includes("reddit") ? reddit : [],
       },
+      ...(xOptions ? { xOptions } : {}),
       evidence,
       authorization: { at: authorizationAt, sha256: "" },
     };
@@ -2877,9 +2879,12 @@
     }
 
     function updateUploadAction() {
-      uploadButton.textContent =
-        workflowMode?.value === "teaser" ||
-        currentMatch?.status === "upload-only"
+      uploadButton.textContent = document.body.classList.contains(
+        "calendar-teaser",
+      )
+        ? "Send to Twitter"
+        : workflowMode?.value === "teaser" ||
+            currentMatch?.status === "upload-only"
           ? "Upload"
           : currentMatch?.status === "matched"
             ? catalogueEntryEdited()
@@ -2984,7 +2989,9 @@
             ? "Saves catalogue edits, then starts a new upload."
             : currentMatch?.status === "new-pending"
               ? "Creates a catalogue entry, then starts the upload."
-              : "Ready. Upload starts this run.";
+              : document.body.classList.contains("calendar-teaser")
+                ? "Ready."
+                : "Ready. Upload starts this run.";
         reviewRecovery.hidden = true;
         refreshReadiness.hidden = true;
       } catch (error) {
@@ -3420,16 +3427,40 @@
 
     function applySocialJob(job) {
       if (!job) return;
+      if (calendarTeaser && activeSession?.id) {
+        const status = job.resultUrl
+          ? "posted"
+          : job.scheduleState === "confirmed"
+            ? "scheduled"
+            : job.scheduleAttempted
+              ? "unresolved"
+              : "prepared";
+        void globalThis.OFEnhancerTeaserDrafts.checkpoint(
+          calendarTeaser.day,
+          status,
+          activeSession.id,
+        )
+          .then(() => calendarTeaser.notify("saved"))
+          .catch((error) => {
+            uploadError.textContent = error.message;
+          });
+      }
       setPlatformState("x", {
         status:
-          job.stage === "sheet-complete"
-            ? job.googleSynced === false
-              ? "recorded-local"
-              : "catalogue-updated"
-            : job.stage === "result-captured" &&
-                activeSession?.catalogueDeferred
-              ? "published-local"
-              : job.stage,
+          job.replyDueAt && !job.replyResultUrl
+            ? "First reply pending"
+            : job.scheduleAttempted && !job.resultUrl
+              ? job.scheduleState === "confirmed"
+                ? "Scheduled"
+                : "Schedule needs verification"
+              : job.stage === "sheet-complete"
+                ? job.googleSynced === false
+                  ? "recorded-local"
+                  : "catalogue-updated"
+                : job.stage === "result-captured" &&
+                    activeSession?.catalogueDeferred
+                  ? "published-local"
+                  : job.stage,
         postUrl: job.resultUrl || "",
         error: job.error || "",
       });
@@ -4096,6 +4127,11 @@
 
     async function startUpload() {
       if (runBusy || activeSession || readiness?.ready !== true) return;
+      if (calendarTeaser?.locked()) {
+        uploadError.textContent =
+          "Review this teaser's saved upload session before starting another.";
+        return;
+      }
       let prepareDispatched = false;
       let recheckAfterFailure = false;
       let value = validate(true);
@@ -4111,6 +4147,7 @@
         return;
       let targets = [];
       runBusy = true;
+      calendarTeaser?.notify("running", { running: true });
       clearTimeout(matchTimer);
       ++matchRevision;
       ++readinessRevision;
@@ -4121,6 +4158,7 @@
       lockDraft(true);
       updateUploadAction();
       try {
+        if (calendarTeaser) await calendarTeaser.saveDraft();
         if (!(await confirmRepeatUpload())) {
           matchStatus.textContent =
             "Upload cancelled. Your draft is unchanged.";
@@ -4295,6 +4333,7 @@
                   },
               evidence: socialEvidence(),
               authorizationAt: Date.now(),
+              xOptions: calendarTeaser?.options(),
             })
           : null;
         const selectedFiles = {
@@ -4429,6 +4468,12 @@
         }
         if (socialPlan) {
           await activeSession.whenBound;
+          if (calendarTeaser)
+            await globalThis.OFEnhancerTeaserDrafts.checkpoint(
+              calendarTeaser.day,
+              "preparing",
+              sessionId,
+            );
           prepareDispatched = true;
           const preparedSocial = await sendMessage({
             type: "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
@@ -4440,6 +4485,12 @@
             })),
           });
           activeSession.accepted = true;
+          if (calendarTeaser)
+            await globalThis.OFEnhancerTeaserDrafts.checkpoint(
+              calendarTeaser.day,
+              "prepared",
+              sessionId,
+            );
           for (const [destination, target] of Object.entries(
             preparedSocial.socialDistribution?.targets || {},
           ))
@@ -4501,6 +4552,7 @@
         refreshReadiness.hidden = !notStarted;
       } finally {
         runBusy = false;
+        calendarTeaser?.notify("running", { running: false });
         if (!activeSession) lockDraft(false);
         updateUploadAction();
         if (recheckAfterFailure) void checkReadiness();
@@ -6454,6 +6506,96 @@
       uploadError.textContent = "";
       if (currentMatch) void checkReadiness();
       else scheduleMatch();
+    });
+    const calendarTeaser = globalThis.OFEnhancerTeaserUploadMode?.init({
+      file: () => socialFile,
+      candidate: () => currentMatch?.candidate,
+      paidUrl: () => currentPaidLink().paidUrl || "",
+      busy: () => runBusy || Boolean(activeSession),
+      normalizeThumbnail: normalizeThumbnailFile,
+      preferLink(kind, customUrl) {
+        const preferred = [...socialPaidLink.options].find((option) =>
+          kind === "custom"
+            ? option.value === "custom"
+            : kind && option.textContent.toLowerCase().includes(kind),
+        );
+        if (!preferred) return;
+        socialPaidLink.value = preferred.value;
+        if (kind === "custom") socialCustomPaidLink.value = customUrl || "";
+        refreshSocialReview();
+        if (currentMatch) void checkReadiness();
+      },
+      async resume(sessionId) {
+        if (runBusy || (activeSession && activeSession.id !== sessionId))
+          return;
+        const response = await sendMessage({
+          type: "RESUME_CREATOR_SOCIAL_DISTRIBUTION",
+          sessionId,
+        });
+        const job = response.socialDistribution?.jobs?.x;
+        if (!job)
+          throw new Error(
+            "This saved run is unavailable. Reconnect Chrome and review upload history.",
+          );
+        activeSession ||= {
+          id: sessionId,
+          closed: false,
+          catalogueDeferred: !currentMatch,
+          accepted: true,
+        };
+        lockDraft(true);
+        applySocialJob(job);
+        scheduleSocialResume(sessionId, job);
+      },
+      setFile(file) {
+        workflowMode.value = "teaser";
+        socialFile = file;
+        socialX.checked = true;
+        socialReddit.checked = false;
+        get("#socialFileSummary").textContent = fileSummary(
+          file,
+          "Choose video",
+        );
+        updateWorkflowVisibility();
+        renderFilePickers();
+        refreshSocialReview();
+      },
+      async associate(episodeKey, paidUrl) {
+        currentSnapshot = await loadCatalogueSnapshot();
+        const normalized = (value) =>
+          String(value || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+        const filename = normalized(socialFile.name.replace(/\.[^.]+$/, ""));
+        const matches = currentSnapshot.rows.filter((row) =>
+          episodeKey
+            ? row.id === episodeKey
+            : normalized(row.title).length > 4 &&
+              filename.includes(normalized(row.title)),
+        );
+        if (matches.length === 1) {
+          if (
+            socialPaidLink.value === "custom" &&
+            !socialCustomPaidLink.value.trim()
+          )
+            socialPaidLink.value = "";
+          selectedCatalogueRow = Number(matches[0].row);
+          applyProposal(buildProposal(selectedCatalogueRow), "matched", {
+            explicit: Boolean(episodeKey),
+          });
+        } else renderPicker();
+        refreshSocialReview();
+        if (paidUrl) {
+          socialPaidLink.value = [...socialPaidLink.options].some(
+            (option) => option.value === paidUrl,
+          )
+            ? paidUrl
+            : "custom";
+          socialCustomPaidLink.value = paidUrl;
+          refreshSocialReview();
+        }
+        if (currentMatch) await checkReadiness();
+      },
     });
     updateWorkflowVisibility();
     void globalThis.CreatorCatalogueClient?.loadConfig?.()

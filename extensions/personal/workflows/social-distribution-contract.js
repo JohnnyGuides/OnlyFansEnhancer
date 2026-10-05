@@ -176,6 +176,35 @@
       throw new Error("Choose at least one social target.");
     }
     const targets = { x, reddit };
+    let xOptions;
+    if (value.xOptions !== undefined) {
+      const options = value.xOptions;
+      if (!x || !options || options.sensitive !== true)
+        throw new Error("Invalid X content warning.");
+      const scheduledUtc = options.scheduledUtc || "";
+      const timeZone = clean(options.timeZone, 80);
+      try {
+        new Intl.DateTimeFormat("en", { timeZone }).format();
+      } catch {
+        throw new Error("Invalid X posting time zone.");
+      }
+      if (
+        !timeZone ||
+        (scheduledUtc &&
+          (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/.test(scheduledUtc) ||
+            !Number.isFinite(Date.parse(scheduledUtc)) ||
+            new Date(scheduledUtc).toISOString() !== scheduledUtc))
+      )
+        throw new Error("Invalid X posting time.");
+      const replyDelayMinutes = options.replyDelayMinutes ?? 15;
+      if (
+        !Number.isInteger(replyDelayMinutes) ||
+        replyDelayMinutes < 1 ||
+        replyDelayMinutes > 1440
+      )
+        throw new Error("Invalid X reply delay.");
+      xOptions = { sensitive: true, scheduledUtc, timeZone, replyDelayMinutes };
+    }
     const preparationOnly = value.preparationOnly === true;
     if (preparationOnly && (mode !== "manual" || !reddit.length)) {
       throw new Error("Reddit draft preparation must stay manual.");
@@ -210,6 +239,11 @@
     if (authorizationAt === null) {
       throw new Error("Invalid distribution authorization time.");
     }
+    if (
+      xOptions?.scheduledUtc &&
+      Date.parse(xOptions.scheduledUtc) <= authorizationAt
+    )
+      throw new Error("The X schedule must follow its authorization.");
     return deepFreeze({
       id,
       mode,
@@ -220,6 +254,7 @@
       paidUrl,
       ...(paidLinkDependency ? { paidLinkDependency } : {}),
       targets,
+      ...(xOptions ? { xOptions } : {}),
       evidence: evidence(value.evidence, targets, preparationOnly),
       authorization: {
         at: authorizationAt,

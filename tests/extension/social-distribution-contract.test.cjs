@@ -69,6 +69,33 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test("X calendar intent freezes warning, posting zone and delayed reply without accepting malformed time", () => {
+  const contract = loadContract();
+  const xOptions = {
+    sensitive: true,
+    scheduledUtc: "2026-10-06T16:00:00.000Z",
+    timeZone: "Europe/Zurich",
+    replyDelayMinutes: 15,
+  };
+  const frozen = contract.freezeDistributionPlan(input({ xOptions }));
+  assert.deepEqual(plain(frozen.xOptions), xOptions);
+  assert.equal(Object.isFrozen(frozen.xOptions), true);
+  for (const override of [
+    { sensitive: false },
+    { scheduledUtc: "2026-02-30T16:00:00.000Z" },
+    { timeZone: "invalid/zone" },
+    { replyDelayMinutes: 0 },
+    { scheduledUtc: "2000-01-01T00:00:00.000Z" },
+  ])
+    assert.throws(
+      () =>
+        contract.freezeDistributionPlan(
+          input({ xOptions: { ...xOptions, ...override } }),
+        ),
+      /X|zone/,
+    );
+});
+
 test("explicit deferred catalogue preserves publication proof validation", () => {
   const contract = loadContract();
   assert.equal(

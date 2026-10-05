@@ -41,7 +41,8 @@ function plan(id, mode = "manual") {
   };
 }
 
-function loadRuntime() {
+function loadRuntime(options = {}) {
+  let clock = 1_788_280_100_000;
   const values = {};
   const sessionValues = {};
   const tabs = new Map();
@@ -166,6 +167,10 @@ function loadRuntime() {
           ) {
             submitRejections.push(input.captionSha256);
             throw new Error("The X caption changed after the post was armed.");
+          }
+          if (input.xOptions?.scheduledUtc) {
+            tab.url = "https://x.com/home";
+            return [{ frameId: 0, result: { status: "scheduled-unresolved" } }];
           }
           tab.url = "https://x.com/RecordedCreator/status/9000000000000000001";
           observedMainUrl = tab.url;
@@ -294,7 +299,8 @@ function loadRuntime() {
       async fileRequest(request) {
         files.push(structuredClone(request));
       },
-      now: () => 1_788_280_100_000,
+      now: () => clock,
+      resolveScheduledResult: options.resolveScheduledResult,
     });
   }
   const runtime = createRuntime();
@@ -305,6 +311,9 @@ function loadRuntime() {
     files,
     injections,
     runtime,
+    setNow(value) {
+      clock = value;
+    },
     restart: createRuntime,
     submitRejections,
     values,
@@ -327,6 +336,93 @@ function loadRuntime() {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("calendar post delays its reply durably and a restarted worker cannot reply early", async () => {
+  const fixture = loadRuntime();
+  const id = "social-calendar-delay-0001";
+  const input = {
+    ...plan(id, "autonomous"),
+    xOptions: {
+      sensitive: true,
+      scheduledUtc: "",
+      timeZone: "Europe/Zurich",
+      replyDelayMinutes: 15,
+    },
+  };
+  await fixture.runtime.prepare({ plan: input, caption: "Caption" });
+  await fixture.runtime.start(id);
+  let job = (await fixture.store.load(id)).jobs.x;
+  assert.equal(job.stage, "submit-attempted");
+  assert.equal(Boolean(job.resultUrl), true);
+  assert.equal(fixture.actions.includes("prepare-reply"), false);
+  assert.equal(job.replyDueAt, 1_788_281_000_000);
+  await fixture.restart().resume(id);
+  assert.equal(fixture.actions.includes("submit-reply"), false);
+  fixture.setNow(job.replyDueAt);
+  fixture.tabs.clear();
+  await fixture.restart().resume(id);
+  job = (await fixture.store.load(id)).jobs.x;
+  assert.equal(job.stage, "sheet-complete");
+  assert.equal(
+    fixture.actions.filter((action) => action === "submit").length,
+    1,
+  );
+  assert.equal(
+    fixture.actions.filter((action) => action === "submit-reply").length,
+    1,
+  );
+});
+
+test("future calendar result must resolve against observed owner evidence before a delayed reply", async () => {
+  const scheduledUtc = new Date(
+    Math.ceil(1_788_280_160_000 / 60_000) * 60_000,
+  ).toISOString();
+  let observed = false;
+  const fixture = loadRuntime({
+    resolveScheduledResult: async () =>
+      observed
+        ? {
+            matched: true,
+            resultId: "9000000000000000001",
+            resultUrl:
+              "https://x.com/RecordedCreator/status/9000000000000000001",
+            postedUtc: scheduledUtc,
+          }
+        : { matched: false },
+  });
+  const id = "social-calendar-scheduled-0001";
+  const input = {
+    ...plan(id, "autonomous"),
+    xOptions: {
+      sensitive: true,
+      scheduledUtc,
+      timeZone: "Europe/Zurich",
+      replyDelayMinutes: 15,
+    },
+  };
+  await fixture.runtime.prepare({ plan: input, caption: "Caption" });
+  await fixture.runtime.start(id);
+  fixture.setNow(Date.parse(scheduledUtc) + 60_000);
+  await fixture.restart().resume(id);
+  assert.equal((await fixture.store.load(id)).jobs.x.resultUrl, undefined);
+  assert.equal(fixture.actions.includes("prepare-reply"), false);
+  observed = true;
+  await fixture.restart().resume(id);
+  const pending = (await fixture.store.load(id)).jobs.x;
+  assert.equal(pending.replyDueAt, Date.parse(scheduledUtc) + 900_000);
+  assert.equal(fixture.actions.includes("prepare-reply"), false);
+  fixture.setNow(pending.replyDueAt);
+  await fixture.restart().resume(id);
+  assert.equal((await fixture.store.load(id)).jobs.x.stage, "sheet-complete");
+  assert.equal(
+    fixture.actions.filter((action) => action === "submit").length,
+    1,
+  );
+  assert.equal(
+    fixture.actions.filter((action) => action === "submit-reply").length,
+    1,
+  );
+});
 
 function redditPlan(id, mode = "manual") {
   const value = plan(id, mode);

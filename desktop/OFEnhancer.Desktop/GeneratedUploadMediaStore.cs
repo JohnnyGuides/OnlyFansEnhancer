@@ -6,7 +6,7 @@ namespace OFEnhancer.Desktop;
 
 // WebView2 exposes a native path only for a File chosen from disk. Browser-
 // generated media is staged through bounded chunks before the usual bound
-// file handoff; the source video itself never passes through this store.
+// file handoff. Calendar clips copied from IndexedDB use the same staging path.
 internal sealed class GeneratedUploadMediaStore
 {
     private const int MaximumChunkBytes = 256 * 1024;
@@ -33,13 +33,15 @@ internal sealed class GeneratedUploadMediaStore
         long offset = payload.GetProperty("offset").GetInt64();
         bool final = payload.GetProperty("final").GetBoolean();
         // Extra Fansly videos each carry their own generated teaser (media1Teaser..media8Teaser).
-        bool teaser = role == "teaser" || (role.Length == 12 && role.StartsWith("media", StringComparison.Ordinal) &&
+        bool social = role == "social";
+        bool teaser = social || role == "teaser" || (role.Length == 12 && role.StartsWith("media", StringComparison.Ordinal) &&
             role[5] is >= '1' and <= '8' && role.EndsWith("Teaser", StringComparison.Ordinal));
         if (session.Length != 48 || session.Any(c => !Uri.IsHexDigit(c)) || !(teaser || role == "thumbnail") ||
             name.Length is < 1 or > 128 || name != Path.GetFileName(name) || name.Any(c => Path.GetInvalidFileNameChars().Contains(c)) ||
-            Path.GetExtension(name).ToLowerInvariant() != (teaser ? ".mp4" : ".png") ||
+            !(social ? new[] { ".mp4", ".mov", ".m4v", ".webm" }.Contains(Path.GetExtension(name).ToLowerInvariant())
+                : Path.GetExtension(name).ToLowerInvariant() == (teaser ? ".mp4" : ".png")) ||
             hash.Length != 64 || hash.Any(c => !Uri.IsHexDigit(c)) ||
-            size <= 0 || size >= (teaser ? 50L * 1024 * 1024 : 2_000_000) ||
+            size <= 0 || size >= (social ? 512L * 1024 * 1024 : teaser ? 50L * 1024 * 1024 : 2_000_000) ||
             modified <= 0 || offset < 0 || offset >= size)
             throw new InvalidOperationException("Invalid generated upload media.");
         byte[] chunk;

@@ -122,8 +122,26 @@ The manual Redgifs/Reddit preparation adapter reflects the observed composers of
 September 8, 2026. That observation is not a complete successful publishing
 trace. Reddit verifies the title hash again before link insertion and refuses
 nonempty changed fields. The accepted X trace includes OnlyFans preview-card
-dismissal before the first reply; ambiguous dismissal stops. X scheduling remains
-manual because the recorded six select controls are not semantically identified.
+dismissal before the first reply; ambiguous dismissal stops. The calendar teaser
+modal uses the clicked day, accepts a ready clip or a chosen/dropped video, previews
+it, and defaults its local thumbnail to the first frame. Catalogue matching can be
+accepted or changed; an exact episode-folder shortcut supports making a new clip.
+Caption, thumbnail, posting time, link and reply delay are saved as a local draft.
+Posting time, reply delay and link-provider choice are remembered for new drafts;
+catalogue links resolve for the newly matched episode. Send to Twitter stays visible
+at the bottom of the modal.
+Choosing a clip does not reserve another day or publish it.
+
+Upload uses the existing manual/autonomous mode choice. X preparation applies and
+reads back the Nudity warning, then uses labelled date/time controls and verifies
+the displayed timezone and schedule summary. A final scheduling attempt is durable
+and is never repeated automatically. An ambiguous receipt stays unresolved until
+the desktop observes exactly one owner video matching the caption hash and scheduled
+time. The first reply waits for that verified live post and the chosen delay.
+Saved runs can be reviewed from the modal. The local thumbnail is retained for the
+calendar; the observed X video editor does not expose a custom-cover control.
+Synthetic checks and inspected live controls do not establish installed end-to-end
+scheduled-publication acceptance.
 
 Trace-gated platform runtime flags and hashes live in
 [the evidence registry](../extensions/personal/workflows/social-trace-evidence.js).

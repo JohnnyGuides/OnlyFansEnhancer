@@ -118,6 +118,250 @@
     );
   }
 
+  function scheduleParts(options) {
+    const timestamp = Date.parse(String(options?.scheduledUtc || ""));
+    if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
+      throw new Error("The X schedule time must be a future UTC instant.");
+    }
+    const timeZone = String(options?.timeZone || "");
+    if (!timeZone) throw new Error("The X schedule time zone is missing.");
+    const date = new Date(timestamp);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const part = (type) =>
+      parts.find((item) => item.type === type)?.value || "";
+    const displayDate = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(date);
+    const displayTime = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+    const zoneName = new Intl.DateTimeFormat("en", {
+      timeZone,
+      timeZoneName: "long",
+    })
+      .formatToParts(date)
+      .find((item) => item.type === "timeZoneName")?.value;
+    if (
+      !part("year") ||
+      !part("month") ||
+      !part("day") ||
+      !part("hour") ||
+      !part("minute") ||
+      !zoneName
+    ) {
+      throw new Error("The X schedule time could not be represented.");
+    }
+    return {
+      scheduledUtc: new Date(timestamp).toISOString(),
+      timeZone,
+      zoneName,
+      values: {
+        Year: part("year"),
+        Month: part("month"),
+        Day: part("day"),
+        Hour: String(Number(part("hour"))),
+        Minute: String(Number(part("minute"))),
+      },
+      summary: `Will send on ${displayDate} at ${displayTime}`,
+    };
+  }
+
+  function scheduleSelect(label) {
+    const matches = [
+      ...document.querySelectorAll("select[aria-labelledby]"),
+    ].filter((select) => {
+      const text = select
+        .getAttribute("aria-labelledby")
+        .split(/\s+/)
+        .map((id) => labelText(document.getElementById(id)))
+        .filter(Boolean)
+        .join(" ");
+      return visible(select) && text === label;
+    });
+    if (matches.length !== 1) {
+      throw new Error(
+        `The X schedule ${label} field is ${matches.length ? "ambiguous" : "missing"}.`,
+      );
+    }
+    if (!(matches[0] instanceof HTMLSelectElement)) {
+      throw new Error(`The X schedule ${label} field is not a select.`);
+    }
+    return matches[0];
+  }
+
+  function scheduleSummary(details) {
+    const matches = [...document.querySelectorAll("button")].filter(
+      (button) => enabled(button) && labelText(button) === details.summary,
+    );
+    if (matches.length !== 1) {
+      throw new Error(
+        `The X schedule summary is ${matches.length ? "ambiguous" : "missing"}.`,
+      );
+    }
+    const scheduleButton = one(
+      MAIN_POST,
+      "The X Schedule button",
+      (button) => enabled(button) && labelText(button) === "Schedule",
+    );
+    return { summary: matches[0], scheduleButton };
+  }
+
+  async function prepareSchedule(options) {
+    const details = scheduleParts(options);
+    one(
+      'button[aria-label="Schedule post"]',
+      "The X Schedule post opener",
+    ).click();
+    await waitFor(() => scheduleSelect("Month"), "The X schedule Month field");
+    const displayedZone = `Time zone ${details.zoneName}`;
+    for (const [label, value] of Object.entries(details.values)) {
+      const select = scheduleSelect(label);
+      Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        "value",
+      ).set.call(select, value);
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      if (select.value !== value) {
+        throw new Error(`X did not accept the selected schedule ${label}.`);
+      }
+    }
+    // X changes this label with the selected date, including DST transitions.
+    await waitFor(() => {
+      const pageText = String(document.body?.innerText || "");
+      return (
+        pageText.includes(displayedZone) &&
+        pageText.indexOf(displayedZone) === pageText.lastIndexOf(displayedZone)
+      );
+    }, "The X schedule time zone matching the selected date");
+    for (const [label, value] of Object.entries(details.values))
+      if (scheduleSelect(label).value !== value)
+        throw new Error(`The X schedule ${label} changed during preparation.`);
+    one(
+      "button",
+      "The X schedule Confirm button",
+      (button) => enabled(button) && labelText(button) === "Confirm",
+    ).click();
+    await waitFor(
+      () => scheduleSummary(details),
+      "The X composer schedule summary",
+    );
+    return details;
+  }
+
+  function verifyPreparedSchedule(options) {
+    const details = scheduleParts(options);
+    return { ...details, ...scheduleSummary(details) };
+  }
+
+  function labelText(element) {
+    return String(element?.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function nudityWarningCheckbox() {
+    const matches = [
+      ...document.querySelectorAll('input[type="checkbox"][aria-describedby]'),
+    ].filter((input) =>
+      input
+        .getAttribute("aria-describedby")
+        .split(/\s+/)
+        .some((id) => labelText(document.getElementById(id)) === "Nudity"),
+    );
+    if (matches.length !== 1) {
+      throw new Error(
+        `The X Nudity warning checkbox is ${matches.length ? "ambiguous" : "missing"}.`,
+      );
+    }
+    if (!(matches[0] instanceof HTMLInputElement)) {
+      throw new Error("The X Nudity warning control is not a native checkbox.");
+    }
+    return matches[0];
+  }
+
+  async function setNudityWarning() {
+    one('button[aria-label="Edit media"]', "The X Edit media button").click();
+    const warningTab = await waitFor(
+      () =>
+        one(
+          '[role="tab"][aria-label="Content warning"]',
+          "The X Content warning tab",
+        ),
+      "The X Content warning tab",
+    );
+    warningTab.click();
+    const checkbox = await waitFor(
+      nudityWarningCheckbox,
+      "The X Nudity warning checkbox",
+    );
+    if (!checkbox.checked) checkbox.click();
+    if (!checkbox.checked)
+      throw new Error("X did not enable the Nudity content warning.");
+    one(
+      "button",
+      "The X media Done button",
+      (button) => visible(button) && labelText(button) === "Done",
+    ).click();
+    await waitFor(
+      () => one('[role="tab"][aria-label="Captions"]', "The X Captions tab"),
+      "The X Captions tab",
+    );
+    one(
+      "button",
+      "The X captions Done button",
+      (button) => visible(button) && labelText(button) === "Done",
+    ).click();
+    await waitFor(
+      () => one(MAIN_COMPOSER, "The X composer"),
+      "The X composer after media editing",
+    );
+
+    one('button[aria-label="Edit media"]', "The X Edit media button").click();
+    one(
+      '[role="tab"][aria-label="Content warning"]',
+      "The X Content warning tab",
+    ).click();
+    const persisted = await waitFor(
+      nudityWarningCheckbox,
+      "The saved X Nudity warning checkbox",
+    );
+    if (!persisted.checked)
+      throw new Error("The X Nudity content warning did not persist.");
+    one(
+      "button",
+      "The X media Done button",
+      (button) => visible(button) && labelText(button) === "Done",
+    ).click();
+    await waitFor(
+      () => one('[role="tab"][aria-label="Captions"]', "The X Captions tab"),
+      "The X Captions tab",
+    );
+    one(
+      "button",
+      "The X captions Done button",
+      (button) => visible(button) && labelText(button) === "Done",
+    ).click();
+    await waitFor(
+      () => one(MAIN_COMPOSER, "The X composer"),
+      "The X composer after warning readback",
+    );
+  }
+
   async function mainIdentity() {
     if (!mainObservation.clicked) {
       throw new Error("The prepared X Post was not clicked in this tab.");
@@ -210,7 +454,15 @@
     return { card: unique[0], dismiss: buttons[0] };
   }
 
-  async function prepare({ caption, attachFile }) {
+  /**
+   * @param {{caption:string, attachFile:(role:string, selector:string)=>Promise<{name?:string}|void>, fileName?:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string}}} input
+   */
+  async function prepare({
+    caption,
+    attachFile,
+    fileName = "",
+    xOptions = {},
+  }) {
     if (
       location.origin !== "https://x.com" ||
       location.pathname !== "/compose/post"
@@ -219,11 +471,14 @@
     }
     if (typeof attachFile !== "function")
       throw new Error("The social file bridge is unavailable.");
+    if (xOptions.scheduledUtc) scheduleParts(xOptions);
     const editor = one(MAIN_COMPOSER, "The X composer");
     one(FILE_INPUT, "The X media input", () => true);
     fillEditor(editor, caption);
-    await attachFile("social", FILE_INPUT);
-    const postButton = await waitFor(() => {
+    const attached = await attachFile("social", FILE_INPUT);
+    const attachedName = attached && "name" in attached ? attached.name : "";
+    const mediaName = String(fileName || attachedName || "").trim();
+    await waitFor(() => {
       const progress = [
         ...document.querySelectorAll('[role="progressbar"]'),
       ].some(
@@ -231,7 +486,15 @@
           visible(element) &&
           Number(element.getAttribute("aria-valuenow")) === 100,
       );
-      return progress && one(MAIN_POST, "The X Post button", enabled);
+      const readyLabel = mediaName ? `${mediaName}: Ready` : "";
+      const pageText = String(document.body?.innerText || "");
+      const fileReady =
+        readyLabel &&
+        pageText.indexOf(readyLabel) >= 0 &&
+        pageText.indexOf(readyLabel) === pageText.lastIndexOf(readyLabel);
+      return (
+        (progress || fileReady) && one(MAIN_POST, "The X Post button", enabled)
+      );
     }, "The X upload-ready state");
     const preparedText = one(MAIN_COMPOSER, "The X composer").textContent;
     if (
@@ -244,7 +507,21 @@
     if (one(MAIN_COMPOSER, "The X composer").textContent !== preparedText) {
       throw new Error("The X caption changed while preparation finished.");
     }
-    observePreparedPost(postButton);
+    if (xOptions.sensitive === true) {
+      await setNudityWarning();
+      if (one(MAIN_COMPOSER, "The X composer").textContent !== preparedText) {
+        throw new Error(
+          "The X caption changed while setting the content warning.",
+        );
+      }
+    }
+    if (xOptions.scheduledUtc) await prepareSchedule(xOptions);
+    if (one(MAIN_COMPOSER, "The X composer").textContent !== preparedText) {
+      throw new Error("The X caption changed while preparing the schedule.");
+    }
+    if (!xOptions.scheduledUtc) {
+      observePreparedPost(one(MAIN_POST, "The X Post button", enabled));
+    }
     return {
       platform: "x",
       status: "prepared",
@@ -263,12 +540,17 @@
       .join("");
   }
 
-  async function submit({ beforeCommit, captionSha256 }) {
+  /**
+   * @param {{beforeCommit:()=>Promise<{armed:boolean}>, captionSha256:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string}}} input
+   */
+  async function submit({ beforeCommit, captionSha256, xOptions = {} }) {
     if (typeof beforeCommit !== "function")
       throw new Error("The durable submit gate is unavailable.");
     if (!/^[0-9a-f]{64}$/.test(String(captionSha256 ?? "")))
       throw new Error("The prepared X caption hash is missing or malformed.");
-    one(MAIN_POST, "The X Post button", enabled);
+    const scheduled = Boolean(xOptions.scheduledUtc);
+    if (scheduled) verifyPreparedSchedule(xOptions);
+    else one(MAIN_POST, "The X Post button", enabled);
     const authorization = await beforeCommit();
     if (authorization?.armed !== true)
       throw new Error("The X post was not durably armed.");
@@ -286,8 +568,17 @@
       throw new Error("The X caption changed after the post was armed.");
     if (!onCompose())
       throw new Error("The X composer changed after the post was armed.");
-    const button = one(MAIN_POST, "The X Post button", enabled);
+    const button = scheduled
+      ? verifyPreparedSchedule(xOptions).scheduleButton
+      : one(MAIN_POST, "The X Post button", enabled);
     button.click();
+    if (scheduled) {
+      return {
+        platform: "x",
+        status: "scheduled-unresolved",
+        scheduledUtc: scheduleParts(xOptions).scheduledUtc,
+      };
+    }
     return { platform: "x", status: "submitted" };
   }
 

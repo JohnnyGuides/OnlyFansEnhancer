@@ -320,6 +320,13 @@
         }
         job = session.jobs[jobId];
         if (job.stage !== "result-captured") {
+          if (
+            jobId === "x" &&
+            job.replyDueAt &&
+            job.resultUrl &&
+            !job.replySubmitAttempted
+          )
+            return { fingerprint, session };
           if (job.stage === "submit-attempted") {
             session = await fail(
               session,
@@ -364,6 +371,55 @@
       }
 
       if (job.stage === "prepared") {
+        if (jobId === "x" && session.plan.xOptions?.scheduledUtc) {
+          if (job.scheduleAttempted || session.plan.mode === "manual") {
+            // A future schedule is not a public result. Capture only when a live
+            // canonical post is independently observed, and never re-click Schedule.
+            try {
+              session =
+                (await capture(session, jobId, dependencyUrl)) || session;
+            } catch {
+              return { fingerprint, session };
+            }
+            if (session.jobs[jobId].stage === "result-captured")
+              return appendResult(session, jobId, fingerprint);
+            return { fingerprint, session };
+          } else {
+            session = await store.checkpoint(sessionId, jobId, {
+              scheduleAttempted: true,
+              scheduleState: "unresolved",
+              updatedAt: now(),
+            });
+            try {
+              const receipt = await adapterFor(jobId).submit({
+                dependencyUrl,
+                jobId,
+                mode: session.plan.mode,
+                plan: session.plan,
+                target: targetFor(session.plan, jobId),
+                async beforeCommit() {
+                  const armed = await store.load(sessionId);
+                  return {
+                    armed:
+                      armed?.jobs?.x?.scheduleAttempted === true &&
+                      armed.jobs.x.scheduleState === "unresolved",
+                  };
+                },
+              });
+              if (receipt?.status === "scheduled")
+                session = await store.checkpoint(sessionId, jobId, {
+                  scheduleState: "confirmed",
+                  updatedAt: now(),
+                });
+            } catch (error) {
+              session = await store.checkpoint(sessionId, jobId, {
+                error: cleanError(error),
+                updatedAt: now(),
+              });
+            }
+            return { fingerprint, session };
+          }
+        }
         if (session.plan.mode === "manual") {
           try {
             session = (await capture(session, jobId, dependencyUrl)) || session;
@@ -423,6 +479,8 @@
             };
           }
           if (session.jobs[jobId].stage !== "result-captured") {
+            if (jobId === "x" && session.jobs[jobId].replyDueAt)
+              return { fingerprint, session };
             return {
               fingerprint,
               session: await fail(

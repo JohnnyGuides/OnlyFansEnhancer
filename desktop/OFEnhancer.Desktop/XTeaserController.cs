@@ -15,7 +15,7 @@ internal sealed record XTeaserOverviewResult(bool Active, XTeaserOverview Overvi
 // the serial request dispatcher; file hashing during scans runs beside it.
 // The hourly sheet write-back of discovered teaser links is independent of
 // the teaser root.
-internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatcher dispatcher,
+internal sealed partial class XTeaserController(CatalogueStore store, WebMessageDispatcher dispatcher,
     Func<DesktopSettings> settings, Func<DateTimeOffset>? clock = null,
     Func<DateTimeOffset, XSheetWritebackRun>? sheetWriteback = null, XScanActivityBoard? scanActivity = null) : IDisposable
 {
@@ -108,6 +108,7 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
     {
         "getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
         "requestXScan", "getXScanActivity",
+        "getTeaserClips", "getTeaserClipChunk", "openTeaserEpisodeFolder", "resolveScheduledTeaserResult",
     };
 
     internal const int MaxPlanDaysAhead = 60;
@@ -124,6 +125,10 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
         "clearTeaserPlanSlot" => await dispatcher.EnqueueAsync<object>(() => ClearPlanSlot(payload)).ConfigureAwait(false),
         "requestXScan" => await dispatcher.EnqueueAsync<object>(() => RequestScan(payload)).ConfigureAwait(false),
         "getXScanActivity" => ScanActivity(payload),
+        "getTeaserClips" => await dispatcher.EnqueueAsync<object>(() => Library(payload)).ConfigureAwait(false),
+        "getTeaserClipChunk" => await dispatcher.EnqueueAsync<object>(() => ClipChunk(payload)).ConfigureAwait(false),
+        "resolveScheduledTeaserResult" => await dispatcher.EnqueueAsync<object>(() => ScheduledResult(payload)).ConfigureAwait(false),
+        "openTeaserEpisodeFolder" => await dispatcher.EnqueueAsync<object>(() => OpenEpisodeFolder(payload)).ConfigureAwait(false),
         _ => throw new GoogleCatalogueControllerException("unsupported-operation"),
     };
 
@@ -200,6 +205,8 @@ internal sealed class XTeaserController(CatalogueStore store, WebMessageDispatch
     public void Dispose()
     {
         timer?.Dispose();
+        foreach (ClipRead read in clipReads.Values) read.Stream.Dispose();
+        clipReads.Clear();
         timer = null;
     }
 }
