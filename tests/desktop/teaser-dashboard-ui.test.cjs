@@ -397,6 +397,57 @@ async function screenshot(page, name, fullPage = false) {
   await page.screenshot({ path: path.join(folder, name), fullPage });
 }
 
+test("Reddit draft count leaves the daily Twitter card and plan intact", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    const day = page.locator('.xt-day[data-date="2026-10-04"]');
+    const before = await day.locator(".xt-tile").getAttribute("data-kind");
+    await page.evaluate(async () => {
+      for (const subreddit of ["example_one", "example_two"])
+        await OFEnhancerTeaserDrafts.savePost({
+          id: crypto.randomUUID(),
+          date: "2026-10-04",
+          subreddit,
+          file: new File(["clip"], "preview.mp4", { type: "video/mp4" }),
+          caption: "Community title",
+          time: "18:00",
+        });
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Teasers", exact: true }).click();
+    await page.locator('#teaserDashboard[data-state="ready"]').waitFor();
+    assert.equal(
+      await day.locator(".xt-tile").getAttribute("data-kind"),
+      before,
+    );
+    assert.equal(await day.locator(".xt-tile").count(), 1);
+    assert.equal(
+      await day.locator(".xt-other-posts").textContent(),
+      "Reddit · 2 drafts",
+    );
+    const tops = await page
+      .locator('.xt-week-section[data-period="next"] .xt-tile')
+      .evaluateAll((tiles) =>
+        tiles.map((tile) => Math.round(tile.getBoundingClientRect().top)),
+      );
+    assert.equal(new Set(tops).size, 1, "extra drafts do not shift day cards");
+    assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
+    await screenshot(page, "reddit-draft-calendar.png", true);
+    if (process.env.OFENHANCER_TEASER_SCREENSHOTS)
+      await page
+        .locator(".xt-calendar")
+        .screenshot({
+          path: path.join(
+            process.env.OFENHANCER_TEASER_SCREENSHOTS,
+            "daily-calendar.png",
+          ),
+        });
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test("timeline strip orders 7 square days and colours numbers by the usual", async () => {
   const { page, context, errors } = await openDashboard();
   try {

@@ -132,6 +132,16 @@ catalogue links resolve for the newly matched episode. Send to Twitter stays vis
 at the bottom of the modal.
 Choosing a clip does not reserve another day or publish it.
 
+The daily calendar retains one primary Twitter draft and its thumbnail. Additional
+Reddit drafts appear as a compact count beneath that day. The same modal switches
+between destinations; each Reddit draft stores its own clip, first-frame thumbnail,
+subreddit, title and intended time. Removing a Reddit draft does not alter the
+Twitter plan or execution checkpoint. Existing date-keyed Twitter drafts migrate
+without replacement, and all local media shares the existing 2 GB storage budget.
+Reddit entries in this calendar are local drafts, not scheduled platform posts;
+their send controls are unavailable. This does not add Reddit publishing, metrics
+collection or AI title generation to the calendar workflow.
+
 Upload uses the existing manual/autonomous mode choice. X preparation applies and
 reads back the Nudity warning, then uses labelled date/time controls and verifies
 the displayed timezone and schedule summary. A final scheduling attempt is durable

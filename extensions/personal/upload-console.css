@@ -15,6 +15,34 @@
 body.calendar-teaser {
   background: #101821;
 }
+.calendar-reddit-draft [hidden],
+.calendar-reddit-draft #socialPaidLinkFields,
+.calendar-reddit-draft #socialCustomPaidLinkField,
+.calendar-reddit-draft .social-auto-mode,
+.calendar-reddit-draft #uploadButton {
+  display: none !important;
+}
+.calendar-reddit-draft #matchStatus,
+.calendar-reddit-draft
+  .action-status:not(:has(#uploadError:not(:empty), #runNotice:not(:empty))),
+.calendar-reddit-draft .action-secondary:not(:has(button:not([hidden]))) {
+  display: none;
+}
+body.calendar-reddit-draft .teaser-schedule-row {
+  grid-template-columns: minmax(0, 1fr) 140px;
+}
+body.calendar-reddit-draft .upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+body.calendar-reddit-draft .upload-actions .action-status {
+  flex-basis: 100%;
+}
+.calendar-reddit-draft .teaser-schedule-field input[type="text"] {
+  width: 100%;
+  max-width: none;
+}
 .calendar-teaser main {
   max-width: none;
   padding: 12px;

@@ -67,6 +67,17 @@
     scheduleRow.append(timeLabel, replyLabel, linkFields);
     const customLink = get("#socialCustomPaidLinkField");
     scheduleRow.after(customLink);
+    const subredditLabel = document.createElement("label");
+    subredditLabel.textContent = "Subreddit";
+    subredditLabel.className = "teaser-schedule-field";
+    subredditLabel.hidden = true;
+    const subreddit = document.createElement("input");
+    subreddit.type = "text";
+    subreddit.placeholder = "r/community";
+    subreddit.maxLength = 23;
+    subreddit.setAttribute("aria-label", "Subreddit");
+    subredditLabel.append(subreddit);
+    subreddit.addEventListener("input", () => notify("dirty"));
     const PREFS = "OFEnhancerTeaserPreferencesV1";
     let preferences = {};
     try {
@@ -75,6 +86,7 @@
       /* Use defaults. */
     }
     const remember = () => {
+      if (context?.platform === "reddit") return;
       const option = get("#socialPaidLink").selectedOptions[0];
       const linkKind =
         option?.value === "custom"
@@ -204,13 +216,23 @@
       if (
         !time.validity.valid ||
         !time.value ||
-        !replyDelay.validity.valid ||
-        !Number.isInteger(Number(replyDelay.value))
+        (context?.platform !== "reddit" &&
+          (!replyDelay.validity.valid ||
+            !Number.isInteger(Number(replyDelay.value))))
       )
         throw new Error("Choose a valid posting time and reply delay.");
       await previewReady;
       const candidate = hub.candidate();
-      const saved = await global.OFEnhancerTeaserDrafts.save({
+      const reddit = context?.platform === "reddit";
+      const saved = await global.OFEnhancerTeaserDrafts[
+        reddit ? "savePost" : "save"
+      ]({
+        ...(reddit
+          ? {
+              id: context.postId,
+              subreddit: subreddit.value.trim().replace(/^r\//i, ""),
+            }
+          : {}),
         date: day,
         file: hub.file(),
         thumbnail,
@@ -222,8 +244,8 @@
         paidUrl: hub.paidUrl(),
       });
       notify("saved");
-      remember();
-      if (candidate?.id && window.parent.OFEnhancerHost) {
+      if (!reddit) remember();
+      if (!reddit && candidate?.id && window.parent.OFEnhancerHost) {
         try {
           await window.parent.OFEnhancerHost.request("setTeaserPlanSlot", {
             date: day,
@@ -287,6 +309,7 @@
         return;
       }
       file.source = "generated";
+      if (context && context.file !== file) context.clipId = null;
       hub.setFile(file);
       previewReady = showFile(file);
       notify("dirty");
@@ -329,6 +352,23 @@
         return;
       accepted = true;
       context = event.data;
+      if (context.platform === "reddit") {
+        document.body.classList.add("calendar-reddit-draft");
+        caption.maxLength = 300;
+        caption.placeholder = "Write the Reddit title…";
+        panel.nextElementSibling.textContent = "Title";
+        subredditLabel.hidden = false;
+        scheduleRow.prepend(subredditLabel);
+        subreddit.value = context.draft?.subreddit || "";
+        replyLabel.hidden = true;
+        linkFields.hidden = true;
+        customLink.hidden = true;
+        automatic.closest("label").hidden = true;
+        get("#uploadButton").hidden = true;
+        get("#uploadButton").disabled = true;
+        save.textContent = "Save Reddit draft";
+        get("#socialHeading").textContent = "Reddit draft";
+      }
       if (context.file) context.file.source = "generated";
       hub.setFile(context.file);
       caption.value = context.draft?.caption || "";
@@ -390,7 +430,8 @@
       day,
       saveDraft,
       notify,
-      locked: () => Boolean(context?.draft?.sessionId),
+      locked: () =>
+        context?.platform === "reddit" || Boolean(context?.draft?.sessionId),
       thumbnail: () => thumbnail,
       options: () => {
         if (

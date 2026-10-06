@@ -14,9 +14,12 @@
   }
   function open() {
     return new Promise((resolve, reject) => {
-      const request = global.indexedDB.open(NAME, 1);
-      request.onupgradeneeded = () =>
-        request.result.createObjectStore("drafts", { keyPath: "date" });
+      const request = global.indexedDB.open(NAME, 2);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("drafts"))
+          request.result.createObjectStore("drafts", { keyPath: "date" });
+        request.result.createObjectStore("posts", { keyPath: "id" });
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () =>
         reject(
@@ -26,11 +29,11 @@
         );
     });
   }
-  async function transact(mode, run) {
+  async function transact(mode, run, name = "drafts") {
     const db = await open();
     try {
       return await new Promise((resolve, reject) => {
-        const transaction = db.transaction("drafts", mode);
+        const transaction = db.transaction(["drafts", "posts"], mode);
         let result;
         transaction.oncomplete = () => resolve(result);
         transaction.onabort = transaction.onerror = () =>
@@ -40,7 +43,7 @@
             ),
           );
         run(
-          transaction.objectStore("drafts"),
+          transaction.objectStore(name),
           (value) => {
             result = value;
           },
@@ -116,20 +119,112 @@
           return;
         }
         const others = read.result.filter((item) => item.date !== record.date);
-        if (
-          others.length >= 61 ||
-          others.reduce(
-            (size, item) => size + (item.file?.size || 0),
-            record.file.size,
-          ) > MAX_TOTAL
-        ) {
-          transaction.abort();
-          return;
-        }
-        store.put(record);
-        done(record);
+        const posts = transaction.objectStore("posts").getAll();
+        posts.onsuccess = () => {
+          if (
+            others.length >= 61 ||
+            others.reduce(
+              (size, item) => size + (item.file?.size || 0),
+              record.file.size +
+                posts.result.reduce(
+                  (size, item) => size + (item.file?.size || 0),
+                  0,
+                ),
+            ) > MAX_TOTAL
+          ) {
+            transaction.abort();
+            return;
+          }
+          store.put(record);
+          done(record);
+        };
       };
     });
+  }
+  async function listPosts(date) {
+    return transact(
+      "readonly",
+      (store, done) => {
+        const read = store.getAll();
+        read.onsuccess = () =>
+          done(
+            summaries(
+              read.result.filter((item) => !date || item.date === date),
+            ),
+          );
+      },
+      "posts",
+    );
+  }
+  async function getPost(id) {
+    return transact(
+      "readonly",
+      (store, done) => {
+        const read = store.get(id);
+        read.onsuccess = () => done(read.result || null);
+      },
+      "posts",
+    );
+  }
+  async function savePost(draft) {
+    if (
+      !validDay(draft?.date) ||
+      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(draft.id || "") ||
+      !/^[A-Za-z0-9_]{2,21}$/.test(draft.subreddit || "") ||
+      !(draft.file instanceof File) ||
+      !draft.file.size ||
+      draft.file.size >= MAX_FILE ||
+      !/\.(mp4|mov|m4v|webm)$/i.test(draft.file.name) ||
+      typeof draft.caption !== "string" ||
+      draft.caption.length > 300 ||
+      !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(draft.time || "") ||
+      (draft.thumbnail &&
+        (!(draft.thumbnail instanceof Blob) ||
+          draft.thumbnail.size > 2_000_000))
+    )
+      throw new Error(
+        "Choose a subreddit, video under 512 MB, title of at most 300 characters and valid time.",
+      );
+    const record = {
+      id: draft.id,
+      date: draft.date,
+      platform: "reddit",
+      subreddit: draft.subreddit,
+      file: draft.file,
+      thumbnail: draft.thumbnail || null,
+      caption: draft.caption,
+      episodeKey: String(draft.episodeKey || ""),
+      clipId: draft.clipId || null,
+      time: draft.time,
+      status: "draft",
+      updatedAt: Date.now(),
+    };
+    return transact(
+      "readwrite",
+      (store, done, transaction) => {
+        const read = store.getAll();
+        read.onsuccess = () => {
+          const others = read.result.filter((item) => item.id !== record.id);
+          const twitter = transaction.objectStore("drafts").getAll();
+          twitter.onsuccess = () => {
+            const bytes = [...others, ...twitter.result].reduce(
+              (size, item) => size + (item.file?.size || 0),
+              record.file.size,
+            );
+            if (others.length >= 200 || bytes > MAX_TOTAL) {
+              transaction.abort();
+              return;
+            }
+            store.put(record);
+            done(record);
+          };
+        };
+      },
+      "posts",
+    );
+  }
+  async function removePost(id) {
+    return transact("readwrite", (store) => store.delete(id), "posts");
   }
   async function checkpoint(date, status, sessionId) {
     if (
@@ -181,5 +276,9 @@
     save,
     checkpoint,
     validDay,
+    listPosts,
+    getPost,
+    savePost,
+    removePost,
   });
 })(globalThis);

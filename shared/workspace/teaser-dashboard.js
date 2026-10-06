@@ -257,6 +257,7 @@
       message: "",
       busy: false,
       drafts: [],
+      redditDrafts: [],
     };
     let generation = 0;
     let wallObserver = null;
@@ -502,6 +503,8 @@
         ]);
         if (global.OFEnhancerTeaserDrafts)
           state.drafts = await global.OFEnhancerTeaserDrafts.list();
+        state.redditDrafts =
+          (await global.OFEnhancerTeaserDrafts?.listPosts?.()) || [];
         if (current !== generation) return;
         applyOverview(overview, {
           episodes: [],
@@ -540,8 +543,12 @@
         request,
         onSaved: async () => {
           state.drafts = await global.OFEnhancerTeaserDrafts.list();
-          await reloadPlan();
-          render();
+          state.redditDrafts = await global.OFEnhancerTeaserDrafts.listPosts();
+          try {
+            await reloadPlan();
+          } finally {
+            render();
+          }
         },
       });
       return true;
@@ -784,7 +791,22 @@
         tile.setAttribute("role", "img");
         day.append(tile, element("div", "xt-numbers xt-numbers-empty"));
       }
+      appendRedditDrafts(day, date);
       return day;
+    }
+
+    function appendRedditDrafts(day, date) {
+      const count = state.redditDrafts.filter(
+        (post) => post.date === date,
+      ).length;
+      if (!count) return;
+      const more = button(
+        "xt-other-posts",
+        `${longDayLabel(date)}: ${count} Reddit drafts`,
+      );
+      more.textContent = `Reddit · ${count} ${count === 1 ? "draft" : "drafts"}`;
+      more.addEventListener("click", () => void openComposer(date));
+      day.append(more);
     }
 
     function planTile(date) {
@@ -878,6 +900,7 @@
       const day = element("li", "xt-day");
       day.dataset.date = date;
       day.append(element("span", "xt-date", dayLabel(date)), planTile(date));
+      appendRedditDrafts(day, date);
       return day;
     }
 

@@ -752,3 +752,204 @@ test("dropping a video opens the inherited calendar day without a date picker", 
     await page.close();
   }
 });
+
+test("Reddit drafts keep separate clips and titles without replacing the Twitter checkpoint", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 950 },
+  });
+  try {
+    const errors = await mount(page, true);
+    const x = await chooseSyntheticVideo(page);
+    await x.locator("#socialCaption").fill("Twitter caption");
+    await x.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        .textContent.includes("Draft saved"),
+    );
+    await page.evaluate(
+      async ({ DAY, SESSION }) => {
+        await OFEnhancerTeaserDrafts.checkpoint(DAY, "preparing", SESSION);
+        await OFEnhancerTeaserDrafts.checkpoint(DAY, "prepared", SESSION);
+      },
+      { DAY, SESSION },
+    );
+    await page
+      .getByRole("button", { name: "Add Reddit post", exact: true })
+      .click();
+    await page.locator(".xt-clip-choices").waitFor();
+    const reddit = await chooseSyntheticVideo(page);
+    await reddit
+      .getByLabel("Subreddit", { exact: true })
+      .fill("r/example_community");
+    await reddit.locator("#socialCaption").fill("Independent community title");
+    assert.equal(
+      await reddit.locator("#socialCaption").getAttribute("maxlength"),
+      "300",
+    );
+    assert.equal(await reddit.locator("#uploadButton").isVisible(), false);
+    await reddit
+      .getByRole("button", { name: "Save Reddit draft", exact: true })
+      .click();
+    await page
+      .getByLabel("Post destination", { exact: true })
+      .locator("option", { hasText: "r/example_community" })
+      .waitFor({ state: "attached" });
+    const stored = await page.evaluate(
+      async (DAY) => ({
+        x: await OFEnhancerTeaserDrafts.get(DAY),
+        posts: await OFEnhancerTeaserDrafts.listPosts(DAY),
+      }),
+      DAY,
+    );
+    assert.equal(stored.x.caption, "Twitter caption");
+    assert.equal(stored.x.status, "prepared");
+    assert.equal(stored.x.sessionId, SESSION);
+    assert.equal(stored.posts.length, 1);
+    assert.equal(stored.posts[0].caption, "Independent community title");
+    assert.equal(stored.posts[0].date, DAY);
+    assert.equal(stored.posts[0].platform, "reddit");
+    assert.equal(stored.posts[0].status, "draft");
+    assert.equal(
+      stored.posts[0].file,
+      undefined,
+      "summaries never return media",
+    );
+    const second = await page.evaluate(async (DAY) => {
+      const draft = await OFEnhancerTeaserDrafts.savePost({
+        id: crypto.randomUUID(),
+        date: DAY,
+        subreddit: "other_community",
+        file: new File(["different clip"], "second.mp4", { type: "video/mp4" }),
+        caption: "Different title",
+        time: "21:00",
+      });
+      return { id: draft.id, name: draft.file.name, size: draft.file.size };
+    }, DAY);
+    assert.notEqual(second.id, stored.posts[0].id);
+    assert.equal(second.name, "second.mp4");
+    const captures = process.env.OFENHANCER_TEASER_SCREENSHOTS;
+    await reddit.waitForFunction(
+      () => document.querySelector(".teaser-video-preview").readyState >= 2,
+    );
+    if (captures) {
+      fs.mkdirSync(captures, { recursive: true });
+      await page.screenshot({
+        path: path.join(captures, "reddit-desktop.png"),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 390, height: 950 });
+    if (captures)
+      await page.screenshot({
+        path: path.join(captures, "reddit-phone.png"),
+        fullPage: true,
+      });
+    assert.equal(
+      await reddit.locator("#socialPaidLinkFields").isVisible(),
+      false,
+    );
+    assert.equal(
+      await reddit.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page
+      .getByLabel("Post destination", { exact: true })
+      .selectOption("x");
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector(".xt-composer-frame")
+          ?.contentWindow?.document.querySelector("#socialCaption")?.value ===
+        "Twitter caption",
+    );
+    const id = stored.posts[0].id;
+    await page.getByLabel("Post destination", { exact: true }).selectOption(id);
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector(".xt-composer-frame")
+          ?.contentWindow?.document.querySelector("#socialCaption")?.value ===
+        "Independent community title",
+    );
+    const restored = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    assert.equal(
+      await restored.getByLabel("Subreddit", { exact: true }).inputValue(),
+      "example_community",
+    );
+    page.once("dialog", (dialog) => dialog.accept());
+    await page
+      .getByRole("button", { name: "Remove post", exact: true })
+      .click();
+    await page.waitForFunction(
+      async (DAY) => (await OFEnhancerTeaserDrafts.listPosts(DAY)).length === 1,
+      DAY,
+    );
+    assert.equal(
+      await page.evaluate(
+        async (id) => (await OFEnhancerTeaserDrafts.getPost(id)).caption,
+        second.id,
+      ),
+      "Different title",
+    );
+    assert.equal(
+      (await page.evaluate((DAY) => OFEnhancerTeaserDrafts.get(DAY), DAY))
+        .sessionId,
+      SESSION,
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("version-one Twitter drafts survive the destination-store upgrade", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/host`);
+    await page.evaluate(async (DAY) => {
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open("OFEnhancerTeaserDraftsV1", 1);
+        request.onupgradeneeded = () =>
+          request.result.createObjectStore("drafts", { keyPath: "date" });
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("drafts", "readwrite");
+          tx.objectStore("drafts").put({
+            date: DAY,
+            caption: "Existing Twitter draft",
+            status: "draft",
+            file: new File(["old"], "old.mp4", { type: "video/mp4" }),
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      });
+    }, DAY);
+    const result = await page.evaluate(
+      async (DAY) => ({
+        x: await OFEnhancerTeaserDrafts.get(DAY),
+        posts: await OFEnhancerTeaserDrafts.listPosts(DAY),
+      }),
+      DAY,
+    );
+    assert.equal(result.x.caption, "Existing Twitter draft");
+    assert.deepEqual(result.posts, []);
+    assert.equal(
+      await page.evaluate(
+        async (DAY) => (await OFEnhancerTeaserDrafts.get(DAY)).file.name,
+        DAY,
+      ),
+      "old.mp4",
+    );
+  } finally {
+    await page.close();
+  }
+});

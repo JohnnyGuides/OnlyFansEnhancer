@@ -96,17 +96,93 @@
     const title = node("h2", "", `Teaser · ${dayLabel(date)}`);
     const close = action("Close");
     heading.append(title, close);
+    const destinations = node("div", "xt-composer-destinations");
+    const destination = node("select", "");
+    destination.setAttribute("aria-label", "Post destination");
+    const twitter = node("option", "", "Twitter");
+    twitter.value = "x";
+    destination.append(twitter);
+    const addPost = action("Add Reddit post");
+    const removePost = action("Remove post");
+    removePost.hidden = true;
+    destinations.append(destination, addPost, removePost);
     const content = node("div", "xt-composer-content");
     const status = node("p", "xt-composer-status");
     status.setAttribute("role", "status");
-    dialog.append(heading, content, status);
+    dialog.append(heading, destinations, content, status);
     document.body.append(dialog);
     const opener = document.activeElement;
     let iframe = null,
       context = null,
       dirty = false,
       loading = false,
-      running = false;
+      running = false,
+      postId = "";
+    async function refreshDestinations() {
+      const posts = await global.OFEnhancerTeaserDrafts.listPosts(date);
+      destination.replaceChildren(twitter);
+      for (const post of posts) {
+        const option = node("option", "", `r/${post.subreddit} · ${post.time}`);
+        option.value = post.id;
+        destination.append(option);
+      }
+      if (postId && !posts.some((post) => post.id === postId)) {
+        const option = node("option", "", "New Reddit post");
+        option.value = postId;
+        destination.append(option);
+      }
+      destination.value = postId || "x";
+      removePost.hidden = !postId;
+    }
+    async function switchPost(id) {
+      if (
+        running ||
+        loading ||
+        (dirty && !confirm("Switch posts and discard unsaved changes?"))
+      ) {
+        destination.value = postId || "x";
+        return;
+      }
+      dirty = false;
+      iframe = null;
+      postId = id === "x" ? "" : id;
+      loading = true;
+      try {
+        await refreshDestinations();
+        const draft = postId
+          ? await global.OFEnhancerTeaserDrafts.getPost(postId)
+          : await global.OFEnhancerTeaserDrafts.get(date);
+        if (!dialog.isConnected) return;
+        if (draft) edit(draft.file, null, draft);
+        else {
+          episode = null;
+          await choose();
+        }
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        loading = false;
+      }
+    }
+    destination.addEventListener(
+      "change",
+      () => void switchPost(destination.value),
+    );
+    addPost.addEventListener(
+      "click",
+      () => void switchPost(crypto.randomUUID()),
+    );
+    removePost.addEventListener("click", async () => {
+      if (running || loading || !confirm("Remove this Reddit draft?")) return;
+      try {
+        await global.OFEnhancerTeaserDrafts.removePost(postId);
+        dirty = false;
+        await onSaved();
+        await switchPost("x");
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    });
     const closeDialog = () => {
       if (running) {
         status.textContent =
@@ -139,7 +215,12 @@
         running = event.data.running === true;
       if (event.data?.type === "ofenhancer:teaser-saved") {
         dirty = false;
-        status.textContent = "Draft saved for this day.";
+        status.textContent = postId
+          ? "Reddit draft saved locally · not scheduled."
+          : "Draft saved for this day.";
+        void refreshDestinations().catch((error) => {
+          status.textContent = error.message;
+        });
         Promise.resolve(onSaved()).catch(() => {
           status.textContent = "Draft saved. Refresh the calendar to see it.";
         });
@@ -175,6 +256,8 @@
           draft?.episodeKey || episode?.sourceKey || clip?.episodeKey || "",
         clipId: draft?.clipId || clip?.clipId || null,
         draft,
+        postId,
+        platform: postId ? "reddit" : "x",
       };
       const back = action("Change clip");
       back.addEventListener("click", () => {
@@ -188,10 +271,12 @@
         }
       });
       iframe = node("iframe", "xt-composer-frame");
-      iframe.title = "Twitter teaser upload hub";
+      iframe.title = postId
+        ? "Reddit teaser draft"
+        : "Twitter teaser upload hub";
       iframe.src = `upload-console.html?teaserDay=${encodeURIComponent(date)}`;
       content.replaceChildren(back, iframe);
-      status.textContent = "";
+      status.textContent = postId ? "Local Reddit draft · not scheduled." : "";
     }
     async function editClip(clip, linked) {
       if (loading) return;
@@ -389,6 +474,7 @@
     dialog.showModal();
     close.focus();
     try {
+      await refreshDestinations();
       const draft = await global.OFEnhancerTeaserDrafts.get(date);
       if (draft) edit(draft.file, null, draft);
       else await choose();
