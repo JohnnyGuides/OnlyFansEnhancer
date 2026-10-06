@@ -1371,6 +1371,17 @@ html:has(.xt-picker[open]) {
     padding: 16px;
     gap: 12px;
   }
+  .xt-composer-dialog:not(:has(.xt-composer-catalogue)) .xt-composer-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .xt-composer-dialog:not(:has(.xt-composer-catalogue))
+    .xt-composer-heading
+    h2 {
+    flex-basis: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .xt-composer-content {
     padding: 0 12px;
   }

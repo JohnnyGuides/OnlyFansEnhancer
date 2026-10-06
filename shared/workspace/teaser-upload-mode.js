@@ -8,7 +8,9 @@
     )
       return null;
     document.body.classList.add("calendar-teaser");
-    document.body.append(document.querySelector("#thumbnailFrameDialog"));
+    const frameDialog = document.querySelector("#thumbnailFrameDialog");
+    document.body.append(frameDialog);
+    frameDialog.querySelector("h2").textContent = "Choose frame";
     const get = (selector) => document.querySelector(selector);
     const notify = (type, extra = {}) =>
       window.parent.postMessage(
@@ -314,6 +316,12 @@
       .querySelector(".teaser-use-frame")
       .addEventListener("click", async () => {
         if (hub.busy() || !hub.file()) return;
+        notify("size", {
+          height: Math.max(
+            document.body.getBoundingClientRect().height,
+            Math.min(680, window.parent.innerHeight - 160),
+          ),
+        });
         await hub.chooseFrame();
       });
     panel.querySelector("input").addEventListener("change", async (event) => {
@@ -339,6 +347,8 @@
       if (context && context.file !== file) context.clipId = null;
       if (context) context.loadingMedia = false;
       save.disabled = Boolean(context?.draft?.sessionId);
+      chooseVideo.textContent = "Choose or drop teaser video";
+      chooseVideo.title = "";
       hub.setFile(file);
       previewReady = showFile(file);
       notify("dirty");
@@ -374,7 +384,7 @@
         context?.loadingMedia
       ) {
         context.loadingMedia = false;
-        chooseVideo.textContent = "Choose or drop teaser video";
+        chooseVideo.textContent = "Choose replacement video";
         return;
       }
       if (
@@ -411,6 +421,10 @@
       context = event.data;
       save.disabled = Boolean(context.loadingMedia);
       if (context.loadingMedia) chooseVideo.textContent = "Loading video…";
+      if (context.mediaError) {
+        chooseVideo.textContent = "Choose replacement video";
+        chooseVideo.title = context.mediaError;
+      }
       if (context.platform === "reddit") {
         document.body.classList.add("calendar-reddit-draft");
         caption.maxLength = 300;
@@ -481,6 +495,11 @@
         fail(error);
       }
     });
+    frameDialog.addEventListener("close", () =>
+      notify("size", {
+        height: Math.ceil(document.body.getBoundingClientRect().height),
+      }),
+    );
     notify("ready");
     let sizeFrame;
     const observer = new ResizeObserver(() => {

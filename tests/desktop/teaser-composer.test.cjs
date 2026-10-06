@@ -231,6 +231,40 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     await frame.waitForFunction(
       () => !document.querySelector("#useThumbnailFrame").disabled,
     );
+    assert.ok(
+      await frame.locator("#thumbnailFrameStrip").evaluate((strip) => {
+        const bounds = strip.getBoundingClientRect();
+        const footer = strip
+          .closest("dialog")
+          .querySelector(".file-actions")
+          .getBoundingClientRect();
+        return bounds.bottom <= footer.top && bounds.top >= 0;
+      }),
+      "frame timeline remains visible above the action row",
+    );
+    if (process.env.OFENHANCER_TEASER_SCREENSHOTS) {
+      await page.screenshot({
+        path: path.join(
+          process.env.OFENHANCER_TEASER_SCREENSHOTS,
+          "frame-picker-desktop.png",
+        ),
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.ok(
+        await frame
+          .locator("#thumbnailFrameDialog")
+          .evaluate(
+            (dialog) => dialog.getBoundingClientRect().right <= innerWidth,
+          ),
+      );
+      await page.screenshot({
+        path: path.join(
+          process.env.OFENHANCER_TEASER_SCREENSHOTS,
+          "frame-picker-phone.png",
+        ),
+      });
+      await page.setViewportSize({ width: 1365, height: 960 });
+    }
     await frame.locator("#useThumbnailFrame").click();
     await frame.waitForFunction(
       () => !document.querySelector("#thumbnailFrameDialog").open,
@@ -502,6 +536,16 @@ test("teaser editor fits a phone viewport and keeps draft actions reachable", as
       ),
       true,
     );
+    assert.ok(
+      await page
+        .locator(".xt-composer-heading h2")
+        .evaluate(
+          (title) =>
+            title.getBoundingClientRect().width > 100 &&
+            title.getBoundingClientRect().height > 0,
+        ),
+      "episode title remains visible above mobile header actions",
+    );
     await frame.locator("#saveTeaserDraft").scrollIntoViewIfNeeded();
     assert.equal(await frame.locator("#saveTeaserDraft").isVisible(), true);
     await page.screenshot({
@@ -705,12 +749,9 @@ test("unavailable indexed teaser offers the linked episode folder", async () => 
         ) ||
       (await new Promise((resolve) => page.once("framenavigated", resolve)));
     await page.getByRole("button", { name: "Open episode folder" }).waitFor();
-    assert.equal(
-      await frame
-        .getByRole("button", { name: "Choose or drop teaser video" })
-        .isVisible(),
-      true,
-    );
+    await frame
+      .getByRole("button", { name: "Choose replacement video" })
+      .waitFor({ state: "visible" });
   } finally {
     await page.close();
   }
@@ -1264,11 +1305,9 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
     await frame.getByLabel("Search worksheet communities").fill("community_02");
     await frame.locator(".xt-planner-community:visible input").check();
     await frame.getByLabel("Search worksheet communities").fill("");
-    await page
-      .locator(".xt-composer-dialog")
-      .screenshot({
-        path: path.join(pickerCaptures, "community-pills-selected.png"),
-      });
+    await page.locator(".xt-composer-dialog").screenshot({
+      path: path.join(pickerCaptures, "community-pills-selected.png"),
+    });
     await frame
       .getByRole("button", { name: "Add selected (2)", exact: true })
       .click();

@@ -158,7 +158,9 @@
       ]);
       batchControls.hidden = reddit.length === 0 && !postId;
       const enabled = reddit.filter((post) => post.enabled !== false).length;
-      count.textContent = enabled ? `${enabled} communities` : "";
+      count.textContent = enabled
+        ? `${enabled} ${enabled === 1 ? "community" : "communities"}`
+        : "";
       search.hidden = reddit.length < 5;
       if (batch) {
         start.value = batch.start;
@@ -639,6 +641,7 @@
         status.textContent = linked
           ? `${error.message} Open the episode folder to create a replacement.`
           : error.message;
+        context.mediaError = error.message;
         frame.contentWindow.postMessage(
           { type: "ofenhancer:teaser-file-error", date, clipId: clip.clipId },
           location.origin,
