@@ -345,6 +345,7 @@
       }
       file.source = "generated";
       if (context && context.file !== file) context.clipId = null;
+      if (context) context.file = file;
       if (context) context.loadingMedia = false;
       save.disabled = Boolean(context?.draft?.sessionId);
       chooseVideo.textContent = "Choose or drop teaser video";
@@ -520,6 +521,13 @@
     return {
       day,
       saveDraft,
+      async resetDraft() {
+        hub.setFile(context?.file || null);
+        await hub.associate(context?.episodeKey || "", "");
+        hub.preferLink(preferences.linkKind, preferences.customUrl);
+        updateLinked();
+        notify("dirty");
+      },
       checkpoint,
       notify,
       locked: () => Boolean(context?.draft?.sessionId),

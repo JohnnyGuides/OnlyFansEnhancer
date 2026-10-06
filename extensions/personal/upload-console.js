@@ -5027,6 +5027,7 @@
     });
 
     function newUploadDraft() {
+      const mode = workflowMode.value;
       if (activeSession) {
         activeSession.closed = true;
         activeSession.channel?.close();
@@ -5074,7 +5075,7 @@
       socialCustomPaidLink.value = "";
       releaseDate.value = nextFridayUtc(new Date(), timeZone).releaseDate;
       refreshReleaseSummary();
-      workflowMode.value = "main";
+      workflowMode.value = calendarTeaser ? "teaser" : mode;
       mainPublishMode.checked = false;
       uploadWithoutSheet = false;
       lastPrefilledCatalogueRow = null;
@@ -5100,6 +5101,10 @@
     }
 
     async function startNewUpload() {
+      if (calendarTeaser?.locked())
+        throw new Error(
+          "This day has a saved upload run. Review saved run before starting another draft.",
+        );
       if (runBusy)
         throw new Error(
           "Wait for the current Upload request to finish connecting, then start New.",
@@ -5108,6 +5113,7 @@
       if (!reset.reset)
         throw new Error("The previous upload state could not be retired.");
       newUploadDraft();
+      await calendarTeaser?.resetDraft();
       await globalThis.CreatorMediaGenerator.clearGeneratedMedia().catch(
         () => {},
       );
@@ -5123,6 +5129,7 @@
         } catch (error) {
           get("#neutralTestStatus").textContent = error.message;
           get("#resumeError").textContent = error.message;
+          if (calendarTeaser) get("#uploadError").textContent = error.message;
         } finally {
           button.disabled = false;
         }

@@ -116,13 +116,15 @@ async function mount(page, linked = false) {
         },
         sendMessage(message, callback) {
           const result =
-            message?.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY"
-              ? { ok: true, availability: { ready: true } }
-              : {
-                  ok: true,
-                  sessions: [],
-                  creatorTools: { registered: [], skipped: [] },
-                };
+            message?.type === "START_NEW_CREATOR_UPLOAD"
+              ? { ok: true, reset: true }
+              : message?.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY"
+                ? { ok: true, availability: { ready: true } }
+                : {
+                    ok: true,
+                    sessions: [],
+                    creatorTools: { registered: [], skipped: [] },
+                  };
           queueMicrotask(() => callback?.(result));
           return Promise.resolve(result);
         },
@@ -195,6 +197,97 @@ async function chooseSyntheticVideo(page) {
   );
   return frame;
 }
+
+test("starting a new calendar draft keeps the teaser editor and selected clip", async () => {
+  const page = await browser.newPage();
+  try {
+    const errors = await mount(page, true);
+    let frame = await chooseSyntheticVideo(page);
+    await frame.locator("#socialCaption").fill("Old draft caption");
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        ?.textContent.includes("Draft saved"),
+    );
+    await frame.locator("#newFromResume").evaluate((button) => button.click());
+    await frame.waitForFunction(
+      () => !document.querySelector("#newFromResume").disabled,
+    );
+    assert.equal(
+      await frame.locator("#socialCaption").inputValue(),
+      "Preview test",
+      await frame.locator("#resumeError").textContent(),
+    );
+    assert.equal(await frame.locator("#uploadMedia").isVisible(), false);
+    assert.equal(await frame.locator(".social-card").isVisible(), true);
+    assert.equal(
+      await frame
+        .locator('input[name="workflowMode"][value="teaser"]')
+        .isChecked(),
+      true,
+    );
+    assert.equal(await frame.locator("#targetSocialX").isChecked(), true);
+    assert.equal(
+      await frame.getByRole("button", { name: "Review saved run" }).count(),
+      0,
+    );
+    assert.match(
+      await frame.locator("#socialFileSummary").textContent(),
+      /preview-test\.mp4/,
+    );
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        ?.textContent.includes("Draft saved"),
+    );
+    assert.equal(
+      await page.evaluate(
+        async (day) => (await OFEnhancerTeaserDrafts.get(day)).sessionId || "",
+        DAY,
+      ),
+      "",
+    );
+    await page.evaluate(
+      async ({ DAY, SESSION }) => {
+        await OFEnhancerTeaserDrafts.checkpoint(DAY, "preparing", SESSION);
+        await OFEnhancerTeaserDrafts.checkpoint(DAY, "prepared", SESSION);
+      },
+      { DAY, SESSION },
+    );
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator("#open-day").click();
+    await page.locator(".xt-composer-frame").waitFor();
+    frame = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    await frame.getByRole("button", { name: "Review saved run" }).waitFor();
+    await frame.locator("#newUploadDraft").evaluate((button) => button.click());
+    await frame.waitForFunction(
+      () => !document.querySelector("#newUploadDraft").disabled,
+    );
+    assert.match(
+      await frame.locator("#resumeError").textContent(),
+      /Review saved run/,
+    );
+    assert.equal(await frame.locator("#uploadMedia").isVisible(), false);
+    assert.equal(
+      await frame.getByRole("button", { name: "Review saved run" }).count(),
+      1,
+    );
+    assert.equal(
+      await page.evaluate(
+        async (day) => (await OFEnhancerTeaserDrafts.get(day)).sessionId,
+        DAY,
+      ),
+      SESSION,
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
 
 test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and restores the same day", async () => {
   const page = await browser.newPage({
