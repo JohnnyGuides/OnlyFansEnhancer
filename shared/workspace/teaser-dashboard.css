@@ -1189,6 +1189,7 @@ html:has(.xt-picker[open]) {
 }
 .xt-composer-dialog:has(.xt-composer-catalogue) {
   width: min(620px, calc(100vw - 32px));
+  margin-inline: auto 16px;
 }
 .xt-composer-catalogue .xt-flow-bar {
   justify-content: flex-start;

@@ -1747,6 +1747,21 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
     assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
     assert.equal(await day.getAttribute("data-kind"), "empty");
     await screenshot(page, "M3-teaser-modal-desktop.png");
+    assert.equal(
+      await modal.evaluate(
+        (node) => innerWidth - node.getBoundingClientRect().right,
+      ),
+      16,
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await screenshot(page, "M3-teaser-modal-phone.png");
+    assert.ok(
+      await modal.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth;
+      }),
+    );
+    await page.setViewportSize({ width: 1365, height: 960 });
     await modal.getByRole("button", { name: "Close" }).click();
     await page.waitForFunction(
       () => !document.querySelector(".xt-composer-dialog"),
