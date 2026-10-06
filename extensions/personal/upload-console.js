@@ -5468,14 +5468,19 @@
     let stripRendering = false;
     let stripRenderTimer = null;
     let crop = { zoom: 1, x: 0, y: 0 };
-    const selectedCrop = () => ({ ...crop });
+    const frameFile = () => (calendarTeaser ? socialFile : fullFile);
+    const frameAspect = () => (calendarTeaser ? 1 : 16 / 9);
+    const selectedCrop = () => ({
+      ...crop,
+      ...(calendarTeaser ? { square: true } : {}),
+    });
     const clampCrop = (value, min, max) => Math.min(max, Math.max(min, value));
     function cropMetrics() {
       const width = frameVideo.videoWidth;
       const height = frameVideo.videoHeight;
       if (!width || !height) return null;
-      const baseWidth = Math.min(width, (height * 16) / 9);
-      const baseHeight = (baseWidth * 9) / 16;
+      const baseWidth = Math.min(width, height * frameAspect());
+      const baseHeight = baseWidth / frameAspect();
       const cropWidth = baseWidth / crop.zoom;
       const cropHeight = baseHeight / crop.zoom;
       return {
@@ -5496,7 +5501,7 @@
         metrics.baseWidth / 2,
         metrics.baseWidth,
       );
-      const cropHeight = (cropWidth * 9) / 16;
+      const cropHeight = cropWidth / frameAspect();
       crop = {
         zoom: metrics.baseWidth / cropWidth,
         x:
@@ -5717,17 +5722,17 @@
       if (cropDrag.corner) {
         const { corner } = cropDrag;
         const resizeDelta =
-          Math.abs(dx) > Math.abs((dy * 16) / 9)
+          Math.abs(dx) > Math.abs(dy * frameAspect())
             ? dx * (corner.includes("w") ? -1 : 1)
-            : ((dy * 16) / 9) * (corner.includes("n") ? -1 : 1);
+            : dy * frameAspect() * (corner.includes("n") ? -1 : 1);
         const maxWidth = Math.min(
           start.baseWidth,
           corner.includes("w")
             ? start.left + start.cropWidth
             : start.width - start.left,
           corner.includes("n")
-            ? ((start.top + start.cropHeight) * 16) / 9
-            : ((start.height - start.top) * 16) / 9,
+            ? (start.top + start.cropHeight) * frameAspect()
+            : (start.height - start.top) * frameAspect(),
         );
         const width = clampCrop(
           start.cropWidth + resizeDelta,
@@ -5738,7 +5743,7 @@
           ? start.left + start.cropWidth - width
           : start.left;
         const top = corner.includes("n")
-          ? start.top + start.cropHeight - (width * 9) / 16
+          ? start.top + start.cropHeight - width / frameAspect()
           : start.top;
         setCropRect(left, top, width);
       } else {
@@ -5774,7 +5779,7 @@
         const width = metrics.baseWidth / zoom;
         setCropRect(
           metrics.left + (metrics.cropWidth - width) / 2,
-          metrics.top + (metrics.cropHeight - (width * 9) / 16) / 2,
+          metrics.top + (metrics.cropHeight - width / frameAspect()) / 2,
           width,
         );
       } else return;
@@ -5863,7 +5868,7 @@
         generation === frameGeneration &&
         frameDialog.open &&
         frameSource === source &&
-        fullFile === source &&
+        frameFile() === source &&
         frameFileProof(source) === proof
       );
     }
@@ -5882,14 +5887,16 @@
       frameSource = null;
       if (frameDialog.open) frameDialog.close();
     }
-    get("#chooseThumbnailFrame").addEventListener("click", async () => {
-      if (!(fullFile instanceof File) || runBusy || activeSession) return;
-      frameSource = fullFile;
+    async function openFramePicker() {
+      const file = frameFile();
+      if (!(file instanceof File) || runBusy || activeSession) return;
+      frameSource = file;
       const generation = ++frameGeneration;
-      const source = fullFile;
+      const source = file;
       const proof = frameFileProof(source);
       const current = () => frameOperationCurrent(generation, source, proof);
       openingFrameChoice.checked = Boolean(openingFrame);
+      if (calendarTeaser) openingFrameChoice.closest("label").hidden = true;
       frameStatus.textContent = "Loading video timeline…";
       cropArea.hidden = true;
       frameRuler.replaceChildren();
@@ -5898,7 +5905,7 @@
       frameSlider.disabled = true;
       get("#useThumbnailFrame").disabled = true;
       frameDialog.showModal();
-      frameUrl = URL.createObjectURL(fullFile);
+      frameUrl = URL.createObjectURL(file);
       frameVideo.src = frameUrl;
       stripVideo.src = frameUrl;
       try {
@@ -5936,7 +5943,8 @@
       } catch (error) {
         if (current()) frameStatus.textContent = error.message;
       }
-    });
+    }
+    get("#chooseThumbnailFrame").addEventListener("click", openFramePicker);
     frameSlider.addEventListener("input", () => {
       if (!Number.isFinite(frameVideo.duration)) return;
       seekToFrame(
@@ -5950,7 +5958,7 @@
       closeFrameDialog();
     });
     get("#useThumbnailFrame").addEventListener("click", async () => {
-      if (!frameSource || frameSource !== fullFile) return;
+      if (!frameSource || frameSource !== frameFile()) return;
       const button = get("#useThumbnailFrame");
       const generation = frameGeneration;
       const source = frameSource;
@@ -5959,7 +5967,9 @@
       const selectedFrameCrop = selectedCrop();
       const keepOpeningFrame = openingFrameChoice.checked;
       button.disabled = true;
-      frameStatus.textContent = "Creating 640 × 360 thumbnail…";
+      frameStatus.textContent = calendarTeaser
+        ? "Creating thumbnail…"
+        : "Creating 640 × 360 thumbnail…";
       try {
         const generated =
           await globalThis.CreatorMediaGenerator.thumbnailFromVideo(
@@ -5968,6 +5978,11 @@
             selectedFrameCrop,
           );
         if (!frameOperationCurrent(generation, source, proof)) return;
+        if (calendarTeaser) {
+          calendarTeaser.setThumbnail(generated);
+          closeFrameDialog();
+          return;
+        }
         thumbnailFile = generated;
         thumbnailFile.source = "generated";
         rememberedFrame = {
@@ -6518,6 +6533,7 @@
       else scheduleMatch();
     });
     const calendarTeaser = globalThis.OFEnhancerTeaserUploadMode?.init({
+      chooseFrame: openFramePicker,
       file: () => socialFile,
       candidate: () => currentMatch?.candidate,
       paidUrl: () => currentPaidLink().paidUrl || "",

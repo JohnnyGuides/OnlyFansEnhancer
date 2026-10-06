@@ -209,7 +209,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     );
     assert.match(
       await page.locator(".xt-composer-heading h2").textContent(),
-      /Teaser planner/,
+      /Preview test/,
     );
     const layout = await frame
       .locator(".teaser-video-preview")
@@ -224,6 +224,17 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
         };
       });
     assert.equal(layout.square, true, "video preview remains square");
+    await frame
+      .getByRole("button", { name: "Choose frame", exact: true })
+      .click();
+    await frame.locator("#useThumbnailFrame").waitFor();
+    await frame.waitForFunction(
+      () => !document.querySelector("#useThumbnailFrame").disabled,
+    );
+    await frame.locator("#useThumbnailFrame").click();
+    await frame.waitForFunction(
+      () => !document.querySelector("#thumbnailFrameDialog").open,
+    );
     assert.equal(
       layout.postsOnRight,
       true,
@@ -304,7 +315,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     );
     assert.ok(saved.thumbnailSize > 0);
     assert.match(
-      await page.locator(".xt-composer-heading h2").textContent(),
+      await page.locator(".xt-composer-dialog").getAttribute("aria-label"),
       /Tuesday, Oct 6/,
     );
 
@@ -334,6 +345,13 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     await page.locator(".xt-composer-heading button").click();
     await page.locator("#open-day").click();
     await page.locator(".xt-composer-frame").waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-frame")
+        ?.contentWindow?.location.href.includes(
+          "upload-console.html?teaserDay=",
+        ),
+    );
     const restored = page
       .frames()
       .find((item) =>
@@ -350,7 +368,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       "19:20",
     );
     assert.match(
-      await page.locator(".xt-composer-heading h2").textContent(),
+      await page.locator(".xt-composer-dialog").getAttribute("aria-label"),
       /Tuesday, Oct 6/,
     );
     assert.deepEqual(errors, []);
@@ -382,6 +400,86 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       "A benign scheduled teaser",
       "caption belongs to the day draft",
     );
+  } finally {
+    await page.close();
+  }
+});
+
+test("indexed clip opens editing before transfer and keeps caption edits when the verified file arrives", async () => {
+  const page = await browser.newPage();
+  try {
+    const errors = await mount(page, true);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    const bytes = fs.readFileSync(VIDEO);
+    const sha256 = require("node:crypto")
+      .createHash("sha256")
+      .update(bytes)
+      .digest("hex");
+    await page.evaluate(
+      ({ day, size, sha256 }) => {
+        const episode = { sourceKey: "preview-test", title: "Preview test" };
+        const clip = {
+          clipId: 1,
+          name: "preview-test.mp4",
+          episodeKey: episode.sourceKey,
+          size,
+          sha256,
+          lastModified: 1,
+        };
+        globalThis.__clipTransfer = new Promise((resolve) => {
+          globalThis.__finishClip = resolve;
+        });
+        void OFEnhancerTeaserComposer.open({
+          date: day,
+          episode,
+          episodes: [episode],
+          request: async (operation) =>
+            operation === "getTeaserClips"
+              ? { clips: [clip] }
+              : globalThis.__clipTransfer,
+        });
+      },
+      { day: DAY, size: bytes.length, sha256 },
+    );
+    await page
+      .locator('.xt-clip-choice[data-episode-key="preview-test"]')
+      .click();
+    const frame = page.frameLocator(".xt-composer-frame");
+    await frame
+      .locator("#socialCaption")
+      .fill("Caption written while the clip loads");
+    assert.equal(
+      await frame
+        .getByRole("button", { name: "Save draft", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await page.evaluate(
+      ({ chunk, size, sha256 }) =>
+        globalThis.__finishClip({
+          offset: 0,
+          size,
+          sha256,
+          name: "preview-test.mp4",
+          token: "test",
+          chunk,
+          done: true,
+        }),
+      { chunk: bytes.toString("base64"), size: bytes.length, sha256 },
+    );
+    await frame.locator(".teaser-video-preview").waitFor({ state: "visible" });
+    assert.equal(
+      await frame.locator("#socialCaption").inputValue(),
+      "Caption written while the clip loads",
+    );
+    assert.equal(
+      await frame
+        .getByRole("button", { name: "Save draft", exact: true })
+        .isEnabled(),
+      true,
+    );
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }
@@ -517,15 +615,15 @@ test("episode without a teaser opens its folder and accepts a video in the same 
     );
     assert.equal(await frame.locator("#socialErrors").textContent(), "");
     assert.equal(await frame.locator("#matchStatus").textContent(), "");
-    const actionRows = await frame
-      .locator(".teaser-association button, #saveTeaserDraft, #uploadButton")
-      .evaluateAll((buttons) =>
-        buttons.map((button) => Math.round(button.getBoundingClientRect().top)),
-      );
-    assert.equal(
-      new Set(actionRows).size,
-      1,
-      "episode and draft actions share one row",
+    assert.ok(
+      await frame.locator(".teaser-association").evaluate((association) => {
+        const media = document.querySelector(".teaser-choose-video");
+        return (
+          association.getBoundingClientRect().bottom <=
+          media.getBoundingClientRect().top
+        );
+      }),
+      "episode folder shortcut sits above the media picker",
     );
     await page.screenshot({
       path: path.join(
@@ -765,7 +863,7 @@ test("dropping a video opens the inherited calendar day without a date picker", 
         ?.textContent.includes("preview-test.mp4"),
     );
     assert.match(
-      await page.locator(".xt-composer-heading h2").textContent(),
+      await page.locator(".xt-composer-dialog").getAttribute("aria-label"),
       /Tuesday, Oct 6/,
     );
     assert.equal(

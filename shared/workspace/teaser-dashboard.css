@@ -1205,10 +1205,10 @@ html:has(.xt-picker[open]) {
   margin-bottom: 12px;
 }
 .xt-composer-catalogue .xt-flow-title {
-  width: 100%;
+  display: none;
 }
 .xt-composer-dialog:has(.xt-composer-catalogue) .xt-composer-heading {
-  padding: 16px 24px;
+  padding: 12px 24px;
 }
 .xt-composer-dialog:has(.xt-composer-catalogue) .xt-composer-heading h2 {
   font-size: 14px;
@@ -1245,6 +1245,13 @@ html:has(.xt-picker[open]) {
 }
 .xt-composer-dialog::backdrop {
   background: rgb(0 0 0 / 72%);
+  animation: xt-picker-backdrop-enter 180ms ease-out;
+}
+.xt-composer-dialog[open] {
+  animation: xt-picker-backdrop-enter 180ms ease-out;
+}
+.xt-composer-dialog[open]:has(.xt-composer-catalogue) {
+  animation: xt-picker-enter 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .xt-composer-heading {
   display: flex;

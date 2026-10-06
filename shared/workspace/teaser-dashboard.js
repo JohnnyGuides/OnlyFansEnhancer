@@ -373,7 +373,12 @@
       if (context.seasons.has(seasonKey(episode))) return "hidden";
       if ((context.categories.get(episode.category || "") || 0) >= 2)
         return "dimmed";
-      if (episode.usedCount === 0 && episode.readyClips > 0)
+      if (
+        episode.usedCount === 0 &&
+        !episode.postedClips &&
+        !posts().some((post) => post.itemId === episode.itemId) &&
+        episode.readyClips > 0
+      )
         return "recommended";
       return "neutral";
     }
@@ -1465,9 +1470,7 @@
               ? "Recent or planned"
               : pick === "dimmed"
                 ? "Busy category"
-                : pick === "recommended"
-                  ? "Recommended"
-                  : `${episode.readyClips} ready`;
+                : `${episode.readyClips} ready`;
         card.append(element("span", "xt-pick-reason", reason));
       }
       card.addEventListener("click", () => {

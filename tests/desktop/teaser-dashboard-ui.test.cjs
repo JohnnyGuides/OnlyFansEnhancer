@@ -1736,6 +1736,9 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
         .evaluate((card) => card.getBoundingClientRect().width),
       96,
     );
+    await modal.evaluate((node) =>
+      Promise.all(node.getAnimations().map((animation) => animation.finished)),
+    );
     assert.ok(
       await modal.evaluate((node) => node.getBoundingClientRect().width <= 620),
     );
@@ -1833,6 +1836,11 @@ test("teaser modal traps and restores focus, cancels cleanly and fits desktop an
       await day.click();
       const modal = page.locator(".xt-composer-dialog");
       await modal.waitFor();
+      await modal.evaluate((node) =>
+        Promise.all(
+          node.getAnimations().map((animation) => animation.finished),
+        ),
+      );
       const dimensions = await modal.evaluate((node) => {
         const box = node.getBoundingClientRect();
         const add = node.querySelector(".xt-clip-add").getBoundingClientRect();

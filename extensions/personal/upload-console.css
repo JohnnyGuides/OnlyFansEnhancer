@@ -15,6 +15,22 @@
 body.calendar-teaser {
   background: #101821;
 }
+.calendar-teaser #resumePrompt {
+  padding: 10px 12px;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.calendar-teaser #resumePrompt h2 {
+  font-size: 13px;
+}
+.calendar-teaser #resumePrompt p {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.calendar-teaser #resumePrompt button {
+  padding: 8px 12px;
+  font-size: 12px;
+}
 .calendar-reddit-draft [hidden],
 .calendar-reddit-draft #socialPaidLinkFields,
 .calendar-reddit-draft #socialCustomPaidLinkField,
@@ -245,6 +261,24 @@ body.calendar-reddit-draft .upload-actions .action-status {
   font-size: 11px;
   text-transform: capitalize;
 }
+.calendar-teaser .xt-planner-selected-info:empty {
+  display: none;
+}
+.calendar-teaser
+  .xt-composer-destinations:has(
+    .xt-planner-post-list > .xt-planner-post:only-child
+  ) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.calendar-teaser
+  .xt-composer-destinations:has(
+    .xt-planner-post-list > .xt-planner-post:only-child
+  )
+  .xt-planner-post-actions {
+  margin: 0;
+}
 .calendar-teaser .xt-planner-post-actions {
   display: flex;
   flex-wrap: wrap;
@@ -321,7 +355,10 @@ body.calendar-reddit-draft .upload-actions .action-status {
   grid-row: 1;
 }
 .calendar-teaser .teaser-association {
-  display: contents;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 .calendar-teaser
   :is(
@@ -346,6 +383,8 @@ body.calendar-reddit-draft .upload-actions .action-status {
 .calendar-teaser .teaser-association button {
   grid-column: 2;
   grid-row: 1;
+  padding: 8px;
+  font-size: 12px;
 }
 .calendar-teaser .teaser-association button:last-child {
   grid-column: 3;

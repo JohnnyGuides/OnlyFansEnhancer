@@ -8,6 +8,7 @@
     )
       return null;
     document.body.classList.add("calendar-teaser");
+    document.body.append(document.querySelector("#thumbnailFrameDialog"));
     const get = (selector) => document.querySelector(selector);
     const notify = (type, extra = {}) =>
       window.parent.postMessage(
@@ -23,7 +24,7 @@
     const panel = document.createElement("div");
     panel.className = "teaser-preview-panel";
     panel.innerHTML =
-      '<div class="teaser-planner-media"><video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-thumbnail-panel"><img alt="Teaser thumbnail" hidden><button type="button" class="teaser-use-frame">Use frame</button><label class="teaser-thumbnail-upload">Image<input type="file" accept="image/png,image/jpeg" hidden></label></div></div><div class="teaser-planner-settings"><div class="teaser-planner-posts"></div></div>';
+      '<div class="teaser-planner-media"><video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-thumbnail-panel"><img alt="Teaser thumbnail" hidden><button type="button" class="teaser-use-frame">Choose frame</button><label class="teaser-thumbnail-upload">Image<input type="file" accept="image/png,image/jpeg" hidden></label></div></div><div class="teaser-planner-settings"><div class="teaser-planner-posts"></div></div>';
     caption.previousElementSibling.before(panel);
     const preview = panel.querySelector("video"),
       image = panel.querySelector("img");
@@ -125,12 +126,14 @@
     get("#catalogueControls").prepend(association);
     const updateLinked = () => {
       changeMatch.title = hub.candidate()?.title || "No linked episode";
+      const title = hub.candidate()?.title || context?.file?.name;
+      if (title) notify("episode", { title });
+      folder.hidden = !hub.candidate();
       changeMatch.setAttribute(
         "aria-label",
         `Change episode: ${changeMatch.title}`,
       );
     };
-    updateLinked();
     changeMatch.addEventListener("click", () => {
       const expanded = document.body.classList.toggle("teaser-matching");
       changeMatch.setAttribute("aria-expanded", String(expanded));
@@ -162,7 +165,7 @@
     save.type = "button";
     save.textContent = "Save draft";
     save.id = "saveTeaserDraft";
-    get("#uploadActions").prepend(association);
+    panel.querySelector(".teaser-planner-media").prepend(association);
     get("#uploadButton").before(save);
     const prepareReddit = document.createElement("button");
     prepareReddit.type = "button";
@@ -203,6 +206,7 @@
       videoUrl = "",
       imageUrl = "",
       previewReady = Promise.resolve();
+    updateLinked();
     function fail(error) {
       get("#uploadError").textContent = error.message;
     }
@@ -311,17 +315,7 @@
       .querySelector(".teaser-use-frame")
       .addEventListener("click", async () => {
         if (hub.busy() || !hub.file()) return;
-        try {
-          useThumbnail(
-            await global.CreatorMediaGenerator.thumbnailFromVideo(
-              hub.file(),
-              preview.currentTime,
-              { square: true },
-            ),
-          );
-        } catch (error) {
-          fail(error);
-        }
+        await hub.chooseFrame();
       });
     panel.querySelector("input").addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
@@ -344,6 +338,8 @@
       }
       file.source = "generated";
       if (context && context.file !== file) context.clipId = null;
+      if (context) context.loadingMedia = false;
+      save.disabled = Boolean(context?.draft?.sessionId);
       hub.setFile(file);
       previewReady = showFile(file);
       notify("dirty");
@@ -371,6 +367,34 @@
     let accepted = false;
     window.addEventListener("message", async (event) => {
       if (
+        event.source === window.parent &&
+        event.origin === location.origin &&
+        event.data?.type === "ofenhancer:teaser-file-error" &&
+        event.data.date === day &&
+        event.data.clipId === context?.clipId &&
+        context?.loadingMedia
+      ) {
+        context.loadingMedia = false;
+        chooseVideo.textContent = "Choose or drop teaser video";
+        return;
+      }
+      if (
+        event.source === window.parent &&
+        event.origin === location.origin &&
+        event.data?.type === "ofenhancer:teaser-file" &&
+        event.data.date === day &&
+        context?.loadingMedia &&
+        event.data.clipId === context.clipId &&
+        event.data.file instanceof File &&
+        !hub.file()
+      ) {
+        context.file = event.data.file;
+        context.loadingMedia = false;
+        acceptFile(context.file);
+        save.disabled = false;
+        return;
+      }
+      if (
         accepted ||
         event.source !== window.parent ||
         event.origin !== location.origin ||
@@ -380,12 +404,14 @@
           event.data.file instanceof File ||
           (event.data.file === null &&
             typeof event.data.episodeKey === "string" &&
-            event.data.episodeKey)
+            (event.data.episodeKey || event.data.loadingMedia === true))
         )
       )
         return;
       accepted = true;
       context = event.data;
+      save.disabled = Boolean(context.loadingMedia);
+      if (context.loadingMedia) chooseVideo.textContent = "Loading video…";
       if (context.platform === "reddit") {
         document.body.classList.add("calendar-reddit-draft");
         caption.maxLength = 300;
@@ -480,6 +506,7 @@
       notify,
       locked: () => Boolean(context?.draft?.sessionId),
       thumbnail: () => thumbnail,
+      setThumbnail: useThumbnail,
       options: () => {
         if (
           !time.validity.valid ||

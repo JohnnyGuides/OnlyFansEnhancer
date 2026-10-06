@@ -19,7 +19,7 @@
       day: "numeric",
     }).format(new Date(day + "T12:00:00"));
   }
-  async function clipFile(clip, request, progress) {
+  async function clipFile(clip, request, progress, current = () => true) {
     if (
       !Number.isSafeInteger(clip.size) ||
       clip.size <= 0 ||
@@ -30,6 +30,7 @@
     let token = "",
       offset = 0;
     for (;;) {
+      if (!current()) throw new Error("Video loading cancelled.");
       const result = await request("getTeaserClipChunk", {
         clipId: clip.clipId,
         offset,
@@ -121,7 +122,7 @@
     batchControls.append(startLabel);
     const count = node("span", "xt-planner-count");
     const postsHeading = node("div", "xt-planner-posts-heading");
-    postsHeading.append(node("h3", "", "Destinations"), count);
+    postsHeading.append(node("h3", "", "Post to"), count);
     const communities = action("Choose communities");
     const removePost = action("Remove post");
     removePost.hidden = true;
@@ -156,7 +157,8 @@
         global.OFEnhancerTeaserDrafts.getBatch(date),
       ]);
       batchControls.hidden = reddit.length === 0 && !postId;
-      count.textContent = `Twitter · ${reddit.filter((post) => post.enabled !== false).length} Reddit selected`;
+      const enabled = reddit.filter((post) => post.enabled !== false).length;
+      count.textContent = enabled ? `${enabled} communities` : "";
       search.hidden = reddit.length < 5;
       if (batch) {
         start.value = batch.start;
@@ -208,7 +210,7 @@
             : post.status || "New";
         row.append(node("strong", "", name));
         if (post.id === (postId || "x"))
-          selectedInfo.textContent = `${name} · ${post.enabled === false ? state : `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`}`;
+          selectedInfo.textContent = post.sessionId ? `${name} · ${state}` : "";
         row.title = post.file?.name || post.name || "Choose a clip";
         row.addEventListener("click", () => void switchPost(post.id));
         if (post.platform === "reddit") {
@@ -465,7 +467,16 @@
       }
       if (dirty && !confirm("Close without saving the changes to this teaser?"))
         return;
-      dialog.close();
+      if (dialog.dataset.closing) return;
+      dialog.dataset.closing = "true";
+      dialog.inert = true;
+      void dialog
+        .animate([{ opacity: 1 }, { opacity: 0 }], {
+          duration: 140,
+          fill: "forwards",
+        })
+        .finished.catch(() => {})
+        .then(() => dialog.close());
     };
     close.addEventListener("click", closeDialog);
     dialog.addEventListener("cancel", (event) => {
@@ -485,6 +496,11 @@
           location.origin,
         );
       if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
+      if (
+        event.data?.type === "ofenhancer:teaser-episode" &&
+        typeof event.data.title === "string"
+      )
+        title.textContent = event.data.title || `Teaser · ${dayLabel(date)}`;
       if (event.data?.type === "ofenhancer:teaser-running")
         running = event.data.running === true;
       if (
@@ -528,6 +544,12 @@
         return;
       }
       dirty = Boolean(file && !draft);
+      title.textContent =
+        episodes.find((item) => item.sourceKey === draft?.episodeKey)?.title ||
+        episode?.title ||
+        file?.name ||
+        clip?.name ||
+        `Teaser · ${dayLabel(date)}`;
       context = {
         date,
         file,
@@ -537,6 +559,7 @@
         draft,
         postId,
         platform: postId ? "reddit" : "x",
+        loadingMedia: Boolean(clip && !file),
       };
       const back = action("Change clip");
       back.addEventListener("click", () => {
@@ -570,21 +593,44 @@
         { once: true },
       );
       content.replaceChildren(back, iframe);
+      content.animate(
+        [
+          { opacity: 0, transform: "translateY(6px)" },
+          { opacity: 1, transform: "none" },
+        ],
+        { duration: 180, easing: "ease-out" },
+      );
       status.textContent = postId ? "Local Reddit draft · not scheduled." : "";
     }
     async function editClip(clip, linked) {
       if (loading) return;
+      episode = linked || null;
+      edit(null, clip);
+      const frame = iframe;
+      const pending = context;
+      const current = () =>
+        dialog.isConnected && iframe === frame && context === pending;
       loading = true;
       try {
-        const file = await clipFile(clip, request, status);
-        if (dialog.isConnected) edit(file, clip);
+        const file = await clipFile(clip, request, status, current);
+        if (!current()) return;
+        context.file = file;
+        context.loadingMedia = false;
+        frame.contentWindow.postMessage(
+          { type: "ofenhancer:teaser-file", date, clipId: clip.clipId, file },
+          location.origin,
+        );
+        status.textContent = "";
       } catch (error) {
-        if (!dialog.isConnected) return;
-        if (linked) {
-          episode = linked;
-          edit();
-          status.textContent = `${error.message} Open the episode folder to edit a replacement teaser.`;
-        } else status.textContent = error.message;
+        if (!current()) return;
+        context.loadingMedia = false;
+        status.textContent = linked
+          ? `${error.message} Open the episode folder to create a replacement.`
+          : error.message;
+        frame.contentWindow.postMessage(
+          { type: "ofenhancer:teaser-file-error", date, clipId: clip.clipId },
+          location.origin,
+        );
       } finally {
         loading = false;
       }
@@ -730,7 +776,6 @@
               clip.state === "failed" ? "Needs re-edit" : clip.name,
             ),
           );
-          if (recommendation) choice.append(node("small", "", "Recommended"));
           choice.addEventListener("click", () => editClip(clip, linked));
           grid.append(choice);
         }
