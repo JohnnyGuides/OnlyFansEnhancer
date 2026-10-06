@@ -177,9 +177,9 @@ public sealed partial class CatalogueStore
     public XScanStatus RecordXScanResult(XScanReport report)
     {
         ValidateXScanReport(report);
-        DateTimeOffset started = ParseXUtc(report.StartedUtc);
+        DateTimeOffset started = ParseUtc(report.StartedUtc);
         string? requested = GetXScanStatus().RequestedUtc;
-        bool answered = requested is not null && ParseXUtc(requested) <= started;
+        bool answered = requested is not null && ParseUtc(requested) <= started;
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO x_scan_state (singleton, requested_utc, last_trigger, last_mode, last_started_utc, last_finished_utc,
@@ -197,7 +197,7 @@ public sealed partial class CatalogueStore
         command.Parameters.AddWithValue("$trigger", report.Trigger);
         command.Parameters.AddWithValue("$mode", report.Mode);
         command.Parameters.AddWithValue("$started", started.ToString("O", CultureInfo.InvariantCulture));
-        command.Parameters.AddWithValue("$finished", ParseXUtc(report.FinishedUtc).ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$finished", ParseUtc(report.FinishedUtc).ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$outcome", report.Outcome);
         command.Parameters.AddWithValue("$detail", report.Detail);
         command.Parameters.AddWithValue("$pages", report.Pages);
@@ -205,7 +205,7 @@ public sealed partial class CatalogueStore
         command.Parameters.AddWithValue("$scheduled", report.Scheduled is { } scheduled ? scheduled : DBNull.Value);
         command.Parameters.AddWithValue("$answered", answered ? 1 : 0);
         command.Parameters.AddWithValue("$backoff", report.BackoffUntilUtc.Length == 0 ? ""
-            : ParseXUtc(report.BackoffUntilUtc).ToString("O", CultureInfo.InvariantCulture));
+            : ParseUtc(report.BackoffUntilUtc).ToString("O", CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
         return GetXScanStatus();
     }
@@ -227,10 +227,7 @@ public sealed partial class CatalogueStore
         return new(requested, last);
     }
 
-    private static DateTimeOffset ParseXUtc(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
-
-    private static string ScheduledUtc(string value) => ParseXUtc(value).ToString("O", CultureInfo.InvariantCulture);
+    private static string ScheduledUtc(string value) => ParseUtc(value).ToString("O", CultureInfo.InvariantCulture);
 
     // "1 video", "2 photos", "1 video, 1 photo"; empty without media.
     internal static string MediaSummary(XScheduledItem item)

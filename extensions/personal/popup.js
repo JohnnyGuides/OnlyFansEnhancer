@@ -2,22 +2,6 @@
 
 const $ = (selector) => document.querySelector(selector);
 
-function sendMessage(message) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      if (!response?.ok) {
-        reject(new Error(response?.error || "Extension request failed."));
-        return;
-      }
-      resolve(response);
-    });
-  });
-}
-
 function modeForPercentage(percentage) {
   if (percentage <= 0) return "gelbooru";
   if (percentage >= 100) return "realbooru";
@@ -56,8 +40,8 @@ async function requestSourcePermissions(percentage) {
 
 async function load() {
   const [{ settings }, { stats }] = await Promise.all([
-    sendMessage({ type: "GET_SETTINGS" }),
-    sendMessage({ type: "GET_STATS" }),
+    globalThis.FanIdentityMaskSendMessage({ type: "GET_SETTINGS" }),
+    globalThis.FanIdentityMaskSendMessage({ type: "GET_STATS" }),
   ]);
 
   $("#enabled").checked = settings.enabled;
@@ -78,7 +62,10 @@ async function saveSettings(patch, revert) {
   settingsSavesInFlight += 1;
   let failure = null;
   try {
-    await sendMessage({ type: "SET_SETTINGS", patch });
+    await globalThis.FanIdentityMaskSendMessage({
+      type: "SET_SETTINGS",
+      patch,
+    });
   } catch (error) {
     failure = error;
     settingsReverts.push(revert);
@@ -153,7 +140,7 @@ async function resetDimension(type) {
   const button = isNames ? $("#resetNames") : $("#resetPictures");
   button.disabled = true;
   try {
-    const response = await sendMessage({
+    const response = await globalThis.FanIdentityMaskSendMessage({
       type: isNames ? "RESET_NAMES" : "RESET_PICTURES",
     });
     $("#note").textContent = isNames
@@ -181,14 +168,18 @@ $("#options").addEventListener("click", () => {
 });
 
 $("#uploadConsole").addEventListener("click", () => {
-  sendMessage({ type: "OPEN_UPLOAD_CONSOLE" }).catch((error) => {
-    $("#note").textContent = error.message;
-  });
+  globalThis
+    .FanIdentityMaskSendMessage({ type: "OPEN_UPLOAD_CONSOLE" })
+    .catch((error) => {
+      $("#note").textContent = error.message;
+    });
 });
 
 $("#showTraceRecorder").addEventListener("click", async () => {
   try {
-    const response = await sendMessage({ type: "SHOW_UPLOAD_TRACE_RECORDER" });
+    const response = await globalThis.FanIdentityMaskSendMessage({
+      type: "SHOW_UPLOAD_TRACE_RECORDER",
+    });
     $("#note").textContent =
       `Trace recorder opened on ${response.traceRecorder.platform}.`;
   } catch (error) {

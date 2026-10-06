@@ -90,6 +90,11 @@ function load() {
     },
   });
   vm.runInContext(
+    fs.readFileSync(path.join(personalRoot, "runtime.js"), "utf8"),
+    context,
+    { filename: "runtime.js" },
+  );
+  vm.runInContext(
     fs.readFileSync(path.join(personalRoot, "x-teaser.js"), "utf8"),
     context,
     { filename: "x-teaser.js" },

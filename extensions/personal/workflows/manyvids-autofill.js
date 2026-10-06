@@ -409,19 +409,8 @@
       );
     }
     const outcomes = [];
-    async function step(label, operation) {
-      try {
-        outcomes.push(await operation());
-        return true;
-      } catch (error) {
-        outcomes.push({
-          label,
-          status: "failed",
-          detail: error?.message || String(error),
-        });
-        return false;
-      }
-    }
+    const step = (label, operation) =>
+      toolkit.runStep(outcomes, label, operation);
 
     const coPerformer = toolkit.queryUnique(SELECTORS.coPerformer, plan.form, {
       description: "co-performer select",

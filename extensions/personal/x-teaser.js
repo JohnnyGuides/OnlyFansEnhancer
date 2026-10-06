@@ -14,19 +14,7 @@ let fileProof = null,
   resumeSession = null,
   rebindCandidate = null,
   suppressAutoReconcile = false;
-function message(payload) {
-  return new Promise((resolve, reject) =>
-    chrome.runtime.sendMessage(payload, (response) => {
-      if (chrome.runtime.lastError)
-        return reject(new Error(chrome.runtime.lastError.message));
-      if (!response?.ok)
-        return reject(
-          new Error(response?.error || "Extension request failed."),
-        );
-      resolve(response);
-    }),
-  );
-}
+const message = globalThis.FanIdentityMaskSendMessage;
 async function durationOf(file) {
   const video = document.createElement("video"),
     url = URL.createObjectURL(file);

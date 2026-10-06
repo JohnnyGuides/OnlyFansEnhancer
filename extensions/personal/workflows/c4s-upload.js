@@ -496,21 +496,8 @@
     }
     const outcomes = [];
 
-    async function step(label, operation) {
-      try {
-        const result = await operation();
-        if (Array.isArray(result)) outcomes.push(...result);
-        else outcomes.push(result);
-        return true;
-      } catch (error) {
-        outcomes.push({
-          label,
-          status: "failed",
-          detail: error?.message || String(error),
-        });
-        return false;
-      }
-    }
+    const step = (label, operation) =>
+      toolkit.runStep(outcomes, label, operation, true);
 
     if (
       profile.category &&

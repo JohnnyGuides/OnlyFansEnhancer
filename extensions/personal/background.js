@@ -1,4 +1,5 @@
 importScripts(
+  "avatar-crop.js",
   "workflows/registry.js",
   "workflows/local-file-attacher.js",
   "workflows/desktop-upload-runtime.js",
@@ -28,6 +29,14 @@ const SETTINGS_KEY = "fimSettingsV1";
 const STATE_KEY = "fimStateV1";
 const CONTROL_KEY = "fimControlV1";
 const AVATAR_CACHE_SIZE = 96;
+const CREATOR_UPLOAD_FILE_ROLES = [
+  "full",
+  "teaser",
+  "thumbnail",
+  "pornhub",
+  ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
+  ...Array.from({ length: 8 }, (_, index) => `media${index + 1}Teaser`),
+];
 const GELBOORU_QUERY_TAGS = "1girl solo selfie score:>=50";
 const GELBOORU_PAGE_SIZE = 100;
 const GELBOORU_REQUIRED_POST_TAGS = ["selfie", "1girl", "solo"];
@@ -1782,93 +1791,6 @@ function takeCustomAvatar(state, key) {
   };
 }
 
-function clamp(value, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, value));
-}
-
-function faceCrop(bitmap, face) {
-  const box = face.boundingBox;
-  const maximumSide = Math.min(bitmap.width, bitmap.height);
-  const side = clamp(Math.max(box.width, box.height) * 2.35, 48, maximumSide);
-  const centerX = box.x + box.width / 2;
-  const centerY = box.y + box.height / 2 + box.height * 0.12;
-  return {
-    x: clamp(centerX - side / 2, 0, bitmap.width - side),
-    y: clamp(centerY - side / 2, 0, bitmap.height - side),
-    side,
-    mode: "face",
-  };
-}
-
-async function detectFaceCrop(bitmap) {
-  if (!("FaceDetector" in globalThis)) return null;
-  try {
-    const detector = new FaceDetector({
-      fastMode: true,
-      maxDetectedFaces: 5,
-    });
-    const faces = await detector.detect(bitmap);
-    if (!faces.length) return null;
-    const largest = faces.reduce((best, face) => {
-      const area = face.boundingBox.width * face.boundingBox.height;
-      const bestArea = best.boundingBox.width * best.boundingBox.height;
-      return area > bestArea ? face : best;
-    });
-    return faceCrop(bitmap, largest);
-  } catch {
-    return null;
-  }
-}
-
-function smartBitmapCrop(bitmap) {
-  const longest = Math.max(bitmap.width, bitmap.height);
-  const scale = Math.min(1, 128 / longest);
-  const width = Math.max(8, Math.round(bitmap.width * scale));
-  const height = Math.max(8, Math.round(bitmap.height * scale));
-  const analysis = new OffscreenCanvas(width, height);
-  const context = analysis.getContext("2d", { willReadFrequently: true });
-  context.drawImage(bitmap, 0, 0, width, height);
-  const { data } = context.getImageData(0, 0, width, height);
-
-  const luminance = (x, y) => {
-    const index = (y * width + x) * 4;
-    return (
-      data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114
-    );
-  };
-
-  let total = 0;
-  let weightedX = 0;
-  let weightedY = 0;
-  for (let y = 1; y < height - 1; y += 2) {
-    for (let x = 1; x < width - 1; x += 2) {
-      const gradient =
-        Math.abs(luminance(x + 1, y) - luminance(x - 1, y)) +
-        Math.abs(luminance(x, y + 1) - luminance(x, y - 1));
-      const dx = (x - width / 2) / (width / 2);
-      const dy = (y - height * 0.4) / (height / 2);
-      const centerPrior = 0.35 + 0.65 * Math.exp(-(dx * dx + dy * dy) * 1.8);
-      const upperPrior = y < height * 0.72 ? 1.15 : 0.65;
-      const weight = (gradient + 2) * centerPrior * upperPrior;
-      total += weight;
-      weightedX += x * weight;
-      weightedY += y * weight;
-    }
-  }
-
-  const salientX = total ? weightedX / total / scale : bitmap.width / 2;
-  const salientY = total ? weightedY / total / scale : bitmap.height * 0.4;
-  const centerX = salientX * 0.65 + bitmap.width * 0.5 * 0.35;
-  const centerY = salientY * 0.65 + bitmap.height * 0.38 * 0.35;
-  const side = Math.min(bitmap.width, bitmap.height);
-  return {
-    x: clamp(centerX - side / 2, 0, bitmap.width - side),
-    y: clamp(centerY - side / 2, 0, bitmap.height - side),
-    side,
-    mode: "smart",
-  };
-}
-
 async function blobToDataUrl(blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = "";
@@ -1911,7 +1833,9 @@ async function cropRemoteAvatar(url) {
 
   try {
     try {
-      const crop = (await detectFaceCrop(bitmap)) || smartBitmapCrop(bitmap);
+      const crop =
+        (await globalThis.FanAvatarCrop.nativeFaceCrop(bitmap)) ||
+        globalThis.FanAvatarCrop.smartCrop(bitmap);
       const canvas = new OffscreenCanvas(AVATAR_CACHE_SIZE, AVATAR_CACHE_SIZE);
       const context = canvas.getContext("2d");
       context.drawImage(
@@ -1931,7 +1855,7 @@ async function cropRemoteAvatar(url) {
       });
       return {
         url: await blobToDataUrl(avatarBlob),
-        mode: crop.mode,
+        mode: crop.detection,
       };
     } catch {
       return cachedOriginal();
@@ -2999,7 +2923,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.105"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.106"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -3311,14 +3235,7 @@ async function getCreatorUploadSession(sessionId) {
 
 function creatorUploadSessionProofMatches(session, proof) {
   if (!session?.draft || !proof || typeof proof !== "object") return false;
-  for (const role of [
-    "full",
-    "teaser",
-    "thumbnail",
-    "pornhub",
-    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
-    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}Teaser`),
-  ]) {
+  for (const role of CREATOR_UPLOAD_FILE_ROLES) {
     const expected = session.draft.fileProof?.[role];
     if (!expected) continue;
     const actual = proof.fileProof?.[role];
@@ -3369,14 +3286,7 @@ function creatorUploadResumeFileProof(value) {
   if (typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid upload file proof.");
   const proof = {};
-  for (const role of [
-    "full",
-    "teaser",
-    "thumbnail",
-    "pornhub",
-    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}`),
-    ...Array.from({ length: 8 }, (_, index) => `media${index + 1}Teaser`),
-  ]) {
+  for (const role of CREATOR_UPLOAD_FILE_ROLES) {
     const item = value[role];
     if (item == null) continue;
     const name = creatorUploadClean(item.name, 500);
@@ -4986,7 +4896,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.105"
+      "upload-hub-0.20.106"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",

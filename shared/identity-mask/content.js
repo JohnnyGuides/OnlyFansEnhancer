@@ -17,24 +17,10 @@
   const identityCache = new Map();
   let generation = 0;
 
-  function sendMessage(message) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response?.ok) {
-          reject(new Error(response?.error || "Extension request failed."));
-          return;
-        }
-        resolve(response);
-      });
-    });
-  }
-
   async function loadSettings() {
-    const response = await sendMessage({ type: "GET_SETTINGS" });
+    const response = await globalThis.FanIdentityMaskSendMessage({
+      type: "GET_SETTINGS",
+    });
     settings = response.settings;
   }
 
@@ -77,7 +63,7 @@
     }
 
     if (unresolvedByPrimary.size > 0) {
-      const response = await sendMessage({
+      const response = await globalThis.FanIdentityMaskSendMessage({
         type: "RESOLVE_IDENTITIES",
         items: [...unresolvedByPrimary.values()],
       });
@@ -180,7 +166,7 @@
     if (!primaryKey) return;
 
     try {
-      const { result } = await sendMessage({
+      const { result } = await globalThis.FanIdentityMaskSendMessage({
         type: "ROTATE_AVATAR",
         primaryKey,
         aliases,

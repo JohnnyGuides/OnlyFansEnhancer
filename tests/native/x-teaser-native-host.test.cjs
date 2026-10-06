@@ -139,13 +139,7 @@ function auditRequest(value) {
 }
 
 function invoke(value, request) {
-  const requestPath = path.join(value.root, `${crypto.randomUUID()}.json`);
-  fs.writeFileSync(requestPath, JSON.stringify(request));
-  const result = spawnSync(
-    "dotnet",
-    [dll, "--request", path.join(value.root, "config.json"), requestPath],
-    { cwd: repositoryRoot, encoding: "utf8" },
-  );
+  const result = invokeRaw(value, request);
   const output = JSON.parse(result.stdout.trim());
   return { ...output, exitCode: result.status, stderr: result.stderr };
 }

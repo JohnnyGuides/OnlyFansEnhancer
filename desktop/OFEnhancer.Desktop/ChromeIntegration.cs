@@ -175,10 +175,7 @@ internal sealed class ChromeIntegration
         var manifest = document.RootElement;
         string[] origins = manifest.GetProperty("allowed_origins").EnumerateArray()
             .Select(item => item.GetString() ?? "").Order(StringComparer.Ordinal).ToArray();
-        string[] expected = channel.Reset is { Pending: true, Stage: ChromeResetStage.Removal }
-            ? new[] { $"chrome-extension://{id}/" }
-                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
-            : [$"chrome-extension://{id}/"];
+        string[] expected = [$"chrome-extension://{id}/"];
         if (manifest.GetProperty("name").GetString() != HostName || manifest.GetProperty("type").GetString() != "stdio"
             || !SamePath(manifest.GetProperty("path").GetString()!, NativeExecutable)
             || !origins.SequenceEqual(expected, StringComparer.Ordinal))
@@ -259,10 +256,7 @@ internal sealed class ChromeIntegration
             description = "OFEnhancer Fresh removal bridge",
             path = NativeExecutable,
             type = "stdio",
-            allowed_origins = new[]
-            {
-                $"chrome-extension://{previousId}/",
-            }.Distinct(StringComparer.Ordinal).ToArray(),
+            allowed_origins = new[] { $"chrome-extension://{previousId}/" },
         });
         CommitManifest(bytes);
         register(NativeManifest);

@@ -23,6 +23,7 @@ function loadConsoleContract() {
     clearTimeout,
   });
   for (const relative of [
+    "workflows/catalogue-contract.js",
     "workflows/social-distribution-contract.js",
     "upload-console.js",
   ]) {

@@ -3,6 +3,10 @@
 
   if (globalThis.CreatorSocialDistributionContract) return;
 
+  const catalogueContract = globalThis.CreatorCatalogueContract;
+  if (!catalogueContract)
+    throw new Error("CreatorCatalogueContract is unavailable.");
+
   const ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
   const HASH_PATTERN = /^[a-f0-9]{64}$/;
   const SUBREDDIT_PATTERN = /^[A-Za-z0-9_]{2,21}$/;
@@ -64,24 +68,6 @@
       ...(duration === null ? {} : { duration }),
       sha256,
     };
-  }
-
-  function catalogue(value) {
-    const row = Number(value?.row);
-    const id = clean(value?.id, 500);
-    const title = clean(value?.title, 500);
-    const fingerprint = clean(value?.fingerprint, 64).toLowerCase();
-    if (
-      !Number.isInteger(row) ||
-      row < 2 ||
-      row > 5002 ||
-      !id ||
-      !title ||
-      !/^[a-f0-9]{8,64}$/.test(fingerprint)
-    ) {
-      throw new Error("Choose one explicit catalogue row.");
-    }
-    return { row, id, title, fingerprint };
   }
 
   function copyProof(value, label) {
@@ -248,7 +234,10 @@
       id,
       mode,
       ...(preparationOnly ? { preparationOnly: true } : {}),
-      catalogue: value.catalogue === null ? null : catalogue(value.catalogue),
+      catalogue:
+        value.catalogue === null
+          ? null
+          : catalogueContract.catalogueRow(value.catalogue),
       socialFile: fileProof(value.socialFile),
       caption: copyProof(value.caption, "caption"),
       paidUrl,
@@ -271,7 +260,7 @@
   }
 
   globalThis.CreatorSocialDistributionContract = Object.freeze({
-    catalogue,
+    catalogue: catalogueContract.catalogueRow,
     freezeDistributionPlan,
     validateDistributionPlan,
   });

@@ -118,6 +118,9 @@ function startContent({ holdResolve = true } = {}) {
     location: { reload() {} },
     console: { warn() {} },
   });
+  vm.runInContext(readShared("runtime.js"), context, {
+    filename: "runtime.js",
+  });
   vm.runInContext(readShared("content.js"), context, {
     filename: "content.js",
   });

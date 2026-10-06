@@ -581,7 +581,6 @@ h2 {
 .lede,
 .hint,
 .status,
-.safety-note span,
 .target-option small {
   color: #aeb6c3;
 }
@@ -715,8 +714,7 @@ h2 {
 }
 
 .card,
-.result-card,
-.safety-note {
+.result-card {
   margin-top: 16px;
   padding: 16px;
   border: 1px solid #272d38;
@@ -818,10 +816,8 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-.field-grid,
 .target-grid,
-.social-targets,
-.capability-grid {
+.social-targets {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
@@ -1292,33 +1288,6 @@ button:disabled {
   font-size: 0.88rem;
 }
 
-.catalogue-edit-dialog {
-  width: min(480px, calc(100vw - 28px));
-  padding: 22px;
-  border: 1px solid #46515f;
-  border-radius: 12px;
-  background: #1a2028;
-  color: #f1f5fa;
-}
-
-.catalogue-edit-dialog::backdrop {
-  background: rgba(5, 9, 14, 0.72);
-}
-
-.catalogue-edit-dialog h2 {
-  margin: 0 0 10px;
-}
-.catalogue-edit-dialog p {
-  margin: 0 0 20px;
-  line-height: 1.45;
-}
-.catalogue-edit-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .error {
   color: #ff9fb0;
 }
@@ -1379,40 +1348,20 @@ button:disabled {
   text-transform: capitalize;
 }
 
-.safety-note {
-  padding: 10px 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #aeb6c3;
-  font-size: 0.8rem;
-  line-height: 1.5;
-}
-.safety-note summary {
-  cursor: pointer;
-}
-.safety-note p {
-  margin: 8px 0 0;
-  max-width: 72ch;
-}
-
 @media (max-width: 650px) {
   main {
     width: min(100% - 20px, 880px);
     padding-top: 16px;
   }
 
-  .field-grid,
   .target-grid,
   .social-targets,
-  .mode-choice,
-  .capability-grid {
+  .mode-choice {
     grid-template-columns: 1fr;
   }
 
   .card,
-  .result-card,
-  .safety-note {
+  .result-card {
     padding: 18px;
   }
 
@@ -1426,10 +1375,6 @@ button:disabled {
 
   .helper-row {
     gap: 14px;
-  }
-
-  .safety-note {
-    flex-direction: column;
   }
 
   .subreddit-heading {
@@ -1483,8 +1428,7 @@ button:disabled {
 [hidden] {
   display: none !important;
 }
-.app-header,
-.workflow-heading {
+.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1495,36 +1439,15 @@ button:disabled {
   margin-bottom: 18px;
   border-bottom: 1px solid #272d38;
 }
-.app-name {
-  display: block;
-  color: #9da8b8;
-  font-size: 0.75rem;
-  margin-bottom: 2px;
-  letter-spacing: 0.035em;
-}
 .workspace-tabs button {
   min-height: 38px;
   padding: 8px 12px;
   font-size: 0.85rem;
 }
-.workflow-heading h2 {
-  font-size: 0.85rem;
-  color: #b8c1ce;
-  font-weight: 650;
-}
-.workflow-heading {
-  margin-bottom: 10px;
-}
 .dev-template {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.dev-badge {
-  color: #a4adba;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 .dev-template button {
   border: 1px solid #343b48;
@@ -1970,8 +1893,7 @@ html {
 }
 .action-secondary button,
 .draft-actions button,
-.preparation-controls button,
-#changeCatalogueEntry {
+.preparation-controls button {
   min-height: 36px;
   padding: 7px 10px;
   font-size: 0.8rem;

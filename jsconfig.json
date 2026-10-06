@@ -19,6 +19,7 @@
     "extensions/personal/identity-settings.js",
     "extensions/store/identity-settings.js",
     "extensions/store/popup.js",
-    "shared/workspace/host-bridge.js"
+    "shared/workspace/host-bridge.js",
+    "shared/identity-mask/runtime.js"
   ]
 }

@@ -258,30 +258,6 @@ button:disabled {
   color: #dbe7f3;
 }
 
-.history-card summary {
-  cursor: pointer;
-  font-weight: 750;
-}
-
-.history-card ol {
-  display: grid;
-  gap: 7px;
-  margin: 14px 0 0;
-  max-height: 280px;
-  overflow: auto;
-  padding-left: 24px;
-}
-
-.history-card li,
-.history-card a {
-  color: #a9bad0;
-  font-size: 13px;
-}
-
-.history-card a:hover {
-  color: #72cbff;
-}
-
 @media (max-width: 520px) {
   main {
     width: min(100% - 20px, 720px);

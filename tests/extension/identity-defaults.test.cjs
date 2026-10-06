@@ -54,6 +54,7 @@ async function startContent(edition, storedSettings) {
     );
   };
   if (edition) run(`extensions/${edition}/identity-settings.js`);
+  run("shared/identity-mask/runtime.js");
   run("shared/identity-mask/content.js");
   await new Promise((resolve) => setImmediate(resolve));
   return {

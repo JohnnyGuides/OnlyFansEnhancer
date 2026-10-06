@@ -48,31 +48,13 @@
     return { basename, size, lastModified, duration, sha256 };
   }
 
-  function catalogueRow(value) {
-    const row = Number(value?.row);
-    const id = clean(value?.id, 500);
-    const title = clean(value?.title, 500);
-    const fingerprint = clean(value?.fingerprint, 64).toLowerCase();
-    if (
-      !Number.isInteger(row) ||
-      row < 2 ||
-      row > 5002 ||
-      !id ||
-      !title ||
-      !/^[a-f0-9]{8,64}$/.test(fingerprint)
-    ) {
-      throw new Error("Choose one explicit catalogue row.");
-    }
-    return { row, id, title, fingerprint };
-  }
-
   function rankCatalogueRows(fileProof, rows) {
     if (Array.isArray(rows) && rows.length > 5000)
       throw new Error("The catalogue exceeds 5000 items.");
     const file = sanitizeFileProof(fileProof);
     const ranked = (Array.isArray(rows) ? rows : [])
       .map((item) => {
-        const safe = catalogueRow(item);
+        const safe = catalogue.catalogueRow(item);
         return {
           ...safe,
           score: Math.round(
@@ -93,7 +75,7 @@
   function freezePairing(fileProof, row) {
     return {
       file: sanitizeFileProof(fileProof),
-      catalogue: catalogueRow(row),
+      catalogue: catalogue.catalogueRow(row),
     };
   }
 

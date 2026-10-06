@@ -1109,7 +1109,7 @@
     for (const element of document.querySelectorAll('input[type="file"]')) {
       candidates += 1;
       if (candidates > MAX_SNAPSHOT_CANDIDATES || fileInputs.length >= 8) break;
-      if (!isRecorderNode(element) && inPublishingScope(element) && true) {
+      if (!isRecorderNode(element) && inPublishingScope(element)) {
         fileInputs.push({
           ...elementSignature(element),
           hidden: !isVisible(element),

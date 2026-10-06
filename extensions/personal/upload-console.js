@@ -3596,6 +3596,13 @@
 
     function deliverFile(session, request) {
       if (session.cancelled) return;
+      const fail = (error) =>
+        session.port.postMessage({
+          type: "file-response",
+          requestId: request.requestId,
+          ok: false,
+          error: error.message,
+        });
       const file = sessionFile(session, request.role);
       if (!file) {
         session.pendingFiles.set(request.requestId, request);
@@ -3627,14 +3634,7 @@
           name: file.name,
           size: file.size,
           lastModified: file.lastModified,
-        }).catch((error) => {
-          session.port.postMessage({
-            type: "file-response",
-            requestId: request.requestId,
-            ok: false,
-            error: error.message,
-          });
-        });
+        }).catch(fail);
       if (file.source === "catalogue-thumbnail")
         return sendMessage({
           type: "DELIVER_CATALOGUE_THUMBNAIL_FILE",
@@ -3648,28 +3648,14 @@
           name: file.name,
           size: file.size,
           lastModified: file.lastModified,
-        }).catch((error) => {
-          session.port.postMessage({
-            type: "file-response",
-            requestId: request.requestId,
-            ok: false,
-            error: error.message,
-          });
-        });
+        }).catch(fail);
       if (request.role === "thumbnail") {
         void normalizeThumbnailFile(file)
           .then((converted) => {
             if (!session.cancelled)
               deliverBrowserFile(session, request, converted);
           })
-          .catch((error) => {
-            session.port.postMessage({
-              type: "file-response",
-              requestId: request.requestId,
-              ok: false,
-              error: error.message,
-            });
-          });
+          .catch(fail);
         return;
       }
       deliverBrowserFile(session, request, file);

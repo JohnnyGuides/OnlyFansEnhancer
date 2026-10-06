@@ -6,6 +6,11 @@
   const DEFAULT_DOM_TIMEOUT = 30_000;
   const UPLOAD_TIMEOUT = 45 * 60_000;
   const UPLOAD_STALL_TIMEOUT = 10 * 60_000;
+  const MONTH_NAMES = Array.from({ length: 12 }, (_, month) =>
+    new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
+      new Date(Date.UTC(2020, month, 1)),
+    ),
+  );
   const MANYVIDS_FULL_INPUT =
     "input.uppy-Dashboard-input[type='file']:not([webkitdirectory])";
   let mutationSignal = null;
@@ -1182,17 +1187,12 @@
         throw new Error("Pornhub schedule timezone is unverified.");
     };
     verifyOwner();
-    const months = Array.from({ length: 12 }, (_, month) =>
-      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
-        new Date(Date.UTC(2020, month, 1)),
-      ),
-    );
     const calendarMonth = () => {
       verifyOwner();
       const header = one(".dp-current", "Pornhub calendar month", picker)
         .textContent.trim()
         .match(/^([A-Za-z]+)\s+(\d{4})$/);
-      const month = header ? months.indexOf(header[1]) : -1;
+      const month = header ? MONTH_NAMES.indexOf(header[1]) : -1;
       if (!header || month < 0)
         throw new Error("Pornhub calendar month is unverified.");
       return Number(header[2]) * 12 + month;
@@ -1432,11 +1432,6 @@
       DEFAULT_DOM_TIMEOUT,
       signal,
     );
-    const months = Array.from({ length: 12 }, (_, index) =>
-      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
-        new Date(Date.UTC(2020, index, 1)),
-      ),
-    );
     const [year, month] = parts.date.split("-").map(Number);
     for (let attempt = 0; attempt < 120; attempt++) {
       const header = one(
@@ -1445,7 +1440,7 @@
         calendar,
       ).textContent.trim();
       const match = header.match(/^([A-Za-z]+)\s+(\d{4})$/);
-      const currentMonth = match ? months.indexOf(match[1]) : -1;
+      const currentMonth = match ? MONTH_NAMES.indexOf(match[1]) : -1;
       if (!match || currentMonth < 0)
         throw new Error("ManyVids calendar month is unverified.");
       const delta =
@@ -1873,11 +1868,6 @@
         .length === 1
     )
       return chooseDate(root, parts, "OnlyFans");
-    const months = Array.from({ length: 12 }, (_, index) =>
-      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
-        new Date(Date.UTC(2020, index, 1)),
-      ),
-    );
     const [year, month] = parts.date.split("-").map(Number);
     for (let attempt = 0; attempt < 120; attempt++) {
       const header = one(
@@ -1887,7 +1877,7 @@
       );
       const previous = header.textContent.trim();
       const match = previous.match(/^([A-Za-z]+)\s+(\d{4})$/);
-      const currentMonth = match ? months.indexOf(match[1]) : -1;
+      const currentMonth = match ? MONTH_NAMES.indexOf(match[1]) : -1;
       if (!match || currentMonth < 0)
         throw new Error("OnlyFans calendar month/year is unverified.");
       const delta =
@@ -2988,15 +2978,10 @@
     if (!root.closest("app-post-schedule-modal"))
       return chooseDate(root, parts, "Fansly");
     const [year, month] = parts.date.split("-").map(Number);
-    const months = Array.from({ length: 12 }, (_, index) =>
-      new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(
-        new Date(Date.UTC(2020, index, 1)),
-      ),
-    );
     for (let attempt = 0; attempt < 120; attempt++) {
       const header = one(".header .month", "Fansly calendar month", root);
       const match = header.textContent.trim().match(/^(\w+)\s+(\d{4})$/);
-      const currentMonth = match ? months.indexOf(match[1]) + 1 : 0;
+      const currentMonth = match ? MONTH_NAMES.indexOf(match[1]) + 1 : 0;
       if (!currentMonth)
         throw new Error("Fansly calendar month/year is unverified.");
       const delta = (year - Number(match[2])) * 12 + month - currentMonth;
@@ -3718,7 +3703,7 @@
     };
   }
   globalThis.CreatorUploadPlatformAdapters = Object.freeze({
-    revision: "upload-hub-0.20.105",
+    revision: "upload-hub-0.20.106",
     inspectPornhubUploader,
     bindPornhubDeviceAction,
     verifyPornhubDeviceAction: (selector) =>

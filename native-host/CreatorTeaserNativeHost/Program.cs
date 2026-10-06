@@ -108,8 +108,8 @@ internal sealed class TeaserHost
 
     public TeaserHost(HostConfig config)
     {
-        teaserRoot = ResolveConfiguredRoot(config.TeaserRoot, "teaser");
-        auditRoot = ResolveConfiguredRoot(config.AuditRoot, "audit");
+        teaserRoot = ResolveConfiguredRoot(config.TeaserRoot);
+        auditRoot = ResolveConfiguredRoot(config.AuditRoot);
         if (
             string.IsNullOrWhiteSpace(config.DoneName)
             || Path.IsPathRooted(config.DoneName)
@@ -120,7 +120,7 @@ internal sealed class TeaserHost
             throw new HostValidationException("Invalid configured Done directory name.");
         }
         doneRoot = Path.GetFullPath(Path.Combine(teaserRoot, config.DoneName));
-        EnsureInside(teaserRoot, doneRoot, "Done directory");
+        EnsureInside(teaserRoot, doneRoot);
         if (!Directory.Exists(doneRoot))
             throw new HostValidationException("The configured Done directory is missing.");
         RejectReparsePath(doneRoot);
@@ -160,7 +160,7 @@ internal sealed class TeaserHost
     private HostResponse Audit(HostRequest request)
     {
         FileProof proof = RequireProof(request);
-        string source = ResolveOneSource(request.Basename, proof);
+        ValidateOneSource(request.Basename, proof);
         StatusProof status = request.Status
             ?? throw new HostValidationException("Audit status metadata is missing.");
         CatalogueProof catalogue = request.Catalogue
@@ -212,7 +212,7 @@ internal sealed class TeaserHost
         for (int index = 0; index < frames.Length; index++)
         {
             string target = Path.GetFullPath(Path.Combine(framesRoot, frameNames[index]));
-            EnsureInside(framesRoot, target, "Audit frame");
+            EnsureInside(framesRoot, target);
             WriteNewOrVerify(target, frames[index], frameHashes[index], $"frame-{index + 1}");
             TestHooks.At($"after-frame-{index + 1}");
         }
@@ -277,7 +277,6 @@ internal sealed class TeaserHost
             Sha256(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(expectedReceipt, JsonOptions))),
             "receipt"
         );
-        _ = source;
         return new HostResponse
         {
             Ok = true,
@@ -314,7 +313,7 @@ internal sealed class TeaserHost
         VerifyReceiptAggregates(receipt);
 
         string destination = Path.GetFullPath(Path.Combine(doneRoot, proof.Basename));
-        EnsureInside(doneRoot, destination, "Done destination");
+        EnsureInside(doneRoot, destination);
         List<string> sources = FindSources(proof.Basename);
         if (sources.Count == 0 && File.Exists(destination))
         {
@@ -373,13 +372,12 @@ internal sealed class TeaserHost
             throw new HostValidationException("Invalid source basename or path.");
     }
 
-    private string ResolveOneSource(string basename, FileProof proof)
+    private void ValidateOneSource(string basename, FileProof proof)
     {
         List<string> candidates = FindSources(basename);
         if (candidates.Count != 1)
             throw new HostValidationException("Expected exactly one matching source file.");
         VerifyIdentity(candidates[0], proof);
-        return candidates[0];
     }
 
     private List<string> FindSources(string basename)
@@ -396,14 +394,14 @@ internal sealed class TeaserHost
             {
                 RejectReparse(file);
                 string full = Path.GetFullPath(file);
-                EnsureInside(teaserRoot, full, "Source file");
+                EnsureInside(teaserRoot, full);
                 if (string.Equals(Path.GetFileName(full), basename, StringComparison.OrdinalIgnoreCase))
                     matches.Add(full);
             }
             foreach (string child in Directory.EnumerateDirectories(directory))
             {
                 string full = Path.GetFullPath(child);
-                EnsureInside(teaserRoot, full, "Source directory");
+                EnsureInside(teaserRoot, full);
                 if (string.Equals(full, doneRoot, StringComparison.OrdinalIgnoreCase))
                     continue;
                 RejectReparse(full);
@@ -524,7 +522,7 @@ internal sealed class TeaserHost
         for (int index = 0; index < 3; index++)
         {
             string path = Path.GetFullPath(Path.Combine(auditRoot, receipt.FrameFiles[index]));
-            EnsureInside(auditRoot, path, "Receipt frame");
+            EnsureInside(auditRoot, path);
             RejectReparsePath(path);
             if (!File.Exists(path) || Sha256(File.ReadAllBytes(path)) != receipt.FrameSha256[index])
                 throw new HostValidationException("Audit receipt frame proof does not match disk.");
@@ -669,7 +667,7 @@ internal sealed class TeaserHost
     private string AuditFile(string name, bool mustExist = true)
     {
         string path = Path.GetFullPath(Path.Combine(auditRoot, name));
-        EnsureInside(auditRoot, path, "Audit file");
+        EnsureInside(auditRoot, path);
         if (mustExist && !File.Exists(path))
             throw new HostValidationException("Required audit file is missing.");
         if (File.Exists(path)) RejectReparsePath(path);
@@ -747,7 +745,7 @@ internal sealed class TeaserHost
         }
     }
 
-    private static string ResolveConfiguredRoot(string value, string label)
+    private static string ResolveConfiguredRoot(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value))
             throw new HostValidationException("The configured root must be absolute.");
@@ -758,7 +756,7 @@ internal sealed class TeaserHost
         return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
-    private static void EnsureInside(string root, string candidate, string label)
+    private static void EnsureInside(string root, string candidate)
     {
         string prefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (

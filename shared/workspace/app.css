@@ -76,9 +76,6 @@ button.connection {
   border-color: #35657a;
   font-weight: 750;
 }
-#chromeSetupDialog .chrome-support-actions {
-  margin-top: 10px;
-}
 [data-catalogue-state="empty"] .catalogue-controls {
   display: block;
   border-bottom: 0;
@@ -920,13 +917,6 @@ dialog::backdrop {
   font-size: 0.82rem;
 }
 
-.settings-list .setting-action {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .google-account-card {
   display: grid;
   gap: 18px;
@@ -1025,10 +1015,6 @@ dialog::backdrop {
   margin: 0;
   color: #cbd2dc;
   font-size: 0.82rem;
-}
-
-.setting-action .secondary-button {
-  flex: 0 0 auto;
 }
 
 .settings-disclosure {
@@ -1271,11 +1257,6 @@ dialog::backdrop {
     margin-top: 5px;
   }
 
-  .settings-list .setting-action {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .google-account-heading {
     align-items: stretch;
     flex-direction: column;
@@ -1288,10 +1269,6 @@ dialog::backdrop {
 
   .sheet-url-control {
     grid-template-columns: 1fr;
-  }
-
-  .setting-action .secondary-button {
-    width: 100%;
   }
 
   .settings-form {

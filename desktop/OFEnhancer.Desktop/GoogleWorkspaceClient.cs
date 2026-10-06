@@ -744,7 +744,7 @@ internal sealed class GoogleWorkspaceClient
         return new Uri(query.Length == 0 ? path : $"{path}?{query}", UriKind.Absolute);
     }
 
-    private static string EscapePath(string value) => Uri.EscapeDataString(value).Replace("%2F", "%2F", StringComparison.OrdinalIgnoreCase);
+    private static string EscapePath(string value) => Uri.EscapeDataString(value);
 
     private static bool SameOrigin(Uri left, Uri right) =>
         string.Equals(left.Scheme, right.Scheme, StringComparison.Ordinal)

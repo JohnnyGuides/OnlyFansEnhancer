@@ -27,7 +27,7 @@
   "content_scripts": [
     {
       "matches": ["https://onlyfans.com/*"],
-      "js": ["identity-settings.js", "core.js", "content.js"],
+      "js": ["identity-settings.js", "runtime.js", "core.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_start"
     }

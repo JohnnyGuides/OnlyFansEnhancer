@@ -34,6 +34,7 @@ function loadRuntime(options = {}) {
     URL,
   });
   for (const relative of [
+    "workflows/catalogue-contract.js",
     "workflows/social-distribution-contract.js",
     "workflows/social-distribution-session-store.js",
     "workflows/social-distribution-orchestrator.js",

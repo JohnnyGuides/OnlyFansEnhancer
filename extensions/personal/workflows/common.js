@@ -878,6 +878,22 @@
     }
   }
 
+  async function runStep(outcomes, label, operation, flattenArray = false) {
+    try {
+      const result = await operation();
+      if (flattenArray && Array.isArray(result)) outcomes.push(...result);
+      else outcomes.push(result);
+      return true;
+    } catch (error) {
+      outcomes.push({
+        label,
+        status: "failed",
+        detail: error?.message || String(error),
+      });
+      return false;
+    }
+  }
+
   function createActionRunner({
     toolId,
     panel,
@@ -1117,6 +1133,7 @@
     createToolPanel,
     createActionRunner,
     appendActionLog,
+    runStep,
     mountTool,
   });
 })();

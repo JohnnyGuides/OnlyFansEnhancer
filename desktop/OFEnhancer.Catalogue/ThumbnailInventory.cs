@@ -49,7 +49,7 @@ internal static class ThumbnailInventory
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         int newAssets = 0;
         using SqliteTransaction transaction = connection.BeginTransaction();
-        Execute(
+        CatalogueSql.Execute(
             connection,
             transaction,
             "UPDATE media_assets SET available = 0, updated_utc = $now",
@@ -95,7 +95,7 @@ internal static class ThumbnailInventory
             command.ExecuteNonQuery();
         }
 
-        Execute(
+        CatalogueSql.Execute(
             connection,
             transaction,
             "INSERT INTO settings(key, value) VALUES ($key, $root) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -111,7 +111,7 @@ internal static class ThumbnailInventory
         string details = JsonSerializer.Serialize(
             new { availableAssets = uniqueAssets, newAssets, unavailableAssets = unavailable }
         );
-        Execute(
+        CatalogueSql.Execute(
             connection,
             transaction,
             "INSERT INTO audit_events(occurred_utc, kind, details_json) VALUES ($now, 'thumbnails-scanned', $details)",
@@ -291,21 +291,6 @@ internal static class ThumbnailInventory
         foreach ((string name, object value) in parameters)
             command.Parameters.AddWithValue(name, value);
         return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-    }
-
-    private static void Execute(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string sql,
-        params (string Name, object Value)[] parameters
-    )
-    {
-        using SqliteCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach ((string name, object value) in parameters)
-            command.Parameters.AddWithValue(name, value);
-        command.ExecuteNonQuery();
     }
 
     private sealed record ScannedFile(

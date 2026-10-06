@@ -12,6 +12,14 @@ function loadContract() {
   const context = vm.createContext({ URL });
   vm.runInContext(
     fs.readFileSync(
+      path.join(repositoryRoot, "workflows/catalogue-contract.js"),
+      "utf8",
+    ),
+    context,
+    { filename: "workflows/catalogue-contract.js" },
+  );
+  vm.runInContext(
+    fs.readFileSync(
       path.join(repositoryRoot, "workflows/social-distribution-contract.js"),
       "utf8",
     ),

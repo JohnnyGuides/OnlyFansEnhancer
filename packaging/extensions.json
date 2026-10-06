@@ -216,7 +216,9 @@
     "workflows/x-teaser-tab-binding.js": "extensions/personal/workflows/x-teaser-tab-binding.js",
     "x-teaser.css": "extensions/personal/x-teaser.css",
     "x-teaser.html": "extensions/personal/x-teaser.html",
-    "x-teaser.js": "extensions/personal/x-teaser.js"
+    "x-teaser.js": "extensions/personal/x-teaser.js",
+    "avatar-crop.js": "shared/identity-mask/avatar-crop.js",
+    "runtime.js": "shared/identity-mask/runtime.js"
   },
   "store": {
     "background.js": "extensions/store/background.js",
@@ -235,6 +237,8 @@
     "popup.css": "extensions/store/popup.css",
     "popup.html": "extensions/store/popup.html",
     "popup.js": "extensions/store/popup.js",
-    "privacy.html": "docs/privacy.html"
+    "privacy.html": "docs/privacy.html",
+    "avatar-crop.js": "shared/identity-mask/avatar-crop.js",
+    "runtime.js": "shared/identity-mask/runtime.js"
   }
 }

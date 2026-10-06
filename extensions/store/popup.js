@@ -2,26 +2,10 @@
 
 const selectElement = (selector) => document.querySelector(selector);
 
-function sendMessage(message) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      if (!response?.ok) {
-        reject(new Error(response?.error || "Extension request failed."));
-        return;
-      }
-      resolve(response);
-    });
-  });
-}
-
 async function load() {
   const [{ settings }, { stats }] = await Promise.all([
-    sendMessage({ type: "GET_SETTINGS" }),
-    sendMessage({ type: "GET_STATS" }),
+    globalThis.FanIdentityMaskSendMessage({ type: "GET_SETTINGS" }),
+    globalThis.FanIdentityMaskSendMessage({ type: "GET_STATS" }),
   ]);
   selectElement("#enabled").checked = settings.enabled;
   selectElement("#enabled").disabled = !settings.consentAccepted;
@@ -41,7 +25,7 @@ async function load() {
 
 selectElement("#enabled").addEventListener("change", async () => {
   try {
-    await sendMessage({
+    await globalThis.FanIdentityMaskSendMessage({
       type: "SET_SETTINGS",
       patch: { enabled: selectElement("#enabled").checked },
     });
@@ -59,7 +43,7 @@ async function resetDimension(type) {
     : selectElement("#resetPictures");
   button.disabled = true;
   try {
-    const response = await sendMessage({
+    const response = await globalThis.FanIdentityMaskSendMessage({
       type: isNames ? "RESET_NAMES" : "RESET_PICTURES",
     });
     selectElement("#count").textContent =

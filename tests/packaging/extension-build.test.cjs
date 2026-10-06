@@ -83,7 +83,13 @@ for (const edition of ["personal", "store"]) {
         "Equal source must produce equal ZIP bytes.",
       );
       const staged = path.join(output, "extensions", edition);
-      for (const name of ["core.js", "content.js", "content.css"]) {
+      for (const name of [
+        "core.js",
+        "content.js",
+        "content.css",
+        "runtime.js",
+        "avatar-crop.js",
+      ]) {
         assert.deepEqual(
           fs.readFileSync(path.join(staged, name)),
           fs.readFileSync(path.join(root, "shared/identity-mask", name)),
@@ -94,6 +100,7 @@ for (const edition of ["personal", "store"]) {
       );
       assert.deepEqual(manifest.content_scripts[0].js, [
         "identity-settings.js",
+        "runtime.js",
         "core.js",
         "content.js",
       ]);

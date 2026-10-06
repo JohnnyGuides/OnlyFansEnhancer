@@ -493,10 +493,6 @@
     const panel = document.createElement("section");
     panel.setAttribute("aria-label", "Browser connection");
     panel.className = "desktop-upload-connection";
-    const back = document.createElement("a");
-    back.href = "index.html";
-    back.textContent = "Back to catalogue";
-    back.hidden = true;
     const setup = document.createElement("a");
     setup.href = "index.html?chrome-setup=1";
     setup.textContent = "Setup";

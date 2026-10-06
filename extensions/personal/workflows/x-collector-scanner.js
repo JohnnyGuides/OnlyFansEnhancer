@@ -167,7 +167,6 @@
     if (Number.isFinite(requested) && requested > last) {
       return at - last >= MANUAL_MIN_GAP_MS ? "requested" : "";
     }
-    if ((Number(state.backoffUntil) || 0) > at) return "";
     // Once per OFEnhancer start: the first tick after the desktop started.
     const started = Date.parse(String(plan?.desktopStartedUtc || ""));
     if (Number.isFinite(started) && started > last && started <= at)

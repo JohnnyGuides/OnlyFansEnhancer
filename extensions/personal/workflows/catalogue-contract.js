@@ -87,6 +87,33 @@
     );
   }
 
+  function catalogueRow(value) {
+    const row = Number(value?.row);
+    const id = String(value?.id == null ? "" : value.id)
+      .trim()
+      .slice(0, 500);
+    const title = String(value?.title == null ? "" : value.title)
+      .trim()
+      .slice(0, 500);
+    const fingerprint = String(
+      value?.fingerprint == null ? "" : value.fingerprint,
+    )
+      .trim()
+      .slice(0, 64)
+      .toLowerCase();
+    if (
+      !Number.isInteger(row) ||
+      row < 2 ||
+      row > 5002 ||
+      !id ||
+      !title ||
+      !/^[a-f0-9]{8,64}$/.test(fingerprint)
+    ) {
+      throw new Error("Choose one explicit catalogue row.");
+    }
+    return { row, id, title, fingerprint };
+  }
+
   function canonicalPostUrl(platform, value) {
     const raw = clean(value);
     if (!raw || !Object.hasOwn(PLATFORM_FIELDS, platform)) return null;
@@ -217,6 +244,7 @@
   }
 
   globalThis.CreatorCatalogueContract = Object.freeze({
+    catalogueRow,
     canonicalPostUrl,
     canonicalRedditPostUrl,
     canonicalXStatusUrl,

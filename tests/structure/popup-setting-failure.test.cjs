@@ -6,10 +6,16 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
 
-const source = fs.readFileSync(
-  path.resolve(__dirname, "../../extensions/personal/popup.js"),
-  "utf8",
-);
+const source =
+  fs.readFileSync(
+    path.resolve(__dirname, "../../shared/identity-mask/runtime.js"),
+    "utf8",
+  ) +
+  "\n" +
+  fs.readFileSync(
+    path.resolve(__dirname, "../../extensions/personal/popup.js"),
+    "utf8",
+  );
 
 async function openPopup({ reloadFails = false, storedAfterFailure = true }) {
   const elements = new Map();

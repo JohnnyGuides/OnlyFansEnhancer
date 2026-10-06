@@ -79,7 +79,7 @@ internal static class CatalogueSnapshotImporter
 
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         using SqliteTransaction transaction = connection.BeginTransaction();
-        Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
+        CatalogueSql.Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
 
         foreach (ValidatedSnapshotItem item in items)
         {
@@ -130,7 +130,7 @@ internal static class CatalogueSnapshotImporter
             new { activeItems, archivedItems },
             StorageJson
         );
-        Execute(
+        CatalogueSql.Execute(
             connection,
             transaction,
             "INSERT INTO audit_events(occurred_utc, kind, details_json) VALUES ($now, 'catalogue-imported', $details)",
@@ -422,7 +422,7 @@ internal static class CatalogueSnapshotImporter
         string key,
         string value
     ) =>
-        Execute(
+        CatalogueSql.Execute(
             connection,
             transaction,
             "INSERT INTO settings(key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -444,21 +444,6 @@ internal static class CatalogueSnapshotImporter
         int active = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
         int archived = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
         return (active, archived);
-    }
-
-    private static void Execute(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string sql,
-        params (string Name, object Value)[] parameters
-    )
-    {
-        using SqliteCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach ((string name, object value) in parameters)
-            command.Parameters.AddWithValue(name, value);
-        command.ExecuteNonQuery();
     }
 
     private sealed record SnapshotEnvelope(int Version, IReadOnlyList<SnapshotItem?>? Items);

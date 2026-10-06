@@ -367,30 +367,6 @@
     avatar.setAttribute("aria-label", "Choose another profile picture");
     image.title = "Click to choose another picture";
 
-    if (!image.dataset.fimRotateBound) {
-      image.dataset.fimRotateBound = "true";
-      image.addEventListener(
-        "click",
-        (event) => {
-          if (
-            event.button !== 0 ||
-            event.altKey ||
-            event.ctrlKey ||
-            event.metaKey ||
-            event.shiftKey
-          ) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          event.stopImmediatePropagation();
-
-          requestAvatarRotation(image);
-        },
-        true,
-      );
-    }
-
     const fallbackUrl = emergencyAvatar(identity, context.primaryKey);
     const requestedUrl =
       image.dataset.fimFailedAvatarUrl === identity.avatarUrl

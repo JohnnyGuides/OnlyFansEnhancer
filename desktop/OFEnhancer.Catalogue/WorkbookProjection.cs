@@ -18,9 +18,9 @@ internal static class WorkbookProjectionImporter
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
         using SqliteTransaction transaction = connection.BeginTransaction();
-        Execute(connection, transaction, "DELETE FROM settings WHERE key = 'catalogue.snapshot.sha256'");
+        CatalogueSql.Execute(connection, transaction, "DELETE FROM settings WHERE key = 'catalogue.snapshot.sha256'");
         if (validated.Complete)
-            Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
+            CatalogueSql.Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
 
         List<GoogleRowBinding> bindings = new(validated.Items.Count);
         foreach (ValidatedWorkbookItem row in validated.Items)
@@ -66,7 +66,7 @@ internal static class WorkbookProjectionImporter
             command.Parameters.AddWithValue("$now", now);
             command.ExecuteNonQuery();
             if (!updateGoogleBindings)
-                Execute(connection, transaction,
+                CatalogueSql.Execute(connection, transaction,
                     "UPDATE catalogue_items SET source_link_cells_json = $cells, category = $category WHERE item_id = $itemId",
                     ("$cells", JsonSerializer.Serialize(row.SourceLinkCells, StorageJson)),
                     ("$category", (object?)row.Category ?? DBNull.Value), ("$itemId", itemId));
@@ -88,9 +88,9 @@ internal static class WorkbookProjectionImporter
     private static void ReplaceSheetBindings(SqliteConnection connection, SqliteTransaction transaction, string workbookId, string sheetId, IReadOnlyList<GoogleRowBinding> bindings, bool complete)
     {
         if (complete)
-            Execute(connection, transaction, "DELETE FROM google_row_bindings WHERE workbook_id = $workbookId AND sheet_id = $sheetId", ("$workbookId", workbookId), ("$sheetId", sheetId));
+            CatalogueSql.Execute(connection, transaction, "DELETE FROM google_row_bindings WHERE workbook_id = $workbookId AND sheet_id = $sheetId", ("$workbookId", workbookId), ("$sheetId", sheetId));
         foreach (GoogleRowBinding binding in bindings)
-            Execute(
+            CatalogueSql.Execute(
                 connection,
                 transaction,
                 "INSERT INTO google_row_bindings(workbook_id, sheet_id, item_id, metadata_id, last_observed_row, verified_remote_fingerprint, verified_utc) VALUES ($workbookId, $sheetId, $itemId, $metadataId, $row, $fingerprint, $utc) ON CONFLICT(workbook_id, sheet_id, item_id) DO UPDATE SET metadata_id = excluded.metadata_id, last_observed_row = excluded.last_observed_row, verified_remote_fingerprint = excluded.verified_remote_fingerprint, verified_utc = excluded.verified_utc",
@@ -251,16 +251,6 @@ internal static class WorkbookProjectionImporter
         if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             throw Invalid("plannedDate must use YYYY-MM-DD.");
         return date;
-    }
-
-    private static void Execute(SqliteConnection connection, SqliteTransaction transaction, string sql, params (string Name, object Value)[] parameters)
-    {
-        using SqliteCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach ((string name, object value) in parameters)
-            command.Parameters.AddWithValue(name, value);
-        command.ExecuteNonQuery();
     }
 
     private static WorkbookProjectionException Invalid(string message) => new("invalid-workbook-projection", message);
