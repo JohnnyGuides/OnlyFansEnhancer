@@ -372,6 +372,7 @@
         subredditLabel.hidden = false;
         scheduleRow.prepend(subredditLabel);
         subreddit.value = context.draft?.subreddit || "";
+        timeLabel.hidden = true;
         replyLabel.hidden = true;
         linkFields.hidden = true;
         customLink.hidden = true;

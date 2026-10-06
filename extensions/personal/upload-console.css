@@ -134,6 +134,56 @@ body.calendar-reddit-draft .upload-actions .action-status {
   display: grid;
   gap: 8px;
 }
+.calendar-teaser .xt-planner-post-list {
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.calendar-teaser .xt-planner-posts-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.calendar-teaser .xt-planner-count {
+  font-size: 11px;
+  color: #afbed2;
+}
+.calendar-teaser .xt-planner-batch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.calendar-teaser .xt-planner-community-picker {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #344657;
+  padding-top: 8px;
+}
+.calendar-teaser .xt-planner-community-list {
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.calendar-teaser .xt-planner-community {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.calendar-teaser .xt-planner-community small {
+  margin-left: auto;
+  color: #afbed2;
+}
+.calendar-teaser .xt-planner-community input {
+  width: auto;
+}
+.calendar-teaser .xt-planner-community-picker p {
+  margin: 0;
+  font-size: 11px;
+  color: #afbed2;
+}
 .calendar-teaser .xt-composer-destinations [hidden] {
   display: none !important;
 }

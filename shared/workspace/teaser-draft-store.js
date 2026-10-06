@@ -14,11 +14,13 @@
   }
   function open() {
     return new Promise((resolve, reject) => {
-      const request = global.indexedDB.open(NAME, 2);
+      const request = global.indexedDB.open(NAME, 3);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains("drafts"))
           request.result.createObjectStore("drafts", { keyPath: "date" });
-        request.result.createObjectStore("posts", { keyPath: "id" });
+        if (!request.result.objectStoreNames.contains("posts"))
+          request.result.createObjectStore("posts", { keyPath: "id" });
+        request.result.createObjectStore("batches", { keyPath: "date" });
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () =>
@@ -33,7 +35,10 @@
     const db = await open();
     try {
       return await new Promise((resolve, reject) => {
-        const transaction = db.transaction(["drafts", "posts"], mode);
+        const transaction = db.transaction(
+          ["drafts", "posts", "batches"],
+          mode,
+        );
         let result;
         transaction.oncomplete = () => resolve(result);
         transaction.onabort = transaction.onerror = () =>
@@ -166,7 +171,78 @@
       "posts",
     );
   }
+  function scheduledPost(record, batch, index) {
+    const [hour, minute] = batch.start.split(":").map(Number);
+    const minutes = hour * 60 + minute + index * batch.gapMinutes;
+    const day = new Date(record.date + "T12:00:00Z");
+    day.setUTCDate(day.getUTCDate() + Math.floor(minutes / 1440));
+    return {
+      ...record,
+      scheduledDate: day.toISOString().slice(0, 10),
+      time: `${String(Math.floor((minutes % 1440) / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`,
+    };
+  }
+  function orderedPosts(records) {
+    return records.sort(
+      (a, b) =>
+        (a.order ?? a.updatedAt) - (b.order ?? b.updatedAt) ||
+        a.id.localeCompare(b.id),
+    );
+  }
+  async function getBatch(date) {
+    if (!validDay(date)) throw new Error("Choose a calendar day.");
+    return transact(
+      "readonly",
+      (store, done) => {
+        const read = store.get(date);
+        read.onsuccess = () => done(read.result || null);
+      },
+      "batches",
+    );
+  }
+  async function saveBatch(batch) {
+    if (
+      !validDay(batch?.date) ||
+      !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(batch.start || "") ||
+      !Number.isInteger(batch.gapMinutes) ||
+      batch.gapMinutes < 1 ||
+      batch.gapMinutes > 1440
+    )
+      throw new Error("Choose a start time and a gap of 1–1440 minutes.");
+    const record = {
+      date: batch.date,
+      start: batch.start,
+      gapMinutes: batch.gapMinutes,
+    };
+    return transact(
+      "readwrite",
+      (store, done, transaction) => {
+        const posts = transaction.objectStore("posts");
+        const read = posts.getAll();
+        read.onsuccess = () => {
+          orderedPosts(
+            read.result.filter((post) => post.date === record.date),
+          ).forEach((post, index) =>
+            posts.put(scheduledPost(post, record, index)),
+          );
+          store.put(record);
+          done(record);
+        };
+      },
+      "batches",
+    );
+  }
   async function savePost(draft) {
+    if (
+      draft?.targets &&
+      (!Array.isArray(draft.targets) ||
+        !draft.targets.length ||
+        draft.targets.length > 200 ||
+        draft.targets.some((target) => !/^[A-Za-z0-9_]{2,21}$/.test(target)) ||
+        new Set(draft.targets.map((target) => target.toLowerCase())).size !==
+          draft.targets.length)
+    )
+      throw new Error("Choose distinct valid communities.");
     if (
       !validDay(draft?.date) ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(draft.id || "") ||
@@ -199,24 +275,79 @@
       status: "draft",
       updatedAt: Date.now(),
     };
+    const records = draft.targets
+      ? draft.targets.map((subreddit) => ({
+          ...record,
+          id: crypto.randomUUID(),
+          subreddit,
+        }))
+      : [record];
     return transact(
       "readwrite",
       (store, done, transaction) => {
         const read = store.getAll();
         read.onsuccess = () => {
-          const others = read.result.filter((item) => item.id !== record.id);
+          const nextOrder = Math.max(
+            Date.now(),
+            ...read.result.map(
+              (item) => (item.order ?? item.updatedAt ?? 0) + 1,
+            ),
+          );
+          for (const [index, item] of records.entries()) {
+            const existing = read.result.find((post) => post.id === item.id);
+            item.order =
+              existing?.order ?? existing?.updatedAt ?? nextOrder + index;
+          }
+          const others = read.result.filter(
+            (item) => !records.some((post) => post.id === item.id),
+          );
+          if (
+            draft.targets &&
+            records.some((post) =>
+              others.some(
+                (existing) =>
+                  existing.date === post.date &&
+                  existing.subreddit.toLowerCase() ===
+                    post.subreddit.toLowerCase(),
+              ),
+            )
+          ) {
+            transaction.abort();
+            return;
+          }
           const twitter = transaction.objectStore("drafts").getAll();
           twitter.onsuccess = () => {
+            // ponytail: draft media copies share the existing 2 GB ceiling; use a shared media store if batch storage reaches it.
             const bytes = [...others, ...twitter.result].reduce(
               (size, item) => size + (item.file?.size || 0),
-              record.file.size,
+              records.reduce((size, item) => size + item.file.size, 0),
             );
-            if (others.length >= 200 || bytes > MAX_TOTAL) {
+            if (others.length + records.length > 200 || bytes > MAX_TOTAL) {
               transaction.abort();
               return;
             }
-            store.put(record);
-            done(record);
+            const batches = transaction.objectStore("batches");
+            const batchRead = batches.get(record.date);
+            batchRead.onsuccess = () => {
+              const batch = batchRead.result || {
+                date: record.date,
+                start: record.time,
+                gapMinutes: 15,
+              };
+              const posts = orderedPosts([
+                ...others.filter((post) => post.date === record.date),
+                ...records,
+              ]);
+              const saved = [];
+              posts.forEach((post, index) => {
+                const scheduled = scheduledPost(post, batch, index);
+                store.put(scheduled);
+                if (records.some((item) => item.id === post.id))
+                  saved.push(scheduled);
+              });
+              batches.put(batch);
+              done(draft.targets ? saved : saved[0]);
+            };
           };
         };
       },
@@ -224,7 +355,29 @@
     );
   }
   async function removePost(id) {
-    return transact("readwrite", (store) => store.delete(id), "posts");
+    return transact(
+      "readwrite",
+      (store, _done, transaction) => {
+        const read = store.get(id);
+        read.onsuccess = () => {
+          if (!read.result) return;
+          const date = read.result.date;
+          store.delete(id);
+          const batch = transaction.objectStore("batches").get(date);
+          batch.onsuccess = () => {
+            if (!batch.result) return;
+            const posts = store.getAll();
+            posts.onsuccess = () =>
+              orderedPosts(
+                posts.result.filter((post) => post.date === date),
+              ).forEach((post, index) =>
+                store.put(scheduledPost(post, batch.result, index)),
+              );
+          };
+        };
+      },
+      "posts",
+    );
   }
   async function checkpoint(date, status, sessionId) {
     if (
@@ -279,6 +432,15 @@
     listPosts,
     getPost,
     savePost,
+    savePosts: (draft, targets) =>
+      savePost({
+        ...draft,
+        targets,
+        subreddit: targets?.[0],
+        id: crypto.randomUUID(),
+      }),
     removePost,
+    getBatch,
+    saveBatch,
   });
 })(globalThis);

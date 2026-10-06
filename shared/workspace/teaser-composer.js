@@ -101,12 +101,46 @@
     destinations.setAttribute("role", "group");
     destinations.setAttribute("aria-label", "Destination posts");
     const destination = node("div", "xt-planner-post-list");
+    const search = node("input", "xt-planner-search");
+    search.type = "search";
+    search.placeholder = "Find a destination";
+    search.setAttribute("aria-label", "Find a destination");
+    search.addEventListener("input", () => {
+      for (const row of destination.children)
+        row.hidden = !row.textContent
+          .toLowerCase()
+          .includes(search.value.trim().toLowerCase());
+    });
+    const batchControls = node("div", "xt-planner-batch");
+    const startLabel = node("label", "teaser-schedule-field", "Reddit starts");
+    const start = node("input", "");
+    start.type = "time";
+    start.value = "18:00";
+    startLabel.append(start);
+    const gapLabel = node("label", "teaser-schedule-field", "Gap (min)");
+    const gap = node("input", "");
+    gap.type = "number";
+    gap.min = "1";
+    gap.max = "1440";
+    gap.value = "15";
+    gapLabel.append(gap);
+    batchControls.append(startLabel, gapLabel);
+    const count = node("span", "xt-planner-count");
+    const postsHeading = node("div", "xt-planner-posts-heading");
+    postsHeading.append(node("h3", "", "Destinations"), count);
     const addPost = action("Add Reddit post");
+    const communities = action("Choose communities");
     const removePost = action("Remove post");
     removePost.hidden = true;
     const postActions = node("div", "xt-planner-post-actions");
-    postActions.append(addPost, removePost);
-    destinations.append(node("h3", "", "Posts"), destination, postActions);
+    postActions.append(communities, addPost, removePost);
+    destinations.append(
+      postsHeading,
+      batchControls,
+      search,
+      destination,
+      postActions,
+    );
     const content = node("div", "xt-composer-content");
     const status = node("p", "xt-composer-status");
     status.setAttribute("role", "status");
@@ -120,10 +154,40 @@
       running = false,
       postId = "";
     async function refreshDestinations() {
-      const [reddit, twitter] = await Promise.all([
+      const scrollTop = destination.scrollTop;
+      const [reddit, twitter, batch] = await Promise.all([
         global.OFEnhancerTeaserDrafts.listPosts(date),
         global.OFEnhancerTeaserDrafts.get(date),
+        global.OFEnhancerTeaserDrafts.getBatch(date),
       ]);
+      batchControls.hidden = reddit.length === 0 && !postId;
+      count.textContent = `Twitter · ${reddit.length} Reddit`;
+      search.hidden = reddit.length < 5;
+      if (batch) {
+        start.value = batch.start;
+        gap.value = String(batch.gapMinutes);
+      } else {
+        try {
+          const remembered = JSON.parse(
+            localStorage.getItem("OFEnhancerRedditBatchPreferencesV1") || "{}",
+          );
+          if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(remembered.start || ""))
+            start.value = remembered.start;
+          if (
+            Number.isInteger(remembered.gapMinutes) &&
+            remembered.gapMinutes >= 1 &&
+            remembered.gapMinutes <= 1440
+          )
+            gap.value = String(remembered.gapMinutes);
+        } catch {
+          /* Use defaults. */
+        }
+      }
+      reddit.sort(
+        (a, b) =>
+          (a.order ?? a.updatedAt) - (b.order ?? b.updatedAt) ||
+          a.id.localeCompare(b.id),
+      );
       const posts = [{ ...twitter, id: "x", platform: "x" }, ...reddit];
       if (postId && !posts.some((post) => post.id === postId))
         posts.push({ id: postId, platform: "reddit" });
@@ -146,15 +210,187 @@
           node(
             "span",
             "xt-planner-post-state",
-            `${post.time || "—"} · ${state}`,
+            `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`,
           ),
           node("small", "", post.file?.name || post.name || "Choose a clip"),
         );
         row.addEventListener("click", () => void switchPost(post.id));
         destination.append(row);
       }
+      search.dispatchEvent(new Event("input"));
+      destination.scrollTop = scrollTop;
       removePost.hidden = !postId;
     }
+    async function updateBatch() {
+      if (
+        loading ||
+        running ||
+        !start.value ||
+        !start.validity.valid ||
+        !gap.validity.valid ||
+        !Number.isInteger(Number(gap.value))
+      )
+        return;
+      loading = true;
+      start.disabled = gap.disabled = true;
+      for (const row of destination.children) row.disabled = true;
+      try {
+        await global.OFEnhancerTeaserDrafts.saveBatch({
+          date,
+          start: start.value,
+          gapMinutes: Number(gap.value),
+        });
+        try {
+          localStorage.setItem(
+            "OFEnhancerRedditBatchPreferencesV1",
+            JSON.stringify({
+              start: start.value,
+              gapMinutes: Number(gap.value),
+            }),
+          );
+        } catch {
+          /* The batch is still saved. */
+        }
+        await refreshDestinations();
+        status.textContent = "Reddit timing saved · local drafts only.";
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        loading = false;
+        start.disabled = gap.disabled = false;
+        for (const row of destination.children) row.disabled = false;
+      }
+    }
+    start.addEventListener("change", () => void updateBatch());
+    gap.addEventListener("change", () => void updateBatch());
+    communities.addEventListener("click", async () => {
+      if (running || loading) return;
+      if (dirty) {
+        status.textContent = "Save this draft before choosing communities.";
+        return;
+      }
+      loading = true;
+      try {
+        const source = await (postId
+          ? global.OFEnhancerTeaserDrafts.getPost(postId)
+          : global.OFEnhancerTeaserDrafts.get(date));
+        if (!source?.file)
+          throw new Error("Save a clip and title before choosing communities.");
+        const client = iframe?.contentWindow?.CreatorCatalogueClient;
+        const presets = iframe?.contentWindow?.CreatorSubredditPresets;
+        if (!client?.getSubredditPresetSnapshot || !presets)
+          throw new Error("Reconnect the catalogue to load communities.");
+        const response = await client.getSubredditPresetSnapshot();
+        if (!dialog.isConnected) return;
+        const targets = presets.rankReady(
+          presets.normalizeSnapshot(response.rows),
+        );
+        const added = new Set(
+          (await global.OFEnhancerTeaserDrafts.listPosts(date)).map((post) =>
+            post.subreddit.toLowerCase(),
+          ),
+        );
+        destinations.querySelector(".xt-planner-community-picker")?.remove();
+        const picker = node("div", "xt-planner-community-picker");
+        const filter = node("input", "");
+        filter.type = "search";
+        filter.placeholder = "Search worksheet communities";
+        filter.setAttribute("aria-label", "Search worksheet communities");
+        const list = node("div", "xt-planner-community-list");
+        const picked = new Set();
+        const add = action("Add selected (0)");
+        add.disabled = true;
+        for (const preset of targets) {
+          const label = node("label", "xt-planner-community");
+          const check = node("input", "");
+          check.type = "checkbox";
+          check.disabled =
+            preset.status === "Rejected" ||
+            added.has(preset.subreddit.toLowerCase());
+          label.append(
+            check,
+            node("span", "", `r/${preset.subreddit}`),
+            node(
+              "small",
+              "",
+              added.has(preset.subreddit.toLowerCase())
+                ? "Added"
+                : preset.status,
+            ),
+          );
+          label.title = preset.notes;
+          label.dataset.name = preset.subreddit.toLowerCase();
+          check.addEventListener("change", () => {
+            if (check.checked) picked.add(preset.subreddit);
+            else picked.delete(preset.subreddit);
+            add.textContent = `Add selected (${picked.size})`;
+            add.disabled = picked.size === 0;
+          });
+          list.append(label);
+        }
+        filter.addEventListener("input", () => {
+          for (const row of list.children)
+            row.hidden = !row.dataset.name.includes(
+              filter.value.trim().toLowerCase().replace(/^r\//, ""),
+            );
+        });
+        const cancel = action("Cancel");
+        cancel.addEventListener("click", () => picker.remove());
+        const actions = node("div", "xt-planner-post-actions");
+        actions.append(add, cancel);
+        const message = node(
+          "p",
+          "",
+          `${targets.length} worksheet communities`,
+        );
+        message.setAttribute("role", "status");
+        picker.append(filter, list, message, actions);
+        postActions.after(picker);
+        add.addEventListener("click", async () => {
+          if (loading || running || !picked.size) return;
+          if (dirty) {
+            message.textContent = "Save this draft before adding communities.";
+            return;
+          }
+          const selected = [...picked];
+          loading = true;
+          add.disabled = true;
+          cancel.disabled = true;
+          try {
+            const template = await (postId
+              ? global.OFEnhancerTeaserDrafts.getPost(postId)
+              : global.OFEnhancerTeaserDrafts.get(date));
+            if (!template?.file)
+              throw new Error(
+                "Save a clip and title before adding communities.",
+              );
+            await global.OFEnhancerTeaserDrafts.saveBatch({
+              date,
+              start: start.value,
+              gapMinutes: Number(gap.value),
+            });
+            await global.OFEnhancerTeaserDrafts.savePosts(
+              { ...template, date, time: start.value },
+              selected,
+            );
+            picker.remove();
+            await refreshDestinations();
+            await Promise.resolve(onSaved());
+            status.textContent = `${selected.length} Reddit drafts added · not scheduled.`;
+          } catch (error) {
+            message.textContent = error.message;
+            add.disabled = false;
+            cancel.disabled = false;
+          } finally {
+            loading = false;
+          }
+        });
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        loading = false;
+      }
+    });
     async function switchPost(id, reuseClip = false) {
       if (
         running ||
@@ -164,6 +400,7 @@
         return;
       }
       const previous = context;
+      destinations.querySelector(".xt-planner-community-picker")?.remove();
       // Preserve the controls before replacing their current iframe document.
       heading.after(destinations);
       destinations.hidden = true;
@@ -185,6 +422,12 @@
         if (!dialog.isConnected) return;
         if (draft) edit(draft.file, null, draft);
         else if (reuseClip && source?.file) {
+          if (!(await global.OFEnhancerTeaserDrafts.getBatch(date)))
+            await global.OFEnhancerTeaserDrafts.saveBatch({
+              date,
+              start: start.value,
+              gapMinutes: Number(gap.value),
+            });
           episode =
             episodes.find((item) => item.sourceKey === source.episodeKey) ||
             episode;

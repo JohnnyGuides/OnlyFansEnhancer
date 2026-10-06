@@ -139,7 +139,15 @@ settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format. New
 Reddit posts start with the selected post's saved clip and can choose another.
 Each Reddit draft stores its own clip, first-frame thumbnail,
-subreddit, title and intended time. Removing a Reddit draft does not alter the
+subreddit and title. Reddit timing belongs to the day's batch: one start time and
+a gap in minutes generate each target's intended date/time in creation order,
+including midnight rollover. Editing a target does not change its position;
+removing one closes the gap. These settings are remembered for new batches and
+do not alter Twitter timing. A searchable, bounded destination list and a
+worksheet community picker support many targets without expanding the whole
+modal. Bulk additions copy the saved selected clip/title, exclude already added
+or rejected communities, and commit atomically within the existing storage limit.
+Removing a Reddit draft does not alter the
 Twitter plan or execution checkpoint. Existing date-keyed Twitter drafts migrate
 without replacement, and all local media shares the existing 2 GB storage budget.
 Reddit entries in this calendar are local drafts, not scheduled platform posts;

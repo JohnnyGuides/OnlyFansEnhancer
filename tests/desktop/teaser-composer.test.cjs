@@ -266,10 +266,8 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       "time, reply and link share one row",
     );
     await frame.locator("#socialCaption").fill("A benign scheduled teaser");
-    await frame.locator('input[type="time"]').fill("19:20");
-    await frame
-      .locator('.teaser-schedule-field input[type="number"]')
-      .fill("23");
+    await frame.getByLabel("Posting time", { exact: true }).fill("19:20");
+    await frame.getByLabel("Reply (min)", { exact: true }).fill("23");
     await frame.locator("#saveTeaserDraft").click();
     await page.waitForFunction(
       () =>
@@ -348,7 +346,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
         "A benign scheduled teaser",
     );
     assert.equal(
-      await restored.locator('input[type="time"]').inputValue(),
+      await restored.getByLabel("Posting time", { exact: true }).inputValue(),
       "19:20",
     );
     assert.match(
@@ -367,12 +365,12 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     await page.locator(".xt-clip-choices").waitFor();
     const nextDay = await chooseSyntheticVideo(page);
     assert.equal(
-      await nextDay.locator('input[type="time"]').inputValue(),
+      await nextDay.getByLabel("Posting time", { exact: true }).inputValue(),
       "19:20",
       "new day remembers the last posting time",
     );
     assert.equal(
-      await nextDay.locator('input[type="number"]').inputValue(),
+      await nextDay.getByLabel("Reply (min)", { exact: true }).inputValue(),
       "23",
     );
     assert.equal(
@@ -974,6 +972,262 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       SESSION,
     );
     assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("worksheet targets share Reddit batch timing, survive midnight and keep a bounded destination list", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 950 },
+  });
+  try {
+    const errors = await mount(page, true);
+    const frame = await chooseSyntheticVideo(page);
+    await frame.locator("#socialCaption").fill("A community teaser");
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        .textContent.includes("Draft saved"),
+    );
+    await frame.evaluate(() => {
+      CreatorCatalogueClient.getSubredditPresetSnapshot = async () => ({
+        rows: Array.from({ length: 30 }, (_, index) => ({
+          subreddit: `community_${String(index + 1).padStart(2, "0")}`,
+          status: index === 29 ? "Rejected" : "Approved",
+          notes: "Synthetic worksheet target",
+        })),
+      });
+    });
+    await frame
+      .getByRole("button", { name: "Choose communities", exact: true })
+      .click();
+    await frame.locator(".xt-planner-community").nth(29).waitFor();
+    assert.equal(await frame.locator(".xt-planner-community").count(), 30);
+    assert.equal(
+      await frame
+        .locator(".xt-planner-community")
+        .nth(29)
+        .locator("input")
+        .isDisabled(),
+      true,
+    );
+    await frame.getByLabel("Search worksheet communities").fill("community_01");
+    assert.equal(
+      await frame.locator(".xt-planner-community:visible").count(),
+      1,
+    );
+    await frame.locator(".xt-planner-community:visible input").check();
+    await frame.getByLabel("Search worksheet communities").fill("community_02");
+    await frame.locator(".xt-planner-community:visible input").check();
+    await frame
+      .getByRole("button", { name: "Add selected (2)", exact: true })
+      .click();
+    await page.waitForFunction(
+      async (day) => (await OFEnhancerTeaserDrafts.listPosts(day)).length === 2,
+      DAY,
+    );
+    await frame.getByLabel("Reddit starts", { exact: true }).fill("23:50");
+    await frame
+      .getByLabel("Reddit starts", { exact: true })
+      .dispatchEvent("change");
+    await page.waitForFunction(
+      async (day) =>
+        (await OFEnhancerTeaserDrafts.getBatch(day))?.start === "23:50",
+      DAY,
+    );
+    await frame.getByLabel("Gap (min)", { exact: true }).fill("20");
+    await frame
+      .getByLabel("Gap (min)", { exact: true })
+      .dispatchEvent("change");
+    await page.waitForFunction(
+      async (day) =>
+        (await OFEnhancerTeaserDrafts.getBatch(day))?.gapMinutes === 20,
+      DAY,
+    );
+    const result = await page.evaluate(async (day) => {
+      const posts = (await OFEnhancerTeaserDrafts.listPosts(day)).sort(
+        (a, b) => a.order - b.order,
+      );
+      const twitter = await OFEnhancerTeaserDrafts.get(day);
+      await OFEnhancerTeaserDrafts.savePost({
+        ...(await OFEnhancerTeaserDrafts.getPost(posts[0].id)),
+        time: "09:00",
+        caption: "Edited title",
+      });
+      const edited = await OFEnhancerTeaserDrafts.getPost(posts[0].id);
+      await OFEnhancerTeaserDrafts.saveBatch({
+        date: day,
+        start: "18:00",
+        gapMinutes: 0,
+      }).then(
+        () => {
+          throw new Error("invalid gap accepted");
+        },
+        () => {},
+      );
+      await OFEnhancerTeaserDrafts.savePosts({ ...twitter, time: "18:00" }, [
+        "community_01",
+        "community_new",
+      ]).then(
+        () => {
+          throw new Error("duplicate batch accepted");
+        },
+        () => {},
+      );
+      const afterRejected = await OFEnhancerTeaserDrafts.listPosts(day);
+      const targets = Array.from(
+        { length: 27 },
+        (_, index) => `community_${String(index + 3).padStart(2, "0")}`,
+      );
+      await OFEnhancerTeaserDrafts.savePosts(twitter, targets);
+      return {
+        slots: posts.map(({ time, scheduledDate }) => ({
+          time,
+          scheduledDate,
+        })),
+        editedTime: edited.time,
+        twitterTime: twitter.time,
+        afterRejected: afterRejected.length,
+      };
+    }, DAY);
+    assert.deepEqual(result.slots, [
+      { time: "23:50", scheduledDate: DAY },
+      { time: "00:10", scheduledDate: "2026-10-07" },
+    ]);
+    assert.equal(
+      result.editedTime,
+      "23:50",
+      "editing a title cannot override batch timing",
+    );
+    assert.equal(result.twitterTime, "18:00");
+    assert.equal(result.afterRejected, 2, "duplicate target failure is atomic");
+    await frame
+      .getByRole("button", { name: "Edit r/community_01 post", exact: true })
+      .click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-frame")
+        ?.contentDocument?.body?.classList.contains("calendar-reddit-draft"),
+    );
+    const reddit = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    await reddit.locator(".xt-planner-post").nth(29).waitFor();
+    assert.equal(
+      await reddit.getByLabel("Posting time", { exact: true }).isVisible(),
+      false,
+    );
+    assert.equal(
+      await reddit
+        .locator(".xt-planner-post-list")
+        .evaluate(
+          (list) =>
+            list.clientHeight <= 190 && list.scrollHeight > list.clientHeight,
+        ),
+      true,
+    );
+    await reddit.getByLabel("Find a destination").fill("community_27");
+    assert.equal(await reddit.locator(".xt-planner-post:visible").count(), 1);
+    await reddit.getByLabel("Find a destination").fill("");
+    const captures = process.env.OFENHANCER_TEASER_SCREENSHOTS;
+    if (captures) {
+      await reddit.locator(".teaser-video-preview").evaluate(async (video) => {
+        video.muted = true;
+        await video.play();
+        video.pause();
+        video.currentTime = 0;
+      });
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(captures, "reddit-batch.png") });
+    }
+    await page.setViewportSize({ width: 390, height: 950 });
+    assert.equal(
+      await reddit.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+      "large target list fits a phone without horizontal scrolling",
+    );
+    assert.equal(
+      await reddit
+        .locator(".xt-planner-post-list")
+        .evaluate((list) => list.clientHeight <= 190),
+      true,
+    );
+    if (captures)
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(captures, "reddit-batch-phone.png") });
+    await page.evaluate(async (day) => {
+      const posts = (await OFEnhancerTeaserDrafts.listPosts(day)).sort(
+        (a, b) => a.order - b.order,
+      );
+      await OFEnhancerTeaserDrafts.removePost(posts[0].id);
+      const next = await OFEnhancerTeaserDrafts.getPost(posts[1].id);
+      if (next.time !== "23:50" || next.scheduledDate !== day)
+        throw new Error("removal did not close batch gap");
+    }, DAY);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("version-two Reddit drafts retain their existing times until batch timing is chosen", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/host`);
+    const id = await page.evaluate(async (day) => {
+      const id = crypto.randomUUID();
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open("OFEnhancerTeaserDraftsV1", 2);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore("drafts", { keyPath: "date" });
+          request.result.createObjectStore("posts", { keyPath: "id" });
+        };
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("posts", "readwrite");
+          tx.objectStore("posts").put({
+            id,
+            date: day,
+            platform: "reddit",
+            subreddit: "existing_community",
+            caption: "Existing Reddit title",
+            time: "21:35",
+            updatedAt: 1,
+            file: new File(["old"], "old.mp4", { type: "video/mp4" }),
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      });
+      return id;
+    }, DAY);
+    const migrated = await page.evaluate(
+      async ({ id, day }) => ({
+        post: await OFEnhancerTeaserDrafts.getPost(id),
+        batch: await OFEnhancerTeaserDrafts.getBatch(day),
+      }),
+      { id, day: DAY },
+    );
+    assert.equal(migrated.post.caption, "Existing Reddit title");
+    assert.equal(migrated.post.time, "21:35");
+    assert.equal(migrated.batch, null);
+    assert.equal(
+      await page.evaluate(
+        async (id) => (await OFEnhancerTeaserDrafts.getPost(id)).file.name,
+        id,
+      ),
+      "old.mp4",
+    );
   } finally {
     await page.close();
   }
