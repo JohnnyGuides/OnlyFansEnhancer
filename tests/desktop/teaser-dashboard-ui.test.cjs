@@ -1751,7 +1751,23 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
       await modal.evaluate(
         (node) => innerWidth - node.getBoundingClientRect().right,
       ),
-      16,
+      0,
+    );
+    assert.equal(
+      await modal.evaluate((node) => node.getBoundingClientRect().height),
+      await page.evaluate(() => innerHeight),
+    );
+    assert.ok(
+      await modal
+        .locator('.xt-episode[data-cover="empty"] .xt-thumb-image')
+        .evaluateAll(
+          (images) =>
+            images.length > 0 &&
+            images.every((image) => {
+              const style = getComputedStyle(image);
+              return style.filter === "none" && style.opacity === "1";
+            }),
+        ),
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await screenshot(page, "M3-teaser-modal-phone.png");

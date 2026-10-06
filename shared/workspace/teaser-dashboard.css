@@ -970,7 +970,8 @@ html:has(.xt-picker[open]) {
 }
 .xt-picker .xt-thumb-image,
 .xt-picker .xt-episode[data-cover="empty"] .xt-thumb-image,
-.xt-composer-catalogue .xt-thumb-image {
+.xt-composer-catalogue .xt-thumb-image,
+.xt-composer-catalogue .xt-episode[data-cover="empty"] .xt-thumb-image {
   opacity: 1;
   filter: none;
 }
@@ -1188,8 +1189,16 @@ html:has(.xt-picker[open]) {
   cursor: pointer;
 }
 .xt-composer-dialog:has(.xt-composer-catalogue) {
-  width: min(620px, calc(100vw - 32px));
-  margin-inline: auto 16px;
+  position: fixed;
+  inset: 0 0 0 auto;
+  box-sizing: border-box;
+  width: min(620px, calc(100vw - 24px));
+  height: 100dvh;
+  max-height: none;
+  max-width: none;
+  margin: 0;
+  overscroll-behavior: contain;
+  border-radius: 16px 0 0 16px;
 }
 .xt-composer-catalogue .xt-flow-bar {
   justify-content: flex-start;
@@ -1338,6 +1347,10 @@ html:has(.xt-picker[open]) {
   margin: 0 0 12px;
 }
 @media (max-width: 600px) {
+  .xt-composer-dialog:has(.xt-composer-catalogue) {
+    width: 100%;
+    border-radius: 0;
+  }
   .xt-composer-dialog {
     width: calc(100vw - 12px);
     max-height: calc(100dvh - 12px);
