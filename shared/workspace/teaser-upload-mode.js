@@ -71,17 +71,6 @@
     panel
       .querySelector(".teaser-planner-settings")
       .append(captionLabel, caption, scheduleRow, customLink);
-    const subredditLabel = document.createElement("label");
-    subredditLabel.textContent = "Subreddit";
-    subredditLabel.className = "teaser-schedule-field";
-    subredditLabel.hidden = true;
-    const subreddit = document.createElement("input");
-    subreddit.type = "text";
-    subreddit.placeholder = "r/community";
-    subreddit.maxLength = 23;
-    subreddit.setAttribute("aria-label", "Subreddit");
-    subredditLabel.append(subreddit);
-    subreddit.addEventListener("input", () => notify("dirty"));
     const PREFS = "OFEnhancerTeaserPreferencesV1";
     let preferences = {};
     try {
@@ -241,7 +230,7 @@
         ...(reddit
           ? {
               id: context.postId,
-              subreddit: subreddit.value.trim().replace(/^r\//i, ""),
+              subreddit: context.draft.subreddit,
             }
           : {}),
         date: day,
@@ -369,9 +358,6 @@
         caption.maxLength = 300;
         caption.placeholder = "Write the Reddit title…";
         captionLabel.textContent = "Reddit title";
-        subredditLabel.hidden = false;
-        scheduleRow.prepend(subredditLabel);
-        subreddit.value = context.draft?.subreddit || "";
         timeLabel.hidden = true;
         replyLabel.hidden = true;
         linkFields.hidden = true;

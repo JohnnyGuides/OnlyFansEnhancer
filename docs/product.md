@@ -139,10 +139,13 @@ settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format. New
 Reddit posts start with the selected post's saved clip and can choose another.
 Each Reddit draft stores its own clip, first-frame thumbnail,
-subreddit and title. Reddit timing belongs to the day's batch: one start time and
-a gap in minutes generate each target's intended date/time in creation order,
+subreddit and title. Each community has an inclusion checkbox; unchecking it
+keeps its media and title while removing it from the plan and calendar count.
+The community is chosen in the destination list, not in a second editor field.
+Reddit timing belongs to the day's batch: one start time and
+internal pacing generate each selected target's intended date/time in creation order,
 including midnight rollover. Editing a target does not change its position;
-removing one closes the gap. These settings are remembered for new batches and
+removing or unchecking one closes the gap. The start time is remembered for new batches and
 do not alter Twitter timing. A searchable, bounded destination list and a
 worksheet community picker support many targets without expanding the whole
 modal. Bulk additions copy the saved selected clip/title, exclude already added

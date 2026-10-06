@@ -151,8 +151,21 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .xt-planner-batch {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+}
+.calendar-teaser .xt-planner-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.calendar-teaser .xt-planner-target > input {
+  width: auto;
+  flex: 0 0 auto;
+}
+.calendar-teaser .xt-planner-target .xt-planner-post {
+  flex: 1;
+  min-width: 0;
 }
 .calendar-teaser .xt-planner-community-picker {
   display: grid;

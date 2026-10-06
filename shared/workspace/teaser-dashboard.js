@@ -797,7 +797,7 @@
 
     function appendRedditDrafts(day, date) {
       const count = state.redditDrafts.filter(
-        (post) => post.date === date,
+        (post) => post.date === date && post.enabled !== false,
       ).length;
       if (!count) return;
       const more = button(

@@ -189,6 +189,12 @@
         a.id.localeCompare(b.id),
     );
   }
+  function reschedulePosts(records, batch) {
+    let index = 0;
+    return orderedPosts(records).map((post) =>
+      post.enabled === false ? post : scheduledPost(post, batch, index++),
+    );
+  }
   async function getBatch(date) {
     if (!validDay(date)) throw new Error("Choose a calendar day.");
     return transact(
@@ -220,11 +226,10 @@
         const posts = transaction.objectStore("posts");
         const read = posts.getAll();
         read.onsuccess = () => {
-          orderedPosts(
+          reschedulePosts(
             read.result.filter((post) => post.date === record.date),
-          ).forEach((post, index) =>
-            posts.put(scheduledPost(post, record, index)),
-          );
+            record,
+          ).forEach((post) => posts.put(post));
           store.put(record);
           done(record);
         };
@@ -297,6 +302,7 @@
             const existing = read.result.find((post) => post.id === item.id);
             item.order =
               existing?.order ?? existing?.updatedAt ?? nextOrder + index;
+            item.enabled = existing?.enabled !== false;
           }
           const others = read.result.filter(
             (item) => !records.some((post) => post.id === item.id),
@@ -334,16 +340,18 @@
                 start: record.time,
                 gapMinutes: 15,
               };
-              const posts = orderedPosts([
-                ...others.filter((post) => post.date === record.date),
-                ...records,
-              ]);
+              const posts = reschedulePosts(
+                [
+                  ...others.filter((post) => post.date === record.date),
+                  ...records,
+                ],
+                batch,
+              );
               const saved = [];
-              posts.forEach((post, index) => {
-                const scheduled = scheduledPost(post, batch, index);
-                store.put(scheduled);
+              posts.forEach((post) => {
+                store.put(post);
                 if (records.some((item) => item.id === post.id))
-                  saved.push(scheduled);
+                  saved.push(post);
               });
               batches.put(batch);
               done(draft.targets ? saved : saved[0]);
@@ -368,11 +376,44 @@
             if (!batch.result) return;
             const posts = store.getAll();
             posts.onsuccess = () =>
-              orderedPosts(
+              reschedulePosts(
                 posts.result.filter((post) => post.date === date),
-              ).forEach((post, index) =>
-                store.put(scheduledPost(post, batch.result, index)),
-              );
+                batch.result,
+              ).forEach((post) => store.put(post));
+          };
+        };
+      },
+      "posts",
+    );
+  }
+  async function setPostEnabled(id, enabled) {
+    if (typeof enabled !== "boolean")
+      throw new Error("Choose whether to include this community.");
+    return transact(
+      "readwrite",
+      (store, done, transaction) => {
+        const read = store.get(id);
+        read.onsuccess = () => {
+          if (!read.result) {
+            transaction.abort();
+            return;
+          }
+          const record = { ...read.result, enabled };
+          store.put(record);
+          const batch = transaction.objectStore("batches").get(record.date);
+          batch.onsuccess = () => {
+            if (!batch.result) {
+              done(record);
+              return;
+            }
+            const posts = store.getAll();
+            posts.onsuccess = () => {
+              reschedulePosts(
+                posts.result.filter((post) => post.date === record.date),
+                batch.result,
+              ).forEach((post) => store.put(post));
+              done(record);
+            };
           };
         };
       },
@@ -442,5 +483,6 @@
     removePost,
     getBatch,
     saveBatch,
+    setPostEnabled,
   });
 })(globalThis);

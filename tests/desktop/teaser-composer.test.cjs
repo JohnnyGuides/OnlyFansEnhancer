@@ -800,8 +800,29 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       },
       { DAY, SESSION },
     );
+    await x.evaluate(() => {
+      CreatorCatalogueClient.getSubredditPresetSnapshot = async () => ({
+        rows: [
+          {
+            subreddit: "example_community",
+            status: "Approved",
+            notes: "Synthetic community",
+          },
+        ],
+      });
+    });
     await x
-      .getByRole("button", { name: "Add Reddit post", exact: true })
+      .getByRole("button", { name: "Choose communities", exact: true })
+      .click();
+    await x.locator(".xt-planner-community input").check();
+    await x
+      .getByRole("button", { name: "Add selected (1)", exact: true })
+      .click();
+    await x
+      .getByRole("button", {
+        name: "Edit r/example_community post",
+        exact: true,
+      })
       .click();
     await page.waitForFunction(() =>
       document
@@ -816,11 +837,13 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
     assert.match(
       await reddit.locator("#socialFileSummary").textContent(),
       /preview-test.mp4/,
-      "new destination starts with the current clip",
+      "selected community starts with the current clip",
     );
-    await reddit
-      .getByLabel("Subreddit", { exact: true })
-      .fill("r/example_community");
+    assert.equal(
+      await reddit.getByLabel("Subreddit", { exact: true }).count(),
+      0,
+      "community selection only appears in the destination list",
+    );
     await reddit.locator("#socialCaption").fill("Independent community title");
     assert.equal(
       await reddit.locator("#socialCaption").getAttribute("maxlength"),
@@ -928,8 +951,8 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       .frames()
       .find((item) => item.url().includes("upload-console.html?teaserDay="));
     assert.equal(
-      await restored.getByLabel("Subreddit", { exact: true }).inputValue(),
-      "example_community",
+      await restored.getByLabel("Subreddit", { exact: true }).count(),
+      0,
     );
     await restored
       .getByRole("button", { name: "Edit r/other_community post", exact: true })
@@ -1037,10 +1060,20 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
         (await OFEnhancerTeaserDrafts.getBatch(day))?.start === "23:50",
       DAY,
     );
-    await frame.getByLabel("Gap (min)", { exact: true }).fill("20");
-    await frame
-      .getByLabel("Gap (min)", { exact: true })
-      .dispatchEvent("change");
+    assert.equal(
+      await frame.getByLabel("Gap (min)", { exact: true }).count(),
+      0,
+      "pacing is internal to the planner",
+    );
+    await page.evaluate(
+      (day) =>
+        OFEnhancerTeaserDrafts.saveBatch({
+          date: day,
+          start: "23:50",
+          gapMinutes: 20,
+        }),
+      DAY,
+    );
     await page.waitForFunction(
       async (day) =>
         (await OFEnhancerTeaserDrafts.getBatch(day))?.gapMinutes === 20,
@@ -1131,8 +1164,59 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
     await reddit.getByLabel("Find a destination").fill("community_27");
     assert.equal(await reddit.locator(".xt-planner-post:visible").count(), 1);
     await reddit.getByLabel("Find a destination").fill("");
+    await reddit
+      .getByRole("checkbox", { name: "Include r/community_02", exact: true })
+      .uncheck();
+    await page.waitForFunction(
+      async (day) =>
+        (await OFEnhancerTeaserDrafts.listPosts(day)).find(
+          (post) => post.subreddit === "community_02",
+        )?.enabled === false,
+      DAY,
+    );
+    const unchecked = await page.evaluate(async (day) => {
+      const posts = await OFEnhancerTeaserDrafts.listPosts(day);
+      const disabled = posts.find((post) => post.subreddit === "community_02");
+      const draft = await OFEnhancerTeaserDrafts.getPost(disabled.id);
+      await OFEnhancerTeaserDrafts.savePost({
+        ...draft,
+        caption: "Retained community title",
+      });
+      const retained = await OFEnhancerTeaserDrafts.getPost(disabled.id);
+      return {
+        caption: retained.caption,
+        enabled: retained.enabled,
+        clipName: retained.file.name,
+        next: posts.find((post) => post.subreddit === "community_03"),
+      };
+    }, DAY);
+    assert.equal(unchecked.caption, "Retained community title");
+    assert.equal(
+      unchecked.enabled,
+      false,
+      "editing an unchecked draft does not reselect it",
+    );
+    assert.equal(unchecked.clipName, "preview-test.mp4");
+    assert.equal(
+      unchecked.next.time,
+      "00:10",
+      "unchecked targets do not occupy a planned slot",
+    );
+    await reddit
+      .getByRole("checkbox", { name: "Include r/community_02", exact: true })
+      .check();
+    await page.waitForFunction(
+      async (day) =>
+        (await OFEnhancerTeaserDrafts.listPosts(day)).find(
+          (post) => post.subreddit === "community_02",
+        )?.enabled === true,
+      DAY,
+    );
     const captures = process.env.OFENHANCER_TEASER_SCREENSHOTS;
     if (captures) {
+      await reddit
+        .locator(".xt-planner-post-list")
+        .evaluate((list) => (list.scrollTop = 0));
       await reddit.locator(".teaser-video-preview").evaluate(async (video) => {
         video.muted = true;
         await video.play();

@@ -117,23 +117,16 @@
     start.type = "time";
     start.value = "18:00";
     startLabel.append(start);
-    const gapLabel = node("label", "teaser-schedule-field", "Gap (min)");
-    const gap = node("input", "");
-    gap.type = "number";
-    gap.min = "1";
-    gap.max = "1440";
-    gap.value = "15";
-    gapLabel.append(gap);
-    batchControls.append(startLabel, gapLabel);
+    let gapMinutes = 15;
+    batchControls.append(startLabel);
     const count = node("span", "xt-planner-count");
     const postsHeading = node("div", "xt-planner-posts-heading");
     postsHeading.append(node("h3", "", "Destinations"), count);
-    const addPost = action("Add Reddit post");
     const communities = action("Choose communities");
     const removePost = action("Remove post");
     removePost.hidden = true;
     const postActions = node("div", "xt-planner-post-actions");
-    postActions.append(communities, addPost, removePost);
+    postActions.append(communities, removePost);
     destinations.append(
       postsHeading,
       batchControls,
@@ -161,11 +154,11 @@
         global.OFEnhancerTeaserDrafts.getBatch(date),
       ]);
       batchControls.hidden = reddit.length === 0 && !postId;
-      count.textContent = `Twitter · ${reddit.length} Reddit`;
+      count.textContent = `Twitter · ${reddit.filter((post) => post.enabled !== false).length} Reddit selected`;
       search.hidden = reddit.length < 5;
       if (batch) {
         start.value = batch.start;
-        gap.value = String(batch.gapMinutes);
+        gapMinutes = batch.gapMinutes;
       } else {
         try {
           const remembered = JSON.parse(
@@ -178,7 +171,7 @@
             remembered.gapMinutes >= 1 &&
             remembered.gapMinutes <= 1440
           )
-            gap.value = String(remembered.gapMinutes);
+            gapMinutes = remembered.gapMinutes;
         } catch {
           /* Use defaults. */
         }
@@ -204,48 +197,77 @@
         row.setAttribute("aria-label", `Edit ${name} post`);
         row.setAttribute("aria-pressed", String(post.id === (postId || "x")));
         const state =
-          post.platform === "reddit" ? "Local draft" : post.status || "New";
+          post.platform === "reddit"
+            ? post.enabled === false
+              ? "Not selected"
+              : "Local draft"
+            : post.status || "New";
         row.append(
           node("strong", "", name),
           node(
             "span",
             "xt-planner-post-state",
-            `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`,
+            post.enabled === false
+              ? state
+              : `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`,
           ),
           node("small", "", post.file?.name || post.name || "Choose a clip"),
         );
         row.addEventListener("click", () => void switchPost(post.id));
-        destination.append(row);
+        if (post.platform === "reddit") {
+          const target = node("div", "xt-planner-target");
+          const check = node("input", "");
+          check.type = "checkbox";
+          check.checked = post.enabled !== false;
+          check.setAttribute("aria-label", `Include ${name}`);
+          check.addEventListener("change", async () => {
+            if (loading || running) {
+              check.checked = post.enabled !== false;
+              return;
+            }
+            check.disabled = true;
+            loading = true;
+            try {
+              await global.OFEnhancerTeaserDrafts.setPostEnabled(
+                post.id,
+                check.checked,
+              );
+              await refreshDestinations();
+              await Promise.resolve(onSaved());
+            } catch (error) {
+              check.checked = post.enabled !== false;
+              status.textContent = error.message;
+            } finally {
+              loading = false;
+              check.disabled = false;
+            }
+          });
+          target.append(check, row);
+          destination.append(target);
+        } else destination.append(row);
       }
       search.dispatchEvent(new Event("input"));
       destination.scrollTop = scrollTop;
       removePost.hidden = !postId;
     }
     async function updateBatch() {
-      if (
-        loading ||
-        running ||
-        !start.value ||
-        !start.validity.valid ||
-        !gap.validity.valid ||
-        !Number.isInteger(Number(gap.value))
-      )
-        return;
+      if (loading || running || !start.value || !start.validity.valid) return;
       loading = true;
-      start.disabled = gap.disabled = true;
-      for (const row of destination.children) row.disabled = true;
+      start.disabled = true;
+      for (const row of destination.querySelectorAll("button,input"))
+        row.disabled = true;
       try {
         await global.OFEnhancerTeaserDrafts.saveBatch({
           date,
           start: start.value,
-          gapMinutes: Number(gap.value),
+          gapMinutes,
         });
         try {
           localStorage.setItem(
             "OFEnhancerRedditBatchPreferencesV1",
             JSON.stringify({
               start: start.value,
-              gapMinutes: Number(gap.value),
+              gapMinutes,
             }),
           );
         } catch {
@@ -257,12 +279,12 @@
         status.textContent = error.message;
       } finally {
         loading = false;
-        start.disabled = gap.disabled = false;
-        for (const row of destination.children) row.disabled = false;
+        start.disabled = false;
+        for (const row of destination.querySelectorAll("button,input"))
+          row.disabled = false;
       }
     }
     start.addEventListener("change", () => void updateBatch());
-    gap.addEventListener("change", () => void updateBatch());
     communities.addEventListener("click", async () => {
       if (running || loading) return;
       if (dirty) {
@@ -367,7 +389,7 @@
             await global.OFEnhancerTeaserDrafts.saveBatch({
               date,
               start: start.value,
-              gapMinutes: Number(gap.value),
+              gapMinutes,
             });
             await global.OFEnhancerTeaserDrafts.savePosts(
               { ...template, date, time: start.value },
@@ -391,7 +413,7 @@
         loading = false;
       }
     });
-    async function switchPost(id, reuseClip = false) {
+    async function switchPost(id) {
       if (
         running ||
         loading ||
@@ -399,7 +421,6 @@
       ) {
         return;
       }
-      const previous = context;
       destinations.querySelector(".xt-planner-community-picker")?.remove();
       // Preserve the controls before replacing their current iframe document.
       heading.after(destinations);
@@ -409,31 +430,13 @@
       postId = id === "x" ? "" : id;
       loading = true;
       try {
-        const source =
-          reuseClip && previous
-            ? (await (previous.postId
-                ? global.OFEnhancerTeaserDrafts.getPost(previous.postId)
-                : global.OFEnhancerTeaserDrafts.get(date))) || previous
-            : previous;
         await refreshDestinations();
         const draft = postId
           ? await global.OFEnhancerTeaserDrafts.getPost(postId)
           : await global.OFEnhancerTeaserDrafts.get(date);
         if (!dialog.isConnected) return;
         if (draft) edit(draft.file, null, draft);
-        else if (reuseClip && source?.file) {
-          if (!(await global.OFEnhancerTeaserDrafts.getBatch(date)))
-            await global.OFEnhancerTeaserDrafts.saveBatch({
-              date,
-              start: start.value,
-              gapMinutes: Number(gap.value),
-            });
-          episode =
-            episodes.find((item) => item.sourceKey === source.episodeKey) ||
-            episode;
-          edit(source.file);
-          context.episodeKey = source.episodeKey || "";
-        } else {
+        else {
           episode = null;
           await choose();
         }
@@ -443,10 +446,6 @@
         loading = false;
       }
     }
-    addPost.addEventListener(
-      "click",
-      () => void switchPost(crypto.randomUUID(), true),
-    );
     removePost.addEventListener("click", async () => {
       if (running || loading || !confirm("Remove this Reddit draft?")) return;
       try {

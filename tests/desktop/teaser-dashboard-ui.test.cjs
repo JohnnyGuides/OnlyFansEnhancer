@@ -403,7 +403,11 @@ test("Reddit draft count leaves the daily Twitter card and plan intact", async (
     const day = page.locator('.xt-day[data-date="2026-10-04"]');
     const before = await day.locator(".xt-tile").getAttribute("data-kind");
     await page.evaluate(async () => {
-      for (const subreddit of ["example_one", "example_two"])
+      for (const subreddit of [
+        "example_one",
+        "example_two",
+        "example_unchecked",
+      ])
         await OFEnhancerTeaserDrafts.savePost({
           id: crypto.randomUUID(),
           date: "2026-10-04",
@@ -412,6 +416,10 @@ test("Reddit draft count leaves the daily Twitter card and plan intact", async (
           caption: "Community title",
           time: "18:00",
         });
+      const disabled = (
+        await OFEnhancerTeaserDrafts.listPosts("2026-10-04")
+      ).find((post) => post.subreddit === "example_unchecked");
+      await OFEnhancerTeaserDrafts.setPostEnabled(disabled.id, false);
     });
     await page.reload();
     await page.getByRole("button", { name: "Teasers", exact: true }).click();
@@ -434,14 +442,12 @@ test("Reddit draft count leaves the daily Twitter card and plan intact", async (
     assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
     await screenshot(page, "reddit-draft-calendar.png", true);
     if (process.env.OFENHANCER_TEASER_SCREENSHOTS)
-      await page
-        .locator(".xt-calendar")
-        .screenshot({
-          path: path.join(
-            process.env.OFENHANCER_TEASER_SCREENSHOTS,
-            "daily-calendar.png",
-          ),
-        });
+      await page.locator(".xt-calendar").screenshot({
+        path: path.join(
+          process.env.OFENHANCER_TEASER_SCREENSHOTS,
+          "daily-calendar.png",
+        ),
+      });
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
