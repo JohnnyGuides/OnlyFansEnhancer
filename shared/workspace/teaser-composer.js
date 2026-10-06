@@ -93,19 +93,20 @@
     active = dialog;
     dialog.setAttribute("aria-label", `Teaser for ${dayLabel(date)}`);
     const heading = node("header", "xt-composer-heading");
-    const title = node("h2", "", `Teaser · ${dayLabel(date)}`);
+    const title = node("h2", "", `Teaser planner · ${dayLabel(date)}`);
     const close = action("Close");
     heading.append(title, close);
     const destinations = node("div", "xt-composer-destinations");
-    const destination = node("select", "");
-    destination.setAttribute("aria-label", "Post destination");
-    const twitter = node("option", "", "Twitter");
-    twitter.value = "x";
-    destination.append(twitter);
+    destinations.hidden = true;
+    destinations.setAttribute("role", "group");
+    destinations.setAttribute("aria-label", "Destination posts");
+    const destination = node("div", "xt-planner-post-list");
     const addPost = action("Add Reddit post");
     const removePost = action("Remove post");
     removePost.hidden = true;
-    destinations.append(destination, addPost, removePost);
+    const postActions = node("div", "xt-planner-post-actions");
+    postActions.append(addPost, removePost);
+    destinations.append(node("h3", "", "Posts"), destination, postActions);
     const content = node("div", "xt-composer-content");
     const status = node("p", "xt-composer-status");
     status.setAttribute("role", "status");
@@ -119,42 +120,77 @@
       running = false,
       postId = "";
     async function refreshDestinations() {
-      const posts = await global.OFEnhancerTeaserDrafts.listPosts(date);
-      destination.replaceChildren(twitter);
+      const [reddit, twitter] = await Promise.all([
+        global.OFEnhancerTeaserDrafts.listPosts(date),
+        global.OFEnhancerTeaserDrafts.get(date),
+      ]);
+      const posts = [{ ...twitter, id: "x", platform: "x" }, ...reddit];
+      if (postId && !posts.some((post) => post.id === postId))
+        posts.push({ id: postId, platform: "reddit" });
+      destination.replaceChildren();
       for (const post of posts) {
-        const option = node("option", "", `r/${post.subreddit} · ${post.time}`);
-        option.value = post.id;
-        destination.append(option);
+        const name =
+          post.platform === "x"
+            ? "Twitter"
+            : post.subreddit
+              ? `r/${post.subreddit}`
+              : "New Reddit post";
+        const row = action("", "xt-planner-post");
+        row.dataset.postId = post.id;
+        row.setAttribute("aria-label", `Edit ${name} post`);
+        row.setAttribute("aria-pressed", String(post.id === (postId || "x")));
+        const state =
+          post.platform === "reddit" ? "Local draft" : post.status || "New";
+        row.append(
+          node("strong", "", name),
+          node(
+            "span",
+            "xt-planner-post-state",
+            `${post.time || "—"} · ${state}`,
+          ),
+          node("small", "", post.file?.name || post.name || "Choose a clip"),
+        );
+        row.addEventListener("click", () => void switchPost(post.id));
+        destination.append(row);
       }
-      if (postId && !posts.some((post) => post.id === postId)) {
-        const option = node("option", "", "New Reddit post");
-        option.value = postId;
-        destination.append(option);
-      }
-      destination.value = postId || "x";
       removePost.hidden = !postId;
     }
-    async function switchPost(id) {
+    async function switchPost(id, reuseClip = false) {
       if (
         running ||
         loading ||
         (dirty && !confirm("Switch posts and discard unsaved changes?"))
       ) {
-        destination.value = postId || "x";
         return;
       }
+      const previous = context;
+      // Preserve the controls before replacing their current iframe document.
+      heading.after(destinations);
+      destinations.hidden = true;
       dirty = false;
       iframe = null;
       postId = id === "x" ? "" : id;
       loading = true;
       try {
+        const source =
+          reuseClip && previous
+            ? (await (previous.postId
+                ? global.OFEnhancerTeaserDrafts.getPost(previous.postId)
+                : global.OFEnhancerTeaserDrafts.get(date))) || previous
+            : previous;
         await refreshDestinations();
         const draft = postId
           ? await global.OFEnhancerTeaserDrafts.getPost(postId)
           : await global.OFEnhancerTeaserDrafts.get(date);
         if (!dialog.isConnected) return;
         if (draft) edit(draft.file, null, draft);
-        else {
+        else if (reuseClip && source?.file) {
+          episode =
+            episodes.find((item) => item.sourceKey === source.episodeKey) ||
+            episode;
+          edit(source.file);
+          context.episodeKey = source.episodeKey || "";
+        } else {
           episode = null;
           await choose();
         }
@@ -164,13 +200,9 @@
         loading = false;
       }
     }
-    destination.addEventListener(
-      "change",
-      () => void switchPost(destination.value),
-    );
     addPost.addEventListener(
       "click",
-      () => void switchPost(crypto.randomUUID()),
+      () => void switchPost(crypto.randomUUID(), true),
     );
     removePost.addEventListener("click", async () => {
       if (running || loading || !confirm("Remove this Reddit draft?")) return;
@@ -213,6 +245,11 @@
       if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
       if (event.data?.type === "ofenhancer:teaser-running")
         running = event.data.running === true;
+      if (
+        event.data?.type === "ofenhancer:teaser-size" &&
+        Number.isFinite(event.data.height)
+      )
+        iframe.style.height = `${Math.min(20000, Math.max(200, event.data.height))}px`;
       if (event.data?.type === "ofenhancer:teaser-saved") {
         dirty = false;
         status.textContent = postId
@@ -275,6 +312,21 @@
         ? "Reddit teaser draft"
         : "Twitter teaser upload hub";
       iframe.src = `upload-console.html?teaserDay=${encodeURIComponent(date)}`;
+      const frame = iframe;
+      iframe.addEventListener(
+        "load",
+        () => {
+          if (iframe !== frame || !dialog.isConnected) return;
+          const posts = frame.contentDocument?.querySelector(
+            ".teaser-planner-posts",
+          );
+          if (posts) {
+            destinations.hidden = false;
+            posts.append(destinations);
+          }
+        },
+        { once: true },
+      );
       content.replaceChildren(back, iframe);
       status.textContent = postId ? "Local Reddit draft · not scheduled." : "";
     }
@@ -296,6 +348,8 @@
       }
     }
     async function choose() {
+      heading.after(destinations);
+      destinations.hidden = true;
       const grid = node("div", "xt-clip-choices");
       const input = node("input", "");
       input.type = "file";

@@ -48,7 +48,19 @@ test("Upload Console center-crops a selected thumbnail to a 640x360 PNG before h
         (error) => error.message,
       );
       bitmap.close();
+      const square = await CreatorUploadConsole.normalizeThumbnailFile(
+        source,
+        true,
+      );
+      const squareBitmap = await createImageBitmap(square);
+      const squareDimensions = [squareBitmap.width, squareBitmap.height];
+      squareBitmap.close();
+      const repeated =
+        await CreatorUploadConsole.normalizeThumbnailFile(source);
       return {
+        squareDimensions,
+        squareName: square.name,
+        cachedLandscape: repeated === converted,
         name: converted.name,
         type: converted.type,
         width: sample.width,
@@ -63,6 +75,9 @@ test("Upload Console center-crops a selected thumbnail to a 640x360 PNG before h
     assert.equal(result.type, "image/png");
     assert.equal(result.width, 640);
     assert.equal(result.height, 360);
+    assert.deepEqual(result.squareDimensions, [640, 640]);
+    assert.equal(result.squareName, "chosen (640x640).png");
+    assert.equal(result.cachedLandscape, true);
     assert.ok(result.bytes > 0 && result.bytes < 2_000_000);
     assert.deepEqual(result.colors, [
       [0, 128, 0, 255],

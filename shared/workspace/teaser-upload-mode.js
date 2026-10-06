@@ -15,14 +15,15 @@
         location.origin,
       );
     const caption = get("#socialCaption");
+    const captionLabel = caption.previousElementSibling;
     caption.maxLength = 280;
     caption.placeholder = "Write the teaser caption…";
-    caption.previousElementSibling.textContent = "Caption";
+    captionLabel.textContent = "Twitter caption";
     get("#socialHeading").textContent = "Twitter teaser";
     const panel = document.createElement("div");
     panel.className = "teaser-preview-panel";
     panel.innerHTML =
-      '<video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-thumbnail-panel"><img alt="Teaser thumbnail" hidden><button type="button" class="teaser-use-frame">Use current frame</button><label class="teaser-thumbnail-upload">Choose image<input type="file" accept="image/png,image/jpeg" hidden></label></div>';
+      '<div class="teaser-planner-media"><video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-thumbnail-panel"><img alt="Teaser thumbnail" hidden><button type="button" class="teaser-use-frame">Use frame</button><label class="teaser-thumbnail-upload">Image<input type="file" accept="image/png,image/jpeg" hidden></label></div></div><div class="teaser-planner-settings"><div class="teaser-planner-posts"></div></div>';
     caption.previousElementSibling.before(panel);
     const preview = panel.querySelector("video"),
       image = panel.querySelector("img");
@@ -67,6 +68,9 @@
     scheduleRow.append(timeLabel, replyLabel, linkFields);
     const customLink = get("#socialCustomPaidLinkField");
     scheduleRow.after(customLink);
+    panel
+      .querySelector(".teaser-planner-settings")
+      .append(captionLabel, caption, scheduleRow, customLink);
     const subredditLabel = document.createElement("label");
     subredditLabel.textContent = "Subreddit";
     subredditLabel.className = "teaser-schedule-field";
@@ -200,8 +204,15 @@
       preview.src = videoUrl;
       try {
         const frame =
-          restored ||
-          (await global.CreatorMediaGenerator.thumbnailFromVideo(file, 0));
+          (restored &&
+            (await hub.normalizeThumbnail(
+              new File([restored], "teaser-thumbnail.png", {
+                type: restored.type || "image/png",
+              }),
+            ))) ||
+          (await global.CreatorMediaGenerator.thumbnailFromVideo(file, 0, {
+            square: true,
+          }));
         if (current === revision) useThumbnail(frame, !restored);
       } catch (error) {
         fail(
@@ -283,6 +294,7 @@
             await global.CreatorMediaGenerator.thumbnailFromVideo(
               hub.file(),
               preview.currentTime,
+              { square: true },
             ),
           );
         } catch (error) {
@@ -356,7 +368,7 @@
         document.body.classList.add("calendar-reddit-draft");
         caption.maxLength = 300;
         caption.placeholder = "Write the Reddit title…";
-        panel.nextElementSibling.textContent = "Title";
+        captionLabel.textContent = "Reddit title";
         subredditLabel.hidden = false;
         scheduleRow.prepend(subredditLabel);
         subreddit.value = context.draft?.subreddit || "";
@@ -366,7 +378,7 @@
         automatic.closest("label").hidden = true;
         get("#uploadButton").hidden = true;
         get("#uploadButton").disabled = true;
-        save.textContent = "Save Reddit draft";
+        save.textContent = "Save draft";
         get("#socialHeading").textContent = "Reddit draft";
       }
       if (context.file) context.file.source = "generated";
@@ -422,7 +434,19 @@
       }
     });
     notify("ready");
+    let sizeFrame;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(sizeFrame);
+      sizeFrame = requestAnimationFrame(() =>
+        notify("size", {
+          height: Math.ceil(document.body.getBoundingClientRect().height),
+        }),
+      );
+    });
+    observer.observe(document.body);
     window.addEventListener("pagehide", () => {
+      observer.disconnect();
+      cancelAnimationFrame(sizeFrame);
       URL.revokeObjectURL(videoUrl);
       URL.revokeObjectURL(imageUrl);
     });

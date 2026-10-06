@@ -133,8 +133,12 @@ at the bottom of the modal.
 Choosing a clip does not reserve another day or publish it.
 
 The daily calendar retains one primary Twitter draft and its thumbnail. Additional
-Reddit drafts appear as a compact count beneath that day. The same modal switches
-between destinations; each Reddit draft stores its own clip, first-frame thumbnail,
+Reddit drafts appear as a compact count beneath that day. One teaser planner shows
+a square preview beside all destination posts; selecting a row edits that post's
+settings without opening another modal. Its first-frame poster and chosen images
+are square; the main uploader retains its existing landscape cover format. New
+Reddit posts start with the selected post's saved clip and can choose another.
+Each Reddit draft stores its own clip, first-frame thumbnail,
 subreddit, title and intended time. Removing a Reddit draft does not alter the
 Twitter plan or execution checkpoint. Existing date-keyed Twitter drafts migrate
 without replacement, and all local media shares the existing 2 GB storage budget.

@@ -80,6 +80,13 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
       const originalBytes = new Uint8Array(await thumbnail.arrayBuffer());
       const croppedBytes = new Uint8Array(await cropped.arrayBuffer());
       const bitmap = await createImageBitmap(thumbnail);
+      const square = await createImageBitmap(
+        await CreatorMediaGenerator.thumbnailFromVideo(source, 0, {
+          square: true,
+        }),
+      );
+      const squareSize = { width: square.width, height: square.height };
+      square.close();
       const thumbnailResult = {
         name: thumbnail.name,
         type: thumbnail.type,
@@ -131,6 +138,7 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
       });
       URL.revokeObjectURL(previewUrl);
       return {
+        square: squareSize,
         rejectedRole,
         thumbnail: thumbnailResult,
         teaser: {
@@ -141,6 +149,7 @@ test("a selected video yields a 640 by 360 frame and an MP4 teaser", async () =>
         },
       };
     });
+    assert.deepEqual(result.square, { width: 640, height: 640 });
     assert.equal(result.rejectedRole, "Invalid generated media session.");
     assert.equal(result.thumbnail.type, "image/png");
     assert.equal(result.thumbnail.width, 640);

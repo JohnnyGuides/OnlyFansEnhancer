@@ -1248,23 +1248,7 @@ html:has(.xt-picker[open]) {
   font-size: 20px;
 }
 
-.xt-composer-destinations {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px 12px;
-}
-.xt-composer-destinations select {
-  min-width: 0;
-  max-width: 100%;
-  padding: 6px 8px;
-  color: inherit;
-  background: var(--panel, #101821);
-  border: 1px solid var(--line, #344253);
-  border-radius: 6px;
-  font: inherit;
-}
+.xt-composer-destinations[hidden],
 .xt-composer-destinations [hidden] {
   display: none !important;
 }

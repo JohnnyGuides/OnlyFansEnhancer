@@ -10,10 +10,9 @@ const { repositoryRoot, personalRoot } = require("../support/paths.cjs");
 
 const DAY = "2026-10-06";
 const SESSION = "a".repeat(48);
-const VIDEO = path.join(
-  repositoryRoot,
-  "tests/fixtures/teaser-hub/preview-test.mp4",
-);
+const VIDEO =
+  process.env.OFENHANCER_TEASER_REVIEW_VIDEO ||
+  path.join(repositoryRoot, "tests/fixtures/teaser-hub/preview-test.mp4");
 let server;
 let origin;
 let browser;
@@ -208,11 +207,40 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       await frame.locator("#socialHeading").textContent(),
       "Twitter teaser",
     );
+    assert.match(
+      await page.locator(".xt-composer-heading h2").textContent(),
+      /Teaser planner/,
+    );
+    const layout = await frame
+      .locator(".teaser-video-preview")
+      .evaluate((video) => {
+        const media = video.getBoundingClientRect();
+        const posts = document
+          .querySelector(".teaser-planner-posts")
+          .getBoundingClientRect();
+        return {
+          square: Math.abs(media.width - media.height) < 1,
+          postsOnRight: posts.left > media.right,
+        };
+      });
+    assert.equal(layout.square, true, "video preview remains square");
+    assert.equal(
+      layout.postsOnRight,
+      true,
+      "destination posts use the space beside the preview",
+    );
     assert.equal(
       await frame
         .locator(".teaser-thumbnail-panel img")
         .evaluate((image) => image.naturalWidth),
       640,
+    );
+    assert.equal(
+      await frame
+        .locator(".teaser-thumbnail-panel img")
+        .evaluate((image) => image.naturalHeight),
+      640,
+      "first-frame poster matches the square teaser layout",
     );
     assert.equal(
       await frame.locator(".teaser-thumbnail-panel .hint").count(),
@@ -774,11 +802,24 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       },
       { DAY, SESSION },
     );
-    await page
+    await x
       .getByRole("button", { name: "Add Reddit post", exact: true })
       .click();
-    await page.locator(".xt-clip-choices").waitFor();
-    const reddit = await chooseSyntheticVideo(page);
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-frame")
+        ?.contentWindow?.document.body?.classList.contains(
+          "calendar-reddit-draft",
+        ),
+    );
+    const reddit = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    assert.match(
+      await reddit.locator("#socialFileSummary").textContent(),
+      /preview-test.mp4/,
+      "new destination starts with the current clip",
+    );
     await reddit
       .getByLabel("Subreddit", { exact: true })
       .fill("r/example_community");
@@ -789,12 +830,14 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
     );
     assert.equal(await reddit.locator("#uploadButton").isVisible(), false);
     await reddit
-      .getByRole("button", { name: "Save Reddit draft", exact: true })
+      .getByRole("button", { name: "Save draft", exact: true })
       .click();
-    await page
-      .getByLabel("Post destination", { exact: true })
-      .locator("option", { hasText: "r/example_community" })
-      .waitFor({ state: "attached" });
+    await reddit
+      .getByRole("button", {
+        name: "Edit r/example_community post",
+        exact: true,
+      })
+      .waitFor();
     const stored = await page.evaluate(
       async (DAY) => ({
         x: await OFEnhancerTeaserDrafts.get(DAY),
@@ -855,9 +898,9 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       ),
       true,
     );
-    await page
-      .getByLabel("Post destination", { exact: true })
-      .selectOption("x");
+    await reddit
+      .getByRole("button", { name: "Edit Twitter post", exact: true })
+      .click();
     await page.waitForFunction(
       () =>
         document
@@ -866,7 +909,16 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
         "Twitter caption",
     );
     const id = stored.posts[0].id;
-    await page.getByLabel("Post destination", { exact: true }).selectOption(id);
+    const twitter = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    await twitter.locator(".xt-planner-post").nth(2).waitFor();
+    assert.equal(
+      await twitter.locator(".xt-planner-post").count(),
+      3,
+      "all destination posts are visible together",
+    );
+    await twitter.locator(`[data-post-id="${id}"]`).click();
     await page.waitForFunction(
       () =>
         document
@@ -881,8 +933,28 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       await restored.getByLabel("Subreddit", { exact: true }).inputValue(),
       "example_community",
     );
+    await restored
+      .getByRole("button", { name: "Edit r/other_community post", exact: true })
+      .waitFor();
+    if (captures) {
+      await restored.evaluate(async () => {
+        const video = document.querySelector(".teaser-video-preview");
+        video.muted = true;
+        await video.play();
+        video.pause();
+        video.currentTime = 0;
+      });
+      await page.setViewportSize({ width: 1100, height: 950 });
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(captures, "unified-planner.png") });
+      await page.setViewportSize({ width: 390, height: 950 });
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(captures, "unified-planner-phone.png") });
+    }
     page.once("dialog", (dialog) => dialog.accept());
-    await page
+    await restored
       .getByRole("button", { name: "Remove post", exact: true })
       .click();
     await page.waitForFunction(

@@ -210,14 +210,17 @@
   }
 
   const normalizedThumbnails = new WeakMap();
-  function normalizeThumbnailFile(file) {
+  function normalizeThumbnailFile(file, square = false) {
     if (!(file instanceof File) || !isImageFile(file))
       return Promise.reject(
         new Error("Choose a readable PNG or JPEG thumbnail."),
       );
     if (file.size > 50 * 1024 * 1024)
       return Promise.reject(new Error("Choose a thumbnail under 50 MB."));
-    if (normalizedThumbnails.has(file)) return normalizedThumbnails.get(file);
+    const height = square ? 640 : 360;
+    const cache = normalizedThumbnails.get(file) || new Map();
+    if (cache.has(height)) return cache.get(height);
+    normalizedThumbnails.set(file, cache);
     const conversion = (async () => {
       let bitmap;
       try {
@@ -236,7 +239,6 @@
         )
           throw new Error("The thumbnail dimensions are unsupported.");
         const width = 640;
-        const height = 360;
         const scale = Math.max(width / bitmap.width, height / bitmap.height);
         const cropWidth = width / scale;
         const cropHeight = height / scale;
@@ -264,14 +266,14 @@
         if (!blob?.size || blob.size >= 2_000_000)
           throw new Error("The converted thumbnail exceeds 2 MB.");
         const base = file.name.replace(/\.[^.]+$/, "").slice(0, 100);
-        return new File([blob], `${base} (640x360).png`, {
+        return new File([blob], `${base} (640x${height}).png`, {
           type: "image/png",
         });
       } finally {
         bitmap.close();
       }
     })();
-    normalizedThumbnails.set(file, conversion);
+    cache.set(height, conversion);
     return conversion;
   }
 
@@ -6520,7 +6522,7 @@
       candidate: () => currentMatch?.candidate,
       paidUrl: () => currentPaidLink().paidUrl || "",
       busy: () => runBusy || Boolean(activeSession),
-      normalizeThumbnail: normalizeThumbnailFile,
+      normalizeThumbnail: (file) => normalizeThumbnailFile(file, true),
       preferLink(kind, customUrl) {
         const preferred = [...socialPaidLink.options].find((option) =>
           kind === "custom"

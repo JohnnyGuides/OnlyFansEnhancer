@@ -142,7 +142,7 @@ globalThis.CreatorMediaGenerator = (() => {
       await waitForPresentedFrame(video);
       const canvas = document.createElement("canvas");
       canvas.width = THUMBNAIL_WIDTH;
-      canvas.height = THUMBNAIL_HEIGHT;
+      canvas.height = crop.square === true ? THUMBNAIL_WIDTH : THUMBNAIL_HEIGHT;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Thumbnail generation is unavailable.");
       drawCover(context, video, canvas.width, canvas.height, crop);
@@ -155,7 +155,7 @@ globalThis.CreatorMediaGenerator = (() => {
         );
       return new File(
         [blob],
-        `${file.name.replace(/\.[^.]+$/, "").slice(0, 90)} (frame 640x360).png`,
+        `${file.name.replace(/\.[^.]+$/, "").slice(0, 90)} (frame ${canvas.width}x${canvas.height}).png`,
         {
           type: "image/png",
         },
