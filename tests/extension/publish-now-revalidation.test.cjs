@@ -47,6 +47,18 @@ async function onlyFansRun(page, { mutate, ...options }) {
     path: path.join(repositoryRoot, "workflows/upload-platform-adapters.js"),
   });
   await page.evaluate((options) => {
+    if (options.paragraphEditor) {
+      const editor = document.querySelector('[role="textbox"]');
+      editor.addEventListener("input", (event) => {
+        if (event.isTrusted) return;
+        const paragraphs = editor.innerText.split("\n").map((line) => {
+          const paragraph = document.createElement("p");
+          paragraph.textContent = line;
+          return paragraph;
+        });
+        editor.replaceChildren(...paragraphs);
+      });
+    }
     globalThis.processingMs = options.processingMs || 0;
     if (options.attachMutation)
       globalThis.attachMutation = new Function(options.attachMutation);
@@ -82,12 +94,12 @@ async function onlyFansRun(page, { mutate, ...options }) {
       setTimeout(() => controller.abort(), options.abortAfterMs);
     try {
       const result = await CreatorUploadPlatformAdapters.runOnlyFans({
-        draft: {
+        draft: Object.freeze({
           publishMode: options.publishMode || "autonomous",
           scheduleIntent: options.scheduleIntent,
           mediaFiles: options.mediaFiles || [],
-          description: "Approved description",
-        },
+          description: options.description ?? "Approved description",
+        }),
         signal: controller.signal,
         async attachFile(role, selector) {
           const input = document.querySelector(selector);
@@ -131,6 +143,54 @@ async function withPage(callback) {
     await browser.close();
   }
 }
+
+test("OnlyFans preserves catalogue paragraph spacing without changing the draft", async () => {
+  await withPage(async (page) => {
+    for (const [description, expected] of [
+      ["First\n\nSecond", "First\n\u3164\nSecond"],
+      ["First\r\n \t\r\nSecond", "First\n\u3164\nSecond"],
+      ["First\n\n\nSecond", "First\n\u3164\n\u3164\nSecond"],
+      ["First\n\u3164\nSecond", "First\n\u3164\nSecond"],
+      ["First\nSecond", "First\nSecond"],
+    ]) {
+      for (const scheduleIntent of ["none", "now"]) {
+        const outcome = await onlyFansRun(page, {
+          description,
+          scheduleIntent,
+          paragraphEditor: scheduleIntent === "now",
+        });
+        assert.equal(outcome.error, undefined);
+        assert.equal(outcome.clicks, scheduleIntent === "now" ? 1 : 0);
+        assert.equal(
+          await page
+            .locator('[role="textbox"]')
+            .evaluate((editor) =>
+              editor.children[0]?.tagName === "P"
+                ? [...editor.children].map((p) => p.innerText).join("\n")
+                : editor.innerText,
+            ),
+          expected,
+        );
+      }
+    }
+  });
+});
+
+test("OnlyFans refuses submission when a protected blank line changes", async () => {
+  await withPage(async (page) => {
+    const outcome = await onlyFansRun(page, {
+      description: "First\n\nSecond",
+      scheduleIntent: "now",
+      gated: true,
+      mutate: () => {
+        document.querySelector('[role="textbox"]').textContent =
+          "First\nSecond";
+      },
+    });
+    assert.match(outcome.error, /state changed/);
+    assert.equal(outcome.clicks, 0);
+  });
+});
 
 for (const scheduleIntent of ["none", "now"]) {
   test(`OnlyFans ${scheduleIntent} waits for a delayed processing indicator to clear`, async () => {

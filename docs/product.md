@@ -51,7 +51,7 @@ change. Do not describe a package build or fixture test as successful live posti
 
 ## Publishing details that must survive refactoring
 
-The catalogue description is the base caption. Fansly adds the configured block
+The catalogue description is the base caption. OnlyFans preparation inserts Hangul Filler (U+3164) into blank lines between paragraphs so its editor retains the spacing; the catalogue and other platforms keep the original text. Fansly adds the configured block
 once, applies the reviewed toggles, locks full media with the reviewed first or explicitly selected preset,
 and uses the shared teaser through **Add Free Preview**. OnlyFans labels remain
 unchanged. Friday scheduling is **15:00 UTC**. Fansly and ManyVids read the timezone displayed by their scheduling UI; OnlyFans uses the approved draft timezone and requires separate live verification of that UI representation. A verified common empty Friday is required when the selected flow

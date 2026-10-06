@@ -2228,6 +2228,10 @@
 
   async function runOnlyFans(context) {
     const { draft, signal } = context;
+    // OnlyFans collapses empty paragraphs; Hangul Filler keeps each blank line.
+    const description = String(draft.description || "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/(?<=\n)[\t ]*(?=\n)/g, "\u3164");
     publicationMode(draft);
     abortIfNeeded(signal);
     const owned = await waitFor(
@@ -2237,6 +2241,12 @@
       signal,
     );
     const { editor, composer } = owned;
+    const captionText = () =>
+      [...editor.childNodes].every((node) => node.nodeName === "P")
+        ? [...editor.children]
+            .map((paragraph) => paragraph.innerText)
+            .join("\n")
+        : (editor.innerText ?? editor.textContent);
     const revalidate = () => {
       const current = resolveOnlyFansComposer();
       if (
@@ -2351,9 +2361,9 @@
     await context.progress?.("configuring");
 
     revalidate();
-    fillTextControl(editor, draft.description);
+    fillTextControl(editor, description);
     await waitFor(
-      () => editor.textContent === String(draft.description || ""),
+      () => captionText() === description,
       "OnlyFans description readback",
       DEFAULT_DOM_TIMEOUT,
       signal,
@@ -2387,7 +2397,7 @@
         throw new Error("OnlyFans labels changed during preparation.");
       const unscheduledStateIntact = () => {
         if (
-          editor.textContent !== String(draft.description || "") ||
+          captionText() !== description ||
           composer.querySelector(".b-dropzone__preview.m-schedule")
         )
           throw new Error(
@@ -2425,7 +2435,7 @@
       if (
         !post ||
         !editor.isConnected ||
-        editor.textContent !== String(draft.description || "") ||
+        captionText() !== description ||
         !mediaReady() ||
         composer.querySelector(".b-dropzone__preview.m-schedule")
       )
@@ -2589,7 +2599,7 @@
     const labelsAfter = labels();
     const scheduleProof = scheduleReadback();
     verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
-    if (editor.textContent !== String(draft.description || "") || !mediaReady())
+    if (captionText() !== description || !mediaReady())
       throw new Error(
         "OnlyFans attachment or description changed before verification.",
       );
@@ -2615,7 +2625,7 @@
     verifyNoBlockingErrors(editor.closest("form") || document, "OnlyFans");
     if (
       !editor.isConnected ||
-      editor.textContent !== String(draft.description || "") ||
+      captionText() !== description ||
       !commit.isConnected ||
       !enabled(commit) ||
       !mediaReady()

@@ -1189,7 +1189,7 @@ for (const scenario of [
             publishMode: scenario.publishMode,
             scheduleIntent: scenario.scheduleIntent,
             mediaFiles: scenario.mediaFiles || [],
-            description: "Only the episode description",
+            description: "Only the episode description\n\nSecond paragraph",
             scheduledIso: "2026-08-28T15:00:00.000Z",
             timeZone: "Europe/Zurich",
           },
@@ -1221,7 +1221,7 @@ for (const scenario of [
           labelsAfter: Array.from(
             document.querySelectorAll('[id^="post-label-"]'),
           ).map((input) => input.checked),
-          caption: document.querySelector('[role="textbox"]').textContent,
+          caption: document.querySelector('[role="textbox"]').innerText,
           selectedDate: document.querySelector(
             ".vdatetime-calendar__month__day",
           ).dataset.selected,
@@ -1248,7 +1248,10 @@ for (const scenario of [
             : "manual-submit-required",
       });
       assert.deepEqual(result.labelsAfter, result.labelsBefore);
-      assert.equal(result.caption, "Only the episode description");
+      assert.equal(
+        result.caption,
+        "Only the episode description\n\u3164\nSecond paragraph",
+      );
       assert.doesNotMatch(result.caption, /Catalogue title/);
       assert.equal(
         result.selectedDate,
