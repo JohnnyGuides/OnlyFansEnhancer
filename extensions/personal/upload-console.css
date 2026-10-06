@@ -225,12 +225,6 @@ body.calendar-reddit-draft .upload-actions .action-status {
   overflow-wrap: anywhere;
   font-size: 13px;
 }
-.calendar-teaser .xt-planner-post small {
-  grid-column: 1 / -1;
-  overflow-wrap: anywhere;
-  color: #afbed2;
-  font-size: 11px;
-}
 .calendar-teaser .xt-planner-post-state {
   color: #afbed2;
   font-size: 11px;

@@ -211,8 +211,8 @@
               ? state
               : `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`,
           ),
-          node("small", "", post.file?.name || post.name || "Choose a clip"),
         );
+        row.title = post.file?.name || post.name || "Choose a clip";
         row.addEventListener("click", () => void switchPost(post.id));
         if (post.platform === "reddit") {
           const target = node("div", "xt-planner-target");
