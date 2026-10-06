@@ -61,8 +61,28 @@
   }
 
   function titleEditor() {
+    const hosts = [
+      ...document.querySelectorAll('faceplate-textarea-input[name="title"]'),
+    ].filter(visible);
+    if (hosts.length) {
+      const host = one(
+        document,
+        'faceplate-textarea-input[name="title"]',
+        "Reddit title field",
+      );
+      const input = one(
+        host.shadowRoot,
+        'textarea[name="title"]',
+        "Reddit title input",
+      );
+      if (input.disabled || host.getAttribute("aria-disabled") === "true")
+        throw new Error("Reddit title input is disabled.");
+      return input;
+    }
     return one(document, REDDIT_TITLE, "Reddit title");
   }
+  const titleValue = (editor) =>
+    editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent;
 
   function linkEditor() {
     const host = one(
@@ -81,11 +101,26 @@
   }
 
   function fillTitle(editor, title) {
-    if (editor.textContent === title) return;
-    if (editor.textContent.trim())
+    if (titleValue(editor) === title) return;
+    if (titleValue(editor).trim())
       throw new Error(
         "An existing draft title is present. Review it in Reddit first.",
       );
+    if (editor instanceof HTMLTextAreaElement) {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      ).set.call(editor, title);
+      editor.dispatchEvent(
+        new Event("input", { bubbles: true, composed: true }),
+      );
+      editor.dispatchEvent(
+        new Event("change", { bubbles: true, composed: true }),
+      );
+      if (editor.value !== title)
+        throw new Error("Reddit did not accept the draft title.");
+      return;
+    }
     editor.focus();
     const selection = document.getSelection();
     const range = document.createRange();
@@ -162,7 +197,7 @@
     }
     const digest = await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(title.textContent),
+      new TextEncoder().encode(titleValue(title)),
     );
     const hash = [...new Uint8Array(digest)]
       .map((value) => value.toString(16).padStart(2, "0"))

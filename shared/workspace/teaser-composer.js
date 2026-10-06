@@ -202,7 +202,9 @@
           post.platform === "reddit"
             ? post.enabled === false
               ? "Not selected"
-              : "Local draft"
+              : post.sessionId
+                ? post.status
+                : "Local draft"
             : post.status || "New";
         row.append(node("strong", "", name));
         if (post.id === (postId || "x"))
@@ -244,6 +246,9 @@
       search.dispatchEvent(new Event("input"));
       destination.scrollTop = scrollTop;
       removePost.hidden = !postId;
+      removePost.disabled = Boolean(
+        reddit.find((post) => post.id === postId)?.sessionId,
+      );
     }
     async function updateBatch() {
       if (loading || running || !start.value || !start.validity.valid) return;

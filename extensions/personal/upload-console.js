@@ -6523,6 +6523,104 @@
       paidUrl: () => currentPaidLink().paidUrl || "",
       busy: () => runBusy || Boolean(activeSession),
       normalizeThumbnail: (file) => normalizeThumbnailFile(file, true),
+      async prepareReddit(draft, checkpoint) {
+        if (runBusy || activeSession)
+          throw new Error("Review the active run first.");
+        if (draft.enabled === false)
+          throw new Error("Select this community before preparing it.");
+        if (!draft.caption.trim()) throw new Error("Enter the Reddit title.");
+        socialX.checked = false;
+        socialReddit.checked = true;
+        get('input[name="socialMode"][value="autonomous"]').checked = false;
+        platformStates.delete("x");
+        runBusy = true;
+        let dispatched = false;
+        let sessionId;
+        try {
+          const response =
+            await globalThis.CreatorCatalogueClient.getSubredditPresetSnapshot();
+          const snapshot = globalThis.CreatorSubredditPresets.normalizeSnapshot(
+            response.rows,
+          );
+          const preset = snapshot.presets.find(
+            (item) =>
+              item.subreddit.toLowerCase() === draft.subreddit.toLowerCase(),
+          );
+          if (!preset || preset.status === "Rejected")
+            throw new Error(
+              "This community is unavailable. Refresh the community list.",
+            );
+          const copy = {
+            subreddit: preset.subreddit,
+            presetId: preset.id,
+            presetRevision: preset.revision,
+            status: preset.status,
+            title: draft.caption.trim(),
+            body: "",
+            flair: "",
+            nsfw: true,
+          };
+          sessionId = randomSessionId();
+          const plan = await buildSocialDistributionPlan({
+            id: sessionId,
+            file: draft.file,
+            caption: copy.title,
+            mode: "manual",
+            targets: ["reddit"],
+            subreddits: [copy],
+            preparationOnly: true,
+            catalogue: null,
+            evidence: socialEvidence(),
+            authorizationAt: Date.now(),
+          });
+          activeSession = connectSession(sessionId, {
+            files: { social: draft.file },
+            socialSessionId: sessionId,
+            proof: {},
+          });
+          await activeSession.whenBound;
+          await checkpoint("preparing", sessionId);
+          dispatched = true;
+          lockDraft(true);
+          const prepared = await sendMessage({
+            type: "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
+            plan,
+            caption: copy.title,
+            subreddits: [copy],
+          });
+          if (
+            prepared.socialDistribution?.sessionId !== sessionId ||
+            prepared.socialDistribution?.targets?.redgifs?.status !==
+              "review-required" ||
+            prepared.socialDistribution?.targets?.[
+              `reddit:${copy.subreddit.toLowerCase()}`
+            ]?.status !== "waiting-for-redgifs"
+          )
+            throw new Error(
+              "Preparation was not confirmed. Review the saved run before retrying.",
+            );
+          activeSession.accepted = true;
+          for (const [destination, target] of Object.entries(
+            prepared.socialDistribution?.targets || {},
+          ))
+            setPlatformState(destination, target);
+          await checkpoint("prepared", sessionId);
+          get("#redditLinkStep").hidden = false;
+          matchStatus.textContent =
+            "Review the Redgifs upload, then paste its link to fill the Reddit draft. Publication is manual.";
+        } catch (error) {
+          if (dispatched) await checkpoint("unresolved", sessionId);
+          else if (activeSession?.id === sessionId) {
+            activeSession.closed = true;
+            activeSession.port?.disconnect();
+            activeSession = null;
+          }
+          throw error;
+        } finally {
+          runBusy = false;
+          if (!activeSession) lockDraft(false);
+        }
+      },
       preferLink(kind, customUrl) {
         const preferred = [...socialPaidLink.options].find((option) =>
           kind === "custom"
@@ -6535,7 +6633,7 @@
         refreshSocialReview();
         if (currentMatch) void checkReadiness();
       },
-      async resume(sessionId) {
+      async resume(sessionId, platform = "x") {
         if (runBusy || (activeSession && activeSession.id !== sessionId))
           return;
         const response = await sendMessage({
@@ -6543,6 +6641,26 @@
           sessionId,
         });
         const job = response.socialDistribution?.jobs?.x;
+        if (platform === "reddit") {
+          const jobs = response.socialDistribution?.jobs || {};
+          if (!Object.keys(jobs).some((key) => key.startsWith("reddit:")))
+            throw new Error(
+              "This Reddit run is unavailable. Review upload history before retrying.",
+            );
+          activeSession ||= {
+            id: sessionId,
+            socialSessionId: sessionId,
+            closed: false,
+            accepted: true,
+          };
+          lockDraft(true);
+          for (const [destination, target] of Object.entries(jobs))
+            setPlatformState(destination, target);
+          get("#redditLinkStep").hidden = false;
+          get("#redditLinkStatus").textContent =
+            "Use the original Reddit draft tab. If Chrome restarted, inspect that draft manually; preparation will not repeat.";
+          return;
+        }
         if (!job)
           throw new Error(
             "This saved run is unavailable. Reconnect Chrome and review upload history.",

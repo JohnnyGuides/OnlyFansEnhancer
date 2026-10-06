@@ -153,9 +153,19 @@ or rejected communities, and commit atomically within the existing storage limit
 Removing a Reddit draft does not alter the
 Twitter plan or execution checkpoint. Existing date-keyed Twitter drafts migrate
 without replacement, and all local media shares the existing 2 GB storage budget.
-Reddit entries in this calendar are local drafts, not scheduled platform posts;
-their send controls are unavailable. This does not add Reddit publishing, metrics
-collection or AI title generation to the calendar workflow.
+Reddit entries in this calendar are local drafts, not scheduled platform posts.
+Prepare Reddit saves the selected community draft, refreshes its worksheet preset,
+and uses the existing manual preparation runtime to attach its clip in RedGIFs
+and fill its Reddit Link composer title. Rejected or missing communities are refused.
+The creator reviews the RedGIFs upload, publishes it manually and supplies its canonical
+watch URL to fill the exact prepared Reddit draft. Flair, NSFW marking and final
+publication remain manual. Per-post execution checkpoints preserve ambiguous outcomes
+and prevent overwriting, removing or repeating a saved run; Review saved run restores
+the link handoff without another upload while the original Chrome session and
+composer tabs remain open. A full Chrome restart or changed tab requires manual
+draft inspection; this workflow does not re-create or re-upload that draft.
+Twitter checkpoints remain independent.
+This adds neither automatic Reddit publishing nor metrics collection nor AI titles.
 
 Upload uses the existing manual/autonomous mode choice. X preparation applies and
 reads back the Nudity warning, then uses labelled date/time controls and verifies

@@ -19,6 +19,43 @@ async function fixture(browser, url, html) {
   return page;
 }
 
+test("current Reddit shadow title supports preparation and protects existing text", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await fixture(
+      browser,
+      "https://www.reddit.com/r/example/submit/?type=LINK",
+      `<faceplate-textarea-input name="title"></faceplate-textarea-input><script>document.querySelector('faceplate-textarea-input').attachShadow({mode:'open'}).innerHTML='<textarea name="title"></textarea>'</script>`,
+    );
+    const result = await page.evaluate(() =>
+      CreatorSocialPreparationAdapter.run({
+        platform: "reddit",
+        action: "prepare",
+        subreddit: "example",
+        title: "A benign preview",
+      }),
+    );
+    assert.equal(result.status, "waiting-for-redgifs");
+    assert.equal(
+      await page.locator('textarea[name="title"]').inputValue(),
+      "A benign preview",
+    );
+    await assert.rejects(
+      page.evaluate(() =>
+        CreatorSocialPreparationAdapter.run({
+          platform: "reddit",
+          action: "prepare",
+          subreddit: "example",
+          title: "Replacement",
+        }),
+      ),
+      /existing draft title/,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Reddit preparation fills visible title, then a shadow link, and never clicks Post", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

@@ -18,6 +18,7 @@ body.calendar-teaser {
 .calendar-reddit-draft [hidden],
 .calendar-reddit-draft #socialPaidLinkFields,
 .calendar-reddit-draft #socialCustomPaidLinkField,
+.calendar-reddit-draft #subredditFields,
 .calendar-reddit-draft .social-auto-mode,
 .calendar-reddit-draft #uploadButton {
   display: none !important;
@@ -323,7 +324,12 @@ body.calendar-reddit-draft .upload-actions .action-status {
   display: contents;
 }
 .calendar-teaser
-  :is(.teaser-association button, #saveTeaserDraft, #uploadButton) {
+  :is(
+    .teaser-association button,
+    #saveTeaserDraft,
+    #uploadButton,
+    #prepareCalendarReddit
+  ) {
   min-height: 40px;
   padding: 9px 12px;
   border: 1px solid #344657;
@@ -333,7 +339,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
   font-size: 13px;
   font-weight: 600;
 }
-.calendar-teaser #uploadButton {
+.calendar-teaser :is(#uploadButton, #prepareCalendarReddit) {
   background: #087ca5;
   border-color: #087ca5;
 }

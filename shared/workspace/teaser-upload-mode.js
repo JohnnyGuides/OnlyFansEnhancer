@@ -164,6 +164,39 @@
     save.id = "saveTeaserDraft";
     get("#uploadActions").prepend(association);
     get("#uploadButton").before(save);
+    const prepareReddit = document.createElement("button");
+    prepareReddit.type = "button";
+    prepareReddit.id = "prepareCalendarReddit";
+    prepareReddit.className = "primary";
+    prepareReddit.textContent = "Prepare Reddit";
+    prepareReddit.hidden = true;
+    save.after(prepareReddit);
+    prepareReddit.addEventListener("click", async () => {
+      if (hub.busy() || context?.draft?.sessionId) return;
+      prepareReddit.disabled = true;
+      notify("running", { running: true });
+      try {
+        const draft = await saveDraft();
+        await hub.prepareReddit(draft, checkpoint);
+        get("#uploadError").textContent = "";
+      } catch (error) {
+        fail(error);
+      } finally {
+        prepareReddit.disabled = Boolean(context?.draft?.sessionId);
+        notify("running", { running: false });
+      }
+    });
+    async function checkpoint(status, sessionId) {
+      const draft = await global.OFEnhancerTeaserDrafts.checkpoint(
+        day,
+        status,
+        sessionId,
+        context?.postId || "",
+      );
+      context.draft = draft;
+      notify("saved");
+      return draft;
+    }
     let thumbnail = null,
       context = null,
       revision = 0,
@@ -366,6 +399,8 @@
         get("#uploadButton").hidden = true;
         get("#uploadButton").disabled = true;
         save.textContent = "Save draft";
+        prepareReddit.hidden = false;
+        prepareReddit.disabled = context.draft?.enabled === false;
         get("#socialHeading").textContent = "Reddit draft";
       }
       if (context.file) context.file.source = "generated";
@@ -392,6 +427,7 @@
       }
       if (context.draft?.sessionId) {
         save.disabled = true;
+        prepareReddit.disabled = true;
         get("#uploadButton").disabled = true;
         get("#runNotice").textContent = "This teaser has a saved upload run.";
         const review = document.createElement("button");
@@ -402,7 +438,7 @@
           review.disabled = true;
           notify("running", { running: true });
           try {
-            await hub.resume(context.draft.sessionId);
+            await hub.resume(context.draft.sessionId, context.platform);
           } catch (error) {
             fail(error);
           } finally {
@@ -440,9 +476,9 @@
     return {
       day,
       saveDraft,
+      checkpoint,
       notify,
-      locked: () =>
-        context?.platform === "reddit" || Boolean(context?.draft?.sessionId),
+      locked: () => Boolean(context?.draft?.sessionId),
       thumbnail: () => thumbnail,
       options: () => {
         if (

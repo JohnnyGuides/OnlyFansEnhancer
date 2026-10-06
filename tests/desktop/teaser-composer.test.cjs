@@ -892,6 +892,87 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
     }, DAY);
     assert.notEqual(second.id, stored.posts[0].id);
     assert.equal(second.name, "second.mp4");
+    await reddit.evaluate(() => {
+      CreatorCatalogueClient.getSubredditPresetSnapshot = async () => ({
+        rows: [{ subreddit: "example_community", status: "Approved" }],
+      });
+      const original = chrome.runtime.sendMessage;
+      window.redditPreparationRequests = [];
+      chrome.runtime.sendMessage = (message, callback) => {
+        if (message.type !== "PREPARE_CREATOR_SOCIAL_DISTRIBUTION")
+          return original(message, callback);
+        window.redditPreparationRequests.push(message);
+        const result = {
+          ok: true,
+          socialDistribution: {
+            sessionId: message.plan.id,
+            targets: {
+              redgifs: { platform: "redgifs", status: "review-required" },
+              "reddit:example_community": {
+                platform: "reddit",
+                status: "waiting-for-redgifs",
+              },
+            },
+          },
+        };
+        queueMicrotask(() => callback?.(result));
+        return Promise.resolve(result);
+      };
+    });
+    if (process.env.OFENHANCER_TEASER_SCREENSHOTS) {
+      fs.mkdirSync(process.env.OFENHANCER_TEASER_SCREENSHOTS, {
+        recursive: true,
+      });
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({
+          path: path.join(
+            process.env.OFENHANCER_TEASER_SCREENSHOTS,
+            "reddit-before-preparation.png",
+          ),
+        });
+    }
+    await reddit
+      .getByRole("button", { name: "Prepare Reddit", exact: true })
+      .click();
+    await reddit.locator("#redditLinkStep").waitFor({ state: "visible" });
+    const request = await reddit.evaluate(
+      () => window.redditPreparationRequests[0],
+    );
+    assert.equal(request.plan.preparationOnly, true);
+    assert.equal(request.plan.mode, "manual");
+    assert.equal(request.plan.targets.x, false);
+    assert.equal(request.subreddits[0].title, "Independent community title");
+    assert.equal(request.plan.socialFile.basename, "preview-test.mp4");
+    const prepared = await page.evaluate(
+      async (id) => OFEnhancerTeaserDrafts.getPost(id),
+      stored.posts[0].id,
+    );
+    assert.equal(prepared.status, "prepared");
+    assert.equal(prepared.sessionId, request.plan.id);
+    assert.equal(
+      await reddit.locator("#prepareCalendarReddit").isDisabled(),
+      true,
+    );
+    assert.equal(
+      await page.evaluate(
+        async (day) => (await OFEnhancerTeaserDrafts.get(day)).sessionId,
+        DAY,
+      ),
+      SESSION,
+    );
+    assert.equal(
+      await page.evaluate(async (draft) => {
+        try {
+          await OFEnhancerTeaserDrafts.savePost(draft);
+          return false;
+        } catch {
+          return true;
+        }
+      }, prepared),
+      true,
+      "a saved Reddit run cannot be overwritten",
+    );
     const captures = process.env.OFENHANCER_TEASER_SCREENSHOTS;
     await reddit.waitForFunction(
       () => document.querySelector(".teaser-video-preview").readyState >= 2,
@@ -974,8 +1055,29 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
         .locator(".xt-composer-dialog")
         .screenshot({ path: path.join(captures, "unified-planner-phone.png") });
     }
-    page.once("dialog", (dialog) => dialog.accept());
+    assert.equal(
+      await restored
+        .getByRole("button", { name: "Remove post", exact: true })
+        .isDisabled(),
+      true,
+      "saved runs cannot be removed",
+    );
     await restored
+      .getByRole("button", { name: "Edit r/other_community post", exact: true })
+      .click();
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector(".xt-composer-frame")
+          ?.contentWindow?.document.querySelector("#socialCaption")?.value ===
+        "Different title",
+    );
+    const other = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    await other.locator("#socialCaption").waitFor();
+    page.once("dialog", (dialog) => dialog.accept());
+    await other
       .getByRole("button", { name: "Remove post", exact: true })
       .click();
     await page.waitForFunction(
@@ -985,9 +1087,9 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
     assert.equal(
       await page.evaluate(
         async (id) => (await OFEnhancerTeaserDrafts.getPost(id)).caption,
-        second.id,
+        stored.posts[0].id,
       ),
-      "Different title",
+      "Independent community title",
     );
     assert.equal(
       (await page.evaluate((DAY) => OFEnhancerTeaserDrafts.get(DAY), DAY))

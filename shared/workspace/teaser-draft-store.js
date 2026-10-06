@@ -300,6 +300,10 @@
           );
           for (const [index, item] of records.entries()) {
             const existing = read.result.find((post) => post.id === item.id);
+            if (existing?.sessionId) {
+              transaction.abort();
+              return;
+            }
             item.order =
               existing?.order ?? existing?.updatedAt ?? nextOrder + index;
             item.enabled = existing?.enabled !== false;
@@ -369,6 +373,10 @@
         const read = store.get(id);
         read.onsuccess = () => {
           if (!read.result) return;
+          if (read.result.sessionId) {
+            transaction.abort();
+            return;
+          }
           const date = read.result.date;
           store.delete(id);
           const batch = transaction.objectStore("batches").get(date);
@@ -420,7 +428,7 @@
       "posts",
     );
   }
-  async function checkpoint(date, status, sessionId) {
+  async function checkpoint(date, status, sessionId, postId = "") {
     if (
       !validDay(date) ||
       !new Set([
@@ -433,36 +441,44 @@
       !/^[a-f0-9]{48}$/.test(sessionId || "")
     )
       throw new Error("Teaser execution identity is missing.");
-    return transact("readwrite", (store, done, transaction) => {
-      const read = store.get(date);
-      read.onsuccess = () => {
-        const record = read.result;
-        if (!record || (record.sessionId && record.sessionId !== sessionId)) {
-          transaction.abort();
-          return;
-        }
-        const transitions = {
-          draft: ["preparing"],
-          preparing: ["prepared", "unresolved"],
-          prepared: ["scheduled", "posted", "unresolved"],
-          scheduled: ["posted", "unresolved"],
-          posted: [],
-          unresolved: ["prepared", "scheduled", "posted"],
+    return transact(
+      "readwrite",
+      (store, done, transaction) => {
+        const read = store.get(postId || date);
+        read.onsuccess = () => {
+          const record = read.result;
+          if (
+            !record ||
+            record.date !== date ||
+            (record.sessionId && record.sessionId !== sessionId)
+          ) {
+            transaction.abort();
+            return;
+          }
+          const transitions = {
+            draft: ["preparing"],
+            preparing: ["prepared", "unresolved"],
+            prepared: ["scheduled", "posted", "unresolved"],
+            scheduled: ["posted", "unresolved"],
+            posted: [],
+            unresolved: ["prepared", "scheduled", "posted"],
+          };
+          if (
+            record.status !== status &&
+            !transitions[record.status]?.includes(status)
+          ) {
+            transaction.abort();
+            return;
+          }
+          record.status = status;
+          record.sessionId = sessionId;
+          record.updatedAt = Date.now();
+          store.put(record);
+          done(record);
         };
-        if (
-          record.status !== status &&
-          !transitions[record.status]?.includes(status)
-        ) {
-          transaction.abort();
-          return;
-        }
-        record.status = status;
-        record.sessionId = sessionId;
-        record.updatedAt = Date.now();
-        store.put(record);
-        done(record);
-      };
-    });
+      },
+      postId ? "posts" : "drafts",
+    );
   }
   global.OFEnhancerTeaserDrafts = Object.freeze({
     list,
