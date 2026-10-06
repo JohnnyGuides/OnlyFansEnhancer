@@ -115,24 +115,23 @@
     const folder = document.createElement("button");
     folder.type = "button";
     folder.textContent = "Open episode folder";
+    folder.className = "xt-episode-folder";
     get("#catalogueControls").append(folder);
     const association = document.createElement("div");
     association.className = "teaser-association";
     const changeMatch = document.createElement("button");
     changeMatch.type = "button";
-    changeMatch.textContent = "Change episode";
+    changeMatch.textContent = "Link episode";
     changeMatch.setAttribute("aria-expanded", "false");
     association.append(changeMatch, folder);
     get("#catalogueControls").prepend(association);
     const updateLinked = () => {
-      changeMatch.title = hub.candidate()?.title || "No linked episode";
+      association.hidden = Boolean(hub.candidate());
+      changeMatch.title = "Choose a catalogue episode";
       const title = hub.candidate()?.title || context?.file?.name;
       if (title) notify("episode", { title });
       folder.hidden = !hub.candidate();
-      changeMatch.setAttribute(
-        "aria-label",
-        `Change episode: ${changeMatch.title}`,
-      );
+      changeMatch.setAttribute("aria-label", "Link episode");
     };
     changeMatch.addEventListener("click", () => {
       const expanded = document.body.classList.toggle("teaser-matching");

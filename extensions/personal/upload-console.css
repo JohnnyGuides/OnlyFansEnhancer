@@ -354,6 +354,9 @@ body.calendar-reddit-draft .upload-actions .action-status {
   grid-column: 1;
   grid-row: 1;
 }
+.calendar-teaser .teaser-association[hidden] {
+  display: none;
+}
 .calendar-teaser .teaser-association {
   display: flex;
   flex-wrap: wrap;

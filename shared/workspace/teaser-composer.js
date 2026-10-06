@@ -564,6 +564,7 @@
       const back = action("Change clip");
       back.classList.add("xt-change-clip");
       heading.querySelector(".xt-change-clip")?.remove();
+      heading.querySelector(".xt-episode-folder")?.remove();
       heading.insertBefore(back, close);
       back.addEventListener("click", () => {
         if (
@@ -585,6 +586,12 @@
         "load",
         () => {
           if (iframe !== frame || !dialog.isConnected) return;
+          const folder =
+            frame.contentDocument?.querySelector(".xt-episode-folder");
+          if (folder) {
+            folder.classList.add("xt-action");
+            heading.insertBefore(folder, close);
+          }
           const posts = frame.contentDocument?.querySelector(
             ".teaser-planner-posts",
           );
@@ -640,6 +647,7 @@
     }
     async function choose() {
       heading.querySelector(".xt-change-clip")?.remove();
+      heading.querySelector(".xt-episode-folder")?.remove();
       heading.after(destinations);
       destinations.hidden = true;
       const grid = node("div", "xt-clip-choices");

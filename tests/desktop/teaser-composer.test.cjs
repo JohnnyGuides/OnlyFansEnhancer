@@ -581,12 +581,13 @@ test("episode without a teaser opens its folder and accepts a video in the same 
           item.url().includes("upload-console.html?teaserDay="),
         ) ||
       (await new Promise((resolve) => page.once("framenavigated", resolve)));
-    await frame
-      .getByRole("button", {
-        name: "Change episode: Preview test",
-        exact: true,
-      })
-      .waitFor();
+    await page.getByRole("button", { name: "Open episode folder" }).waitFor();
+    assert.equal(
+      await frame
+        .getByRole("button", { name: "Link episode", exact: true })
+        .isVisible(),
+      false,
+    );
     const automatic = frame.getByRole("checkbox", {
       name: "Send automatically",
       exact: true,
@@ -595,7 +596,7 @@ test("episode without a teaser opens its folder and accepts a video in the same 
     assert.equal(await automatic.isChecked(), true);
     await automatic.uncheck();
     assert.equal(await automatic.isChecked(), false);
-    await frame.getByRole("button", { name: "Open episode folder" }).click();
+    await page.getByRole("button", { name: "Open episode folder" }).click();
     assert.deepEqual(
       await page.evaluate(() =>
         window.folderRequests.filter(
@@ -616,14 +617,14 @@ test("episode without a teaser opens its folder and accepts a video in the same 
     assert.equal(await frame.locator("#socialErrors").textContent(), "");
     assert.equal(await frame.locator("#matchStatus").textContent(), "");
     assert.ok(
-      await frame.locator(".teaser-association").evaluate((association) => {
-        const media = document.querySelector(".teaser-choose-video");
-        return (
-          association.getBoundingClientRect().bottom <=
-          media.getBoundingClientRect().top
-        );
-      }),
-      "episode folder shortcut sits above the media picker",
+      await page
+        .locator(".xt-episode-folder")
+        .evaluate(
+          (folder) =>
+            folder.parentElement.classList.contains("xt-composer-heading") &&
+            folder.nextElementSibling.textContent === "Close",
+        ),
+      "episode folder shortcut sits at the top right beside Close",
     );
     await page.screenshot({
       path: path.join(
@@ -703,7 +704,7 @@ test("unavailable indexed teaser offers the linked episode folder", async () => 
           item.url().includes("upload-console.html?teaserDay="),
         ) ||
       (await new Promise((resolve) => page.once("framenavigated", resolve)));
-    await frame.getByRole("button", { name: "Open episode folder" }).waitFor();
+    await page.getByRole("button", { name: "Open episode folder" }).waitFor();
     assert.equal(
       await frame
         .getByRole("button", { name: "Choose or drop teaser video" })
