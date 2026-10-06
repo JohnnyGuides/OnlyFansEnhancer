@@ -101,7 +101,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .teaser-choose-video {
   width: 100%;
-  aspect-ratio: 1;
+  min-height: 140px;
   border: 1px dashed #58718b;
   border-radius: 10px;
   background: #101821;
@@ -360,13 +360,8 @@ body.calendar-reddit-draft .upload-actions .action-status {
   gap: 6px;
   margin-bottom: 8px;
 }
-.calendar-teaser
-  :is(
-    .teaser-association button,
-    #saveTeaserDraft,
-    #uploadButton,
-    #prepareCalendarReddit
-  ) {
+.calendar-teaser .teaser-association button,
+.calendar-teaser :is(#saveTeaserDraft, #uploadButton, #prepareCalendarReddit) {
   min-height: 40px;
   padding: 9px 12px;
   border: 1px solid #344657;
@@ -381,13 +376,8 @@ body.calendar-reddit-draft .upload-actions .action-status {
   border-color: #087ca5;
 }
 .calendar-teaser .teaser-association button {
-  grid-column: 2;
-  grid-row: 1;
   padding: 8px;
   font-size: 12px;
-}
-.calendar-teaser .teaser-association button:last-child {
-  grid-column: 3;
 }
 .calendar-teaser:not(.teaser-matching) #cataloguePicker,
 .calendar-teaser #catalogueBrowseToggle,

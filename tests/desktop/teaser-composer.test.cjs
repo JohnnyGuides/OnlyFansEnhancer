@@ -342,7 +342,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       "actual embedded Upload Hub should not produce page errors",
     );
 
-    await page.locator(".xt-composer-heading button").click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.locator("#open-day").click();
     await page.locator(".xt-composer-frame").waitFor();
     await page.waitForFunction(() =>
@@ -372,7 +372,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       /Tuesday, Oct 6/,
     );
     assert.deepEqual(errors, []);
-    await page.locator(".xt-composer-heading button").click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
     await page.evaluate(() =>
       OFEnhancerTeaserComposer.open({
@@ -556,7 +556,7 @@ test("episode without a teaser opens its folder and accepts a video in the same 
   });
   try {
     const errors = await mount(page, true);
-    await page.locator(".xt-composer-heading button").click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
     await page.evaluate(() => {
       window.folderRequests = [];
@@ -659,7 +659,7 @@ test("unavailable indexed teaser offers the linked episode folder", async () => 
   const page = await browser.newPage();
   try {
     await mount(page, true);
-    await page.locator(".xt-composer-heading button").click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
     await page.evaluate(() => {
       window.OFEnhancerHost = {
@@ -796,7 +796,7 @@ test("composer ignores forged messages and prevents closing while upload is runn
         location.origin,
       ),
     );
-    await page.locator(".xt-composer-heading button").click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     assert.equal(
       await page
         .locator(".xt-composer-dialog")

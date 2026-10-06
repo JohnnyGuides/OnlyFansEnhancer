@@ -562,6 +562,9 @@
         loadingMedia: Boolean(clip && !file),
       };
       const back = action("Change clip");
+      back.classList.add("xt-change-clip");
+      heading.querySelector(".xt-change-clip")?.remove();
+      heading.insertBefore(back, close);
       back.addEventListener("click", () => {
         if (
           !running &&
@@ -592,7 +595,7 @@
         },
         { once: true },
       );
-      content.replaceChildren(back, iframe);
+      content.replaceChildren(iframe);
       content.animate(
         [
           { opacity: 0, transform: "translateY(6px)" },
@@ -636,6 +639,7 @@
       }
     }
     async function choose() {
+      heading.querySelector(".xt-change-clip")?.remove();
       heading.after(destinations);
       destinations.hidden = true;
       const grid = node("div", "xt-clip-choices");
