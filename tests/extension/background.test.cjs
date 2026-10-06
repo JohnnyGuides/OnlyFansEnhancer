@@ -608,8 +608,26 @@ function send(message, sender = extensionPageSender) {
     operation: "getStatus",
   });
   assert.equal(sharedAppStatus.result.productVersion, "0.20.104");
+  const desktopAppRuntime = context.CreatorDesktopUploadRuntime.create({
+    chrome,
+    handleMessage: messageListener,
+  });
+  for (const operation of [
+    "getUploadCatalogueSnapshot",
+    "getSubredditPresets",
+  ]) {
+    const response = await desktopAppRuntime.execute({
+      kind: "message",
+      message: { type: "OFENHANCER_APP_REQUEST", operation },
+    });
+    assert.equal(response.ok, true, response.error);
+    assert.equal(nativeMessages.at(-1).request.operation, operation);
+  }
   for (const sender of [
     {},
+    { desktopUploadRuntime: true },
+    { id: "other-extension", desktopUploadRuntime: true },
+    { id: "test-extension", desktopUploadRuntime: false },
     { id: "test-extension", tab: { id: 5 }, url: "https://x.com/Owner" },
     { id: "other-extension", url: "chrome-extension://test-extension/a.html" },
     { id: "other-extension", url: "chrome-extension://other-extension/a.html" },

@@ -6185,7 +6185,11 @@ function handleExtensionMessage(message, sender, sendResponse) {
       case "GET_DESKTOP_STATUS":
         return { desktopStatus: await getDesktopStatus() };
       case "OFENHANCER_APP_REQUEST":
-        assertExtensionPage(sender);
+        if (
+          sender?.desktopUploadRuntime !== true ||
+          sender?.id !== chrome.runtime.id
+        )
+          assertExtensionPage(sender);
         return {
           result: await routeOFEnhancerAppRequest(
             message.operation,

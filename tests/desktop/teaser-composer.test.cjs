@@ -573,6 +573,17 @@ test("indexed clip opens editing before transfer and keeps caption edits when th
       .locator('.xt-clip-choice[data-episode-key="preview-test"]')
       .click();
     const frame = page.frameLocator(".xt-composer-frame");
+    await page
+      .locator(".xt-composer-heading")
+      .getByRole("button", { name: "Open episode folder", exact: true })
+      .waitFor();
+    assert.equal(
+      await frame
+        .getByRole("button", { name: "Link episode", exact: true })
+        .isVisible(),
+      false,
+      "an indexed clip already owns its episode while media is loading",
+    );
     await frame
       .locator("#socialCaption")
       .fill("Caption written while the clip loads");
