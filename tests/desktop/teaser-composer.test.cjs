@@ -1149,6 +1149,17 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
       .find((item) => item.url().includes("upload-console.html?teaserDay="));
     await reddit.locator(".xt-planner-post").nth(29).waitFor();
     assert.equal(
+      await reddit.locator(".xt-planner-post-list").evaluate((list) => {
+        const first = list.children[0].getBoundingClientRect();
+        const second = list.children[1].getBoundingClientRect();
+        return (
+          Math.abs(first.top - second.top) < 1 && second.left > first.right
+        );
+      }),
+      true,
+      "destinations wrap as compact pills instead of full-width rows",
+    );
+    assert.equal(
       await reddit.getByLabel("Posting time", { exact: true }).isVisible(),
       false,
     );

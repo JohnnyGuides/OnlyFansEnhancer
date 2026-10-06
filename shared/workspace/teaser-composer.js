@@ -126,6 +126,7 @@
     const removePost = action("Remove post");
     removePost.hidden = true;
     const postActions = node("div", "xt-planner-post-actions");
+    const selectedInfo = node("p", "xt-planner-selected-info");
     postActions.append(communities, removePost);
     destinations.append(
       postsHeading,
@@ -133,6 +134,7 @@
       search,
       destination,
       postActions,
+      selectedInfo,
     );
     const content = node("div", "xt-composer-content");
     const status = node("p", "xt-composer-status");
@@ -202,16 +204,9 @@
               ? "Not selected"
               : "Local draft"
             : post.status || "New";
-        row.append(
-          node("strong", "", name),
-          node(
-            "span",
-            "xt-planner-post-state",
-            post.enabled === false
-              ? state
-              : `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`,
-          ),
-        );
+        row.append(node("strong", "", name));
+        if (post.id === (postId || "x"))
+          selectedInfo.textContent = `${name} · ${post.enabled === false ? state : `${post.scheduledDate && post.scheduledDate !== date ? post.scheduledDate + " " : ""}${post.time || "—"} · ${state}`}`;
         row.title = post.file?.name || post.name || "Choose a clip";
         row.addEventListener("click", () => void switchPost(post.id));
         if (post.platform === "reddit") {
