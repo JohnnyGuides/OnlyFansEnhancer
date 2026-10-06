@@ -923,14 +923,12 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       fs.mkdirSync(process.env.OFENHANCER_TEASER_SCREENSHOTS, {
         recursive: true,
       });
-      await page
-        .locator(".xt-composer-dialog")
-        .screenshot({
-          path: path.join(
-            process.env.OFENHANCER_TEASER_SCREENSHOTS,
-            "reddit-before-preparation.png",
-          ),
-        });
+      await page.locator(".xt-composer-dialog").screenshot({
+        path: path.join(
+          process.env.OFENHANCER_TEASER_SCREENSHOTS,
+          "reddit-before-preparation.png",
+        ),
+      });
     }
     await reddit
       .getByRole("button", { name: "Prepare Reddit", exact: true })
