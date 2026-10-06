@@ -1227,6 +1227,26 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
       .click();
     await frame.locator(".xt-planner-community").nth(29).waitFor();
     assert.equal(await frame.locator(".xt-planner-community").count(), 30);
+    assert.ok(
+      await frame.locator(".xt-planner-community-picker").evaluate((picker) => {
+        const panel = picker
+          .closest(".xt-composer-destinations")
+          .getBoundingClientRect();
+        const bounds = picker.getBoundingClientRect();
+        const actions = picker.previousElementSibling.getBoundingClientRect();
+        return bounds.width >= panel.width - 2 && bounds.top >= actions.bottom;
+      }),
+      "community picker spans the settings panel below destination actions",
+    );
+    const pickerCaptures = path.join(
+      repositoryRoot,
+      "artifacts/community-picker-review",
+    );
+    fs.mkdirSync(pickerCaptures, { recursive: true });
+    await page
+      .locator(".xt-composer-dialog")
+      .screenshot({ path: path.join(pickerCaptures, "community-pills.png") });
+
     assert.equal(
       await frame
         .locator(".xt-planner-community")
@@ -1243,6 +1263,12 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
     await frame.locator(".xt-planner-community:visible input").check();
     await frame.getByLabel("Search worksheet communities").fill("community_02");
     await frame.locator(".xt-planner-community:visible input").check();
+    await frame.getByLabel("Search worksheet communities").fill("");
+    await page
+      .locator(".xt-composer-dialog")
+      .screenshot({
+        path: path.join(pickerCaptures, "community-pills-selected.png"),
+      });
     await frame
       .getByRole("button", { name: "Add selected (2)", exact: true })
       .click();

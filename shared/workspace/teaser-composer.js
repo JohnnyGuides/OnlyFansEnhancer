@@ -318,7 +318,7 @@
         const picker = node("div", "xt-planner-community-picker");
         const filter = node("input", "");
         filter.type = "search";
-        filter.placeholder = "Search worksheet communities";
+        filter.placeholder = "Search communities";
         filter.setAttribute("aria-label", "Search worksheet communities");
         const list = node("div", "xt-planner-community-list");
         const picked = new Set();
@@ -342,7 +342,9 @@
                 : preset.status,
             ),
           );
-          label.title = preset.notes;
+          label.title = [preset.status, preset.notes]
+            .filter(Boolean)
+            .join(" � ");
           label.dataset.name = preset.subreddit.toLowerCase();
           check.addEventListener("change", () => {
             if (check.checked) picked.add(preset.subreddit);

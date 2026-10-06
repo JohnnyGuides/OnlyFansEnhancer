@@ -200,11 +200,19 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .xt-planner-community-picker {
   display: grid;
-  gap: 8px;
-  border-top: 1px solid #344657;
-  padding-top: 8px;
+  flex: 0 0 100%;
+  min-width: 0;
+  gap: 10px;
+  padding-top: 4px;
+}
+.calendar-teaser .xt-planner-community-picker > input {
+  width: 100%;
 }
 .calendar-teaser .xt-planner-community-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
   max-height: 190px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -212,16 +220,41 @@ body.calendar-reddit-draft .upload-actions .action-status {
 .calendar-teaser .xt-planner-community {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0;
+  position: relative;
+  max-width: 100%;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid #344657;
+  border-radius: 999px;
+  background: #0c121a;
   font-size: 12px;
+  cursor: pointer;
+}
+.calendar-teaser .xt-planner-community span {
+  overflow-wrap: anywhere;
+}
+.calendar-teaser .xt-planner-community:has(:checked) {
+  border-color: #65cfff;
+  background: #123345;
+}
+.calendar-teaser .xt-planner-community:has(:focus-visible) {
+  outline: 2px solid #65cfff;
+  outline-offset: 2px;
+}
+.calendar-teaser .xt-planner-community:has(:disabled) {
+  opacity: 0.5;
+  cursor: default;
 }
 .calendar-teaser .xt-planner-community small {
-  margin-left: auto;
-  color: #afbed2;
+  display: none;
 }
 .calendar-teaser .xt-planner-community input {
-  width: auto;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
 }
 .calendar-teaser .xt-planner-community-picker p {
   margin: 0;
