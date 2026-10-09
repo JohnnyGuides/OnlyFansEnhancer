@@ -83,6 +83,7 @@
     episode = null,
     recommendations = [],
     renderCatalogue = null,
+    layoutCatalogue = () => {},
     request = global.OFEnhancerHost.request,
     onSaved = () => {},
   }) {
@@ -91,6 +92,7 @@
       return;
     }
     const dialog = node("dialog", "xt-composer-dialog");
+    let catalogueObserver = null;
     active = dialog;
     dialog.setAttribute("aria-label", `Teaser for ${dayLabel(date)}`);
     const heading = node("header", "xt-composer-heading");
@@ -529,6 +531,7 @@
     dialog.addEventListener(
       "close",
       () => {
+        catalogueObserver?.disconnect();
         window.removeEventListener("message", receive);
         dialog.remove();
         active = null;
@@ -547,6 +550,7 @@
           "Choose an MP4, MOV, M4V or WebM video under 512 MB.";
         return;
       }
+      catalogueObserver?.disconnect();
       dirty = Boolean(file && !draft);
       title.textContent =
         episodes.find((item) => item.sourceKey === draft?.episodeKey)?.title ||
@@ -651,6 +655,7 @@
       }
     }
     async function choose() {
+      catalogueObserver?.disconnect();
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.after(destinations);
@@ -762,6 +767,13 @@
             if (file && !loading) edit(file);
           });
           content.replaceChildren(wrapper, input);
+          layoutCatalogue(wall);
+          if (global.ResizeObserver) {
+            catalogueObserver = new ResizeObserver(() =>
+              layoutCatalogue(wrapper.querySelector(".xt-cards")),
+            );
+            catalogueObserver.observe(wrapper);
+          }
           status.textContent = "";
           return;
         }

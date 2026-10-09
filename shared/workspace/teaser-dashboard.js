@@ -8,6 +8,17 @@
   // "Scan now" only asks Chrome's background scanner to read the owner's
   // own profile.
   const DAY_MS = 86400000;
+  function joinSeasonLines(wall) {
+    const cards = Array.from(wall?.children || []);
+    cards.forEach((card, index) => {
+      const next = cards[index + 1];
+      card.dataset.join = String(
+        Boolean(card.dataset.season) &&
+          next?.dataset.season === card.dataset.season &&
+          next.offsetTop === card.offsetTop,
+      );
+    });
+  }
   const ABOVE_USUAL = 1.15;
   const BELOW_USUAL = 0.8;
   const PICK_WINDOW_DAYS = 7;
@@ -545,6 +556,7 @@
         episodes: episodes(),
         recommendations: recommendations(pickContext(date)),
         renderCatalogue: (select) => renderFlow(pickContext(date), select),
+        layoutCatalogue: joinSeasonLines,
         request,
         onSaved: async () => {
           state.drafts = await global.OFEnhancerTeaserDrafts.list();
@@ -1529,6 +1541,7 @@
                   for (const item of [...extras].slice(1)) wall.append(item);
                 }
                 flow.replaceWith(next);
+                joinSeasonLines(next.querySelector(".xt-cards"));
                 next
                   .querySelector(`[data-coverage="${state.coverage}"]`)
                   ?.focus();
@@ -1630,9 +1643,7 @@
       return flow;
     }
 
-    // A season's line bridges the gap to its next tile unless the row ends
-    // there; the grid has fixed 96px columns with 6px gaps.
-    function joinSeasonLines(wall) {
+    function layoutDashboard(wall) {
       const container = root.parentElement;
       if (!root.isConnected || !container) return;
       const style = getComputedStyle(container);
@@ -1664,18 +1675,13 @@
       if (bar) bar.style.width = `${wallColumns * 102 - 6}px`;
       const cards = Array.from(wall?.children || []);
       cards.forEach((card, index) => {
-        const next = cards[index + 1];
         if (state.picking) {
           const label = card.querySelector(".xt-season-name");
           if (label)
             label.style.maxWidth = `${(wallColumns - (index % wallColumns)) * 102 - 6}px`;
         }
-        card.dataset.join = String(
-          Boolean(next) &&
-            next.dataset.season === card.dataset.season &&
-            (index + 1) % wallColumns !== 0,
-        );
       });
+      joinSeasonLines(wall);
     }
 
     function performance(post) {
@@ -1925,7 +1931,7 @@
       // Observe the current layout even when a filter yields no tiles. The
       // callback resolves the current wall rather than retaining detached DOM.
       const updateLayout = () =>
-        joinSeasonLines(root.querySelector(".xt-flow .xt-cards"));
+        layoutDashboard(root.querySelector(".xt-flow .xt-cards"));
       updateLayout();
       if (global.ResizeObserver) {
         wallObserver = new ResizeObserver(updateLayout);

@@ -2618,6 +2618,44 @@ test("before any post is recorded the line counts posts read without a total", a
   }
 });
 
+test("catalogue picker connects each season across gaps and recalculates wrapped rows", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    await page.locator('.xt-tile[data-date="2026-10-02"]').click();
+    const wall = page.locator(".xt-composer-catalogue .xt-cards");
+    await wall.locator('[data-join="true"]').first().waitFor();
+    await page
+      .locator('.xt-composer-catalogue [data-coverage="needs"]')
+      .click();
+    await page.locator('.xt-composer-catalogue [data-coverage="all"]').click();
+    for (const width of [1200, 650, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForFunction(() => {
+        const cards = [
+          ...document.querySelectorAll(".xt-composer-catalogue .xt-card"),
+        ];
+        return cards.every((card, index) => {
+          const next = cards[index + 1];
+          const expected =
+            Boolean(card.dataset.season) &&
+            next?.dataset.season === card.dataset.season &&
+            next.offsetTop === card.offsetTop;
+          return (
+            card.dataset.join === String(expected) &&
+            getComputedStyle(card, "::before").right ===
+              (expected ? "-6px" : "0px")
+          );
+        });
+      });
+      assert.ok(await wall.locator('[data-join="true"]').count());
+      await screenshot(page, `season-lines-${width}.png`, true);
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test("a scan log that stopped updating never shows a spinner", async () => {
   const { page, context, errors } = await openDashboard({
     activity: liveActivity({ updatedUtc: "2026-10-01T11:55:00.000Z" }),
