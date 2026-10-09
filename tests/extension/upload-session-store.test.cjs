@@ -806,6 +806,7 @@ test("saved draft keeps extra video teaser proofs and drops them for images", as
     draft: {
       title: "Neutral",
       fullFilename: "full.mp4",
+      scriptLeadInMs: 1023,
       mediaFiles: [
         { role: "media1", name: "one.mp4", kind: "video" },
         { role: "media2", name: "two.mp4", kind: "video" },
@@ -813,6 +814,7 @@ test("saved draft keeps extra video teaser proofs and drops them for images", as
       ],
       fileProof: {
         full: proof("full.mp4"),
+        script: { ...proof("episode.funscript"), type: "application/json" },
         media1: proof("one.mp4"),
         media2: proof("two.mp4"),
         media3: proof("still.png"),
@@ -832,6 +834,9 @@ test("saved draft keeps extra video teaser proofs and drops them for images", as
     "media2",
     "media2Teaser",
     "media3",
+    "script",
   ]);
   assert.equal(restored.draft.fileProof.media2Teaser.name, "two (teaser).mp4");
+  assert.equal(restored.draft.fileProof.script.name, "episode.funscript");
+  assert.equal(restored.draft.scriptLeadInMs, 1023);
 });

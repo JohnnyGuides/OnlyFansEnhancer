@@ -2766,6 +2766,7 @@
         targets,
         draft: {
           title: value.title,
+          scriptLeadInMs: value.scriptLeadInMs,
           hasTeaser: value.hasTeaser,
           publishMode: value.publishMode,
           description: value.description,
@@ -2789,6 +2790,7 @@
             Boolean(thumbnailFile),
           pornhubFilename: selectedPornhubFile(value.pornhubMode)?.name || "",
           fileProof: {
+            script: fileResumeProof(scriptFile),
             full: fileResumeProof(fullFile),
             ...Object.fromEntries(
               additionalMedia.map((file, index) => [
@@ -3444,13 +3446,10 @@
       if (activeSession?.script) results.append(scriptResultCard());
     }
 
-    function scriptRun(value, targets, openingFrameToken) {
+    function scriptRun(value, targets) {
       if (!scriptFile || !scriptFunscript) return null;
-      const leadInMs = openingFrameToken
-        ? globalThis.OFEnhancerDesktopUpload?.openingFrameLeadInMs?.(
-            openingFrameToken,
-          )
-        : 0;
+      const leadInMs =
+        value.scriptLeadInMs ?? (value.openingFrame ? undefined : 0);
       const blocked = !Number.isSafeInteger(leadInMs);
       return {
         funscript: scriptFunscript,
@@ -3572,14 +3571,17 @@
         const notes = [];
         for (const result of response.scripts || []) {
           if (result.url) {
-            script.urls.push(result.url);
-            script.sentKeys.push(...result.keys);
+            if (!script.urls.includes(result.url)) script.urls.push(result.url);
+            // Reposting is idempotent; keep failed catalogue records retryable.
+            if (!result.sheetError) script.sentKeys.push(...result.keys);
           }
           if (result.error) failures.push(result.error);
           if (result.sheetError) notes.push(result.sheetError);
         }
         script.status =
-          !failures.length && (response.scripts || []).length === uploads.length
+          !failures.length &&
+          !notes.length &&
+          (response.scripts || []).length === uploads.length
             ? "sent"
             : "failed";
         script.error = [...failures, ...notes].join(" ");
@@ -4538,6 +4540,7 @@
             pornhubMode: value.pornhubMode,
             profileSignature: value.profileSignature,
             fileProof: {
+              script: fileResumeProof(scriptFile),
               full: fileResumeProof(fullFile),
               ...Object.fromEntries(
                 additionalMedia.map((file, index) => [
@@ -4557,7 +4560,12 @@
           },
         });
         activeSession.catalogueDeferred = uploadWithoutSheet;
-        activeSession.script = scriptRun(value, targets, openingFrameToken);
+        value.scriptLeadInMs = openingFrameToken
+          ? globalThis.OFEnhancerDesktopUpload?.openingFrameLeadInMs?.(
+              openingFrameToken,
+            )
+          : 0;
+        activeSession.script = scriptRun({ ...value, openingFrame }, targets);
         lastAttempt = { sessionId, phase: "connecting" };
         if (workflowMode) workflowMode.disabled = true;
         fullInput.disabled = true;
@@ -4871,7 +4879,7 @@
           ? `Detected ${savedFiles.length > 1 ? "videos" : "video"} “${savedFiles.join(" + ") || resumable.draft.title}” in the queue.`
           : `${response.pendingRecovery} previous preparation ${response.pendingRecovery === 1 ? "run is" : "runs are"} saved in upload history.`;
         get("#resumeInstructions").textContent = resumable
-          ? "To Resume, reselect the exact saved files. New retires earlier local runs across Upload Hub and the browser extension. Remote drafts and review history remain."
+          ? "To Resume, reselect the exact saved files, including any script. New retires earlier local runs across Upload Hub and the browser extension. Remote drafts and review history remain."
           : "This run cannot be resumed from the saved state. Review any remote draft, then choose New. Earlier local runs will be retired; remote drafts and review history remain.";
       } catch (error) {
         if (activeSession) return;
@@ -4921,6 +4929,15 @@
 
     async function resumeSavedUpload() {
       const expected = resumable.draft;
+      if (
+        expected.fileProof?.script &&
+        (!scriptFunscript ||
+          !matchesResumeFile(expected.fileProof.script, scriptFile))
+      ) {
+        get("#resumeError").textContent =
+          "Reselect the saved script before resuming.";
+        return;
+      }
       const expectedExtraTeasers = Object.keys(expected.fileProof || {}).filter(
         (role) => /^media[1-8]Teaser$/.test(role),
       );
@@ -5080,6 +5097,7 @@
             pornhubMode: expected.pornhubMode || "free",
             profileSignature: expected.profileSignature,
             fileProof: {
+              script: fileResumeProof(scriptFile),
               full: fileResumeProof(fullFile),
               ...Object.fromEntries(
                 additionalMedia.map((file, index) => [
@@ -5094,6 +5112,7 @@
             },
           },
         });
+        activeSession.script = scriptRun(expected, [...targetNames]);
         platformStates.clear();
         for (const target of resumable.platforms)
           platformStates.set(target.platform, target);
@@ -5103,6 +5122,13 @@
         get("#preparationControls").hidden = false;
         lockDraft(true);
         renderPlatformStates();
+        if (
+          activeSession.script &&
+          [...targetNames].every(
+            (target) => platformStates.get(target)?.postUrl,
+          )
+        )
+          void sendScript();
         matchStatus.textContent =
           "Reconnected to the saved upload. Review the platform result before continuing.";
         uploadError.textContent = "";

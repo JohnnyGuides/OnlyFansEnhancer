@@ -761,6 +761,53 @@ function send(message, sender = extensionPageSender) {
   assert.equal(validatedUpload.draft.fanslyPreset, "defaulT");
   assert.equal(validatedUpload.draft.fullFilename, "Episode 42 (full).mp4");
   assert.equal(validatedUpload.draft.manyvidsThumbnail, true);
+  const scriptProof = {
+    name: "episode.funscript",
+    size: 100,
+    lastModified: 1000,
+    type: "application/json",
+  };
+  context.scriptRequest = {
+    ...validatedUpload,
+    draft: {
+      ...validatedUpload.draft,
+      scriptLeadInMs: 1023,
+      fileProof: { script: scriptProof },
+    },
+  };
+  const scriptUpload = await vm.runInContext(
+    "validateCreatorUploadRequest(scriptRequest)",
+    context,
+  );
+  assert.equal(scriptUpload.draft.scriptLeadInMs, 1023);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(scriptUpload.draft.fileProof.script)),
+    scriptProof,
+  );
+  context.scriptSession = { draft: scriptUpload.draft };
+  context.scriptBindingProof = { ...scriptUpload.draft, fileProof: {} };
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(scriptSession, scriptBindingProof)",
+      context,
+    ),
+    false,
+  );
+  context.scriptBindingProof.fileProof.script = scriptProof;
+  assert.equal(
+    vm.runInContext(
+      "creatorUploadSessionProofMatches(scriptSession, scriptBindingProof)",
+      context,
+    ),
+    true,
+  );
+  for (const invalid of [-1, 60001, 1.5, "1023"]) {
+    context.scriptRequest.draft.scriptLeadInMs = invalid;
+    await assert.rejects(
+      vm.runInContext("validateCreatorUploadRequest(scriptRequest)", context),
+      /Invalid script lead-in/,
+    );
+  }
   const extraMediaRequest = (name, kind) => ({
     ...validatedUpload,
     targets: ["onlyfans", "fansly"],

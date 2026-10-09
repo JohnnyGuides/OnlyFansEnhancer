@@ -611,6 +611,15 @@
   function sanitizeDraft(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     const output = {};
+    if (value.scriptLeadInMs !== undefined) {
+      if (
+        !Number.isSafeInteger(value.scriptLeadInMs) ||
+        value.scriptLeadInMs < 0 ||
+        value.scriptLeadInMs > 60_000
+      )
+        throw new Error("Invalid saved script lead-in.");
+      output.scriptLeadInMs = value.scriptLeadInMs;
+    }
     for (const [field, maximum] of Object.entries(DRAFT_STRINGS)) {
       if (Object.hasOwn(value, field))
         output[field] = clean(value[field], maximum);
@@ -638,6 +647,7 @@
         throw new Error("Invalid saved upload file proof.");
       output.fileProof = {};
       for (const role of [
+        "script",
         "full",
         "teaser",
         "thumbnail",

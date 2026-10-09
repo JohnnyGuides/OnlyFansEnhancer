@@ -3236,7 +3236,7 @@ async function getCreatorUploadSession(sessionId) {
 
 function creatorUploadSessionProofMatches(session, proof) {
   if (!session?.draft || !proof || typeof proof !== "object") return false;
-  for (const role of CREATOR_UPLOAD_FILE_ROLES) {
+  for (const role of [...CREATOR_UPLOAD_FILE_ROLES, "script"]) {
     const expected = session.draft.fileProof?.[role];
     if (!expected) continue;
     const actual = proof.fileProof?.[role];
@@ -3287,7 +3287,7 @@ function creatorUploadResumeFileProof(value) {
   if (typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid upload file proof.");
   const proof = {};
-  for (const role of CREATOR_UPLOAD_FILE_ROLES) {
+  for (const role of [...CREATOR_UPLOAD_FILE_ROLES, "script"]) {
     const item = value[role];
     if (item == null) continue;
     const name = creatorUploadClean(item.name, 500);
@@ -3333,6 +3333,7 @@ async function validateCreatorUploadRequest(message) {
     throw new Error("Choose an allow-listed upload platform.");
   }
   const draft = {
+    scriptLeadInMs: message.draft?.scriptLeadInMs,
     title: creatorUploadClean(message.draft?.title, 500),
     description: creatorUploadClean(message.draft?.description, 10_000),
     fullFilename: creatorUploadClean(message.draft?.fullFilename, 500),
@@ -3388,6 +3389,13 @@ async function validateCreatorUploadRequest(message) {
     contentPreset: creatorUploadClean(message.draft?.contentPreset, 100),
     fanslyCaption: creatorUploadClean(message.draft?.fanslyCaption, 15_000),
   };
+  if (
+    draft.scriptLeadInMs !== undefined &&
+    (!Number.isSafeInteger(draft.scriptLeadInMs) ||
+      draft.scriptLeadInMs < 0 ||
+      draft.scriptLeadInMs > 60_000)
+  )
+    throw new Error("Invalid script lead-in.");
   const normalizedProfiles = CREATOR_REGISTRY.normalizeSettings({
     profiles: message.draft?.profiles,
   }).value.profiles;
@@ -6207,6 +6215,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
                   fullFilename: latest.draft.fullFilename || "",
                   pornhubFilename: latest.draft.pornhubFilename || "",
                   fileProof: latest.draft.fileProof || {},
+                  openingFrame: latest.draft.openingFrame || null,
+                  scriptLeadInMs: latest.draft.scriptLeadInMs,
                   hasTeaser: latest.draft.hasTeaser === true,
                   manyvidsThumbnail: latest.draft.manyvidsThumbnail === true,
                   pornhubThumbnail: latest.draft.pornhubThumbnail === true,

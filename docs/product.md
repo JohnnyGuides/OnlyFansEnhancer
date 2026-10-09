@@ -119,7 +119,9 @@ row. It is checked against the website's rules when chosen (whole-millisecond
 for a refusal is shown. Only `actions` and `inverted` are sent; the bytes are not
 persisted. The console hands the script to the worker in ordered 30,000-byte
 parts (about 40 KB per relayed command, under the desktop relay's 64 KB limit);
-the worker rejects missing, repeated or out-of-order parts and drops partial
+only its file identity and the measured video lead-in are saved for recovery.
+Resume requires reselecting the saved script and uses the original lead-in.
+The worker rejects missing, repeated or out-of-order parts and drops partial
 uploads after five minutes.
 Once every destination in the run has a post link, the script is posted to
 JohnnyGuides (`POST /sync/scripts`, Bearer token from the toolkit settings) with
@@ -130,7 +132,8 @@ prepared video. Other keys get the script unchanged, in a separate upload. A
 script failure appears on its own result card with Retry and never alters the
 platform results. The website names the file by content hash, so the same keys
 and script always give the same file and mapping; a retry after a lost reply is
-harmless, and keys already sent are not posted again. The returned link is recorded in the catalogue's Script column.
+harmless. Keys whose catalogue write failed remain retryable; completed keys are
+not posted again. The returned link is recorded in the catalogue's Script column.
 The **JohnnyGuides Website** destination is shown disabled until video upload
 to the site exists.
 Only a creator-confirmed exact
