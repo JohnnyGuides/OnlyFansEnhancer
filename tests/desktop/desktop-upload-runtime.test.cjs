@@ -78,6 +78,8 @@ function extension(options = {}) {
     chrome,
     handleMessage(message, sender, reply) {
       actions.push(message);
+      if (options.handleMessage)
+        return options.handleMessage(message, sender, reply);
       reply({ ok: true, sender: sender.id });
       return true;
     },
@@ -511,4 +513,132 @@ test("opening frame preparation is bound to the selected file and routed only to
       ["onlyfans", "fansly"].includes(platform) ? token : undefined,
     );
   }
+});
+
+test("a 45-minute, 1 MB script crosses the desktop relay in parts under 64 KB and posts intact", async () => {
+  const syncContext = vm.createContext({
+    URL,
+    TextEncoder,
+    TextDecoder,
+    btoa,
+    atob,
+    crypto: webcrypto,
+  });
+  vm.runInContext(
+    fs.readFileSync(
+      path.join(root, "extensions/personal/workflows/sync-script.js"),
+      "utf8",
+    ),
+    syncContext,
+  );
+  const sync = syncContext.CreatorSyncScript;
+  // ~43,000 points over 45 minutes with the extra fields real editors write.
+  const original = {
+    version: "1.0",
+    inverted: false,
+    range: 100,
+    metadata: { title: "Episode", duration: 2_700_000 },
+    actions: Array.from({ length: 43_000 }, (_, index) => ({
+      at: Math.round((index * 2_700_000) / 43_000),
+      pos: (index * 37) % 101,
+    })),
+  };
+  const text = JSON.stringify(original);
+  assert.ok(text.length > 1_000_000, `script is ${text.length} bytes`);
+  const funscript = JSON.parse(JSON.stringify(sync.parseFunscript(text)));
+  const uploads = sync.scriptUploads(
+    [
+      { platform: "onlyfans", postUrl: "https://onlyfans.com/123456/x" },
+      { platform: "manyvids", postUrl: "https://www.manyvids.com/Video/777/x" },
+    ],
+    funscript,
+    { onlyfans: 1023, fansly: 1023 },
+  );
+  const assembler = sync.createScriptAssembler();
+  const posted = [];
+  const browser = extension({
+    handleMessage(message, _sender, reply) {
+      if (message.type === "UPLOAD_SYNC_SCRIPT_PART")
+        reply({ ok: true, received: assembler.add(message) });
+      else if (message.type === "UPLOAD_SYNC_SCRIPT") {
+        const { title, uploads: received } = assembler.take(message.uploadId);
+        void sync
+          .uploadScripts(
+            {
+              settings: {
+                origin: "https://johnnyguides.com",
+                token: "token-1234",
+              },
+              title,
+              uploads: received,
+            },
+            {
+              fetchImpl: async (_url, init) => {
+                posted.push(JSON.parse(init.body));
+                return {
+                  ok: true,
+                  status: 200,
+                  json: async () => ({
+                    url: `https://johnnyguides.com/sync/scripts/${posted.length}.funscript`,
+                  }),
+                };
+              },
+            },
+          )
+          .then((scripts) => reply({ ok: true, scripts }));
+      } else reply({ ok: true });
+      return true;
+    },
+  });
+  let largest = 0;
+  // The desktop BrowserUploadChannel refuses any command over 64 KB before queuing.
+  const ui = host((request) => {
+    const bytes = Buffer.byteLength(JSON.stringify(request.payload), "utf8");
+    largest = Math.max(largest, bytes);
+    if (bytes > 64 * 1024)
+      throw Object.assign(new Error("upload-command-too-large"), {
+        uploadAdmission: "not-started",
+      });
+    return browser.runtime.execute(request.payload);
+  });
+  const send = (message) =>
+    new Promise((resolve, reject) =>
+      ui.context.chrome.runtime.sendMessage(message, (response) => {
+        const error = ui.context.chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(response);
+      }),
+    );
+  const uploadId = await sync.sendScriptParts(send, {
+    title: "Episode",
+    uploads: uploads.map(({ keys, funscript }) => ({ keys, funscript })),
+  });
+  const response = await send({
+    type: "UPLOAD_SYNC_SCRIPT",
+    sessionId: "session",
+    uploadId,
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.scripts.length, 2);
+  const parts = browser.actions.filter(
+    (message) => message.type === "UPLOAD_SYNC_SCRIPT_PART",
+  );
+  assert.ok(parts.length > 60, `${parts.length} parts`);
+  assert.ok(largest < 64 * 1024, `largest relayed command ${largest} bytes`);
+  console.log(
+    `largest relayed command: ${largest} bytes in ${parts.length} parts`,
+  );
+  assert.deepEqual(
+    posted.map((body) => body.keys),
+    [["123456"], ["777"]],
+  );
+  assert.deepEqual(posted[1].funscript, {
+    actions: funscript.actions,
+    inverted: false,
+  });
+  assert.deepEqual(
+    posted[0].funscript.actions,
+    funscript.actions.map(({ at, pos }) => ({ at: at + 1023, pos })),
+  );
+  assert.equal(posted[0].title, "Episode");
 });

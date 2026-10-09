@@ -5618,8 +5618,14 @@ async function startCreatorUpload(sessionId, targets) {
 // Posts the run's toy-sync script to the website once per lead-in group, then
 // records each returned link like a platform result. Neither step can alter
 // the platform uploads.
+// Script bytes arrive in ordered parts because the desktop relay caps each
+// command at 64 KB; UPLOAD_SYNC_SCRIPT then posts the reassembled script.
+const CREATOR_SYNC_SCRIPT_PARTS =
+  globalThis.CreatorSyncScript.createScriptAssembler();
+
 async function uploadCreatorSyncScripts(message) {
   const sync = globalThis.CreatorSyncScript;
+  const { title, uploads } = CREATOR_SYNC_SCRIPT_PARTS.take(message.uploadId);
   const stored = await chrome.storage.local.get(sync.SETTINGS_KEY);
   const settings = sync.normalizeSettings(stored[sync.SETTINGS_KEY] || {});
   if (!settings.valid)
@@ -5631,8 +5637,8 @@ async function uploadCreatorSyncScripts(message) {
   return sync.uploadScripts(
     {
       settings: settings.value,
-      title: message.title,
-      uploads: message.uploads,
+      title,
+      uploads,
     },
     {
       async commit(url) {
@@ -6317,6 +6323,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
             message.catalogue,
           ),
         };
+      case "UPLOAD_SYNC_SCRIPT_PART":
+        return { received: CREATOR_SYNC_SCRIPT_PARTS.add(message) };
       case "UPLOAD_SYNC_SCRIPT":
         return { scripts: await uploadCreatorSyncScripts(message) };
       case "RETRY_CREATOR_UPLOAD_PLATFORM":

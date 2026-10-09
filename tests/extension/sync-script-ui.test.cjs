@@ -218,6 +218,23 @@ async function draftOnlyFansClip(page, { fansly = false } = {}) {
   );
 }
 
+// Reassembles each committed script from its relayed parts, as the worker does.
+const sentScripts = (page) =>
+  page.evaluate(() =>
+    calls
+      .filter((call) => call.type === "UPLOAD_SYNC_SCRIPT")
+      .map((commit) => {
+        const assembler = CreatorSyncScript.createScriptAssembler();
+        for (const part of calls.filter(
+          (call) =>
+            call.type === "UPLOAD_SYNC_SCRIPT_PART" &&
+            call.uploadId === commit.uploadId,
+        ))
+          assembler.add(part);
+        return assembler.take(commit.uploadId);
+      }),
+  );
+
 const scriptCard = (page) =>
   page.locator(".result-card", {
     has: page.locator("h3", { hasText: "Script" }),
@@ -302,13 +319,12 @@ test("Script card validates, sends after the links exist and fails on its own", 
         [...document.querySelectorAll(".result-card")].at(-1).textContent,
       ),
     );
-    const sent = await page.evaluate(() =>
-      calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT"),
-    );
+    const sent = await sentScripts(page);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].title, "Brand new clip");
+    // Only {actions, inverted?} travel; other script fields are dropped.
     assert.deepEqual(sent[0].uploads, [
-      { keys: ["123456"], funscript: script },
+      { keys: ["123456"], funscript: { actions: script.actions } },
     ]);
     const onlyfans = page.locator(".result-card", {
       has: page.locator("h3", { hasText: "OnlyFans" }),
@@ -358,10 +374,7 @@ test("Script card validates, sends after the links exist and fails on its own", 
     assert.equal(await jg.isDisabled(), true, "after unlock and reset");
     assert.equal(await jg.isChecked(), false);
     assert.equal(await page.locator("#uploadScript").isDisabled(), false);
-    assert.equal(
-      await page.locator("#scriptFileSummary").textContent(),
-      "Select script",
-    );
+    assert.equal(await page.locator("#scriptFileSummary").textContent(), "");
     await page.locator("#loadTemplate").click();
     await page.waitForFunction(
       () =>
@@ -448,14 +461,11 @@ test("the script for OnlyFans and Fansly is shifted by the measured opening fram
     await page.waitForFunction(() =>
       calls.some((call) => call.type === "UPLOAD_SYNC_SCRIPT"),
     );
-    const [sent] = await page.evaluate(() =>
-      calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT"),
-    );
+    const [sent] = await sentScripts(page);
     assert.deepEqual(sent.uploads, [
       {
         keys: ["123456", "987654321"],
         funscript: {
-          ...script,
           actions: [
             { at: 1023, pos: 10 },
             { at: 2523, pos: 90 },

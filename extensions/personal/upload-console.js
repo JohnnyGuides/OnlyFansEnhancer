@@ -3552,11 +3552,21 @@
         );
         if (!uploads.length)
           throw new Error("No platform link has a video id for the script.");
+        // The script goes in parts below the desktop relay's 64 KB limit.
+        const uploadId = await globalThis.CreatorSyncScript.sendScriptParts(
+          sendMessage,
+          {
+            title: script.title,
+            uploads: uploads.map(({ keys, funscript }) => ({
+              keys,
+              funscript,
+            })),
+          },
+        );
         const response = await sendMessage({
           type: "UPLOAD_SYNC_SCRIPT",
           sessionId: session.id,
-          title: script.title,
-          uploads: uploads.map(({ keys, funscript }) => ({ keys, funscript })),
+          uploadId,
         });
         const failures = [];
         const notes = [];
@@ -5542,12 +5552,7 @@
         [teaserInput, teaserFile, "teaserFileSummary", "Auto"],
         [thumbnailInput, thumbnailFile, "manyvidsThumbnailSummary", "Auto"],
         [pornhubInput, pornhubFile, "pornhubFileSummary", "Select video"],
-        [
-          scriptInput,
-          scriptFile,
-          "scriptFileSummary",
-          scriptError || "Select script",
-        ],
+        [scriptInput, scriptFile, "scriptFileSummary", scriptError || ""],
         [
           socialInput,
           socialFile,

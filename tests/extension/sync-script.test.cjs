@@ -5,11 +5,20 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const root = require("../support/paths.cjs").personalRoot;
 
 function load(file) {
-  const context = vm.createContext({ URL, TextEncoder, Date });
+  const context = vm.createContext({
+    URL,
+    TextEncoder,
+    TextDecoder,
+    Date,
+    btoa,
+    atob,
+    crypto: webcrypto,
+  });
   vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context, {
     filename: file,
   });
@@ -56,13 +65,53 @@ test("a script must be .funscript JSON with {at, pos} actions", () => {
     '{"actions":[{"at":5,"pos":101}]}',
     '{"actions":[{"at":"5","pos":50}]}',
   ])
-    assert.throws(() => sync.parseFunscript(bad), /script/, bad);
+    assert.throws(() => sync.parseFunscript(bad), /script|Action/, bad);
   assert.equal(sync.isScriptFile({ name: "a.funscript", size: 10 }), true);
   assert.equal(sync.isScriptFile({ name: "a.json", size: 10 }), false);
   assert.equal(sync.isScriptFile({ name: "a.funscript", size: 0 }), false);
   assert.equal(
     sync.isScriptFile({ name: "a.funscript", size: 8 * 1024 * 1024 + 1 }),
     false,
+  );
+});
+
+test("script rules match the website and name the failing action", () => {
+  assert.deepEqual(
+    plain(
+      sync.parseFunscript(
+        JSON.stringify({
+          version: "1.0",
+          inverted: true,
+          metadata: { creator: "x" },
+          actions: [{ at: 0, pos: 50, extra: 1 }],
+        }),
+      ),
+    ),
+    { actions: [{ at: 0, pos: 50 }], inverted: true },
+  );
+  assert.deepEqual(
+    plain(
+      sync.parseFunscript(
+        '{"inverted":"yes","actions":[{"at":86400000,"pos":0}]}',
+      ),
+    ),
+    { actions: [{ at: 86_400_000, pos: 0 }] },
+  );
+  for (const [text, reason] of [
+    ['{"actions":[{"at":0,"pos":1},{"at":1.5,"pos":1}]}', /Action 2: at/],
+    ['{"actions":[{"at":86400001,"pos":1}]}', /Action 1: at/],
+    ['{"actions":[{"at":0,"pos":-1}]}', /Action 1: pos/],
+    ['{"actions":[]}', /no actions/],
+  ])
+    assert.throws(() => sync.parseFunscript(text), reason, text);
+  assert.throws(
+    () =>
+      sync.parseFunscript(
+        JSON.stringify({
+          actions: Array.from({ length: 500_001 }, () => ({ at: 0, pos: 0 })),
+        }),
+      ),
+    /500,001 actions; the limit is 500,000/,
   );
 });
 
@@ -162,7 +211,7 @@ test("the upload posts keys, title and script with the bearer token", async () =
   assert.deepEqual(JSON.parse(init.body), {
     keys: ["123456", "ph634de69359881"],
     title: "Episode 4",
-    funscript: script,
+    funscript: { actions: script.actions, inverted: false },
   });
   assert.deepEqual(plain(result), {
     file: "episode-4.funscript",
@@ -214,6 +263,10 @@ test("website refusals and bad input fail the script upload only", async () => {
     ),
   );
   await assert.rejects(sync.uploadScript({ ...base, title: " " }, never));
+  await assert.rejects(
+    sync.uploadScript({ ...base, title: "Linebell" }, never),
+    /control characters/,
+  );
   await assert.rejects(sync.uploadScript({ ...base, token: "" }, never));
   await assert.rejects(
     sync.uploadScript({ ...base, origin: "https://example.com" }, never),
@@ -340,4 +393,47 @@ test("the upload draft accepts only a .funscript under 8 MB as Script", () => {
       [...hooks.normalizeDraft({ ...base, scriptFile }).errors],
       ["Choose a .funscript script under 8 MB or leave it blank."],
     );
+});
+
+test("script parts reassemble only when complete and in order", async () => {
+  const payload = {
+    title: "Episode",
+    uploads: [{ keys: ["123"], funscript: { actions: script.actions } }],
+  };
+  const parts = [];
+  // A 70,000-byte title forces three parts.
+  const big = { ...payload, title: "x".repeat(70_000) };
+  const id = await sync.sendScriptParts(async (part) => parts.push(part), big);
+  assert.equal(parts.length, 3);
+  const ok = sync.createScriptAssembler();
+  for (const part of parts) ok.add(part);
+  assert.equal(plain(ok.take(id)).title.length, 70_000);
+  assert.throws(() => ok.take(id), /did not arrive completely/, "taken once");
+
+  const missing = sync.createScriptAssembler();
+  missing.add(parts[0]);
+  missing.add(parts[1]);
+  assert.throws(() => missing.take(id), /did not arrive completely/);
+
+  const duplicate = sync.createScriptAssembler();
+  duplicate.add(parts[0]);
+  assert.throws(() => duplicate.add(parts[0]), /out of order or twice/);
+  assert.throws(() => duplicate.add(parts[1]), /out of order or twice/);
+
+  const outOfOrder = sync.createScriptAssembler();
+  assert.throws(() => outOfOrder.add(parts[1]), /out of order/);
+
+  let clock = 0;
+  const stale = sync.createScriptAssembler({ now: () => clock });
+  stale.add(parts[0]);
+  clock = 5 * 60_000 + 1;
+  assert.throws(() => stale.add(parts[1]), /out of order/, "expired");
+
+  const invalid = sync.createScriptAssembler();
+  assert.throws(() => invalid.add({ ...parts[0], data: "%%%" }), /invalid/);
+  assert.throws(() => invalid.add({ ...parts[0], uploadId: "x" }), /invalid/);
+
+  const damaged = sync.createScriptAssembler();
+  damaged.add({ uploadId: id, index: 0, total: 1, data: btoa("{oops") });
+  assert.throws(() => damaged.take(id), /damaged/);
 });

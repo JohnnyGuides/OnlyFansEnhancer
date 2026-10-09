@@ -8,6 +8,14 @@
   const KEY = /^[a-z0-9_-]{1,40}$/i;
   const MAX_BYTES = 8 * 1024 * 1024;
   const PLATFORMS = ["onlyfans", "fansly", "manyvids", "pornhub"];
+  const MAX_ACTIONS = 500_000;
+  const MAX_AT = 86_400_000;
+  // The desktop relay refuses commands over 64 KB, so the script travels to
+  // the worker in base64 parts of 30,000 bytes (40,000 characters).
+  const PART_BYTES = 30_000;
+  const MAX_PARTS = 600;
+  const UPLOAD_ID = /^[a-f0-9]{32}$/;
+  const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
   function parseFunscript(text) {
     let value;
@@ -21,21 +29,26 @@
       typeof value !== "object" ||
       Array.isArray(value) ||
       !Array.isArray(value.actions) ||
-      !value.actions.length ||
-      !value.actions.every(
-        (action) =>
-          action &&
-          Number.isFinite(action.at) &&
-          action.at >= 0 &&
-          Number.isFinite(action.pos) &&
-          action.pos >= 0 &&
-          action.pos <= 100,
-      )
+      !value.actions.length
     )
+      throw new Error("The script has no actions list.");
+    if (value.actions.length > MAX_ACTIONS)
       throw new Error(
-        "The script needs an actions list of {at, pos} points (pos 0-100).",
+        `The script has ${value.actions.length.toLocaleString("en-US")} actions; the limit is 500,000.`,
       );
-    return value;
+    // Matches the website: only {at, pos} points and an optional inverted flag are sent.
+    const actions = value.actions.map((action, index) => {
+      if (!Number.isInteger(action?.at) || action.at < 0 || action.at > MAX_AT)
+        throw new Error(
+          `Action ${index + 1}: at must be a whole number of ms from 0 to 86,400,000.`,
+        );
+      if (!Number.isFinite(action.pos) || action.pos < 0 || action.pos > 100)
+        throw new Error(`Action ${index + 1}: pos must be from 0 to 100.`);
+      return { at: action.at, pos: action.pos };
+    });
+    return typeof value.inverted === "boolean"
+      ? { actions, inverted: value.inverted }
+      : { actions };
   }
 
   function isScriptFile(file) {
@@ -142,8 +155,12 @@
       throw new Error("No platform video id is available for the script.");
     const cleanTitle = String(title || "")
       .trim()
-      .slice(0, 120);
+      .slice(0, 120)
+      .replace(/[\uD800-\uDBFF]$/, "");
     if (!cleanTitle) throw new Error("Enter a title for the script.");
+    // eslint-disable-next-line no-control-regex -- control characters are the rejected input
+    if (/[\x00-\x1f\x7f]/.test(cleanTitle))
+      throw new Error("The title contains control characters.");
     const body = JSON.stringify({
       keys: cleanKeys,
       title: cleanTitle,
@@ -230,6 +247,126 @@
     return scripts;
   }
 
+  function base64(bytes) {
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 8192)
+      binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+    return btoa(binary);
+  }
+
+  // Sends {title, uploads} to the worker as ordered parts; returns the id to
+  // commit with UPLOAD_SYNC_SCRIPT.
+  async function sendScriptParts(sendMessage, payload) {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const total = Math.max(1, Math.ceil(bytes.length / PART_BYTES));
+    if (total > MAX_PARTS) throw new Error("The script is too large to send.");
+    const uploadId = [...crypto.getRandomValues(new Uint8Array(16))]
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+    for (let index = 0; index < total; index++)
+      await sendMessage({
+        type: "UPLOAD_SYNC_SCRIPT_PART",
+        uploadId,
+        index,
+        total,
+        data: base64(
+          bytes.subarray(index * PART_BYTES, (index + 1) * PART_BYTES),
+        ),
+      });
+    return uploadId;
+  }
+
+  // Worker side: accepts parts strictly in order, drops stale or broken
+  // uploads, and returns the validated {title, uploads} once complete.
+  function createScriptAssembler({
+    now = () => Date.now(),
+    ttlMs = 5 * 60_000,
+    maxUploads = 4,
+  } = {}) {
+    const pending = new Map();
+    const expire = () => {
+      for (const [id, entry] of pending)
+        if (now() - entry.updatedAt > ttlMs) pending.delete(id);
+    };
+    const damaged = () =>
+      new Error("The script arrived damaged. Send the script again.");
+    return {
+      /** @param {{uploadId?: string, index?: number, total?: number, data?: string}} part */
+      add({ uploadId, index, total, data } = {}) {
+        expire();
+        if (
+          !UPLOAD_ID.test(String(uploadId)) ||
+          !Number.isSafeInteger(total) ||
+          total < 1 ||
+          total > MAX_PARTS ||
+          !Number.isSafeInteger(index) ||
+          typeof data !== "string" ||
+          data.length > Math.ceil(PART_BYTES / 3) * 4 ||
+          !BASE64.test(data)
+        )
+          throw new Error("The script part is invalid.");
+        let entry = pending.get(uploadId);
+        if (!entry && index === 0) {
+          if (pending.size >= maxUploads)
+            throw new Error("Too many script uploads are in progress.");
+          entry = { total, parts: [], updatedAt: now() };
+          pending.set(uploadId, entry);
+        }
+        if (!entry || entry.total !== total || index !== entry.parts.length) {
+          pending.delete(uploadId);
+          throw new Error(
+            "Script parts arrived out of order or twice. Send the script again.",
+          );
+        }
+        entry.parts.push(data);
+        entry.updatedAt = now();
+        return entry.parts.length;
+      },
+      take(uploadId) {
+        expire();
+        const entry = pending.get(uploadId);
+        pending.delete(uploadId);
+        if (!entry || entry.parts.length !== entry.total)
+          throw new Error(
+            "The script did not arrive completely. Send the script again.",
+          );
+        const chunks = entry.parts.map((part) =>
+          Uint8Array.from(atob(part), (character) => character.charCodeAt(0)),
+        );
+        const bytes = new Uint8Array(
+          chunks.reduce((size, chunk) => size + chunk.length, 0),
+        );
+        let offset = 0;
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        let value;
+        try {
+          value = JSON.parse(
+            new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+          );
+        } catch {
+          throw damaged();
+        }
+        if (
+          typeof value?.title !== "string" ||
+          !Array.isArray(value.uploads) ||
+          !value.uploads.length ||
+          value.uploads.length > 4
+        )
+          throw damaged();
+        return {
+          title: value.title,
+          uploads: value.uploads.map((upload) => ({
+            keys: upload?.keys,
+            funscript: parseFunscript(JSON.stringify(upload?.funscript)),
+          })),
+        };
+      },
+    };
+  }
+
   globalThis.CreatorSyncScript = Object.freeze({
     SETTINGS_KEY,
     DEFAULT_ORIGIN,
@@ -242,5 +379,7 @@
     shiftFunscript,
     uploadScript,
     uploadScripts,
+    sendScriptParts,
+    createScriptAssembler,
   });
 })();

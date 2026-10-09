@@ -113,8 +113,14 @@ no favourite is inferred. The desktop checks the scanned inventory and file hash
 then performs the same conversion and bound file handoff. Refresh variants rescans
 the configured thumbnail folder; a manually chosen file remains available.
 Bound local images remain selectable after their filenames change.
-An optional **Script** (`.funscript`) card follows Pornhub Free. Its JSON and
-`{at, pos}` actions are checked when chosen, and its bytes stay in the console.
+An optional **Script** (`.funscript`) control sits at the right of the Add media
+row. It is checked against the website's rules when chosen (whole-millisecond
+`at` from 0 to 86,400,000, `pos` 0–100, at most 500,000 actions) and the reason
+for a refusal is shown. Only `actions` and `inverted` are sent; the bytes are not
+persisted. The console hands the script to the worker in ordered 30,000-byte
+parts (about 40 KB per relayed command, under the desktop relay's 64 KB limit);
+the worker rejects missing, repeated or out-of-order parts and drops partial
+uploads after five minutes.
 Once every destination in the run has a post link, the script is posted to
 JohnnyGuides (`POST /sync/scripts`, Bearer token from the toolkit settings) with
 the post ids of the run's links (OnlyFans post id, Fansly id, Pornhub viewkey,
@@ -122,7 +128,9 @@ ManyVids id). OnlyFans and Fansly receive the video with any opening frame, so
 their keys get a copy shifted by the lead-in that the desktop measured from the
 prepared video. Other keys get the script unchanged, in a separate upload. A
 script failure appears on its own result card with Retry and never alters the
-platform results. The returned link is recorded in the catalogue's Script column.
+platform results. The website names the file by content hash, so the same keys
+and script always give the same file and mapping; a retry after a lost reply is
+harmless, and keys already sent are not posted again. The returned link is recorded in the catalogue's Script column.
 The **JohnnyGuides Website** destination is shown disabled until video upload
 to the site exists.
 Only a creator-confirmed exact
