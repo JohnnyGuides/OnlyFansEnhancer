@@ -55,6 +55,9 @@ for (const desktop of [false, true]) {
       );
       assert.equal(await chromeSetup.count(), 0);
       assert.equal(await page.locator("#selectedPlatformDetails").count(), 0);
+      const back = page.getByRole("link", { name: "Back to workspace" });
+      assert.equal(await back.count(), desktop ? 1 : 0);
+      if (desktop) assert.equal(await back.getAttribute("href"), "index.html");
     } finally {
       await browser.close();
     }

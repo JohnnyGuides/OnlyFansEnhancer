@@ -2209,6 +2209,14 @@ a {
 .app-heading h1 {
   margin: 0;
 }
+.app-heading .upload-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  min-height: 32px;
+  padding: 0;
+}
 .workflow-panel {
   grid-column: 2;
   grid-row: 1;

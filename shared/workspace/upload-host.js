@@ -530,6 +530,16 @@
     const header =
       document.querySelector(".app-heading") ||
       document.querySelector(".app-header");
+    if (header && window.parent === window) {
+      const back = document.createElement("a");
+      back.href = "index.html";
+      back.className = "workspace-link upload-back";
+      back.setAttribute("aria-label", "Back to workspace");
+      back.title = "Back to workspace";
+      back.innerHTML =
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>';
+      header.prepend(back);
+    }
     if (header) header.append(panel);
     else (document.querySelector("main") || document.body).prepend(panel);
     panel.dataset.state = "checking";
