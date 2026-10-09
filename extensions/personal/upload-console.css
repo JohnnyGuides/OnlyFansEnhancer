@@ -2353,7 +2353,7 @@ a {
 }
 .additional-media-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: nowrap;
   gap: 8px;
   margin: -6px 0 18px;
@@ -2473,20 +2473,79 @@ a {
 .media-grid .file-actions button {
   min-height: 34px;
 }
-/* The optional script spans the grid as one slim row below the video files. */
-.upload-media > .script-file-card {
-  grid-column: 1 / -1;
-  flex-direction: row;
-  align-items: center;
-  min-height: 0;
-  padding-block: 10px;
+/* The optional script sits at the right of the Add media row, one card
+   column wide under Pornhub Free. */
+.additional-media-row > .script-file-card {
+  flex: 0 0 calc((100% - 30px) / 4);
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-left: auto;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid #364353;
+  border-radius: 10px;
+  background: #171d25;
 }
-.media-grid .script-file-card .file-information {
+.script-file-card .file-information {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.script-file-card label {
+  margin: 0;
+  color: #f1f5fa;
+  font-size: 0.8rem;
+}
+.script-file-card .file-description-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.script-file-card .file-summary {
+  display: flex;
   flex: 1 1 auto;
-  min-height: 0;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
-.media-grid .script-file-card .file-actions {
-  margin-top: 0;
+.script-file-card .file-name-stem {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.script-file-card .file-name-extension,
+.script-file-card .file-size {
+  flex: none;
+  font-size: 0.75rem;
+}
+.script-file-card .file-actions {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-left: auto;
+}
+.script-file-card .file-actions button {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+/* A chosen script shows its name on its own line. */
+.script-file-card .file-information:has(.file-name-stem) {
+  flex-basis: 100%;
+}
+@media (max-width: 650px) {
+  .additional-media-row {
+    flex-wrap: wrap;
+  }
+  .additional-media-row > .script-file-card {
+    flex-basis: calc((100% - 10px) / 2);
+  }
+}
+@media (max-width: 480px) {
+  .additional-media-row > .script-file-card {
+    flex-basis: 100%;
+  }
 }
 .upload-metadata-row {
   display: grid;

@@ -304,47 +304,6 @@
                     </button>
                   </div>
                 </div>
-                <div class="file-picker media-file-card script-file-card">
-                  <div class="file-information">
-                    <label for="uploadScript">Script</label>
-                    <div class="file-description-row">
-                      <p
-                        id="scriptFileSummary"
-                        class="file-summary"
-                        aria-live="polite"
-                      >
-                        Optional .funscript
-                      </p>
-                      <span id="scriptFileSummarySize" class="file-size"></span>
-                    </div>
-                  </div>
-                  <input
-                    id="uploadScript"
-                    name="uploadScript"
-                    type="file"
-                    class="file-input-native"
-                    tabindex="-1"
-                    accept=".funscript"
-                    aria-describedby="scriptFileSummary draftErrors"
-                  />
-                  <div class="file-actions">
-                    <button
-                      type="button"
-                      data-choose-file="uploadScript"
-                      aria-label="Choose toy-sync script"
-                    >
-                      Choose file
-                    </button>
-                    <button
-                      type="button"
-                      data-remove-file="uploadScript"
-                      aria-label="Remove script"
-                      hidden
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
               </section>
             </div>
             <div id="additionalMediaRow" class="additional-media-row">
@@ -365,6 +324,47 @@
                 class="additional-media-list"
                 aria-live="polite"
               ></div>
+              <div class="file-picker script-file-card">
+                <div class="file-information">
+                  <label for="uploadScript">Script</label>
+                  <div class="file-description-row">
+                    <p
+                      id="scriptFileSummary"
+                      class="file-summary"
+                      aria-live="polite"
+                    >
+                      Select script
+                    </p>
+                    <span id="scriptFileSummarySize" class="file-size"></span>
+                  </div>
+                </div>
+                <input
+                  id="uploadScript"
+                  name="uploadScript"
+                  type="file"
+                  class="file-input-native"
+                  tabindex="-1"
+                  accept=".funscript"
+                  aria-describedby="scriptFileSummary draftErrors"
+                />
+                <div class="file-actions">
+                  <button
+                    type="button"
+                    data-choose-file="uploadScript"
+                    aria-label="Choose toy-sync script"
+                  >
+                    Choose file
+                  </button>
+                  <button
+                    type="button"
+                    data-remove-file="uploadScript"
+                    aria-label="Remove script"
+                    hidden
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
             </div>
             <dialog
               id="thumbnailFrameDialog"

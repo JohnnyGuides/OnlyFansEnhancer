@@ -360,7 +360,7 @@ test("Script card validates, sends after the links exist and fails on its own", 
     assert.equal(await page.locator("#uploadScript").isDisabled(), false);
     assert.equal(
       await page.locator("#scriptFileSummary").textContent(),
-      "Optional .funscript",
+      "Select script",
     );
     await page.locator("#loadTemplate").click();
     await page.waitForFunction(

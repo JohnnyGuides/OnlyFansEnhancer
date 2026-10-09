@@ -362,7 +362,7 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
       JSON.stringify(previewBox),
     );
     const cardWidths = await page
-      .locator(".media-grid .file-picker:not(.script-file-card)")
+      .locator(".media-grid .file-picker")
       .evaluateAll((cards) =>
         cards.map((card) => card.getBoundingClientRect().width),
       );
@@ -704,10 +704,36 @@ for (const [name, width, height, scale] of [
           Math.abs(chooseFrame.y - custom.y) < 3,
           JSON.stringify({ chooseFrame, custom }),
         );
+        // Script sits in the Add media row, in the Pornhub Free column.
+        const script = await page.locator(".script-file-card").boundingBox();
+        const pornhubCard = await page
+          .locator(".pornhub-file-card")
+          .boundingBox();
+        const addMedia = await page
+          .locator('[data-choose-file="uploadAdditionalMedia"]')
+          .boundingBox();
+        assert.ok(
+          Math.abs(script.x - pornhubCard.x) < 2 &&
+            Math.abs(script.width - pornhubCard.width) < 2 &&
+            Math.abs(script.y - addMedia.y) < 3 &&
+            script.height <= 48,
+          JSON.stringify({ script, pornhubCard, addMedia }),
+        );
         const heading = await page.locator("#targetsHeading").boundingBox();
         const publish = await page.locator("#mainPublishFields").boundingBox();
         assert.ok(
           publish.x > heading.x && Math.abs(publish.y - heading.y) < 12,
+        );
+      }
+      if (name === "narrow") {
+        const script = await page.locator(".script-file-card").boundingBox();
+        const addMedia = await page
+          .locator('[data-choose-file="uploadAdditionalMedia"]')
+          .boundingBox();
+        assert.ok(
+          script.y >= addMedia.y + addMedia.height &&
+            Math.abs(script.x - addMedia.x) < 2,
+          JSON.stringify({ script, addMedia }),
         );
       }
       if (process.env.OFENHANCER_REVIEW_DIR) {

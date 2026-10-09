@@ -5403,11 +5403,12 @@
     function updateMediaRelevance() {
       const targets = new Set(selectedTargets());
       get("#uploadMedia").hidden = workflowMode?.value === "teaser";
-      get("#additionalMediaRow").hidden =
-        workflowMode?.value === "teaser" ||
-        (!additionalMedia.length &&
-          !targets.has("onlyfans") &&
-          !targets.has("fansly"));
+      // The row also holds the Script picker, so only Add media follows the targets.
+      get("#additionalMediaRow").hidden = workflowMode?.value === "teaser";
+      get('[data-choose-file="uploadAdditionalMedia"]').hidden =
+        !additionalMedia.length &&
+        !targets.has("onlyfans") &&
+        !targets.has("fansly");
       get("#pornhubPresetFields").hidden = !targets.has("pornhub");
       get(".pornhub-file-card").hidden =
         pornhubPaid.checked && !pornhub.checked;
@@ -5545,7 +5546,7 @@
           scriptInput,
           scriptFile,
           "scriptFileSummary",
-          scriptError || "Optional .funscript",
+          scriptError || "Select script",
         ],
         [
           socialInput,
