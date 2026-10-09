@@ -95,12 +95,27 @@ internal sealed partial class XTeaserController
             throw new GoogleCatalogueControllerException("invalid-teaser-episode");
         string root = Path.GetDirectoryName(store.ConfiguredThumbnailRoot ?? "")
             ?? throw new GoogleCatalogueControllerException("episode-folder-unavailable");
-        string path = Path.Combine(root, key);
-        if (!Directory.Exists(path)) throw new GoogleCatalogueControllerException("episode-folder-unavailable");
-        for (string? directory = path; directory is not null; directory = Path.GetDirectoryName(directory))
-            if (new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                throw new GoogleCatalogueControllerException("unsafe-episode-folder");
+        string path = ResolveEpisodeFolder(root, key);
         Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         return new { opened = true };
+    }
+
+    internal static string ResolveEpisodeFolder(string root, string key)
+    {
+        if (!Directory.Exists(root)) throw new GoogleCatalogueControllerException("episode-folder-unavailable");
+        for (string? directory = root; directory is not null; directory = Path.GetDirectoryName(directory))
+            if (new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint))
+                throw new GoogleCatalogueControllerException("unsafe-episode-folder");
+        // Archived episodes live one grouping folder below the media root.
+        string[] matches = Directory.EnumerateDirectories(root)
+            .Where(directory => !new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            .Prepend(root)
+            .Select(directory => Path.Combine(directory, key))
+            .Where(Directory.Exists).Take(2).ToArray();
+        if (matches.Length == 0) throw new GoogleCatalogueControllerException("episode-folder-unavailable");
+        if (matches.Length > 1) throw new GoogleCatalogueControllerException("ambiguous-episode-folder");
+        if (new DirectoryInfo(matches[0]).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new GoogleCatalogueControllerException("unsafe-episode-folder");
+        return matches[0];
     }
 }

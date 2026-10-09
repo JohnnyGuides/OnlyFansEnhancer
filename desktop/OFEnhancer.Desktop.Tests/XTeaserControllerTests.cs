@@ -218,6 +218,46 @@ public sealed class XTeaserControllerTests
 
     private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement;
 
+    [TestMethod]
+    public void EpisodeFolderResolvesExactKeysAtTheRootOrInAnArchiveGroup()
+    {
+        using TestDirectory temp = new();
+        string direct = Directory.CreateDirectory(Path.Combine(temp.Path, "episode-a")).FullName;
+        string archived = Directory.CreateDirectory(Path.Combine(temp.Path, ".PRE_ARCHIVE", "episode-b")).FullName;
+        Directory.CreateDirectory(Path.Combine(temp.Path, ".PRE_ARCHIVE", "episode-b-extra"));
+        Assert.AreEqual(direct, XTeaserController.ResolveEpisodeFolder(temp.Path, "episode-a"));
+        Assert.AreEqual(archived, XTeaserController.ResolveEpisodeFolder(temp.Path, "episode-b"));
+        Assert.AreEqual("episode-folder-unavailable", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+            XTeaserController.ResolveEpisodeFolder(temp.Path, "episode")).Code);
+        Directory.CreateDirectory(Path.Combine(temp.Path, ".FORMER_VIDS", "episode-b"));
+        Assert.AreEqual("ambiguous-episode-folder", Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+            XTeaserController.ResolveEpisodeFolder(temp.Path, "episode-b")).Code);
+    }
+
+    [DataTestMethod]
+    [DataRow("root", "unsafe-episode-folder")]
+    [DataRow("group", "episode-folder-unavailable")]
+    [DataRow("episode", "unsafe-episode-folder")]
+    public void EpisodeFolderLookupDoesNotFollowJunctions(string location, string code)
+    {
+        using TestDirectory temp = new();
+        string root = Directory.CreateDirectory(Path.Combine(temp.Path, "media")).FullName;
+        string outside = Directory.CreateDirectory(Path.Combine(temp.Path, "outside")).FullName;
+        Directory.CreateDirectory(Path.Combine(outside, "episode-a"));
+        string link = Path.Combine(root, location == "episode" ? "episode-a" : "linked");
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "cmd.exe", $"/d /c mklink /J \"{link}\" \"{outside}\"")
+            { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
+        process.WaitForExit();
+        Assert.AreEqual(0, process.ExitCode);
+        try
+        {
+            Assert.AreEqual(code, Assert.ThrowsException<GoogleCatalogueControllerException>(() =>
+                XTeaserController.ResolveEpisodeFolder(location == "root" ? link : root, "episode-a")).Code);
+        }
+        finally { Directory.Delete(link); }
+    }
+
     private static long Count(CatalogueStore store, string table)
     {
         using SqliteCommand command = store.Connection.CreateCommand();

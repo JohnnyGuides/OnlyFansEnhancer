@@ -327,7 +327,9 @@ IndexedDB (61 drafts, 512 MB per video, 2 GB total); an execution checkpoint loc
 the draft to one upload session. `getTeaserClips` supplies bounded indexed ready
 and failed metadata. `getTeaserClipChunk` reads only root-contained indexed files,
 with size/mtime/hash validation and a bounded sequential read token. The episode
-folder operation validates the catalogue key and configured local parent.
+folder operation validates the catalogue key and configured local parent, then
+resolves an exact folder name at that parent or one grouping level below it.
+Missing or ambiguous matches and reparse points are refused.
 
 X plans optionally carry minute-aligned UTC time, IANA timezone, the sensitive
 warning and reply delay. The social ledger records scheduleAttempted before the
