@@ -159,7 +159,7 @@
       .replace(/[\uD800-\uDBFF]$/, "");
     if (!cleanTitle) throw new Error("Enter a title for the script.");
     // eslint-disable-next-line no-control-regex -- control characters are the rejected input
-    if (/[\x00-\x1f\x7f]/.test(cleanTitle))
+    if (/[\x00-\x1f\x7f-\x9f]/.test(cleanTitle))
       throw new Error("The title contains control characters.");
     const body = JSON.stringify({
       keys: cleanKeys,

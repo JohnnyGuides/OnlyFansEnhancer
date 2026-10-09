@@ -267,6 +267,10 @@ test("website refusals and bad input fail the script upload only", async () => {
     sync.uploadScript({ ...base, title: "Linebell" }, never),
     /control characters/,
   );
+  await assert.rejects(
+    sync.uploadScript({ ...base, title: "Next\u0085line" }, never),
+    /control characters/,
+  );
   await assert.rejects(sync.uploadScript({ ...base, token: "" }, never));
   await assert.rejects(
     sync.uploadScript({ ...base, origin: "https://example.com" }, never),
