@@ -119,16 +119,23 @@ consent, select exactly one spreadsheet, then return and select **Import catalog
 Confirm the worksheet name and imported count. This operation only updates the
 local catalogue, not Google Sheets.
 
-The reader examines the first 20 rows and first 24 columns (A–X) of visible tabs
+The reader examines the first 20 rows and first 25 columns (A–Y) of visible tabs
 for a unique header. It requires ID (also Video ID, Item ID, Source key) and Title
-or Name. Recognized optional columns may move within A–X; matching ignores case
+or Name. Recognized optional columns may move within A–Y; matching ignores case
 and punctuation, not meaning. Catalogue/Catalog tabs take priority over incidental
 tables, but multiple matching catalogue tabs, headers, or columns stop import.
 
-After discovery, only the selected tab is read, bounded to A1:X5002. At most 5,000
+After discovery, only the selected tab is read, bounded to A1:Y5002. At most 5,000
 video entries are accepted, and a selected grid extending beyond row 5,002 is
 rejected. Invalid mapped dates/counts or duplicate IDs stop before local changes.
 Unrecognized columns are ignored; absent imported rows are archived, not erased.
+
+Column Y, headed **Script**, after Last verified sync, holds JohnnyGuides
+toy-sync script links (`https://johnnyguides.com/sync/scripts/<file>.funscript`).
+Add the header by hand; it is not part of the U–X workbook migration. An uploaded
+script link is written through the same guarded row write-back as platform links
+(row reread, changed or conflicting cells refused). Unlike platform columns, a
+second script variant is appended to the cell rather than refused.
 
 Multiple links retain their original text and hyperlink evidence. Conflicting
 displayed/hyperlinked posts are flagged, not silently resolved. Invalid link text

@@ -195,6 +195,7 @@
     "workflows/social-trace-contract.js": "extensions/personal/workflows/social-trace-contract.js",
     "workflows/social-trace-evidence.js": "extensions/personal/workflows/social-trace-evidence.js",
     "workflows/subreddit-presets.js": "extensions/personal/workflows/subreddit-presets.js",
+    "workflows/sync-script.js": "extensions/personal/workflows/sync-script.js",
     "workflows/upload-capability-probe.js": "extensions/personal/workflows/upload-capability-probe.js",
     "workflows/upload-file-bridge.js": "extensions/personal/workflows/upload-file-bridge.js",
     "workflows/upload-platform-adapters.js": "extensions/personal/workflows/upload-platform-adapters.js",

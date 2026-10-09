@@ -24,6 +24,7 @@ public sealed class GoogleWorkbookProfileTests
     [DataRow("pornhubPaid", "V")]
     [DataRow("clips4sale", "W")]
     [DataRow("lastVerifiedSync", "X")]
+    [DataRow("script", "Y")]
     public void SyncDestinationsUseTheInspectedProfileColumns(string destination, string expectedColumn)
     {
         Assert.AreEqual(expectedColumn, GoogleWorkbookProfile.ColumnForDestination(destination));

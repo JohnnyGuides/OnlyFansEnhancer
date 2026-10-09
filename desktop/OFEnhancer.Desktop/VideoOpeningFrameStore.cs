@@ -9,7 +9,8 @@ namespace OFEnhancer.Desktop;
 
 internal sealed class VideoOpeningFrameStore
 {
-    private sealed record Prepared(string SourcePath, long SourceSize, long SourceModified, string Selection, FileInfo Output);
+    private sealed record Prepared(string SourcePath, long SourceSize, long SourceModified, string Selection, FileInfo Output,
+        int LeadInMs);
     private readonly ConcurrentDictionary<string, Prepared> prepared = new();
     private readonly string root;
     private readonly string ffmpeg;
@@ -193,11 +194,20 @@ internal sealed class VideoOpeningFrameStore
                 throw new InvalidOperationException("The video with an opening frame could not be verified.");
             await Run(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-xerror", "-ss", "1.25", "-i", partial,
                 "-map", "0:v:0", "-frames:v", "2", "-f", "null", "-"], TimeSpan.FromMinutes(1));
+            // The source's first frame follows every intro frame; its measured shift
+            // (frame-rate rounding and audio priming included) aligns toy scripts.
+            int introFrames = int.Parse((await Run(ffprobe, ["-v", "error", "-select_streams", "v:0", "-count_packets",
+                "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", intro], TimeSpan.FromSeconds(30))).Trim().TrimEnd(','),
+                NumberStyles.None, CultureInfo.InvariantCulture);
+            double shift = await PresentationTime(partial, introFrames) - await PresentationTime(source.FullName, 0);
+            if (!double.IsFinite(shift) || shift is < 0.75 or > 1.25)
+                throw new InvalidOperationException("The video with an opening frame could not be verified.");
             File.Move(partial, final);
             File.Delete(frame);
             File.Delete(intro);
             File.Delete(list);
-            prepared[token] = new(source.FullName, source.Length, Modified(source), selection, new FileInfo(final));
+            prepared[token] = new(source.FullName, source.Length, Modified(source), selection, new FileInfo(final),
+                (int)Math.Round(shift * 1000, MidpointRounding.AwayFromZero));
             return token;
         }
         catch {
@@ -205,6 +215,23 @@ internal sealed class VideoOpeningFrameStore
             throw;
         }
     }
+
+    // Presentation time of the index-th video frame, from the leading packets in decode order.
+    private async Task<double> PresentationTime(string file, int index)
+    {
+        string text = await Run(ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time",
+            "-read_intervals", $"%+#{index + 64}", "-of", "csv=p=0", file], TimeSpan.FromSeconds(30));
+        double[] times = [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => double.TryParse(line.TrimEnd(','), NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                ? value : double.NaN)
+            .Where(double.IsFinite).Order()];
+        return index < times.Length ? times[index]
+            : throw new InvalidOperationException("The video with an opening frame could not be verified.");
+    }
+
+    internal int LeadInMs(string token) =>
+        prepared.TryGetValue(token, out Prepared? item) ? item.LeadInMs
+            : throw new InvalidOperationException("The opening frame video is no longer available. Start this upload again.");
 
     internal FileInfo Resolve(string token, FileInfo source, string platform)
     {

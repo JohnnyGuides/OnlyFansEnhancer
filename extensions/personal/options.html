@@ -64,6 +64,31 @@
         <p id="catalogueBridgeStatus" class="status" role="status"></p>
       </section>
 
+      <section class="card" aria-labelledby="syncScriptHeading">
+        <h2 id="syncScriptHeading">JohnnyGuides toy-sync scripts</h2>
+        <p class="hint">
+          When an upload includes a Script, the upload console sends it to this
+          site after the platform links exist. The token is stored locally and
+          sent only to this site.
+        </p>
+        <label for="syncScriptOrigin">Website</label>
+        <input
+          id="syncScriptOrigin"
+          type="url"
+          inputmode="url"
+          autocomplete="off"
+          placeholder="https://johnnyguides.com"
+        />
+        <label for="syncScriptToken">Upload token</label>
+        <input id="syncScriptToken" type="password" autocomplete="off" />
+        <div class="inline-actions">
+          <button id="saveSyncScript" class="primary" type="button">
+            Save script upload
+          </button>
+        </div>
+        <p id="syncScriptStatus" class="status" role="status"></p>
+      </section>
+
       <section class="card" aria-labelledby="xFirstReplyHeading">
         <h2 id="xFirstReplyHeading">X teaser first reply</h2>
         <label class="toggle-row">
@@ -269,6 +294,7 @@
       </section>
     </main>
     <script src="workflows/catalogue-client.js"></script>
+    <script src="workflows/sync-script.js"></script>
     <script src="avatar-crop.js"></script>
     <script src="runtime.js"></script>
     <script src="options.js"></script>

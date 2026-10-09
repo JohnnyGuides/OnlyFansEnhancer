@@ -24,7 +24,7 @@ public sealed record DistributionLedgerRequest(string EventId,string RunId,strin
 
 public sealed partial class CatalogueStore
 {
-    private static readonly string[] UploadPlatforms = ["pornhub", "onlyfans", "fansly", "manyvids", "x", "reddit", "redgifs", "clips4sale"];
+    private static readonly string[] UploadPlatforms = ["pornhub", "onlyfans", "fansly", "manyvids", "x", "reddit", "redgifs", "clips4sale", "script"];
 
     public UploadCatalogueSnapshot GetUploadCatalogueSnapshot() => new("snapshot", "desktop",
         GetItems().Select(ToUploadRow).ToArray(), SeasonAliases: GetUploadSeasonAliases());
@@ -93,7 +93,7 @@ public sealed partial class CatalogueStore
         string? canonical = CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri);
         if (canonical is null) throw new WorkbookProjectionException("invalid-upload-result", "The upload result URL is invalid.");
 
-        GoogleCatalogueSelection? destination = request.Platform is "onlyfans" or "fansly" or "manyvids" or "x"
+        GoogleCatalogueSelection? destination = request.Platform is "onlyfans" or "fansly" or "manyvids" or "x" or "script"
             ? GetGoogleCatalogueSelection() : null;
         if (destination is not { SheetId: not null }) destination = null;
         using SqliteTransaction transaction = connection.BeginTransaction();
@@ -114,7 +114,8 @@ public sealed partial class CatalogueStore
             return new("idempotent", current.Fingerprint, PostUrl: canonical, SheetWriteback: existingIntent);
         }
         if (!string.Equals(current.Fingerprint, request.Fingerprint, StringComparison.OrdinalIgnoreCase)) return new("stale", current.Fingerprint);
-        bool append=request.Action is "appendTwitterTeaser" or "appendRedditPost";
+        // Each lead-in variant of a toy-sync script has its own link on the row.
+        bool append=request.Action is "appendTwitterTeaser" or "appendRedditPost" || request.Platform=="script";
         if (state == "published" && !append && !request.RepeatUploadConfirmed) return new("conflict", current.Fingerprint);
         if (knownUrls.Count >= 100) throw new WorkbookProjectionException("upload-result-limit", "This item has reached the publication link limit.");
 
@@ -161,7 +162,7 @@ public sealed partial class CatalogueStore
                 cells.TryGetValue(platform,out CatalogueSourceLinkCell? source);
                 if(source is not null) urls.AddRange(source.Urls);
                 string[] distinct=urls.Distinct(StringComparer.Ordinal).ToArray();
-                bool social=platform is "x" or "reddit";
+                bool social=platform is "x" or "reddit" or "script";
                 var confirmed=group.SelectMany(record=>record.ConfirmedExistingUrls ?? []).Concat(group.Select(record=>record.PostUrl)).ToHashSet(StringComparer.Ordinal);
                 bool confirmedRepeat=group.Any(record=>record.ConfirmedExistingUrls is {Length:>0}) && distinct.All(confirmed.Contains);
                 bool conflict=source?.IssueCode is not null || !social && distinct.Length>1 && !confirmedRepeat;

@@ -24,6 +24,7 @@ internal static class CatalogueSnapshotImporter
         "x",
         "reddit",
         "redgifs",
+        "script",
     ];
     private static readonly JsonSerializerOptions InputJson = new()
     {
@@ -256,6 +257,13 @@ internal static class CatalogueSnapshotImporter
                 ignoreCase: true
             ),
             "pornhubFree" or "pornhubPaid" => CanonicalPornhub(uri),
+            "script" => CanonicalPath(
+                uri,
+                ["johnnyguides.com", "www.johnnyguides.com"],
+                @"^/sync/scripts/(?<file>[A-Za-z0-9._-]{1,200}\.funscript)$",
+                match => $"https://johnnyguides.com/sync/scripts/{match.Groups["file"].Value}",
+                ignoreCase: true
+            ),
             "clips4sale" => CanonicalPath(
                 uri,
                 ["clips4sale.com", "www.clips4sale.com"],

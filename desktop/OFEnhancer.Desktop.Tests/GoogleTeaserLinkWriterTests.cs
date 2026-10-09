@@ -39,6 +39,42 @@ public sealed class GoogleTeaserLinkWriterTests
     }
 
     [TestMethod]
+    public async Task ScriptLinksAppendToColumnYThroughTheSameRowGuards()
+    {
+        const string first = "https://johnnyguides.com/sync/scripts/episode-a.funscript";
+        const string second = "https://johnnyguides.com/sync/scripts/episode-a-intro.funscript";
+        static string[] Row(params string[] start) => [.. start, .. Enumerable.Repeat("", 25 - start.Length)];
+        string[] header = Row("ID", "Title", "Release");
+        header[24] = "Script";
+        FakeSheet sheet = new([header, Row("ep-a", "Episode A"), Row("ep-b", "Episode B")]);
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            "script", first, "Episode A", "");
+
+        Assert.AreEqual("appended", (await Writer(sheet).WriteResultAsync(intent, _ => { }, CancellationToken.None)).Status);
+        Assert.AreEqual($"'{Sheet}'!Y2", sheet.Posts.Single().GetProperty("data")[0].GetProperty("range").GetString());
+        Assert.AreEqual(first, sheet.Cell(2, 25));
+        Assert.AreEqual("already-present", (await Writer(sheet).WriteResultAsync(intent,
+            _ => Assert.Fail("An existing script link is not written again"), CancellationToken.None)).Status);
+        // A second lead-in variant joins the cell instead of being a conflict.
+        await Writer(sheet).WriteResultAsync(intent with { Key = "key-2", Url = second }, _ => { }, CancellationToken.None);
+        Assert.AreEqual(first + "\n" + second, sheet.Cell(2, 25));
+
+        sheet.BeforeCellRead = () => sheet.SetCell(2, 25, "owner edit");
+        Assert.AreEqual("catalogue-entry-changed", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).WriteResultAsync(intent with { Key = "key-3", Url = first.Replace("a.funscript", "a3.funscript",
+                StringComparison.Ordinal) }, _ => Assert.Fail(), CancellationToken.None))).Code);
+        sheet.BeforeCellRead = null;
+        sheet.SetCell(2, 25, first);
+        Assert.AreEqual("teaser-status-elsewhere", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).WriteResultAsync(intent with { SourceKey = "ep-b", Title = "Episode B" }, _ => Assert.Fail(),
+                CancellationToken.None))).Code);
+        Assert.AreEqual("invalid-teaser-link", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).WriteResultAsync(intent with { Url = "https://example.com/sync/scripts/a.funscript" }, _ => Assert.Fail(),
+                CancellationToken.None))).Code);
+        Assert.AreEqual(2, sheet.Posts.Count);
+    }
+
+    [TestMethod]
     public async Task PlatformResultRefusesConflictingCellChangedMetadataAndWrongSheet()
     {
         FakeSheet sheet = Workbook();
@@ -291,7 +327,7 @@ public sealed class GoogleTeaserLinkWriterTests
                 ["properties"] = new JsonObject
                 {
                     ["sheetId"] = 7, ["title"] = Sheet, ["hidden"] = false,
-                    ["gridProperties"] = new JsonObject { ["rowCount"] = 50, ["columnCount"] = 6 },
+                    ["gridProperties"] = new JsonObject { ["rowCount"] = 50, ["columnCount"] = Math.Max(6, rows.Max(row => row.Length)) },
                 },
             };
             if (data)

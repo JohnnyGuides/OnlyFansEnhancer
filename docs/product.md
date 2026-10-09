@@ -113,6 +113,18 @@ no favourite is inferred. The desktop checks the scanned inventory and file hash
 then performs the same conversion and bound file handoff. Refresh variants rescans
 the configured thumbnail folder; a manually chosen file remains available.
 Bound local images remain selectable after their filenames change.
+An optional **Script** (`.funscript`) card follows Pornhub Free. Its JSON and
+`{at, pos}` actions are checked when chosen, and its bytes stay in the console.
+Once every destination in the run has a post link, the script is posted to
+JohnnyGuides (`POST /sync/scripts`, Bearer token from the toolkit settings) with
+the post ids of the run's links (OnlyFans post id, Fansly id, Pornhub viewkey,
+ManyVids id). OnlyFans and Fansly receive the video with any opening frame, so
+their keys get a copy shifted by the lead-in that the desktop measured from the
+prepared video. Other keys get the script unchanged, in a separate upload. A
+script failure appears on its own result card with Retry and never alters the
+platform results. The returned link is recorded in the catalogue's Script column.
+The **JohnnyGuides Website** destination is shown disabled until video upload
+to the site exists.
 Only a creator-confirmed exact
 Season/Arc mapping may preselect it; never infer orientation from performers,
 titles, filenames, descriptions, or tags. Existing metadata is preserved while

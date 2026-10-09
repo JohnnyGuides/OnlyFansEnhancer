@@ -80,6 +80,7 @@ internal static class GoogleWorkbookProfile
         "pornhubPaid" => "V",
         "clips4sale" => "W",
         "lastVerifiedSync" => "X",
+        "script" => "Y",
         _ => throw new GoogleCatalogueException("unsupported-workbook-destination"),
     };
 

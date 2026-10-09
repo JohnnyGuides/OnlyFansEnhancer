@@ -229,6 +229,7 @@ internal sealed class GoogleCatalogueSyncWorker
             "pornhubFree" => "Pornhub Free", "onlyfans" => "OnlyFans", "fansly" => "Fansly", "manyvids" => "ManyVids",
             "xTeasers" => "# teasers", "x" => "Twitter Teaser(s)", "redditTeasers" => "# Reddit posts", "reddit" => "Reddit Post(s)",
             "ofenhancerId" => "OFEnhancer ID", "pornhubPaid" => "Pornhub Paid", "clips4sale" => "Clips4Sale", "lastVerifiedSync" => "Last verified sync",
+            "script" => "Script",
             _ => throw new GoogleCatalogueException("unsupported-workbook-destination")
         };
         if (header.Range != headerRange || header.Value != expectedHeader) return new(null, null, "projection-layout-changed");

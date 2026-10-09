@@ -84,6 +84,45 @@ async function saveCatalogueBridge() {
   showCatalogueStatus("Catalogue bridge saved for the upload console.");
 }
 
+const SYNC_SCRIPT = globalThis.CreatorSyncScript;
+
+function showSyncScriptStatus(message, isError = false) {
+  const status = $("#syncScriptStatus");
+  status.textContent = message;
+  status.style.color = isError ? "#ffb4c4" : "#91d8ac";
+}
+
+async function loadSyncScript() {
+  const stored = (await chrome.storage.local.get(SYNC_SCRIPT.SETTINGS_KEY))[
+    SYNC_SCRIPT.SETTINGS_KEY
+  ];
+  $("#syncScriptOrigin").value = stored?.origin || SYNC_SCRIPT.DEFAULT_ORIGIN;
+  $("#syncScriptToken").value = stored?.token || "";
+  showSyncScriptStatus(
+    stored?.token
+      ? "Script upload settings are stored locally."
+      : "Script upload is not configured yet.",
+  );
+}
+
+async function saveSyncScript() {
+  showSyncScriptStatus("");
+  const settings = SYNC_SCRIPT.normalizeSettings({
+    origin: $("#syncScriptOrigin").value,
+    token: $("#syncScriptToken").value,
+  });
+  if (!settings.valid) throw new Error(settings.errors.join(" "));
+  const granted = await chrome.permissions.request({
+    origins: [`${settings.value.origin}/*`],
+  });
+  if (!granted) throw new Error("Website permission was not granted.");
+  await chrome.storage.local.set({
+    [SYNC_SCRIPT.SETTINGS_KEY]: settings.value,
+  });
+  $("#syncScriptOrigin").value = settings.value.origin;
+  showSyncScriptStatus("Script upload saved for the upload console.");
+}
+
 async function loadIdentitySettings() {
   const { settings } = await globalThis.FanIdentityMaskSendMessage({
     type: "GET_SETTINGS",
@@ -266,6 +305,7 @@ async function load() {
   const results = await Promise.allSettled([
     loadXFirstReply(),
     loadCatalogueBridge(),
+    loadSyncScript(),
     loadIdentitySettings(),
     loadIdentityStats(),
     loadAvatarManagementView(),
@@ -470,6 +510,9 @@ $("#saveCatalogueBridge").addEventListener("click", () => {
   saveCatalogueBridge().catch((error) =>
     showCatalogueStatus(error.message, true),
   );
+});
+$("#saveSyncScript").addEventListener("click", () => {
+  saveSyncScript().catch((error) => showSyncScriptStatus(error.message, true));
 });
 $("#reset").addEventListener("click", () => {
   resetMappings().catch((error) => showStatus(error.message, true));

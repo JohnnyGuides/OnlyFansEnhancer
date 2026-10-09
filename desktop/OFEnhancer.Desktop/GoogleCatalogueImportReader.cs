@@ -8,10 +8,10 @@ namespace OFEnhancer.Desktop;
 internal static class GoogleCatalogueImportReader
 {
     private const int MaximumHeaderRow = 20;
-    private const int MaximumColumns = 24;
+    private const int MaximumColumns = 25;
     private const int MaximumFetchedRow = 5002;
     private static readonly string[] Platforms =
-        ["pornhubFree", "pornhubPaid", "onlyfans", "fansly", "manyvids", "x", "reddit", "clips4sale", "redgifs"];
+        ["pornhubFree", "pornhubPaid", "onlyfans", "fansly", "manyvids", "x", "reddit", "clips4sale", "redgifs", "script"];
 
     internal static GoogleCatalogueImportPreview Detect(GoogleWorkbookSnapshot snapshot, int? preferredSheetId = null)
     {
@@ -141,6 +141,7 @@ internal static class GoogleCatalogueImportReader
             "manyvids" or "manyvidslink" or "manyvidsurl" => "manyvids",
             "clips4sale" or "clips4salelink" or "clips4saleurl" => "clips4sale",
             "redgifs" or "redgifslink" or "redgifsurl" => "redgifs",
+            "script" or "scriptlink" or "scripturl" or "funscript" => "script",
             "twitterteasers" or "twitterteaser" or "twitterlink" or "xlink" or "xpost" => "x",
             "redditposts" or "redditpost" or "redditlink" => header?.TrimStart().StartsWith('#') == true ? "redditTeasers" : "reddit",
             "teasers" or "xteasers" or "teasercount" or "twitterteasercount" => "xTeasers",

@@ -7,6 +7,7 @@ importScripts(
   "workflows/catalogue-contract.js",
   "workflows/catalogue-client.js",
   "workflows/subreddit-presets.js",
+  "workflows/sync-script.js",
   "workflows/upload-session-store.js",
   "workflows/social-distribution-contract.js",
   "workflows/social-distribution-session-store.js",
@@ -5614,6 +5615,42 @@ async function startCreatorUpload(sessionId, targets) {
   return [];
 }
 
+// Posts the run's toy-sync script to the website once per lead-in group, then
+// records each returned link like a platform result. Neither step can alter
+// the platform uploads.
+async function uploadCreatorSyncScripts(message) {
+  const sync = globalThis.CreatorSyncScript;
+  const stored = await chrome.storage.local.get(sync.SETTINGS_KEY);
+  const settings = sync.normalizeSettings(stored[sync.SETTINGS_KEY] || {});
+  if (!settings.valid)
+    throw new Error(
+      "Add the JohnnyGuides site and upload token in the toolkit settings, then retry the script.",
+    );
+  const session = await getCreatorUploadSession(message.sessionId);
+  if (!session) throw new Error("Unknown creator upload run.");
+  return sync.uploadScripts(
+    {
+      settings: settings.value,
+      title: message.title,
+      uploads: message.uploads,
+    },
+    {
+      async commit(url) {
+        if (session.catalogue?.source !== "desktop")
+          return session.catalogue
+            ? "Script links reach the sheet only through the OFEnhancer desktop catalogue."
+            : "";
+        const commit = await commitCreatorUploadResult(session, "script", url);
+        return ["updated", "idempotent", "recorded-local"].includes(
+          commit.status,
+        ) && !commit.googleError
+          ? ""
+          : `Script link not written to the sheet (${commit.googleError || commit.status}).`;
+      },
+    },
+  );
+}
+
 async function retryCreatorUploadPlatform(sessionId, platform) {
   const session = await getCreatorUploadSession(sessionId);
   const target = session?.platforms.get(platform);
@@ -6280,6 +6317,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
             message.catalogue,
           ),
         };
+      case "UPLOAD_SYNC_SCRIPT":
+        return { scripts: await uploadCreatorSyncScripts(message) };
       case "RETRY_CREATOR_UPLOAD_PLATFORM":
         return {
           results: await retryCreatorUploadPlatform(

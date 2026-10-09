@@ -30,6 +30,27 @@ public sealed class GoogleCatalogueImportReaderTests
     }
 
     [TestMethod]
+    public void ReadsTheScriptColumnAfterLastVerifiedSync()
+    {
+        string[] header = [.. Enumerable.Repeat("", 25)];
+        string[] row = [.. Enumerable.Repeat("", 25)];
+        (header[0], header[1], header[23], header[24]) = ("ID", "Title", "Last verified sync", "Script");
+        (row[0], row[1], row[24]) = ("item-1", "Example",
+            "https://johnnyguides.com/sync/scripts/example.funscript\nhttps://johnnyguides.com/sync/scripts/example-1.funscript");
+        GoogleCatalogueImportPreview result = GoogleCatalogueImportReader.Read(Workbook(
+            Sheet(1, "Video Catalogue", Row(1, header), Row(2, row))));
+        Assert.AreEqual(25, result.Columns["script"]);
+        CatalogueSourceLinkCell cell = result.Projection.Items.Single().SourceLinkCells!["script"];
+        CollectionAssert.AreEqual(new[] { "https://johnnyguides.com/sync/scripts/example.funscript",
+            "https://johnnyguides.com/sync/scripts/example-1.funscript" }, cell.Urls.ToArray());
+        Assert.IsNull(cell.IssueCode);
+
+        row[24] = "https://example.com/sync/scripts/example.funscript";
+        Assert.AreEqual("invalid-workbook-link", GoogleCatalogueImportReader.Read(Workbook(
+            Sheet(1, "Video Catalogue", Row(1, header), Row(2, row)))).Issues!.Single().Code);
+    }
+
+    [TestMethod]
     public void ReadsActualWorkHeadersAndFindsCatalogueAmongUnrelatedTabs()
     {
         GoogleSheetSnapshot catalogue = Sheet(12, "2026 uploads",

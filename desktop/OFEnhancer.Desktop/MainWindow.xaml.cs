@@ -402,7 +402,7 @@ public partial class MainWindow : Window, IDisposable
                 if (additionalObjects.Count != 1 || additionalObjects[0] is not CoreWebView2File file)
                     throw new InvalidOperationException("Choose the video again in this window.");
                 string token = await (openingFrames ??= new VideoOpeningFrameStore()).PrepareAsync(new FileInfo(file.Path), payload);
-                result = new { token };
+                result = new { token, leadInMs = openingFrames.LeadInMs(token) };
             }
             else result = await uploads.RequestAsync(payload);
             return JsonSerializer.Serialize(new { requestId, ok = true, result }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });

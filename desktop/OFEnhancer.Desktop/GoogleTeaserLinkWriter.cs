@@ -36,10 +36,12 @@ internal sealed class GoogleTeaserLinkWriter(
         UploadSheetWriteback? intent, Action<int>? beforeWrite, CancellationToken cancellationToken)
     {
         bool teaser = platform == "x";
+        // X teasers and toy-sync scripts may hold several links in one cell.
+        bool append = teaser || platform == "script";
         string LinkKey(string value) => platform == "onlyfans" ? new Uri(value).AbsolutePath.Split('/')[1] : value;
         string statusId = (teaser ? CatalogueStore.XStatusIdFromUrl(url)
             : Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
-                && platform is "onlyfans" or "fansly" or "manyvids"
+                && platform is "onlyfans" or "fansly" or "manyvids" or "script"
                 ? CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri) : null) is { } id
             && url.Length <= 2048 && !url.Any(char.IsWhiteSpace)
             ? id : throw new GoogleCatalogueException("invalid-teaser-link");
@@ -67,7 +69,7 @@ internal sealed class GoogleTeaserLinkWriter(
         if (Links(text).Contains(statusId)
             || cell?.Hyperlink is { } target && Links(target).Contains(statusId))
             return new("already-present", before);
-        if (!teaser && (!string.IsNullOrWhiteSpace(text) || cell?.Hyperlink is not null))
+        if (!append && (!string.IsNullOrWhiteSpace(text) || cell?.Hyperlink is not null))
             throw new GoogleCatalogueException("platform-link-conflict");
         // A status already linked from another row is never duplicated here.
         if (sheet.Rows.Any(row => row.RowNumber > before.HeaderRow && row.RowNumber != item.SourceRow

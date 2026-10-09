@@ -26,7 +26,9 @@
     "https://*.gelbooru.com/*",
     "https://realbooru.com/*",
     "https://script.google.com/*",
-    "https://script.googleusercontent.com/*"
+    "https://script.googleusercontent.com/*",
+    "https://johnnyguides.com/*",
+    "https://*.johnnyguides.com/*"
   ],
   "host_permissions": [
     "https://onlyfans.com/*",

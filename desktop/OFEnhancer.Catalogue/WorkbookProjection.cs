@@ -180,12 +180,12 @@ internal static class WorkbookProjectionImporter
 
     private static IReadOnlyDictionary<string, string> ValidateLinks(IReadOnlyDictionary<string, string>? links)
     {
-        if (links is null || links.Count > 9)
+        if (links is null || links.Count > 10)
             throw Invalid("platformLinks is missing or too large.");
         SortedDictionary<string, string> result = new(StringComparer.Ordinal);
         foreach ((string platform, string? rawUrl) in links)
         {
-            if (platform is not ("onlyfans" or "fansly" or "manyvids" or "pornhubFree" or "pornhubPaid" or "clips4sale" or "x" or "reddit" or "redgifs"))
+            if (platform is not ("onlyfans" or "fansly" or "manyvids" or "pornhubFree" or "pornhubPaid" or "clips4sale" or "x" or "reddit" or "redgifs" or "script"))
                 throw Invalid($"Unsupported platform: {platform}");
             string url = Required(rawUrl, 2_048, $"platformLinks.{platform}");
             if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) || !uri.IsDefaultPort)
@@ -202,11 +202,11 @@ internal static class WorkbookProjectionImporter
         IReadOnlyDictionary<string, CatalogueSourceLinkCell>? cells)
     {
         if (cells is null) return new Dictionary<string, CatalogueSourceLinkCell>();
-        if (cells.Count > 9) throw Invalid("Too many source link cells.");
+        if (cells.Count > 10) throw Invalid("Too many source link cells.");
         SortedDictionary<string, CatalogueSourceLinkCell> validated = new(StringComparer.Ordinal);
         foreach ((string platform, CatalogueSourceLinkCell cell) in cells)
         {
-            if (platform is not ("onlyfans" or "fansly" or "manyvids" or "pornhubFree" or "pornhubPaid" or "clips4sale" or "x" or "reddit" or "redgifs")
+            if (platform is not ("onlyfans" or "fansly" or "manyvids" or "pornhubFree" or "pornhubPaid" or "clips4sale" or "x" or "reddit" or "redgifs" or "script")
                 || cell is null || cell.Text is null || cell.Text.Length > 10_000
                 || cell.Text.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t'))
                 || cell.Hyperlink?.Length > 2_048

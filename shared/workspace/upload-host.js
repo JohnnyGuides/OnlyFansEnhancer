@@ -335,6 +335,7 @@
       );
     },
   };
+  const openingFrameLeadIns = new Map();
   globalThis.OFEnhancerDesktopUpload = Object.freeze({
     refreshBrowsers,
     loadDevelopmentFixtures: () => call("loadDevelopmentFixtures"),
@@ -352,8 +353,11 @@
         },
         [file],
       );
+      openingFrameLeadIns.set(result.token, result.leadInMs);
       return result.token;
     },
+    // Measured intro length in ms; undefined when the desktop did not report it.
+    openingFrameLeadInMs: (token) => openingFrameLeadIns.get(token),
     async deliverFile(session, request, file) {
       try {
         await ensureBrowser();

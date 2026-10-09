@@ -379,6 +379,7 @@
     teaserFile = null,
     thumbnailFile = null,
     pornhubFile = null,
+    scriptFile = null,
     title,
     description,
     scheduledIso,
@@ -443,6 +444,17 @@
     }
     if (mainEnabled && pornhubFile && !isVideoFile(pornhubFile)) {
       errors.push("Choose a non-empty Pornhub video or leave it blank.");
+    }
+    if (
+      mainEnabled &&
+      scriptFile &&
+      !(
+        /\.funscript$/i.test(String(scriptFile.name || "")) &&
+        Number(scriptFile.size) > 0 &&
+        Number(scriptFile.size) <= 8 * 1024 * 1024
+      )
+    ) {
+      errors.push("Choose a .funscript script under 8 MB or leave it blank.");
     }
     if (
       selectedTargets.includes("pornhub") &&
@@ -956,6 +968,7 @@
     const catalogueThumbnailChoices = get("#catalogueThumbnailChoices");
     const catalogueThumbnailHint = get("#catalogueThumbnailHint");
     const pornhubInput = get("#uploadPornhubVideo");
+    const scriptInput = get("#uploadScript");
     const contentPreset = get("#contentPreset");
     const pornhubVideoType = get("#pornhubVideoType");
     const pornhubCertificationsConfirmed = get(
@@ -1106,6 +1119,10 @@
     const thumbnailPreviewCache = new Map();
     const thumbnailPreviewRequests = new Map();
     let pornhubFile = null;
+    // The parsed script stays in memory for the website upload only.
+    let scriptFile = null;
+    let scriptFunscript = null;
+    let scriptError = "";
     let socialFile = null;
     let matchTimer = null;
     let matchRevision = 0;
@@ -1737,6 +1754,7 @@
         teaserFile,
         thumbnailFile,
         pornhubFile: pornhubVideoType.value === "free" ? pornhubFile : null,
+        scriptFile,
         title:
           workflowMode?.value === "teaser"
             ? socialCaption.value.trim().split("\n")[0] ||
@@ -1895,7 +1913,7 @@
       }
       const name = file.name;
       const extensionStart = name.lastIndexOf(".");
-      if (extensionStart <= 0 || name.length - extensionStart > 9) {
+      if (extensionStart <= 0 || name.length - extensionStart > 10) {
         element.textContent = name;
         return;
       }
@@ -3423,6 +3441,143 @@
         }
         results.append(card);
       }
+      if (activeSession?.script) results.append(scriptResultCard());
+    }
+
+    function scriptRun(value, targets, openingFrameToken) {
+      if (!scriptFile || !scriptFunscript) return null;
+      const leadInMs = openingFrameToken
+        ? globalThis.OFEnhancerDesktopUpload?.openingFrameLeadInMs?.(
+            openingFrameToken,
+          )
+        : 0;
+      const blocked = !Number.isSafeInteger(leadInMs);
+      return {
+        funscript: scriptFunscript,
+        title: value.title,
+        targets: [...targets],
+        // Only OnlyFans and Fansly receive the video with an opening frame.
+        leadIns: { onlyfans: leadInMs, fansly: leadInMs },
+        blocked,
+        status: blocked ? "failed" : "waiting",
+        error: blocked
+          ? "The opening-frame length is unknown, so the script was not sent. Update OFEnhancer and upload the script again."
+          : "",
+        sentKeys: [],
+        urls: [],
+      };
+    }
+
+    function scriptLinks(script) {
+      return script.targets
+        .map((platform) => ({
+          platform,
+          postUrl: platformStates.get(platform)?.postUrl || "",
+        }))
+        .filter((link) => link.postUrl);
+    }
+
+    function scriptResultCard() {
+      const script = activeSession.script;
+      const card = document.createElement("article");
+      card.className = "result-card";
+      const heading = document.createElement("div");
+      heading.className = "result-heading";
+      const name = document.createElement("h3");
+      name.textContent = "Script";
+      const badge = document.createElement("span");
+      badge.className = "result-status";
+      badge.dataset.state = script.status;
+      badge.textContent = {
+        waiting: "Waiting for platform links",
+        uploading: "Uploading to JohnnyGuides",
+        sent: "Uploaded to JohnnyGuides",
+        failed: "Failed",
+      }[script.status];
+      heading.append(name, badge);
+      card.append(heading);
+      for (const url of script.urls) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = url;
+        card.append(link);
+      }
+      if (script.error) {
+        const message = document.createElement("p");
+        message.className = "error";
+        message.textContent = script.error;
+        card.append(message);
+      }
+      if (
+        !script.blocked &&
+        script.status !== "uploading" &&
+        // A link recorded later (such as a manual Pornhub publish) can still be sent.
+        scriptLinks(script).some(({ platform, postUrl }) => {
+          const key = globalThis.CreatorSyncScript.scriptKey(platform, postUrl);
+          return key && !script.sentKeys.includes(key);
+        })
+      ) {
+        const send = document.createElement("button");
+        send.type = "button";
+        send.textContent =
+          script.status === "failed" ? "Retry script" : "Send script";
+        send.addEventListener("click", () => void sendScript());
+        card.append(send);
+      }
+      return card;
+    }
+
+    // A script failure is reported on its own card; platform results stand.
+    async function sendScript() {
+      const session = activeSession;
+      const script = session?.script;
+      if (!script || script.blocked || script.status === "uploading") return;
+      script.attempted = true;
+      script.status = "uploading";
+      script.error = "";
+      renderPlatformStates();
+      try {
+        // Keys already sent are never posted again.
+        const uploads = globalThis.CreatorSyncScript.scriptUploads(
+          scriptLinks(script).filter(
+            ({ platform, postUrl }) =>
+              !script.sentKeys.includes(
+                globalThis.CreatorSyncScript.scriptKey(platform, postUrl),
+              ),
+          ),
+          script.funscript,
+          script.leadIns,
+        );
+        if (!uploads.length)
+          throw new Error("No platform link has a video id for the script.");
+        const response = await sendMessage({
+          type: "UPLOAD_SYNC_SCRIPT",
+          sessionId: session.id,
+          title: script.title,
+          uploads: uploads.map(({ keys, funscript }) => ({ keys, funscript })),
+        });
+        const failures = [];
+        const notes = [];
+        for (const result of response.scripts || []) {
+          if (result.url) {
+            script.urls.push(result.url);
+            script.sentKeys.push(...result.keys);
+          }
+          if (result.error) failures.push(result.error);
+          if (result.sheetError) notes.push(result.sheetError);
+        }
+        script.status =
+          !failures.length && (response.scripts || []).length === uploads.length
+            ? "sent"
+            : "failed";
+        script.error = [...failures, ...notes].join(" ");
+      } catch (error) {
+        script.status = "failed";
+        script.error = error.message;
+      }
+      if (activeSession === session) renderPlatformStates();
     }
 
     function setPlatformState(platform, patch) {
@@ -3432,6 +3587,14 @@
       });
       renderPlatformStates();
       updateUploadAction();
+      const script = activeSession?.script;
+      if (
+        script?.status === "waiting" &&
+        !script.attempted &&
+        script.targets.length &&
+        script.targets.every((target) => platformStates.get(target)?.postUrl)
+      )
+        void sendScript();
       if (patch.postUrl && activeSession?.catalogueDeferred)
         get("#savedCatalogueAssociation").hidden = false;
     }
@@ -4384,11 +4547,13 @@
           },
         });
         activeSession.catalogueDeferred = uploadWithoutSheet;
+        activeSession.script = scriptRun(value, targets, openingFrameToken);
         lastAttempt = { sessionId, phase: "connecting" };
         if (workflowMode) workflowMode.disabled = true;
         fullInput.disabled = true;
         thumbnailInput.disabled = true;
         pornhubInput.disabled = true;
+        scriptInput.disabled = true;
         teaserInput.disabled = true;
         socialInput.disabled = true;
         platformStates.clear();
@@ -5042,6 +5207,7 @@
         teaserInput,
         thumbnailInput,
         pornhubInput,
+        scriptInput,
         socialInput,
       ]) {
         input.disabled = false;
@@ -5157,11 +5323,15 @@
       teaserFile = neutralTestFiles.teaserFile;
       thumbnailFile = neutralTestFiles.thumbnailFile;
       pornhubFile = neutralTestFiles.teaserFile;
+      scriptFile = null;
+      scriptFunscript = null;
+      scriptError = "";
       for (const input of [
         fullInput,
         teaserInput,
         thumbnailInput,
         pornhubInput,
+        scriptInput,
       ])
         input.value = "";
       selectedCatalogueRow = null;
@@ -5372,6 +5542,12 @@
         [thumbnailInput, thumbnailFile, "manyvidsThumbnailSummary", "Auto"],
         [pornhubInput, pornhubFile, "pornhubFileSummary", "Select video"],
         [
+          scriptInput,
+          scriptFile,
+          "scriptFileSummary",
+          scriptError || "Optional .funscript",
+        ],
+        [
           socialInput,
           socialFile,
           "socialFileSummary",
@@ -5399,7 +5575,9 @@
           ? "Replace"
           : input === fullInput
             ? "Choose file"
-            : input === pornhubInput || input === teaserInput
+            : input === pornhubInput ||
+                input === teaserInput ||
+                input === scriptInput
               ? "Choose file"
               : "Choose File";
         choose.disabled = input.disabled;
@@ -6008,6 +6186,7 @@
       teaserInput,
       thumbnailInput,
       pornhubInput,
+      scriptInput,
       socialInput,
     ])
       fileControlObserver.observe(input, {
@@ -6196,6 +6375,32 @@
         title.value = titleFromFilename(pornhubFile.name);
       if (!activeSession) scheduleMatch();
     });
+    let scriptRevision = 0;
+    scriptInput.addEventListener("change", async () => {
+      const file = scriptInput.files?.[0] || null;
+      const revision = ++scriptRevision;
+      scriptFile = null;
+      scriptFunscript = null;
+      scriptError = "";
+      if (file) {
+        try {
+          if (!globalThis.CreatorSyncScript.isScriptFile(file))
+            throw new Error("Choose a .funscript under 8 MB.");
+          const parsed = globalThis.CreatorSyncScript.parseFunscript(
+            await file.text(),
+          );
+          if (revision !== scriptRevision) return;
+          scriptFile = file;
+          scriptFunscript = parsed;
+        } catch (error) {
+          if (revision !== scriptRevision) return;
+          scriptError = error.message;
+          scriptInput.value = "";
+        }
+      }
+      renderFilePickers();
+      if (!activeSession) scheduleMatch();
+    });
     socialInput.addEventListener("change", () => {
       socialFile = socialInput.files?.[0] || null;
       get("#socialFileSummary").textContent = fileSummary(
@@ -6209,6 +6414,7 @@
       teaserInput,
       thumbnailInput,
       pornhubInput,
+      scriptInput,
       socialInput,
     ])
       input.addEventListener("change", renderFilePickers);

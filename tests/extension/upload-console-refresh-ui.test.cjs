@@ -362,7 +362,7 @@ test("compact uploader keeps real accessible pickers, two keyboard choices and o
       JSON.stringify(previewBox),
     );
     const cardWidths = await page
-      .locator(".media-grid .file-picker")
+      .locator(".media-grid .file-picker:not(.script-file-card)")
       .evaluateAll((cards) =>
         cards.map((card) => card.getBoundingClientRect().width),
       );

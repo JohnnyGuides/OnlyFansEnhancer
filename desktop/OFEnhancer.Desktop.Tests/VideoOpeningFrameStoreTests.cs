@@ -49,6 +49,7 @@ public sealed class VideoOpeningFrameStoreTests
             VideoOpeningFrameStore store = new(Path.Combine(root, "cache"), ffmpeg, ffprobe);
             string token = await store.PrepareAsync(source, selection);
             FileInfo result = store.Resolve(token, source, "fansly");
+            Assert.IsTrue(store.LeadInMs(token) is >= 1000 and <= 1100, "measured, not the nominal second");
             Assert.AreEqual(source.Name, result.Name);
             Assert.AreNotEqual(source.FullName, result.FullName);
             Assert.IsTrue(result.Length > source.Length);
@@ -63,6 +64,40 @@ public sealed class VideoOpeningFrameStoreTests
             string JoinedFrame() => Run(ffmpeg!, "-v", "error", "-ss", "1.5", "-i", result.FullName, "-map", "0:v:0", "-frames:v", "1", "-f", "framemd5", "-")
                 .Split('\n').Last(line => line.StartsWith("0,"));
             Assert.AreEqual(OriginalFrame().Split(',').Last().Trim(), JoinedFrame().Split(',').Last().Trim());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task ReportsTheMeasuredLeadInIncludingFrameRateAndAudioRounding()
+    {
+        string? ffmpeg = Tool("ffmpeg.exe");
+        string? ffprobe = Tool("ffprobe.exe");
+        if (ffmpeg is null || ffprobe is null) Assert.Inconclusive("FFmpeg is unavailable on this test machine.");
+        string root = Path.Combine(Path.GetTempPath(), "ofenhancer-leadin-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try {
+            string sourcePath = Path.Combine(root, "neutral-ntsc.mp4");
+            Run(ffmpeg!, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30000/1001",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "3", "-c:v", "libx264", "-preset", "ultrafast",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", sourcePath);
+            FileInfo source = new(sourcePath);
+            JsonElement selection = JsonSerializer.SerializeToElement(new {
+                name = source.Name, size = source.Length,
+                lastModified = new DateTimeOffset(source.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+                seconds = 1, crop = new { zoom = 1, x = 0, y = 0 },
+            });
+            VideoOpeningFrameStore store = new(Path.Combine(root, "cache"), ffmpeg, ffprobe);
+            string token = await store.PrepareAsync(source, selection);
+            int leadIn = store.LeadInMs(token);
+            Assert.IsTrue(leadIn is >= 1000 and <= 1100, $"Unexpected lead-in: {leadIn}");
+            FileInfo result = store.Resolve(token, source, "onlyfans");
+            string Frame(string file, double seconds) => Run(ffmpeg!, "-v", "error", "-ss",
+                seconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture), "-i", file, "-map", "0:v:0",
+                "-frames:v", "1", "-f", "framemd5", "-").Split('\n').Last(line => line.StartsWith("0,")).Split(',').Last().Trim();
+            // A source moment reappears exactly the measured lead-in later.
+            Assert.AreEqual(Frame(sourcePath, 0.5), Frame(result.FullName, 0.5 + leadIn / 1000d));
+            Assert.ThrowsException<InvalidOperationException>(() => store.LeadInMs("wrong"));
         }
         finally { Directory.Delete(root, recursive: true); }
     }

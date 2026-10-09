@@ -1902,8 +1902,13 @@ html {
   border: 1px solid #3d4859;
 }
 #mainDestinations {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
+}
+@media (max-width: 820px) {
+  #mainDestinations {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 #mainDestinations .target-option {
   min-height: 54px;
@@ -2467,6 +2472,21 @@ a {
 }
 .media-grid .file-actions button {
   min-height: 34px;
+}
+/* The optional script spans the grid as one slim row below the video files. */
+.upload-media > .script-file-card {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  min-height: 0;
+  padding-block: 10px;
+}
+.media-grid .script-file-card .file-information {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.media-grid .script-file-card .file-actions {
+  margin-top: 0;
 }
 .upload-metadata-row {
   display: grid;

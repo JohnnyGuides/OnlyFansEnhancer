@@ -187,7 +187,7 @@ internal sealed class GoogleWorkspaceClient
         List<(string Name, string Value)> query = [("fields", fields)];
         foreach (GoogleSheetSnapshot sheet in requestedSheets)
         {
-            char lastColumn = (char)('A' + Math.Min(sheet.ColumnCount, 24) - 1);
+            char lastColumn = (char)('A' + Math.Min(sheet.ColumnCount, 25) - 1);
             int lastRow = Math.Min(sheet.RowCount, headerDiscovery ? 20 : 5002);
             query.Add(("ranges", $"'{sheet.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:{lastColumn}{lastRow}"));
         }
@@ -489,13 +489,13 @@ internal sealed class GoogleWorkspaceClient
     {
         string boundedWorkbook = Required(workbookId, 256, "workbookId");
         string boundedSheet = Required(sheetTitle, 200, "sheetTitle");
-        if (headerRow is < 1 or > 20 || columns.Count is < 2 or > 24
+        if (headerRow is < 1 or > 20 || columns.Count is < 2 or > 25
             || !columns.TryGetValue("sourceKey", out int idColumn)
             || !columns.TryGetValue("title", out int titleColumn)
-            || idColumn is < 1 or > 24 || titleColumn is < 1 or > 24)
+            || idColumn is < 1 or > 25 || titleColumn is < 1 or > 25)
             throw new GoogleCatalogueException("catalogue-layout-changed");
         int lastColumn = columns.Values.Max();
-        if (lastColumn is < 1 or > 24) throw new GoogleCatalogueException("catalogue-layout-changed");
+        if (lastColumn is < 1 or > 25) throw new GoogleCatalogueException("catalogue-layout-changed");
         string[] values = new string[lastColumn];
         values[idColumn - 1] = Required(id, 200, "id");
         values[titleColumn - 1] = Required(title, 300, "title");
@@ -541,7 +541,7 @@ internal sealed class GoogleWorkspaceClient
 
     internal Task UpdateMetadataCellAsync(string workbookId, int metadataId, int column, string value, CancellationToken cancellationToken)
     {
-        if (metadataId < 0 || column is < 1 or > 24) throw new GoogleCatalogueException("invalid-google-batch");
+        if (metadataId < 0 || column is < 1 or > 25) throw new GoogleCatalogueException("invalid-google-batch");
         object?[] cells = new object?[column];
         cells[column - 1] = value;
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(new {
@@ -973,7 +973,7 @@ internal sealed record GoogleWorkbookSnapshot(
             if (grid.TryGetProperty("columnMetadata", out JsonElement columnMetadata))
             {
                 if (columnMetadata.ValueKind != JsonValueKind.Array
-                    || startColumn + columnMetadata.GetArrayLength() > 24)
+                    || startColumn + columnMetadata.GetArrayLength() > 25)
                 {
                     throw Invalid();
                 }
@@ -1006,7 +1006,7 @@ internal sealed record GoogleWorkbookSnapshot(
                 }
                 if (!row.TryGetProperty("values", out JsonElement values))
                     continue;
-                if (values.ValueKind != JsonValueKind.Array || startColumn + values.GetArrayLength() > 24)
+                if (values.ValueKind != JsonValueKind.Array || startColumn + values.GetArrayLength() > 25)
                     throw Invalid();
                 while (cells.Count < startColumn)
                     cells.Add(new(null, null));

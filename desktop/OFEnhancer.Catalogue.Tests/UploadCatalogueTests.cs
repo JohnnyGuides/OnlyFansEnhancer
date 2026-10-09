@@ -24,6 +24,29 @@ public sealed class UploadCatalogueTests
         Assert.AreEqual(0, reopened.GetUploadSheetWritebacks("work").Count);
     }
     [TestMethod]
+    public void ScriptLinksQueueSheetWritesAndASecondVariantIsNotAConflict()
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
+        test.Store.SaveGoogleCatalogueProfile("work", "1", "Videos", "catalogue-v1", true, DateTimeOffset.UtcNow);
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var first = test.Store.RecordUploadResult(new(row.Row, row.Fingerprint, "script",
+            "https://johnnyguides.com/sync/scripts/episode.funscript", Id: row.Id));
+        Assert.AreEqual("recorded-local", first.Status);
+        var second = test.Store.RecordUploadResult(new(row.Row, first.Fingerprint!, "script",
+            "https://www.johnnyguides.com/sync/scripts/episode-1.funscript", Id: row.Id));
+        Assert.AreEqual("recorded-local", second.Status);
+        CollectionAssert.AreEquivalent(new[] {
+            "https://johnnyguides.com/sync/scripts/episode.funscript",
+            "https://johnnyguides.com/sync/scripts/episode-1.funscript" },
+            test.Store.GetUploadSheetWritebacks("work").Where(intent => intent.Platform == "script")
+                .Select(intent => intent.Url).ToArray());
+        Assert.AreEqual("published", test.Store.GetUploadCatalogueSnapshot().Rows.Single().PublicationState["script"]);
+        Assert.ThrowsException<WorkbookProjectionException>(() => test.Store.RecordUploadResult(new(row.Row,
+            second.Fingerprint!, "script", "https://example.com/sync/scripts/episode.funscript", Id: row.Id)));
+    }
+
+    [TestMethod]
     public void OnlyFansHandleSuffixIsTheSamePublishedPost()
     {
         using TestStore test = new();
