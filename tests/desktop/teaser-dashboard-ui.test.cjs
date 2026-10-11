@@ -1672,6 +1672,83 @@ test("history calendar lines up with the week row and trend cards compare period
   }
 });
 
+for (const failLibrary of [false, true]) {
+  test(`add teaser shows the catalogue while clip lookup is ${failLibrary ? "failed" : "pending"}`, async () => {
+    const { page, context, errors } = await openDashboard();
+    try {
+      // This workspace harness verifies the editor handoff; its full runtime
+      // and selected-episode delivery are covered by teaser-composer.test.cjs.
+      await page.route("**/desktop/upload-console.html?*", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: "<!doctype html><title>Editor handoff</title>",
+        }),
+      );
+      await page.evaluate(() => {
+        const request = globalThis.__OFENHANCER_TEST_HOST__;
+        globalThis.clipLookups = [];
+        globalThis.__OFENHANCER_TEST_HOST__ = (operation, payload) =>
+          operation === "getTeaserClips"
+            ? new Promise((resolve, reject) =>
+                clipLookups.push({ resolve, reject }),
+              )
+            : request(operation, payload);
+      });
+      await page.locator('.xt-tile[data-date="2026-10-02"]').click();
+      const catalogue = page.locator(".xt-composer-catalogue");
+      await catalogue
+        .locator(".xt-episode[data-episode-key]")
+        .first()
+        .waitFor();
+      await page.waitForFunction(() => clipLookups.length === 1);
+      if (failLibrary) {
+        await page.evaluate(() =>
+          clipLookups[0].reject(new Error("Library unavailable")),
+        );
+        await page
+          .getByText(
+            "Ready clips are unavailable. Choose an episode or a video.",
+            { exact: true },
+          )
+          .waitFor();
+      }
+      await catalogue.locator('[data-coverage="needs"]').click();
+      await catalogue.locator('[data-coverage="all"]').click();
+      assert.ok(
+        await catalogue.locator(".xt-episode[data-episode-key]").count(),
+      );
+      assert.equal(
+        await page.locator(".xt-composer-content > .xt-clip-choices").count(),
+        0,
+      );
+      await screenshot(
+        page,
+        `add-teaser-library-${failLibrary ? "failed" : "pending"}.png`,
+      );
+      await catalogue.locator('[data-episode-key="series-a-e4"]').click();
+      await page.waitForFunction(() => clipLookups.length === 2);
+      await page.evaluate(() => clipLookups[1].resolve({ clips: [] }));
+      await page.locator(".xt-composer-frame").waitFor();
+      if (!failLibrary) {
+        await page.evaluate(() =>
+          clipLookups[0].reject(new Error("Late library failure")),
+        );
+        assert.equal(
+          await page.locator(".xt-composer-status").textContent(),
+          "",
+        );
+      }
+      assert.equal(
+        await page.locator(".xt-composer-heading h2").textContent(),
+        "Series A E4",
+      );
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
 test("day-scoped teaser modal ranks ready clips without mutating the calendar plan", async () => {
   const { page, context, errors } = await openDashboard();
   try {

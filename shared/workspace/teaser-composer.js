@@ -704,17 +704,60 @@
           folder,
         );
       }
-      status.textContent = "Loading ready clips…";
+      let clips = [];
+      let catalogueView = null;
+      if (renderCatalogue && !episode) {
+        const catalogue = renderCatalogue((item) => {
+          episode = item;
+          const available = clips.filter(
+            (clip) => clip.episodeKey === item.sourceKey,
+          );
+          if (available.length === 1) void editClip(available[0], item);
+          else void choose();
+        });
+        const upload = node("li", "xt-card xt-upload-choice");
+        add.className = "xt-episode xt-clip-add";
+        upload.append(add);
+        const wall = catalogue.querySelector(".xt-cards");
+        if (!wall) {
+          status.textContent = "";
+          return;
+        }
+        wall.prepend(upload);
+        const wrapper = node("div", "xt xt-composer-catalogue");
+        wrapper.append(catalogue);
+        wrapper.addEventListener("dragover", (event) => event.preventDefault());
+        wrapper.addEventListener("drop", (event) => {
+          event.preventDefault();
+          const file = event.dataTransfer?.files?.[0];
+          if (file && !loading) edit(file);
+        });
+        catalogueView = wrapper;
+        content.replaceChildren(wrapper, input);
+        layoutCatalogue(wall);
+        if (global.ResizeObserver) {
+          catalogueObserver = new ResizeObserver(() =>
+            layoutCatalogue(wrapper.querySelector(".xt-cards")),
+          );
+          catalogueObserver.observe(wrapper);
+        }
+      }
+      status.textContent = catalogueView ? "" : "Loading ready clips…";
       try {
         const library = await request("getTeaserClips", {});
-        if (!dialog.isConnected || iframe) return;
+        if (
+          !dialog.isConnected ||
+          iframe ||
+          !(catalogueView || grid).isConnected
+        )
+          return;
         const ranked = new Map(
           recommendations.map((item, index) => [
             item.episode.sourceKey,
             { ...item, rank: index + 1 },
           ]),
         );
-        const clips = (library.clips || [])
+        clips = (library.clips || [])
           .filter((clip) => !episode || clip.episodeKey === episode.sourceKey)
           .sort(
             (left, right) =>
@@ -725,24 +768,8 @@
           edit();
           return;
         }
-        if (renderCatalogue && !episode) {
-          const catalogue = renderCatalogue((item) => {
-            episode = item;
-            const available = clips.filter(
-              (clip) => clip.episodeKey === item.sourceKey,
-            );
-            if (available.length === 1) void editClip(available[0], item);
-            else void choose();
-          });
-          const upload = node("li", "xt-card xt-upload-choice");
-          add.className = "xt-episode xt-clip-add";
-          upload.append(add);
-          const wall = catalogue.querySelector(".xt-cards");
-          if (!wall) {
-            status.textContent = "";
-            return;
-          }
-          wall.prepend(upload);
+        if (catalogueView) {
+          const wall = catalogueView.querySelector(".xt-cards");
           for (const clip of clips.filter((item) => !item.episodeKey)) {
             const item = node("li", "xt-card xt-unlinked-choice");
             const choice = action("", "xt-episode");
@@ -756,24 +783,7 @@
             item.append(choice);
             wall.append(item);
           }
-          const wrapper = node("div", "xt xt-composer-catalogue");
-          wrapper.append(catalogue);
-          wrapper.addEventListener("dragover", (event) =>
-            event.preventDefault(),
-          );
-          wrapper.addEventListener("drop", (event) => {
-            event.preventDefault();
-            const file = event.dataTransfer?.files?.[0];
-            if (file && !loading) edit(file);
-          });
-          content.replaceChildren(wrapper, input);
           layoutCatalogue(wall);
-          if (global.ResizeObserver) {
-            catalogueObserver = new ResizeObserver(() =>
-              layoutCatalogue(wrapper.querySelector(".xt-cards")),
-            );
-            catalogueObserver.observe(wrapper);
-          }
           status.textContent = "";
           return;
         }
@@ -836,9 +846,16 @@
           ? ""
           : "No ready clips here yet. Choose a video to start.";
       } catch {
+        if (
+          !dialog.isConnected ||
+          iframe ||
+          !(catalogueView || grid).isConnected
+        )
+          return;
         if (episode) edit();
-        status.textContent =
-          "Ready clips are unavailable. You can still choose a video.";
+        status.textContent = catalogueView
+          ? "Ready clips are unavailable. Choose an episode or a video."
+          : "Ready clips are unavailable. You can still choose a video.";
       }
     }
     dialog.showModal();
