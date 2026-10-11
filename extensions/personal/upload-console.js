@@ -6936,7 +6936,11 @@
         refreshSocialReview();
       },
       async associate(episodeKey, paidUrl) {
-        currentSnapshot = await loadCatalogueSnapshot();
+        clearTimeout(matchTimer);
+        const revision = ++matchRevision;
+        const snapshot = await loadCatalogueSnapshot();
+        if (revision !== matchRevision) return;
+        currentSnapshot = snapshot;
         const normalized = (value) =>
           String(value || "")
             .toLowerCase()
@@ -6988,7 +6992,12 @@
     refreshReleaseSummary();
     refreshSocialReview();
     loadWorkflowSettingsPanel()
-      .then(() => scheduleMatch())
+      .then(() => {
+        // The calendar owns episode selection; late settings must not rematch it.
+        if (calendarTeaser) {
+          if (currentMatch) void checkReadiness();
+        } else scheduleMatch();
+      })
       .catch((error) => {
         matchStatus.textContent = error.message;
       });

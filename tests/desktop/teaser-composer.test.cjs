@@ -63,104 +63,117 @@ after(async () => {
   await new Promise((resolve) => server?.close(resolve));
 });
 
-async function mount(page, linked = false) {
+async function mount(page, linked = false, delaySettings = false) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.setDefaultTimeout(12_000);
-  await page.addInitScript((linked) => {
-    const values = {};
-    globalThis.chrome = {
-      storage: {
-        local: {
-          get(keys, callback) {
-            const result = Object.fromEntries(
-              (Array.isArray(keys) ? keys : [keys])
-                .filter((key) => key in values)
-                .map((key) => [key, values[key]]),
-            );
+  await page.addInitScript(
+    ({ linked, delaySettings }) => {
+      const values = {};
+      globalThis.chrome = {
+        storage: {
+          local: {
+            get(keys, callback) {
+              const result = Object.fromEntries(
+                (Array.isArray(keys) ? keys : [keys])
+                  .filter((key) => key in values)
+                  .map((key) => [key, values[key]]),
+              );
+              if (delaySettings && keys === "creatorToolkitActionLogV1") {
+                return new Promise((resolve) => {
+                  globalThis.releaseSettings = () => {
+                    callback?.(result);
+                    resolve(result);
+                  };
+                });
+              }
+              queueMicrotask(() => callback?.(result));
+              return Promise.resolve(result);
+            },
+            set(data, callback) {
+              Object.assign(values, data);
+              queueMicrotask(() => callback?.());
+              return Promise.resolve();
+            },
+          },
+          onChanged: { addListener() {}, removeListener() {} },
+        },
+        runtime: {
+          lastError: null,
+          getManifest: () => ({ version: "test" }),
+          getURL: (path) => `${location.origin}/${path}`,
+          connect(info) {
+            const listeners = [];
+            return {
+              name: info?.name,
+              onMessage: {
+                addListener: (listener) => listeners.push(listener),
+              },
+              onDisconnect: { addListener() {} },
+              postMessage(message) {
+                if (message.type === "bind-session")
+                  queueMicrotask(() =>
+                    listeners.forEach((listener) =>
+                      listener({
+                        type: "session-bound",
+                        sessionId: message.sessionId,
+                        existing: true,
+                      }),
+                    ),
+                  );
+              },
+              disconnect() {},
+            };
+          },
+          sendMessage(message, callback) {
+            const result =
+              message?.type === "START_NEW_CREATOR_UPLOAD"
+                ? { ok: true, reset: true }
+                : message?.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY"
+                  ? { ok: true, availability: { ready: true } }
+                  : {
+                      ok: true,
+                      sessions: [],
+                      creatorTools: { registered: [], skipped: [] },
+                    };
             queueMicrotask(() => callback?.(result));
             return Promise.resolve(result);
           },
-          set(data, callback) {
-            Object.assign(values, data);
-            queueMicrotask(() => callback?.());
-            return Promise.resolve();
+        },
+        permissions: {
+          request: async () => true,
+          contains(_permissions, callback) {
+            callback?.(true);
+            return Promise.resolve(true);
           },
         },
-        onChanged: { addListener() {}, removeListener() {} },
-      },
-      runtime: {
-        lastError: null,
-        getManifest: () => ({ version: "test" }),
-        getURL: (path) => `${location.origin}/${path}`,
-        connect(info) {
-          const listeners = [];
-          return {
-            name: info?.name,
-            onMessage: { addListener: (listener) => listeners.push(listener) },
-            onDisconnect: { addListener() {} },
-            postMessage(message) {
-              if (message.type === "bind-session")
-                queueMicrotask(() =>
-                  listeners.forEach((listener) =>
-                    listener({
-                      type: "session-bound",
-                      sessionId: message.sessionId,
-                      existing: true,
-                    }),
-                  ),
-                );
-            },
-            disconnect() {},
-          };
-        },
-        sendMessage(message, callback) {
-          const result =
-            message?.type === "START_NEW_CREATOR_UPLOAD"
-              ? { ok: true, reset: true }
-              : message?.type === "CHECK_CREATOR_UPLOAD_AVAILABILITY"
-                ? { ok: true, availability: { ready: true } }
-                : {
-                    ok: true,
-                    sessions: [],
-                    creatorTools: { registered: [], skipped: [] },
-                  };
-          queueMicrotask(() => callback?.(result));
-          return Promise.resolve(result);
-        },
-      },
-      permissions: {
-        request: async () => true,
-        contains(_permissions, callback) {
-          callback?.(true);
-          return Promise.resolve(true);
-        },
-      },
-    };
-    globalThis.CreatorCatalogueClient = {
-      loadConfig: async () => ({ connected: linked }),
-      getCatalogueSnapshot: async () => ({
-        source: "desktop",
-        status: "snapshot",
-        rows: linked
-          ? [
-              {
-                row: 2,
-                id: "preview-test",
-                itemId: "preview-test",
-                title: "Preview test",
-                description: "A synthetic episode",
-                releaseDate: "2026-10-01",
-                fingerprint: "a".repeat(64),
-                publicationState: {},
-                onlyfansLink: "https://onlyfans.com/1/preview",
-              },
-            ]
-          : [],
-        emptyRow: { row: 3 },
-      }),
-    };
-  }, linked);
+      };
+      globalThis.CreatorCatalogueClient = {
+        loadConfig: async () => ({ connected: linked }),
+        getCatalogueSnapshot: async () => ({
+          source: "desktop",
+          status: "snapshot",
+          rows: linked
+            ? [
+                {
+                  row: 2,
+                  id: "preview-test",
+                  itemId: "preview-test",
+                  title: "Preview test",
+                  description: "A synthetic episode",
+                  releaseDate: "2026-10-01",
+                  fingerprint: "a".repeat(64),
+                  publicationState: {},
+                  onlyfansLink: "https://onlyfans.com/1/preview",
+                },
+              ]
+            : [],
+          emptyRow: { row: 3 },
+        }),
+      };
+    },
+    { linked, delaySettings },
+  );
   await page.goto(`${origin}/host`);
   await page.locator("#open-day").click();
   await page.locator(".xt-clip-choices").waitFor();
@@ -697,6 +710,101 @@ test("main uploader uses one compact social publishing checkbox", async () => {
     await page.close();
   }
 });
+
+for (const caption of ["Preview test", "My edited caption"])
+  test(`late startup settings preserve the selected teaser episode and caption: ${caption || "empty"}`, async () => {
+    const page = await browser.newPage();
+    try {
+      const errors = await mount(page, true, true);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+      await page.evaluate(() =>
+        OFEnhancerTeaserComposer.open({
+          date: "2026-10-06",
+          episodes: [{ sourceKey: "preview-test", title: "Preview test" }],
+          request: async () => ({ clips: [] }),
+        }),
+      );
+      await page.locator(".xt-episode-choice").click();
+      await page.getByRole("button", { name: "Open episode folder" }).waitFor();
+      const frame = page
+        .frames()
+        .find((item) => item.url().includes("?teaserDay="));
+      assert.equal(
+        await frame.locator("#socialCaption").inputValue(),
+        "Preview test",
+      );
+      await frame.locator("#socialCaption").fill(caption);
+      await frame.waitForFunction(() => typeof releaseSettings === "function");
+      await frame.evaluate(() => {
+        window.startupStatuses = [];
+        new MutationObserver(() =>
+          startupStatuses.push(
+            document.querySelector("#matchStatus").textContent,
+          ),
+        ).observe(document.querySelector("#matchStatus"), {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+        releaseSettings();
+      });
+      // Allow the startup matching debounce to run after settings completion.
+      await frame.waitForTimeout(500);
+      assert.deepEqual(
+        await frame.evaluate(() =>
+          startupStatuses.filter((text) =>
+            /Waiting for edits|Loading the catalogue|Choose files and destinations/.test(
+              text,
+            ),
+          ),
+        ),
+        [],
+      );
+      assert.equal(await frame.locator("#socialCaption").inputValue(), caption);
+      assert.equal(
+        await frame
+          .getByRole("button", { name: "Link episode", exact: true })
+          .isVisible(),
+        false,
+      );
+      assert.equal(
+        await page
+          .getByRole("button", { name: "Open episode folder" })
+          .isVisible(),
+        true,
+      );
+      await page.evaluate(() => {
+        window.folderRequests = [];
+        window.OFEnhancerHost = {
+          request: async (op, payload) =>
+            window.folderRequests.push({ op, payload }),
+        };
+      });
+      await page.getByRole("button", { name: "Open episode folder" }).click();
+      assert.deepEqual(await page.evaluate(() => window.folderRequests), [
+        {
+          op: "openTeaserEpisodeFolder",
+          payload: { episodeKey: "preview-test" },
+        },
+      ]);
+      await frame.locator("#uploadSocialTeaser").setInputFiles(VIDEO);
+      await frame.locator("#saveTeaserDraft").click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".xt-composer-status")?.textContent ===
+          "Draft saved for this day.",
+      );
+      const draft = await frame.evaluate(() =>
+        OFEnhancerTeaserDrafts.get("2026-10-06"),
+      );
+      assert.equal(draft.episodeKey, "preview-test");
+      assert.equal(draft.caption, caption);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
 
 test("episode without a teaser opens its folder and accepts a video in the same day modal", async () => {
   const page = await browser.newPage({
