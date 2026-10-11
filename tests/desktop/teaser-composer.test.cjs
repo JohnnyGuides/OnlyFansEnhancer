@@ -734,7 +734,8 @@ for (const caption of ["Preview test", "My edited caption"])
         await frame.locator("#socialCaption").inputValue(),
         "Preview test",
       );
-      await frame.locator("#socialCaption").fill(caption);
+      if (caption !== "Preview test")
+        await frame.locator("#socialCaption").fill(caption);
       await frame.waitForFunction(() => typeof releaseSettings === "function");
       await frame.evaluate(() => {
         window.startupStatuses = [];
