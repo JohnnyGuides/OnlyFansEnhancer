@@ -484,6 +484,69 @@ async function stored(env, id) {
   return env.run("CreatorUploadSessionStore.load(lookup)");
 }
 
+test("Fansly manual receipt survives recovery and adds its media ID to the website POST", async () => {
+  const env = await loadWorker();
+  const id = sessionId();
+  const session = addSession(env, id, {
+    platforms: ["fansly", "onlyfans"],
+    catalogue: null,
+  });
+  connect(env, id);
+  await prepare(env, id, "fansly");
+  const target = session.platforms.get("fansly");
+  const captured = await deliver(
+    env,
+    outcome(id, target, {
+      postUrl: "https://fansly.com/post/956588460972449792",
+      fanslyMediaId: "956574905413943296",
+    }),
+    senderFor(target, { url: "https://fansly.com/home" }),
+  );
+  assert.equal(captured.accepted, true);
+  assert.equal(
+    (await stored(env, id)).platforms.fansly.fanslyMediaId,
+    "956574905413943296",
+  );
+  env.context.uploadSessionId = id;
+  env.context.TextDecoder = TextDecoder;
+  env.context.atob = atob;
+  const requests = [];
+  env.context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        file: "benign.funscript",
+        keys: body.keys,
+        url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+      }),
+    };
+  };
+  const result = await env.run(`(async () => {
+    await chrome.storage.local.set({ [CreatorSyncScript.SETTINGS_KEY]: { origin: "https://johnnyguides.com", token: "synthetic-test-token" } });
+    creatorUploadSessions.delete(uploadSessionId);
+    const uploadId = await CreatorSyncScript.sendScriptParts(async part => CREATOR_SYNC_SCRIPT_PARTS.add(part), {
+      title: "Benign episode", uploads: [
+        { keys: ["956588460972449792"], funscript: { actions: [{ at: 1023, pos: 10 }] } },
+        { keys: ["ph123"], funscript: { actions: [{ at: 0, pos: 10 }] } }
+      ]
+    });
+    return uploadCreatorSyncScripts({ sessionId: uploadSessionId, uploadId });
+  })()`);
+  assert.deepEqual(
+    requests.map((r) => r.body.keys),
+    [["956588460972449792", "956574905413943296"], ["ph123"]],
+  );
+  assert.deepEqual(
+    requests.map((r) => r.body.funscript.actions[0].at),
+    [1023, 0],
+  );
+  assert.equal(result.length, 2);
+  assert.equal(result[0].sheetError, "");
+});
+
 test("manual preparation arms a watch in the exact prepared document", async () => {
   const env = await loadWorker();
   const id = sessionId();

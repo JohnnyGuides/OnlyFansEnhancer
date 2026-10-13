@@ -55,6 +55,12 @@
       visited += 1;
       if (!current.value || typeof current.value !== "object") continue;
       if (
+        platform === "fansly" &&
+        Array.isArray(current.value.posts) &&
+        current.value.posts.length !== 1
+      )
+        return null;
+      if (
         current.value.success === false ||
         current.value.status === "error" ||
         current.value.error ||
@@ -72,7 +78,7 @@
           if (result) urls.add(result);
         }
         if (
-          (typeof value === "string" || typeof value === "number") &&
+          (typeof value === "string" || Number.isSafeInteger(value)) &&
           /^\d{5,}$/.test(String(value))
         ) {
           if (normalizedKey === "postid") {
@@ -81,13 +87,20 @@
             const parent = String(current.path.at(-1) || "").toLowerCase();
             if (
               current.path.length === 0 ||
-              new Set(["post", "data", "response"]).has(parent)
+              new Set(["post", "data", "response"]).has(parent) ||
+              (platform === "fansly" && current.path.at(-2) === "posts")
             ) {
               contextualIds.add(String(value));
             }
           }
         }
         if (value && typeof value === "object" && path.length < 6) {
+          // Attachment ownership and account-media identities are not post IDs.
+          if (
+            platform === "fansly" &&
+            new Set(["attachments", "accountMedia"]).has(key)
+          )
+            continue;
           queue.push({ value, path });
         }
       }
@@ -99,6 +112,51 @@
       if (result) candidates.add(result);
     }
     return candidates.size === 1 ? [...candidates][0] : null;
+  }
+
+  function extractFanslyMediaId(payload, postUrl) {
+    if (!postUrl || extractPostUrl("fansly", payload) !== postUrl) return "";
+    const response = payload.response;
+    if (!response || typeof response !== "object") return "";
+    const post = Array.isArray(response.posts)
+      ? response.posts.length === 1 && response.posts[0]
+      : response.post || response;
+    const id = (value) =>
+      typeof value === "string" && /^\d{1,40}$/.test(value) ? value : "";
+    if (
+      !post ||
+      !id(post.id) ||
+      canonical("fansly", post.id) !== postUrl ||
+      !Array.isArray(post.attachments) ||
+      !Array.isArray(response.accountMedia)
+    )
+      return "";
+    const videos = new Set();
+    for (const attachment of post.attachments) {
+      if (
+        !attachment ||
+        attachment.postId !== post.id ||
+        attachment.contentType !== 1 ||
+        !id(attachment.contentId)
+      )
+        return "";
+      const matches = response.accountMedia.filter(
+        (item) => item && item.id === attachment.contentId,
+      );
+      if (matches.length !== 1) return "";
+      const item = matches[0];
+      if (
+        item.media?.type === 2 &&
+        /^video\//.test(item.media.mimetype || "")
+      ) {
+        if (!id(item.mediaId) || item.media.id !== item.mediaId) return "";
+        videos.add(item.mediaId);
+      } else if (!(
+        item.media?.type === 1 && /^image\//.test(item.media.mimetype || "")
+      ))
+        return "";
+    }
+    return videos.size === 1 ? [...videos][0] : "";
   }
 
   function matchesEndpoint(meta, platform) {
@@ -176,9 +234,14 @@
         observer.platform === "manyvids"
           ? canonical("manyvids", observer.videoId)
           : extractPostUrl(observer.platform, payload);
+      const fanslyMediaId =
+        observer.platform === "fansly"
+          ? extractFanslyMediaId(payload, postUrl)
+          : "";
       settle(observer, {
         platform: observer.platform,
         postUrl,
+        ...(fanslyMediaId ? { fanslyMediaId } : {}),
         sessionId: observer.sessionId,
         status: postUrl ? "link-captured" : "posted-link-unresolved",
       });
@@ -306,10 +369,15 @@
   function watch({ sessionId, platform, watchId, timeoutMs, videoId }) {
     if (!/^[a-f0-9]{32}$/.test(String(watchId || ""))) return false;
     cancel(sessionId, platform);
-    const announce = (outcome, postUrl = "") =>
+    const announce = (outcome, postUrl = "", fanslyMediaId = "") =>
       document.dispatchEvent(
         new CustomEvent(MANUAL_WATCH_EVENT, {
-          detail: JSON.stringify({ watchId, outcome, postUrl }),
+          detail: JSON.stringify({
+            watchId,
+            outcome,
+            postUrl,
+            ...(fanslyMediaId ? { fanslyMediaId } : {}),
+          }),
         }),
       );
     install({ sessionId, platform, timeoutMs, videoId, manual: true }).then(
@@ -317,6 +385,7 @@
         announce(
           receipt?.postUrl ? "captured" : "unresolved",
           receipt?.postUrl || "",
+          receipt?.fanslyMediaId || "",
         ),
       (error) =>
         announce(/cancelled/i.test(error?.message) ? "cancelled" : "expired"),

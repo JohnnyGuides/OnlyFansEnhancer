@@ -77,6 +77,43 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test("Fansly media identity survives session loss and cannot be replaced by a stale checkpoint", async () => {
+  const { store, values } = loadStore();
+  const record = {
+    id: "fansly-media-session-001",
+    draft: { title: "Benign episode" },
+    platforms: {
+      fansly: {
+        postUrl: "https://fansly.com/post/956588460972449792",
+        fanslyMediaId: "956574905413943296",
+        commitArmed: true,
+        submitAttempted: true,
+      },
+    },
+  };
+  await store.save(record);
+  await store.save({
+    id: record.id,
+    platforms: { fansly: { fanslyMediaId: "123456789" } },
+  });
+  assert.equal(
+    (await store.load(record.id)).platforms.fansly.fanslyMediaId,
+    "956574905413943296",
+  );
+  delete values[store.KEY_PREFIX + record.id];
+  assert.equal(
+    (await store.load(record.id)).platforms.fansly.fanslyMediaId,
+    "956574905413943296",
+  );
+  for (const invalid of ["x", "1".repeat(41), 956574905413943296]) {
+    const saved = await store.save({
+      id: "invalid-fansly-id-001",
+      platforms: { fansly: { fanslyMediaId: invalid } },
+    });
+    assert.equal(saved.platforms.fansly.fanslyMediaId, undefined);
+  }
+});
+
 test("recovery capacity refuses new work without evicting unresolved sessions", async () => {
   const { store } = loadStore();
   const step = {

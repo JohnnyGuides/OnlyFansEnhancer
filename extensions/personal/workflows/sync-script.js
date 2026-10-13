@@ -144,6 +144,24 @@
     return { valid: !errors.length, errors, value: { origin, token } };
   }
 
+  // Bind the attachment alias to its post's existing timing group in the worker.
+  // Never send a post-only Fansly mapping: an older media mapping wins in JG Sync.
+  function addFanslyMediaKey(uploads, postUrl, mediaId) {
+    const postKey = scriptKey("fansly", postUrl);
+    if (!postKey) return uploads;
+    return uploads.map((upload) => {
+      if (!upload.keys.includes(postKey)) return upload;
+      if (typeof mediaId !== "string" || !/^\d{1,40}$/.test(mediaId))
+        throw new Error(
+          "The Fansly video media ID was not captured. The script was not sent; recover the video's attachment ID before retrying.",
+        );
+      const keys = [...new Set([...upload.keys, mediaId])];
+      if (keys.length > 10)
+        throw new Error("The Fansly media ID would exceed the 10-key limit.");
+      return { ...upload, keys };
+    });
+  }
+
   async function uploadScript(
     { origin, token, keys, title, funscript },
     fetchImpl = globalThis.fetch,
@@ -376,6 +394,7 @@
     parseFunscript,
     scriptKey,
     scriptUploads,
+    addFanslyMediaKey,
     shiftFunscript,
     uploadScript,
     uploadScripts,

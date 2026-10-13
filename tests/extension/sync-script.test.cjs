@@ -182,6 +182,62 @@ function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+test("Fansly attachment alias joins only its post's timing group without mutating scripts", () => {
+  const groups = sync.scriptUploads(links, script, {
+    onlyfans: 1023,
+    fansly: 1023,
+  });
+  const before = JSON.stringify(groups);
+  const result = sync.addFanslyMediaKey(
+    groups,
+    "https://fansly.com/post/987654321",
+    "956574905413943296",
+  );
+  assert.deepEqual(plain(result[0].keys), [
+    "123456",
+    "987654321",
+    "956574905413943296",
+  ]);
+  assert.deepEqual(plain(result[1].keys), ["ph634de69359881", "5550123"]);
+  assert.equal(result[0].funscript, groups[0].funscript);
+  assert.equal(result[1], groups[1]);
+  assert.equal(JSON.stringify(groups), before);
+  assert.deepEqual(
+    plain(
+      sync.addFanslyMediaKey(
+        result,
+        "https://fansly.com/post/987654321",
+        "956574905413943296",
+      ),
+    ),
+    plain(result),
+  );
+  for (const id of [undefined, "", "x", "1".repeat(41), 956574905413943296])
+    assert.throws(
+      () =>
+        sync.addFanslyMediaKey(groups, "https://fansly.com/post/987654321", id),
+      /media ID was not captured/,
+    );
+  assert.throws(
+    () =>
+      sync.addFanslyMediaKey(
+        [
+          {
+            keys: [
+              "987654321",
+              ...Array.from({ length: 9 }, (_, i) => String(i)),
+            ],
+            funscript: script,
+          },
+        ],
+        "https://fansly.com/post/987654321",
+        "956574905413943296",
+      ),
+    /10-key limit/,
+  );
+  assert.equal(sync.addFanslyMediaKey(groups, "", ""), groups);
+});
+
 test("the upload posts keys, title and script with the bearer token", async () => {
   const requests = [];
   const result = await sync.uploadScript(

@@ -2957,7 +2957,7 @@ function installCreatorManualPublishBridge(config) {
   const bridges = (globalThis.CreatorManualPublishBridges ||= new Map());
   bridges.get(config.platform)?.();
   const eventName = "creator-upload-manual-publish";
-  const forward = (outcome, postUrl = "") => {
+  const forward = (outcome, postUrl = "", fanslyMediaId = "") => {
     try {
       chrome.runtime.sendMessage(
         {
@@ -2967,6 +2967,9 @@ function installCreatorManualPublishBridge(config) {
           watchId: config.watchId,
           outcome,
           postUrl,
+          ...(config.platform === "fansly" && /^\d{1,40}$/.test(fanslyMediaId)
+            ? { fanslyMediaId }
+            : {}),
         },
         () => void chrome.runtime.lastError,
       );
@@ -2988,7 +2991,11 @@ function installCreatorManualPublishBridge(config) {
     }
     if (detail?.watchId !== config.watchId) return;
     stop();
-    forward(String(detail.outcome || ""), String(detail.postUrl || ""));
+    forward(
+      String(detail.outcome || ""),
+      String(detail.postUrl || ""),
+      typeof detail.fanslyMediaId === "string" ? detail.fanslyMediaId : "",
+    );
   };
   const onPageHide = () => {
     stop();
@@ -3135,6 +3142,7 @@ function creatorUploadSessionRecord(session) {
           commitArmed: target.commitArmed,
           submitAttempted: target.submitAttempted,
           postUrl: target.postUrl,
+          fanslyMediaId: target.fanslyMediaId,
           error: target.error,
           documentId: target.documentId,
           boundUrl: target.boundUrl,
@@ -5422,6 +5430,12 @@ async function runCreatorUploadPlatform(session, platform) {
               postUrl
             ) {
               target.postUrl = postUrl;
+              if (
+                platform === "fansly" &&
+                typeof receipt.fanslyMediaId === "string" &&
+                /^\d{1,40}$/.test(receipt.fanslyMediaId)
+              )
+                target.fanslyMediaId = receipt.fanslyMediaId;
               target.status = "link-captured";
               await checkpointCreatorUploadSession(session);
             }
@@ -5512,6 +5526,12 @@ async function runCreatorUploadPlatform(session, platform) {
     }
     target.status = "link-captured";
     target.postUrl = postUrl;
+    if (
+      platform === "fansly" &&
+      typeof observed.fanslyMediaId === "string" &&
+      /^\d{1,40}$/.test(observed.fanslyMediaId)
+    )
+      target.fanslyMediaId = observed.fanslyMediaId;
     await checkpointCreatorUploadSession(session);
     creatorUploadNotify(session.id, {
       type: "platform-progress",
@@ -5642,11 +5662,16 @@ async function uploadCreatorSyncScripts(message) {
     );
   const session = await getCreatorUploadSession(message.sessionId);
   if (!session) throw new Error("Unknown creator upload run.");
+  const fansly = session.platforms.get("fansly");
   return sync.uploadScripts(
     {
       settings: settings.value,
       title,
-      uploads,
+      uploads: sync.addFanslyMediaKey(
+        uploads,
+        fansly?.postUrl,
+        fansly?.fanslyMediaId,
+      ),
     },
     {
       async commit(url) {
@@ -6815,7 +6840,12 @@ async function endCreatorManualPublishWatch(session, target, ending) {
 
 // Records the owner's post through the same link/catalogue path as
 // autonomous publication. The status changes before any await.
-async function finishCreatorManualPublish(session, target, rawPostUrl) {
+async function finishCreatorManualPublish(
+  session,
+  target,
+  rawPostUrl,
+  fanslyMediaId = "",
+) {
   const platform = target.platform;
   const postUrl = rawPostUrl
     ? CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(platform, rawPostUrl)
@@ -6839,6 +6869,12 @@ async function finishCreatorManualPublish(session, target, rawPostUrl) {
   }
   target.status = "link-captured";
   target.postUrl = postUrl;
+  if (
+    platform === "fansly" &&
+    typeof fanslyMediaId === "string" &&
+    /^\d{1,40}$/.test(fanslyMediaId)
+  )
+    target.fanslyMediaId = fanslyMediaId;
   target.error = "";
   await checkpointCreatorUploadSession(session);
   creatorUploadNotify(session.id, {
@@ -6919,6 +6955,7 @@ async function acceptCreatorManualPublishOutcome(message, sender) {
       session,
       target,
       outcome === "captured" ? message.postUrl : null,
+      message.fanslyMediaId,
     );
   else
     result = await endCreatorManualPublishWatch(

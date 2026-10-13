@@ -89,6 +89,7 @@
       ) === item.postUrl && item.postUrl
         ? { postUrl: item.postUrl }
         : {}),
+      ...fanslyMediaProof(item.platform, item),
     }));
   }
 
@@ -173,6 +174,7 @@
               "Publication result identity changed; reconcile the existing result.",
             );
           if (postUrl) previous.postUrl = postUrl;
+          Object.assign(previous, fanslyMediaProof(platform, target));
           continue;
         }
         const work = await workIdentity(record);
@@ -210,6 +212,7 @@
           commitArmed: true,
           submitAttempted: true,
           ...(postUrl ? { postUrl } : {}),
+          ...fanslyMediaProof(platform, target),
         });
       }
       await chrome.storage.local.set({ [ACTION_KEY]: records });
@@ -730,10 +733,19 @@
     return output;
   }
 
+  function fanslyMediaProof(platform, value) {
+    return platform === "fansly" &&
+      typeof value.fanslyMediaId === "string" &&
+      /^\d{1,40}$/.test(value.fanslyMediaId)
+      ? { fanslyMediaId: value.fanslyMediaId }
+      : {};
+  }
+
   function sanitizePlatform(name, value) {
     if (!PLATFORMS.has(name) || !value || typeof value !== "object")
       return null;
     const output = { platform: name };
+    Object.assign(output, fanslyMediaProof(name, value));
     const tabId = finiteInteger(value.tabId, 0);
     if (tabId !== undefined) output.tabId = tabId;
     for (const [field, maximum] of [
@@ -826,7 +838,7 @@
     for (const field of ["commitArmed", "submitAttempted"]) {
       if (previous[field] === true) merged[field] = true;
     }
-    for (const field of ["manyvidsId", "postUrl"]) {
+    for (const field of ["manyvidsId", "postUrl", "fanslyMediaId"]) {
       if (previous[field]) merged[field] = previous[field];
     }
     return merged;
@@ -874,6 +886,7 @@
           documentId: action.documentId,
           commitArmed: true,
           submitAttempted: true,
+          ...fanslyMediaProof(action.platform, action),
           ...(action.postUrl &&
           globalThis.CreatorCatalogueContract?.canonicalPostUrl(
             action.platform,

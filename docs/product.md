@@ -126,7 +126,11 @@ uploads after five minutes.
 Once every destination in the run has a post link, the script is posted to
 JohnnyGuides (`POST /sync/scripts`, Bearer token from the toolkit settings) with
 the post ids of the run's links (OnlyFans post id, Fansly id, Pornhub viewkey,
-ManyVids id). OnlyFans and Fansly receive the video with any opening frame, so
+ManyVids id). Fansly also receives its video's media id, captured from the owning
+post attachment and retained with the upload receipt. The worker adds that alias
+to the post's existing timing group; a missing or ambiguous media id blocks the
+script send so an older media-id mapping cannot silently override it in JG Sync.
+OnlyFans and Fansly receive the video with any opening frame, so
 their keys get a copy shifted by the lead-in that the desktop measured from the
 prepared video. Other keys get the script unchanged, in a separate upload. A
 script failure appears on its own result card with Retry and never alters the
