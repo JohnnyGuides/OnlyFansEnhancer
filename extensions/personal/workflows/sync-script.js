@@ -151,13 +151,19 @@
     if (!postKey) return uploads;
     return uploads.map((upload) => {
       if (!upload.keys.includes(postKey)) return upload;
-      if (typeof mediaId !== "string" || !/^\d{1,40}$/.test(mediaId))
-        throw new Error(
-          "The Fansly video media ID was not captured. The script was not sent; recover the video's attachment ID before retrying.",
-        );
       const keys = [...new Set([...upload.keys, mediaId])];
-      if (keys.length > 10)
-        throw new Error("The Fansly media ID would exceed the 10-key limit.");
+      const fanslyError =
+        typeof mediaId !== "string" || !/^\d{1,40}$/.test(mediaId)
+          ? "The Fansly video media ID was not captured. The Fansly script was not sent; recover the video's attachment ID before retrying."
+          : keys.length > 10
+            ? "The Fansly media ID would exceed the 10-key limit."
+            : "";
+      if (fanslyError)
+        return {
+          ...upload,
+          keys: upload.keys.filter((key) => key !== postKey),
+          fanslyError,
+        };
       return { ...upload, keys };
     });
   }
@@ -239,6 +245,10 @@
   ) {
     const scripts = [];
     for (const upload of (Array.isArray(uploads) ? uploads : []).slice(0, 4)) {
+      if (upload.fanslyError) {
+        scripts.push({ keys: [], error: upload.fanslyError });
+        if (!upload.keys.length) continue;
+      }
       let sent;
       try {
         sent = await uploadScript(

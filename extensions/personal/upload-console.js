@@ -3451,10 +3451,18 @@
       const leadInMs =
         value.scriptLeadInMs ?? (value.openingFrame ? undefined : 0);
       const blocked = !Number.isSafeInteger(leadInMs);
+      // A mixed run's script belongs to the full video, not the separate free cut.
+      const skipFree =
+        (value.pornhubMode || "free") === "free" &&
+        targets.includes("pornhub") &&
+        targets.some((target) => target !== "pornhub");
       return {
         funscript: scriptFunscript,
         title: value.title,
-        targets: [...targets],
+        targets: targets.filter((target) => !skipFree || target !== "pornhub"),
+        notice: skipFree
+          ? "Pornhub Free script skipped: the limited clip needs its own matching script. Send it in a separate Pornhub Free-only run."
+          : "",
         // Only OnlyFans and Fansly receive the video with an opening frame.
         leadIns: { onlyfans: leadInMs, fansly: leadInMs },
         blocked,
@@ -3495,6 +3503,11 @@
       }[script.status];
       heading.append(name, badge);
       card.append(heading);
+      if (script.notice) {
+        const notice = document.createElement("p");
+        notice.textContent = script.notice;
+        card.append(notice);
+      }
       for (const url of script.urls) {
         const link = document.createElement("a");
         link.href = url;

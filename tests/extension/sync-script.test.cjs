@@ -212,31 +212,103 @@ test("Fansly attachment alias joins only its post's timing group without mutatin
     ),
     plain(result),
   );
-  for (const id of [undefined, "", "x", "1".repeat(41), 956574905413943296])
-    assert.throws(
-      () =>
-        sync.addFanslyMediaKey(groups, "https://fansly.com/post/987654321", id),
-      /media ID was not captured/,
+  for (const id of [undefined, "", "x", "1".repeat(41), 956574905413943296]) {
+    const isolated = sync.addFanslyMediaKey(
+      groups,
+      "https://fansly.com/post/987654321",
+      id,
     );
-  assert.throws(
-    () =>
-      sync.addFanslyMediaKey(
-        [
-          {
-            keys: [
-              "987654321",
-              ...Array.from({ length: 9 }, (_, i) => String(i)),
-            ],
-            funscript: script,
-          },
-        ],
-        "https://fansly.com/post/987654321",
-        "956574905413943296",
-      ),
+    assert.deepEqual(plain(isolated[0].keys), ["123456"]);
+    assert.match(isolated[0].fanslyError, /media ID was not captured/);
+    assert.equal(isolated[1], groups[1]);
+  }
+  assert.match(
+    sync.addFanslyMediaKey(
+      [
+        {
+          keys: [
+            "987654321",
+            ...Array.from({ length: 9 }, (_, i) => String(i)),
+          ],
+          funscript: script,
+        },
+      ],
+      "https://fansly.com/post/987654321",
+      "956574905413943296",
+    )[0].fanslyError,
     /10-key limit/,
   );
   assert.equal(sync.addFanslyMediaKey(groups, "", ""), groups);
 });
+
+for (const fanslyLeadIn of [1023, 2010]) {
+  test(`Fansly alias failure isolates keys and preserves retries (lead-in ${fanslyLeadIn})`, async () => {
+    const posted = [];
+    const options = {
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(init.body);
+        posted.push(body);
+        return response(200, {
+          url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+        });
+      },
+    };
+    const run = async (pending, id) =>
+      sync.uploadScripts(
+        {
+          settings: { origin: "https://johnnyguides.com", token: "token-1234" },
+          title: "Benign clips",
+          uploads: sync.addFanslyMediaKey(
+            sync.scriptUploads(pending, script, {
+              onlyfans: 1023,
+              fansly: fanslyLeadIn,
+            }),
+            links[1].postUrl,
+            id,
+          ),
+        },
+        options,
+      );
+    const results = await run(links, "invalid");
+    assert.match(
+      results.find((result) => result.error).error,
+      /Fansly.*not sent/,
+    );
+    const sentKeys = results.flatMap((result) => result.keys);
+    assert.deepEqual(
+      [...sentKeys].sort(),
+      ["123456", "5550123", "ph634de69359881"].sort(),
+    );
+    assert.equal(
+      posted.some((body) => body.keys.includes("987654321")),
+      false,
+    );
+    assert.deepEqual(
+      posted.find((body) => body.keys.includes("123456")).funscript.actions,
+      [
+        { at: 1023, pos: 10 },
+        { at: 2523, pos: 90 },
+      ],
+    );
+    const retry = await run(
+      links.filter(
+        ({ platform, postUrl }) =>
+          !sentKeys.includes(sync.scriptKey(platform, postUrl)),
+      ),
+      "999000",
+    );
+    assert.deepEqual(plain(retry[0].keys), ["987654321", "999000"]);
+    assert.deepEqual(posted.at(-1).funscript.actions, [
+      { at: fanslyLeadIn, pos: 10 },
+      { at: fanslyLeadIn + 1500, pos: 90 },
+    ]);
+    assert.equal(
+      posted.flatMap((body) => body.keys).filter((key) => key === "123456")
+        .length,
+      1,
+    );
+  });
+}
 
 test("the upload posts keys, title and script with the bearer token", async () => {
   const requests = [];

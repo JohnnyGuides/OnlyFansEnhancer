@@ -245,6 +245,137 @@ const scriptCard = (page) =>
     has: page.locator("h3", { hasText: "Script" }),
   });
 
+for (const { mode, mixed } of [
+  { mode: "free", mixed: true },
+  { mode: "free", mixed: false },
+  { mode: "paid", mixed: true },
+]) {
+  test(`resumed ${mode} script binding (mixed: ${mixed})`, async () => {
+    await withConsole(async (page) => {
+      const selected = mixed ? script : { actions: [{ at: 200, pos: 70 }] };
+      await chooseScript(page, "benign.funscript", JSON.stringify(selected));
+      const saved = await page.evaluate(
+        ({ mode, mixed }) => {
+          const file = document.querySelector("#uploadScript").files[0];
+          return {
+            id: "benign-binding",
+            draft: {
+              title: "Benign distinct clips",
+              description: "Full video and separately edited limited clip.",
+              pornhubMode: mode,
+              scriptLeadInMs: 1023,
+              fileProof: {
+                script: {
+                  name: file.name,
+                  type: file.type,
+                  size: file.size,
+                  lastModified: file.lastModified,
+                },
+              },
+            },
+            platforms: [
+              ...(mixed
+                ? [
+                    {
+                      platform: "onlyfans",
+                      status: "catalogue-updated",
+                      postUrl: "https://onlyfans.com/123456/johnny_guides",
+                    },
+                  ]
+                : []),
+              {
+                platform: "pornhub",
+                status: "catalogue-updated",
+                postUrl:
+                  "https://www.pornhub.com/view_video.php?viewkey=phbenigncut",
+              },
+            ],
+          };
+        },
+        { mode, mixed },
+      );
+      await page.addInitScript((saved) => {
+        globalThis.savedResume = saved;
+      }, saved);
+      await page.reload();
+      await page.evaluate(
+        ({ saved, text }) => {
+          const proof = saved.draft.fileProof.script;
+          const transfer = new DataTransfer();
+          transfer.items.add(
+            new File([text], proof.name, {
+              type: proof.type,
+              lastModified: proof.lastModified,
+            }),
+          );
+          const input = document.querySelector("#uploadScript");
+          input.files = transfer.files;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          scriptReplies.push({
+            ok: true,
+            scripts: [
+              {
+                url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+                keys: saved.platforms
+                  .filter(
+                    (p) =>
+                      !(
+                        saved.draft.pornhubMode === "free" &&
+                        saved.platforms.length > 1 &&
+                        p.platform === "pornhub"
+                      ),
+                  )
+                  .map((p) =>
+                    CreatorSyncScript.scriptKey(p.platform, p.postUrl),
+                  ),
+                sheetError: "",
+              },
+            ],
+          });
+        },
+        { saved, text: JSON.stringify(selected) },
+      );
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#scriptFileSummary").title ===
+          "benign.funscript",
+      );
+      await page.locator("#resumeUpload").click();
+      await page.waitForFunction(() =>
+        calls.some((call) => call.type === "UPLOAD_SYNC_SCRIPT"),
+      );
+      const [sent] = await sentScripts(page);
+      assert.deepEqual(
+        sent.uploads.flatMap((upload) => upload.keys),
+        mode === "free" && mixed
+          ? ["123456"]
+          : mixed
+            ? ["123456", "phbenigncut"]
+            : ["phbenigncut"],
+      );
+      assert.deepEqual(
+        sent.uploads.at(-1).funscript.actions,
+        mode === "free" && mixed
+          ? [
+              { at: 1023, pos: 10 },
+              { at: 2523, pos: 90 },
+            ]
+          : selected.actions,
+      );
+      if (mode === "free" && mixed)
+        assert.match(
+          await scriptCard(page).textContent(),
+          /Pornhub Free script skipped/,
+        );
+      else
+        assert.doesNotMatch(
+          await scriptCard(page).textContent(),
+          /script skipped/,
+        );
+    });
+  });
+}
+
 for (const { linksReady, legacyFrame } of [
   { linksReady: false },
   { linksReady: true },
@@ -563,6 +694,74 @@ test("Script card validates, sends after the links exist and fails on its own", 
     );
     assert.equal(await jg.isDisabled(), true, "after template load");
     assert.equal(await jg.isChecked(), false);
+  });
+});
+
+test("Fansly failure keeps only its key retryable in a shared timing group", async () => {
+  await withConsole(async (page) => {
+    await page.locator("#uploadTeaser").setInputFiles({
+      name: "benign-preview.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign preview fixture"),
+    });
+    await chooseScript(page, "benign.funscript", JSON.stringify(script));
+    await draftOnlyFansClip(page, { fansly: true });
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() =>
+      calls.some((call) => call.type === "START_CREATOR_UPLOAD"),
+    );
+    await page.evaluate(() => {
+      scriptReplies.push({
+        ok: true,
+        scripts: [
+          {
+            keys: [],
+            error:
+              "The Fansly video media ID was not captured. The Fansly script was not sent; recover the video's attachment ID before retrying.",
+          },
+          {
+            keys: ["123456"],
+            url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+            sheetError: "",
+          },
+        ],
+      });
+      deliverResult("onlyfans", {
+        status: "catalogue-updated",
+        postUrl: "https://onlyfans.com/123456/johnny_guides",
+      });
+      deliverResult("fansly", {
+        status: "catalogue-updated",
+        postUrl: "https://fansly.com/post/987654321",
+      });
+    });
+    await scriptCard(page)
+      .getByRole("button", { name: "Retry script" })
+      .waitFor();
+    assert.match(await scriptCard(page).textContent(), /Fansly.*not sent/);
+    await page.evaluate(() =>
+      scriptReplies.push({
+        ok: true,
+        scripts: [
+          {
+            keys: ["987654321", "999000"],
+            url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+            sheetError: "",
+          },
+        ],
+      }),
+    );
+    await scriptCard(page)
+      .getByRole("button", { name: "Retry script" })
+      .click();
+    await page.waitForFunction(
+      () =>
+        calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 2,
+    );
+    const sent = await sentScripts(page);
+    assert.deepEqual(sent[0].uploads[0].keys, ["123456", "987654321"]);
+    assert.deepEqual(sent[1].uploads[0].keys, ["987654321"]);
+    assert.equal(await scriptCard(page).getByRole("button").count(), 0);
   });
 });
 

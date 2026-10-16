@@ -95,8 +95,8 @@ modes, and time. Upload observation can continue beyond 45 minutes; only progres
 video's editor through the recorded Edit action and its first verified navigation. Its final Save remains a single attempt. Returning to the upload page does not prove acceptance; an unverified Save stays unresolved and cannot be repeated. Source defaults are not
 an independently maintained product table.
 
-The Pornhub video row stays visible and uses the full video when no separate
-file is chosen, never the teaser. Upload Hub also keeps the shared teaser and
+The Pornhub video row stays visible. Pornhub Free requires a separate limited
+clip; Pornhub Paid uses the full video. Upload Hub also keeps the shared teaser and
 thumbnail rows visible. When a selected destination needs them and no file is
 chosen, Chrome builds an MP4 preview of up to 29 seconds from six sampled scenes and a
 640 × 360 PNG from an early frame. The creator can scrub the full video's
@@ -123,17 +123,21 @@ only its file identity and the measured video lead-in are saved for recovery.
 Resume requires reselecting the saved script and uses the original lead-in.
 The worker rejects missing, repeated or out-of-order parts and drops partial
 uploads after five minutes.
-Once every destination in the run has a post link, the script is posted to
+Once every eligible script destination in the run has a post link, the script is posted to
 JohnnyGuides (`POST /sync/scripts`, Bearer token from the toolkit settings) with
 the post ids of the run's links (OnlyFans post id, Fansly id, Pornhub viewkey,
 ManyVids id). Fansly also receives its video's media id, captured from the owning
 post attachment and retained with the upload receipt. The worker adds that alias
-to the post's existing timing group; a missing or ambiguous media id blocks the
-script send so an older media-id mapping cannot silently override it in JG Sync.
+to the post's existing timing group; a missing or ambiguous media id blocks only
+the Fansly keys and leaves them retryable, while other keys continue. This avoids
+an older media-id mapping silently overriding a post-only mapping in JG Sync.
 OnlyFans and Fansly receive the video with any opening frame, so
 their keys get a copy shifted by the lead-in that the desktop measured from the
-prepared video. Other keys get the script unchanged, in a separate upload. A
-script failure appears on its own result card with Retry and never alters the
+prepared video. Other eligible keys get the script unchanged, in a separate upload.
+In a mixed run the script belongs to the full video: the separate Pornhub Free
+clip is skipped with a notice. A Pornhub Free-only run can send a script selected
+specifically for that limited clip. Resume keeps this binding from the saved run.
+A script failure appears on its own result card with Retry and never alters the
 platform results. The website names the file by content hash, so the same keys
 and script always give the same file and mapping; a retry after a lost reply is
 harmless. Keys whose catalogue write failed remain retryable; completed keys are
