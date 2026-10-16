@@ -919,7 +919,6 @@ the log.
 - Silent normal update exited 0 with `Installation process succeeded` in `.local/OFEnhancer-0.20.107-install.log`. Installed metadata is 0.20.107; all 1,323 files in the staged package manifest match the installed files. Both existing extension folders retain their public-key state. The restarted desktop runs from its permanent install folder. All 15 readable settings, credential and data fingerprints remained unchanged. The active catalogue database was open and could not be hashed before installation; post-update SQLite integrity is `ok`, with no before/after byte comparison established for that database.
 - Installer SHA-256: `4a96465fa068155453bf5c3e1ec6fa558786caabfc12f6e8b202f6448539ebcd`; stage manifest SHA-256: `31b98552ed23f63d694fcd691b94cd18bc3b0dbeb483459970536af781642e8f`. Reloading the existing Chrome extension and owner UAT remain pending. Untracked review/scratch artifacts were preserved outside the commits.
 
-
 ## Script cut binding and independent sync uploads - 0.20.109 (16 October 2026)
 
 - Built committed source `8e5a2a0` plus a version-only 0.20.109 bump in an isolated source archive. The earlier uncommitted 0.20.108 candidate edits and review artifacts were excluded from the build and preserved in the primary checkout.
