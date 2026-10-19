@@ -317,7 +317,11 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByRole("button", { name: "Preview ending", exact: true })
       .click();
-    await editor.getByText("Preview ready", { exact: true }).waitFor();
+    await frame.waitForFunction(
+      () =>
+        !document.querySelector('.teaser-ending [data-action="export"]')
+          .disabled,
+    );
     await editor.getByLabel("Like button aim position").fill("48");
     await editor.getByLabel("Like button aim position").dispatchEvent("input");
     assert.equal(
@@ -329,7 +333,11 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByRole("button", { name: "Preview ending", exact: true })
       .click();
-    await editor.getByText("Preview ready", { exact: true }).waitFor();
+    await frame.waitForFunction(
+      () =>
+        !document.querySelector('.teaser-ending [data-action="export"]')
+          .disabled,
+    );
     assert.equal(
       await editor
         .getByRole("button", { name: "Export MP4", exact: true })
@@ -350,11 +358,16 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByRole("button", { name: "Preview ending", exact: true })
       .click();
-    await editor.getByText("Preview ready", { exact: true }).waitFor();
+    await frame.waitForFunction(
+      () =>
+        !document.querySelector('.teaser-ending [data-action="export"]')
+          .disabled,
+    );
+    const download = page.waitForEvent("download");
     await editor
       .getByRole("button", { name: "Export MP4", exact: true })
       .click();
-    await editor.getByRole("link", { name: "Download MP4" }).waitFor();
+    const exported = await download;
     assert.match(
       await frame.locator("#socialFileSummary").textContent(),
       /square-test/,
@@ -363,9 +376,6 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
       await frame.locator("#socialFileSummary").textContent(),
       /suction/,
     );
-    const download = page.waitForEvent("download");
-    await editor.getByRole("link", { name: "Download MP4" }).click();
-    const exported = await download;
     assert.equal(exported.suggestedFilename(), "square-test (suction).mp4");
     await exported.saveAs(path.join(work, "export.mp4"));
     if (process.env.OFENHANCER_SUCTION_REVIEW_DIR) {
@@ -398,7 +408,9 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
         .locator(".xt-composer-dialog")
         .screenshot({ path: path.join(captures, "suction-editor-phone.png") });
     }
-    await editor.getByRole("button", { name: "Apply", exact: true }).click();
+    await editor
+      .getByRole("button", { name: "Apply ending", exact: true })
+      .click();
     await editor
       .getByRole("dialog", { name: "Suction ending settings" })
       .waitFor({ state: "hidden" });
@@ -436,6 +448,34 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     assert.match(
       await frame.locator("#socialFileSummary").textContent(),
       /square-test/,
+    );
+    let extraDownloads = 0;
+    page.on("download", () => extraDownloads++);
+    await editor
+      .getByRole("checkbox", { name: "Suction ending", exact: true })
+      .check();
+    await editor
+      .getByRole("button", { name: "Preview ending", exact: true })
+      .click();
+    await frame.waitForFunction(
+      () =>
+        !document.querySelector('.teaser-ending [data-action="use"]').disabled,
+    );
+    await editor
+      .getByRole("button", { name: "Apply ending", exact: true })
+      .click();
+    await editor
+      .getByRole("dialog", { name: "Suction ending settings" })
+      .waitFor({ state: "hidden" });
+    await frame.waitForFunction(() =>
+      document
+        .querySelector("#socialFileSummary")
+        .textContent.includes("suction"),
+    );
+    assert.equal(
+      extraDownloads,
+      0,
+      "Apply renders directly without downloading",
     );
     assert.deepEqual(errors, []);
   } finally {

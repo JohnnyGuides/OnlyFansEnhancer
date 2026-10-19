@@ -160,7 +160,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .teaser-ending-dialog {
   box-sizing: border-box;
-  width: min(560px, calc(100% - 24px));
+  width: min(520px, calc(100% - 24px));
   max-height: calc(100dvh - 24px);
   overflow: auto;
   padding: 16px;
@@ -187,13 +187,51 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .teaser-ending-editor {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   align-items: center;
   gap: 20px;
 }
 .calendar-teaser .teaser-ending-settings {
   display: grid;
   gap: 18px;
+}
+.calendar-teaser .teaser-ending-stage {
+  position: relative;
+}
+.calendar-teaser .teaser-ending-replay {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid #647180;
+  border-radius: 7px;
+  background: rgb(8 13 18 / 90%);
+  color: #edf3fc;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.calendar-teaser .teaser-ending-replay:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+.calendar-teaser .teaser-ending-settings label {
+  margin: 0;
+  font-size: 12px;
+}
+.calendar-teaser .teaser-ending-settings label span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.calendar-teaser .teaser-ending-settings output {
+  color: #b8c8d9;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 .calendar-teaser .teaser-ending-dialog footer {
   display: flex;
@@ -225,8 +263,34 @@ body.calendar-reddit-draft .upload-actions .action-status {
   gap: 4px;
 }
 .calendar-teaser .teaser-ending input[type="range"] {
+  appearance: none;
   width: 100%;
-  accent-color: #f580b1;
+  height: 4px;
+  margin: 10px 0;
+  border: 0;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    #33bfdf var(--range-fill),
+    #344657 var(--range-fill)
+  );
+}
+.calendar-teaser .teaser-ending input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #c1eff8;
+  border-radius: 50%;
+  background: #33bfdf;
+  cursor: pointer;
+}
+.calendar-teaser .teaser-ending input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #c1eff8;
+  border-radius: 50%;
+  background: #33bfdf;
+  cursor: pointer;
 }
 .calendar-teaser .teaser-ending input[type="checkbox"] {
   width: 14px;
@@ -259,6 +323,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .teaser-ending-actions {
   display: flex;
+  width: 100%;
   flex-wrap: wrap;
   gap: 6px;
 }
@@ -278,11 +343,17 @@ body.calendar-reddit-draft .upload-actions .action-status {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.calendar-teaser .teaser-ending-actions [data-action="export"]:enabled {
+.calendar-teaser .teaser-ending-actions [data-action="cancel"] {
+  margin-right: auto;
+  border-color: transparent;
+  background: transparent;
+  color: #b8c8d9;
+}
+.calendar-teaser .teaser-ending-actions [data-action="use"]:enabled {
   background: #087b9e;
   border-color: #29b9dc;
 }
-.calendar-teaser .teaser-ending-actions :focus-visible {
+.calendar-teaser .teaser-ending :is(button, input):focus-visible {
   outline: 2px solid #68d8ff;
   outline-offset: 2px;
 }

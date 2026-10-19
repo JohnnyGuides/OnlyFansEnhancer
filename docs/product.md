@@ -178,9 +178,9 @@ the rest of the clip and its audio timing unchanged. A clip shorter than the
 chosen ending needs a faster speed or a longer source.
 The guide approximates X's timeline position; it cannot follow the real button
 across mobile or full-screen layouts and is not included in the exported video.
-**Apply** replaces the selected draft clip with the rendered copy. Unchecking
+**Apply ending** renders and replaces the selected draft clip with the rendered copy. Unchecking
 the effect restores the original clip during the same editing session; export
-alone leaves the selection and the original file unchanged.
+alone downloads the MP4 and leaves the selection and the original file unchanged.
 New Reddit posts start with the selected post's saved clip and can choose another.
 Each Reddit draft stores its own clip, first-frame thumbnail,
 subreddit and title. Each community has an inclusion checkbox; unchecking it

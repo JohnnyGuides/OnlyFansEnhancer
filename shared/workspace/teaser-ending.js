@@ -246,18 +246,18 @@
       <button type="button" class="teaser-ending-gear" aria-label="Suction ending settings" title="Ending settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m9 3-.6 2.5-2.2 1.3L3.7 6l-2 3.5 1.9 1.8v2.5l-1.9 1.7 2 3.5 2.5-.8 2.2 1.3L9 22h4l.6-2.5 2.2-1.3 2.5.8 2-3.5-1.9-1.7v-2.5l1.9-1.8-2-3.5-2.5.8-2.2-1.3L13 3Z"/><circle cx="11" cy="12.5" r="3"/></svg></button>
       <dialog class="teaser-ending-dialog" aria-label="Suction ending settings">
       <header><h2>Suction ending</h2><button type="button" data-action="close" aria-label="Close ending settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div class="teaser-ending-editor"><div class="teaser-ending-media">
+      <div class="teaser-ending-editor"><div class="teaser-ending-media"><div class="teaser-ending-stage">
         <canvas aria-label="Suction ending preview"></canvas>
-        <video controls playsinline aria-label="Exported teaser preview" hidden></video>
+        <video playsinline muted aria-label="Exported teaser preview" hidden></video>
+        <button type="button" class="teaser-ending-replay" data-action="preview" aria-label="Preview ending" title="Replay ending"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 5 11 7-11 7Z"/></svg><span>Preview</span></button></div>
         <div class="teaser-ending-target" aria-hidden="true"><span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg>
         </span></div></div>
-        <div class="teaser-ending-settings"><label title="Approximate X timeline position; layouts vary.">Aim toward Like <input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
-        <label><span>Ending speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label>
-        <p role="status" class="teaser-ending-status"></p></div>
+        <div class="teaser-ending-settings"><label title="Approximate X timeline position; layouts vary."><span>Like position <output data-aim>42%</output></span><input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
+        <label><span>Speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label></div>
       </div><footer>
-        <div class="teaser-ending-actions"><button type="button" data-action="preview">Preview ending</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" data-action="cancel" hidden>Cancel</button></div>
-        <div class="teaser-ending-actions" data-result hidden><a download>Download MP4</a><button type="button" data-action="use">Apply</button></div>
+        <p role="status" class="teaser-ending-status"></p>
+        <div class="teaser-ending-actions"><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" data-action="use" disabled>Apply ending</button></div>
       </footer></dialog>`;
     preview.after(root);
     const dialog = root.querySelector("dialog");
@@ -268,9 +268,9 @@
     const aim = root.querySelector('[aria-label="Like button aim position"]');
     const speed = root.querySelector('[aria-label="Ending speed"]');
     const speedValue = root.querySelector("[data-speed]");
+    const aimValue = root.querySelector("[data-aim]");
     const status = root.querySelector('[role="status"]');
     const button = (action) => root.querySelector(`[data-action="${action}"]`);
-    const result = root.querySelector("[data-result]");
     let controller,
       output,
       outputUrl,
@@ -279,16 +279,17 @@
       originalFile = null;
     function clear() {
       reviewed = false;
+      button("preview").querySelector("span").textContent = "Preview";
       output = null;
       rendered.pause();
       rendered.removeAttribute("src");
       rendered.load();
       URL.revokeObjectURL(outputUrl);
       outputUrl = "";
-      result.hidden = true;
       rendered.hidden = true;
       canvas.hidden = false;
       button("export").disabled = true;
+      button("use").disabled = true;
     }
     function reset() {
       controller?.abort();
@@ -300,12 +301,22 @@
       dialog.close();
       root.hidden = !sourceFile || locked();
     }
+    function syncControls() {
+      root.style.setProperty("--ending-aim", `${aim.value}%`);
+      aimValue.value = `${aim.value}%`;
+      speedValue.value = `${Number(speed.value)}×`;
+      speed.setAttribute("aria-valuetext", speedValue.value);
+      for (const control of [aim, speed])
+        control.style.setProperty(
+          "--range-fill",
+          `${((Number(control.value) - Number(control.min)) / (Number(control.max) - Number(control.min))) * 100}%`,
+        );
+    }
+    syncControls();
     for (const control of [aim, speed])
       control.addEventListener("input", () => {
         clear();
-        root.style.setProperty("--ending-aim", `${aim.value}%`);
-        speedValue.value = `${Number(speed.value)}×`;
-        speed.setAttribute("aria-valuetext", speedValue.value);
+        syncControls();
         status.textContent = "";
       });
     function open() {
@@ -337,7 +348,19 @@
       enabled.checked = Boolean(appliedFile && getFile() === appliedFile);
       gear.focus();
     });
-    async function run(exportVideo) {
+    function downloadOutput() {
+      const link = document.createElement("a");
+      link.href = outputUrl;
+      link.download = output.name;
+      link.click();
+    }
+    function applyOutput() {
+      const generated = output;
+      if (getFile() !== appliedFile) originalFile = getFile();
+      appliedFile = generated;
+      useFile(generated);
+    }
+    async function run(exportVideo, intent = "") {
       if (
         controller ||
         busy() ||
@@ -357,9 +380,8 @@
         gear.disabled =
         button("preview").disabled =
         button("export").disabled =
+        button("use").disabled =
           true;
-      button("cancel").hidden = false;
-      result.hidden = true;
       rendered.hidden = true;
       canvas.hidden = false;
       status.textContent = exportVideo ? "Exporting…" : "Previewing…";
@@ -377,6 +399,7 @@
         });
         if (getFile() !== selected || operation.signal.aborted) return;
         reviewed = true;
+        button("preview").querySelector("span").textContent = "Replay";
         if (generated) {
           output = generated;
           URL.revokeObjectURL(outputUrl);
@@ -384,12 +407,10 @@
           rendered.src = outputUrl;
           rendered.hidden = false;
           canvas.hidden = true;
-          const download = result.querySelector("a");
-          download.href = outputUrl;
-          download.download = output.name;
-          result.hidden = false;
-          status.textContent = "MP4 ready";
-        } else status.textContent = "Preview ready";
+          status.textContent = "";
+          if (intent === "apply") applyOutput();
+          else if (intent === "export") downloadOutput();
+        } else status.textContent = "";
       } catch (error) {
         reviewed = false;
         status.textContent =
@@ -403,19 +424,24 @@
           button("preview").disabled =
             false;
         button("export").disabled = !reviewed;
-        button("cancel").hidden = true;
+        button("use").disabled = !reviewed;
         onBusy(false);
       }
     }
     button("preview").addEventListener("click", () => void run(false));
-    button("export").addEventListener("click", () => void run(true));
-    button("cancel").addEventListener("click", () => controller?.abort());
+    button("export").addEventListener("click", () => {
+      if (controller || busy() || locked()) return;
+      if (output) downloadOutput();
+      else void run(true, "export");
+    });
+    button("cancel").addEventListener("click", () => {
+      if (controller) controller.abort();
+      else dialog.close();
+    });
     button("use").addEventListener("click", () => {
-      if (!output || busy() || locked()) return;
-      const generated = output;
-      if (getFile() !== appliedFile) originalFile = getFile();
-      appliedFile = generated;
-      useFile(generated);
+      if (controller || busy() || locked()) return;
+      if (output) applyOutput();
+      else void run(true, "apply");
     });
     window.addEventListener("pagehide", () => {
       controller?.abort();
