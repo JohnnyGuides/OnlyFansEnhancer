@@ -180,12 +180,12 @@ Ending speed ranges from 0.5× to 3×; the default 1× takes 0.9 seconds. Changi
 the speed or aim requires another preview. Speed affects only the ending, with
 the rest of the clip and its audio timing unchanged. In During video mode, a clip shorter than the
 chosen ending needs a faster speed or a longer source.
-A draggable warp target below the video supports pointer/touch and arrow keys,
+A target slider beside the preview supports pointer/touch and arrow keys,
 with the full 0–100% width available. X action icons show a timeline guide;
 Desktop web defaults to Like at 47%, Mobile web to 50%, based on measured
 X timeline layouts on 19 October 2026. Choosing a layout resets the target to
 its Like icon; custom placement is used in the actual rendered video.
-The paired handles above the X actions adjust funnel width from a point to
+The paired handles aligned with the X action icons adjust funnel width from a point to
 40% of the video width while preserving the target centre. Pointer/touch and
 arrow-key changes invalidate the prepared preview; both warp modes render the
 chosen width and still end on a fully collapsed frame.

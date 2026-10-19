@@ -342,17 +342,8 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     const targetBounds = await editor
       .locator(".teaser-ending-target-track")
       .boundingBox();
-    await page.mouse.move(
-      targetBounds.x + targetBounds.width * 0.3,
-      targetBounds.y + 8,
-    );
-    await page.mouse.down();
-    await page.mouse.move(
-      targetBounds.x + targetBounds.width * 0.48,
-      targetBounds.y + 8,
-      { steps: 4 },
-    );
-    await page.mouse.up();
+    await warpTarget.fill("48");
+    await warpTarget.dispatchEvent("input");
     assert.equal(await warpTarget.getAttribute("aria-valuenow"), "48");
     const funnelWidth = editor.getByRole("slider", {
       name: "Funnel width",
@@ -371,7 +362,7 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await page.mouse.down();
     await page.mouse.move(
       targetBounds.x + targetBounds.width * (0.48 + 0.125),
-      targetBounds.y + 6,
+      widthBounds.y + 6,
       { steps: 4 },
     );
     await page.mouse.up();

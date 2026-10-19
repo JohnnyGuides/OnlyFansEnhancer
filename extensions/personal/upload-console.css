@@ -229,7 +229,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
 .calendar-teaser .teaser-ending-neck {
   position: absolute;
   z-index: 2;
-  top: 0;
+  top: 16px;
   left: var(--ending-aim, 47%);
   width: max(24px, var(--ending-neck, 0%));
   height: 16px;
@@ -290,50 +290,13 @@ body.calendar-reddit-draft .upload-actions .action-status {
 .calendar-teaser [data-layout="mobile"] [data-x-action="share"] {
   left: 95.8%;
 }
-.calendar-teaser .teaser-ending-target-handle {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  left: var(--ending-aim, 47%);
-  width: 24px;
-  height: 38px;
-  transform: translateX(-50%);
-  cursor: ew-resize;
-}
-.calendar-teaser .teaser-ending-target-handle::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 1px;
-  width: 8px;
-  height: 8px;
-  background: #68d8ff;
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-.calendar-teaser .teaser-ending-target-handle::after {
-  content: "";
-  position: absolute;
-  left: 11px;
-  top: 8px;
-  height: 25px;
-  border-left: 1px solid #68d8ff;
-}
-.calendar-teaser .teaser-ending-target-handle:focus-visible,
 .calendar-teaser .teaser-ending-neck:focus-visible {
   outline: 2px solid #68d8ff;
   outline-offset: 1px;
   border-radius: 3px;
 }
-.calendar-teaser .teaser-ending-target-handle[aria-disabled="true"],
 .calendar-teaser .teaser-ending-neck[aria-disabled="true"] {
   cursor: wait;
-}
-.calendar-teaser .teaser-ending-target-caption {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: #b8c8d9;
-  font-variant-numeric: tabular-nums;
 }
 .calendar-teaser .teaser-ending label {
   display: grid;

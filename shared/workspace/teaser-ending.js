@@ -285,18 +285,18 @@
         <div class="teaser-ending-target" data-layout="desktop" title="X timeline guide; positions vary by viewer layout.">
           <div class="teaser-ending-target-track">
             <div class="teaser-ending-neck" role="slider" tabindex="0" aria-label="Funnel width" aria-valuemin="0" aria-valuemax="40" aria-valuenow="0" aria-valuetext="Point" aria-orientation="horizontal" title="Drag either edge to widen or narrow the funnel. Arrow keys adjust the width."></div>
-            <div class="teaser-ending-target-handle" role="slider" tabindex="0" aria-label="Warp target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="47" aria-valuetext="47% across video" aria-orientation="horizontal"></div>
             <span data-x-action="reply" title="Reply"><svg viewBox="0 0 24 24"><path d="M21 11.5a9 9 0 0 1-9 9H4l2-4a9 9 0 1 1 15-5Z"/></svg></span>
             <span data-x-action="repost" title="Repost"><svg viewBox="0 0 24 24"><path d="m3 7 4-4 4 4M7 3v13a3 3 0 0 0 3 3h3m8-2-4 4-4-4m4 4V8a3 3 0 0 0-3-3h-3"/></svg></span>
             <span data-x-action="like" title="Like"><svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg></span>
             <span data-x-action="views" title="Views"><svg viewBox="0 0 24 24"><path d="M4 20V9m6 11V4m6 16v-8m5 8V2"/></svg></span>
             <span data-x-action="bookmark" title="Bookmark"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4Z"/></svg></span>
             <span data-x-action="share" title="Share"><svg viewBox="0 0 24 24"><path d="M12 15V2m-5 5 5-5 5 5M4 13v8h16v-8"/></svg></span>
-          </div><div class="teaser-ending-target-caption"><span>Target <output data-aim>47%</output></span><span>Width <output data-neck>Point</output></span></div>
+          </div>
         </div></div>
         <div class="teaser-ending-settings"><label>Warp<select aria-label="Warp mode"><option value="last-frame">Last frame</option><option value="during-video" selected>During video</option></select></label>
         <label>X timeline<select aria-label="X timeline layout"><option value="desktop">Desktop web</option><option value="mobile">Mobile web</option></select></label>
         <label><span>Speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label>
+        <label>Target<input type="range" min="0" max="100" value="47" aria-label="Warp target" title="Move the funnel’s centre below the video."></label>
         <p role="status" class="teaser-ending-status"></p>
         <div class="teaser-ending-actions"><button type="button" data-action="preview" aria-label="Preview ending">Preview</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" class="primary" data-action="use" disabled>Apply ending</button></div>
       </div></div></dialog>`;
@@ -311,14 +311,11 @@
     const track = root.querySelector(".teaser-ending-target-track");
     const layout = root.querySelector('[aria-label="X timeline layout"]');
     const neckControl = root.querySelector('[aria-label="Funnel width"]');
-    const neckValue = root.querySelector("[data-neck]");
     let aimPercent = DEFAULT_AIM * 100,
-      neckPercent = 0,
-      dragWidth = false;
+      neckPercent = 0;
     const speed = root.querySelector('[aria-label="Ending speed"]');
     const mode = root.querySelector('[aria-label="Warp mode"]');
     const speedValue = root.querySelector("[data-speed]");
-    const aimValue = root.querySelector("[data-aim]");
     const status = root.querySelector('[role="status"]');
     const button = (action) => root.querySelector(`[data-action="${action}"]`);
     let controller,
@@ -356,15 +353,17 @@
     function syncControls() {
       root.style.setProperty("--ending-aim", `${aimPercent}%`);
       root.style.setProperty("--ending-neck", `${neckPercent}%`);
-      neckValue.value = neckPercent ? `${neckPercent}%` : "Point";
       neckControl.setAttribute("aria-valuenow", String(neckPercent));
-      neckControl.setAttribute("aria-valuetext", neckValue.value);
-      aimValue.value = `${aimPercent}%`;
+      neckControl.setAttribute(
+        "aria-valuetext",
+        neckPercent ? `${neckPercent}%` : "Point",
+      );
+      aim.value = String(aimPercent);
       speedValue.value = `${Number(speed.value)}×`;
       speed.setAttribute("aria-valuetext", speedValue.value);
       aim.setAttribute("aria-valuenow", String(aimPercent));
       aim.setAttribute("aria-valuetext", `${aimPercent}% across video`);
-      for (const control of [speed])
+      for (const control of [speed, aim])
         control.style.setProperty(
           "--range-fill",
           `${((Number(control.value) - Number(control.min)) / (Number(control.max) - Number(control.min))) * 100}%`,
@@ -402,32 +401,26 @@
     function point(event) {
       const bounds = track.getBoundingClientRect();
       const percent = ((event.clientX - bounds.left) / bounds.width) * 100;
-      if (dragWidth) setNeck(Math.abs(percent - aimPercent) * 2);
-      else setAim(percent);
+      setNeck(Math.abs(percent - aimPercent) * 2);
     }
     track.addEventListener("pointerdown", (event) => {
-      if (controller || busy() || locked() || event.button !== 0) return;
+      if (
+        controller ||
+        busy() ||
+        locked() ||
+        event.button !== 0 ||
+        !event.target.closest(".teaser-ending-neck")
+      )
+        return;
       track.setPointerCapture(event.pointerId);
-      dragWidth = Boolean(event.target.closest(".teaser-ending-neck"));
-      (dragWidth ? neckControl : aim).focus();
+      neckControl.focus();
       point(event);
       event.preventDefault();
     });
     track.addEventListener("pointermove", (event) => {
       if (track.hasPointerCapture(event.pointerId)) point(event);
     });
-    aim.addEventListener("keydown", (event) => {
-      const step = event.shiftKey ? 10 : 1;
-      const next = {
-        ArrowLeft: aimPercent - step,
-        ArrowRight: aimPercent + step,
-        Home: 0,
-        End: 100,
-      }[event.key];
-      if (next === undefined) return;
-      event.preventDefault();
-      setAim(next);
-    });
+    aim.addEventListener("input", () => setAim(Number(aim.value)));
     neckControl.addEventListener("keydown", (event) => {
       const step = event.shiftKey ? 10 : 1;
       const next = {
@@ -495,7 +488,8 @@
       onBusy(true);
       aim.setAttribute("aria-disabled", "true");
       neckControl.setAttribute("aria-disabled", "true");
-      layout.disabled =
+      aim.disabled =
+        layout.disabled =
         mode.disabled =
         speed.disabled =
         enabled.disabled =
@@ -543,7 +537,8 @@
         controller = null;
         aim.setAttribute("aria-disabled", "false");
         neckControl.setAttribute("aria-disabled", "false");
-        layout.disabled =
+        aim.disabled =
+          layout.disabled =
           speed.disabled =
           mode.disabled =
           enabled.disabled =
