@@ -239,24 +239,30 @@
   }
 
   function mount({ preview, getFile, useFile, locked, busy, onBusy }) {
-    const root = document.createElement("details");
+    const root = document.createElement("div");
     root.className = "teaser-ending";
     root.hidden = true;
-    root.innerHTML = `<summary>Suction ending</summary>
-      <div class="teaser-ending-editor">
+    root.innerHTML = `<label class="teaser-ending-toggle"><input type="checkbox" aria-label="Suction ending">Suction ending</label>
+      <button type="button" class="teaser-ending-gear" aria-label="Suction ending settings" title="Ending settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m9 3-.6 2.5-2.2 1.3L3.7 6l-2 3.5 1.9 1.8v2.5l-1.9 1.7 2 3.5 2.5-.8 2.2 1.3L9 22h4l.6-2.5 2.2-1.3 2.5.8 2-3.5-1.9-1.7v-2.5l1.9-1.8-2-3.5-2.5.8-2.2-1.3L13 3Z"/><circle cx="11" cy="12.5" r="3"/></svg></button>
+      <dialog class="teaser-ending-dialog" aria-label="Suction ending settings">
+      <header><h2>Suction ending</h2><button type="button" data-action="close" aria-label="Close ending settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <div class="teaser-ending-editor"><div class="teaser-ending-media">
         <canvas aria-label="Suction ending preview"></canvas>
         <video controls playsinline aria-label="Exported teaser preview" hidden></video>
         <div class="teaser-ending-target" aria-hidden="true"><span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg>
-        </span></div>
-        <label>Aim toward Like <input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
+        </span></div></div>
+        <div class="teaser-ending-settings"><label title="Approximate X timeline position; layouts vary.">Aim toward Like <input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
         <label><span>Ending speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label>
-        <p class="hint">Approximate X timeline position. Adjust the aim for your layout; mobile and full-screen views can differ.</p>
+        <p role="status" class="teaser-ending-status"></p></div>
+      </div><footer>
         <div class="teaser-ending-actions"><button type="button" data-action="preview">Preview ending</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" data-action="cancel" hidden>Cancel</button></div>
-        <div class="teaser-ending-actions" data-result hidden><a download>Download MP4</a><button type="button" data-action="use">Use in draft</button></div>
-        <p role="status" class="teaser-ending-status"></p>
-      </div>`;
+        <div class="teaser-ending-actions" data-result hidden><a download>Download MP4</a><button type="button" data-action="use">Apply</button></div>
+      </footer></dialog>`;
     preview.after(root);
+    const dialog = root.querySelector("dialog");
+    const enabled = root.querySelector('[type="checkbox"]');
+    const gear = root.querySelector(".teaser-ending-gear");
     const canvas = root.querySelector("canvas");
     const rendered = root.querySelector("video");
     const aim = root.querySelector('[aria-label="Like button aim position"]');
@@ -269,7 +275,8 @@
       output,
       outputUrl,
       reviewed = false,
-      sourceFile;
+      appliedFile = null,
+      originalFile = null;
     function clear() {
       reviewed = false;
       output = null;
@@ -286,9 +293,11 @@
     function reset() {
       controller?.abort();
       clear();
-      sourceFile = getFile();
+      const sourceFile = getFile();
+      if (sourceFile !== appliedFile) appliedFile = originalFile = null;
+      enabled.checked = Boolean(appliedFile && sourceFile === appliedFile);
       status.textContent = "";
-      root.open = false;
+      dialog.close();
       root.hidden = !sourceFile || locked();
     }
     for (const control of [aim, speed])
@@ -297,17 +306,36 @@
         root.style.setProperty("--ending-aim", `${aim.value}%`);
         speedValue.value = `${Number(speed.value)}×`;
         speed.setAttribute("aria-valuetext", speedValue.value);
-        status.textContent = "Preview the updated ending before exporting.";
+        status.textContent = "";
       });
-    root.addEventListener("toggle", () => {
-      if (root.open && (busy() || locked())) root.open = false;
-      preview.hidden = root.open;
-      if (root.open) {
-        preview.pause();
-        const context = canvas.getContext("2d");
+    function open() {
+      if (busy() || locked() || !getFile()) return;
+      preview.pause();
+      if (!output) {
         canvas.width = canvas.height = 480;
-        if (preview.readyState >= 2) draw(context, preview, 0);
-      } else controller?.abort();
+        if (preview.readyState >= 2) draw(canvas.getContext("2d"), preview, 0);
+      }
+      dialog.showModal();
+    }
+    gear.addEventListener("click", open);
+    enabled.addEventListener("change", () => {
+      if (busy() || locked()) {
+        enabled.checked = Boolean(appliedFile && getFile() === appliedFile);
+        return;
+      }
+      if (enabled.checked) open();
+      else if (appliedFile && getFile() === appliedFile) {
+        const source = originalFile;
+        appliedFile = originalFile = null;
+        useFile(source);
+      }
+    });
+    button("close").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => {
+      controller?.abort();
+      rendered.pause();
+      enabled.checked = Boolean(appliedFile && getFile() === appliedFile);
+      gear.focus();
     });
     async function run(exportVideo) {
       if (
@@ -318,12 +346,15 @@
         (exportVideo && !reviewed)
       )
         return;
-      const file = getFile();
+      const selected = getFile();
+      const file = selected === appliedFile ? originalFile : selected;
       const operation = new AbortController();
       controller = operation;
       onBusy(true);
       aim.disabled =
         speed.disabled =
+        enabled.disabled =
+        gear.disabled =
         button("preview").disabled =
         button("export").disabled =
           true;
@@ -331,9 +362,7 @@
       result.hidden = true;
       rendered.hidden = true;
       canvas.hidden = false;
-      status.textContent = exportVideo
-        ? "Exporting… Keep this window open."
-        : "Previewing ending…";
+      status.textContent = exportVideo ? "Exporting…" : "Previewing…";
       try {
         const generated = await process(file, {
           canvas,
@@ -346,7 +375,7 @@
               status.textContent = `Exporting… ${Math.round(p * 100)}%`;
           },
         });
-        if (getFile() !== file || operation.signal.aborted) return;
+        if (getFile() !== selected || operation.signal.aborted) return;
         reviewed = true;
         if (generated) {
           output = generated;
@@ -359,17 +388,20 @@
           download.href = outputUrl;
           download.download = output.name;
           result.hidden = false;
-          status.textContent = "MP4 ready. The original clip is unchanged.";
-        } else status.textContent = "Ending previewed. Ready to export.";
+          status.textContent = "MP4 ready";
+        } else status.textContent = "Preview ready";
       } catch (error) {
         reviewed = false;
         status.textContent =
-          error.name === "AbortError"
-            ? "Cancelled. The original clip is unchanged."
-            : error.message;
+          error.name === "AbortError" ? "Cancelled" : error.message;
       } finally {
         controller = null;
-        aim.disabled = speed.disabled = button("preview").disabled = false;
+        aim.disabled =
+          speed.disabled =
+          enabled.disabled =
+          gear.disabled =
+          button("preview").disabled =
+            false;
         button("export").disabled = !reviewed;
         button("cancel").hidden = true;
         onBusy(false);
@@ -380,7 +412,10 @@
     button("cancel").addEventListener("click", () => controller?.abort());
     button("use").addEventListener("click", () => {
       if (!output || busy() || locked()) return;
-      useFile(output);
+      const generated = output;
+      if (getFile() !== appliedFile) originalFile = getFile();
+      appliedFile = generated;
+      useFile(generated);
     });
     window.addEventListener("pagehide", () => {
       controller?.abort();

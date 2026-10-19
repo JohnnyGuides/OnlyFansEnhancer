@@ -168,8 +168,9 @@ Reddit drafts appear as a compact count beneath that day. One teaser planner sho
 a square preview beside all destination posts; selecting a row edits that post's
 settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format.
-Twitter teasers offer **Suction ending** for square source videos at least one
-second long. The creator previews the ending warp toward an adjustable
+Twitter teasers offer a compact **Suction ending** checkbox and a settings gear
+for square source videos at least one second long. The gear opens a modal
+containing the preview, aim, speed and export controls. The creator previews the ending warp toward an adjustable
 Like-button guide before exporting a separate MP4, up to 1080 × 1080 with audio.
 Ending speed ranges from 0.5× to 3×; the default 1× takes 0.9 seconds. Changing
 the speed or aim requires another preview. Speed affects only the ending, with
@@ -177,8 +178,9 @@ the rest of the clip and its audio timing unchanged. A clip shorter than the
 chosen ending needs a faster speed or a longer source.
 The guide approximates X's timeline position; it cannot follow the real button
 across mobile or full-screen layouts and is not included in the exported video.
-**Use in draft** explicitly replaces the selected draft clip with the rendered
-copy; export alone leaves that selection and the original file unchanged.
+**Apply** replaces the selected draft clip with the rendered copy. Unchecking
+the effect restores the original clip during the same editing session; export
+alone leaves the selection and the original file unchanged.
 New Reddit posts start with the selected post's saved clip and can choose another.
 Each Reddit draft stores its own clip, first-frame thumbnail,
 subreddit and title. Each community has an inclusion checkbox; unchecking it

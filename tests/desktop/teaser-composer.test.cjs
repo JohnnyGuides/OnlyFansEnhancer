@@ -250,12 +250,64 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
   try {
     const errors = await mount(page, true);
     const frame = await chooseSyntheticVideo(page);
+    const previousPoster = await frame
+      .locator(".teaser-video-preview")
+      .getAttribute("poster");
     await frame.locator("#uploadSocialTeaser").setInputFiles(square);
     await frame.waitForFunction(
       () => document.querySelector(".teaser-video-preview").videoWidth === 480,
     );
+    await frame.waitForFunction((previous) => {
+      const video = document.querySelector(".teaser-video-preview");
+      return video.poster && video.poster !== previous;
+    }, previousPoster);
+    await frame.locator(".teaser-video-preview").evaluate(async (video) => {
+      video.muted = true;
+      await video.play();
+      video.pause();
+    });
     const editor = frame.locator(".teaser-ending");
-    await editor.locator("summary").click();
+    assert.ok(
+      await editor.evaluate(
+        (item) => item.getBoundingClientRect().height <= 36,
+      ),
+      "collapsed control stays small",
+    );
+    if (process.env.OFENHANCER_SUCTION_REVIEW_DIR) {
+      fs.mkdirSync(process.env.OFENHANCER_SUCTION_REVIEW_DIR, {
+        recursive: true,
+      });
+      await page.locator(".xt-composer-dialog").screenshot({
+        path: path.join(
+          process.env.OFENHANCER_SUCTION_REVIEW_DIR,
+          "suction-planner-compact.png",
+        ),
+      });
+    }
+    await editor
+      .getByRole("checkbox", { name: "Suction ending", exact: true })
+      .check();
+    await editor
+      .getByRole("dialog", { name: "Suction ending settings" })
+      .waitFor();
+    await page.keyboard.press("Escape");
+    await editor
+      .getByRole("dialog", { name: "Suction ending settings" })
+      .waitFor({ state: "hidden" });
+    await frame.waitForFunction(
+      () =>
+        !document.querySelector('.teaser-ending input[type="checkbox"]')
+          .checked,
+    );
+    assert.equal(
+      await editor
+        .getByRole("checkbox", { name: "Suction ending", exact: true })
+        .isChecked(),
+      false,
+    );
+    await editor
+      .getByRole("button", { name: "Suction ending settings", exact: true })
+      .click();
     assert.equal(
       await editor
         .getByRole("button", { name: "Export MP4", exact: true })
@@ -265,9 +317,7 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByRole("button", { name: "Preview ending", exact: true })
       .click();
-    await editor
-      .getByText("Ending previewed. Ready to export.", { exact: true })
-      .waitFor();
+    await editor.getByText("Preview ready", { exact: true }).waitFor();
     await editor.getByLabel("Like button aim position").fill("48");
     await editor.getByLabel("Like button aim position").dispatchEvent("input");
     assert.equal(
@@ -279,9 +329,7 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByRole("button", { name: "Preview ending", exact: true })
       .click();
-    await editor
-      .getByText("Ending previewed. Ready to export.", { exact: true })
-      .waitFor();
+    await editor.getByText("Preview ready", { exact: true }).waitFor();
     assert.equal(
       await editor
         .getByRole("button", { name: "Export MP4", exact: true })
@@ -302,9 +350,7 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByRole("button", { name: "Preview ending", exact: true })
       .click();
-    await editor
-      .getByText("Ending previewed. Ready to export.", { exact: true })
-      .waitFor();
+    await editor.getByText("Preview ready", { exact: true }).waitFor();
     await editor
       .getByRole("button", { name: "Export MP4", exact: true })
       .click();
@@ -352,9 +398,16 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
         .locator(".xt-composer-dialog")
         .screenshot({ path: path.join(captures, "suction-editor-phone.png") });
     }
+    await editor.getByRole("button", { name: "Apply", exact: true }).click();
     await editor
-      .getByRole("button", { name: "Use in draft", exact: true })
-      .click();
+      .getByRole("dialog", { name: "Suction ending settings" })
+      .waitFor({ state: "hidden" });
+    assert.equal(
+      await editor
+        .getByRole("checkbox", { name: "Suction ending", exact: true })
+        .isChecked(),
+      true,
+    );
     await frame.waitForFunction(() =>
       document
         .querySelector("#socialFileSummary")
@@ -371,6 +424,19 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
       DAY,
     );
     assert.equal(name, "square-test (suction).mp4");
+    await editor
+      .getByRole("checkbox", { name: "Suction ending", exact: true })
+      .uncheck();
+    await frame.waitForFunction(
+      () =>
+        !document
+          .querySelector("#socialFileSummary")
+          .textContent.includes("suction"),
+    );
+    assert.match(
+      await frame.locator("#socialFileSummary").textContent(),
+      /square-test/,
+    );
     assert.deepEqual(errors, []);
   } finally {
     await page.close();
