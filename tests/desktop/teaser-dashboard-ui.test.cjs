@@ -296,7 +296,7 @@ async function openDashboard({
       switch (operation) {
         case "getStatus":
           return {
-            productVersion: "0.20.110",
+            productVersion: "0.20.111",
             protocolVersion: 1,
             capabilities: [
               "desktop-shell",
@@ -2283,9 +2283,10 @@ test("refresh cleans up layout observers through empty and failed results", asyn
       response = { overview: { episodes: [], posts: [], recentMoves: [] } };
       await dashboard.load();
       container.style.width = "800px";
-      await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
-      );
+      // ResizeObserver delivery can lag paint frames; await the actual result.
+      const resizeDeadline = performance.now() + 2000;
+      while (root.style.width !== "708px" && performance.now() < resizeDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 16));
       if (root.style.width !== "708px")
         throw new Error("Empty catalogue did not resize");
       fail = true;
@@ -2573,7 +2574,7 @@ test("a failed load offers a retry", async () => {
         if (operation === "getTeaserPlan") return { slots: [] };
         if (operation === "getStatus")
           return {
-            productVersion: "0.20.110",
+            productVersion: "0.20.111",
             protocolVersion: 1,
             capabilities: [],
           };
