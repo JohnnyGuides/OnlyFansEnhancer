@@ -146,6 +146,7 @@
     "app/teaser-draft-store.js": "shared/workspace/teaser-draft-store.js",
     "app/teaser-composer.js": "shared/workspace/teaser-composer.js",
     "app/teaser-upload-mode.js": "shared/workspace/teaser-upload-mode.js",
+    "app/teaser-ending.js": "shared/workspace/teaser-ending.js",
     "app/upload-host.js": "shared/workspace/upload-host.js",
     "background.js": "extensions/personal/background.js",
     "content.css": "shared/identity-mask/content.css",

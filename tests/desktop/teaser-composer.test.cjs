@@ -211,6 +211,150 @@ async function chooseSyntheticVideo(page) {
   return frame;
 }
 
+test("square teaser previews its Like-directed ending before MP4 export and draft replacement", async () => {
+  const work = fs.mkdtempSync(
+    path.join(repositoryRoot, ".local", "suction-composer-"),
+  );
+  const square = path.join(work, "square-test.mp4");
+  const generated = require("node:child_process").spawnSync(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=480x480:rate=30:duration=3",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:duration=3",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-shortest",
+      square,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(generated.status, 0, generated.stderr);
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 1000 },
+  });
+  try {
+    const errors = await mount(page, true);
+    const frame = await chooseSyntheticVideo(page);
+    await frame.locator("#uploadSocialTeaser").setInputFiles(square);
+    await frame.waitForFunction(
+      () => document.querySelector(".teaser-video-preview").videoWidth === 480,
+    );
+    const editor = frame.locator(".teaser-ending");
+    await editor.locator("summary").click();
+    assert.equal(
+      await editor
+        .getByRole("button", { name: "Export MP4", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await editor
+      .getByRole("button", { name: "Preview ending", exact: true })
+      .click();
+    await editor
+      .getByText("Ending previewed. Ready to export.", { exact: true })
+      .waitFor();
+    await editor.getByLabel("Like button aim position").fill("48");
+    await editor.getByLabel("Like button aim position").dispatchEvent("input");
+    assert.equal(
+      await editor
+        .getByRole("button", { name: "Export MP4", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await editor
+      .getByRole("button", { name: "Preview ending", exact: true })
+      .click();
+    await editor
+      .getByText("Ending previewed. Ready to export.", { exact: true })
+      .waitFor();
+    await editor
+      .getByRole("button", { name: "Export MP4", exact: true })
+      .click();
+    await editor.getByRole("link", { name: "Download MP4" }).waitFor();
+    assert.match(
+      await frame.locator("#socialFileSummary").textContent(),
+      /square-test/,
+    );
+    assert.doesNotMatch(
+      await frame.locator("#socialFileSummary").textContent(),
+      /suction/,
+    );
+    const download = page.waitForEvent("download");
+    await editor.getByRole("link", { name: "Download MP4" }).click();
+    const exported = await download;
+    assert.equal(exported.suggestedFilename(), "square-test (suction).mp4");
+    await exported.saveAs(path.join(work, "export.mp4"));
+    if (process.env.OFENHANCER_SUCTION_REVIEW_DIR) {
+      const captures = process.env.OFENHANCER_SUCTION_REVIEW_DIR;
+      fs.mkdirSync(captures, { recursive: true });
+      fs.copyFileSync(
+        path.join(work, "export.mp4"),
+        path.join(captures, "suction-ending-preview.mp4"),
+      );
+      await editor.locator("video").evaluate(async (video) => {
+        video.muted = true;
+        await video.play();
+        video.pause();
+        await new Promise((resolve) => {
+          video.onseeked = resolve;
+          video.currentTime = video.duration - 0.45;
+        });
+      });
+      await page.locator(".xt-composer-dialog").screenshot({
+        path: path.join(captures, "suction-editor-desktop.png"),
+      });
+      await page.setViewportSize({ width: 390, height: 1000 });
+      assert.equal(
+        await frame.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+        true,
+      );
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(captures, "suction-editor-phone.png") });
+    }
+    await editor
+      .getByRole("button", { name: "Use in draft", exact: true })
+      .click();
+    await frame.waitForFunction(() =>
+      document
+        .querySelector("#socialFileSummary")
+        .textContent.includes("suction"),
+    );
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        .textContent.includes("Draft saved"),
+    );
+    const name = await frame.evaluate(
+      async (day) => (await OFEnhancerTeaserDrafts.get(day)).file.name,
+      DAY,
+    );
+    assert.equal(name, "square-test (suction).mp4");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("starting a new calendar draft keeps the teaser editor and selected clip", async () => {
   const page = await browser.newPage();
   try {

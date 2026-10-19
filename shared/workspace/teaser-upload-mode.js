@@ -207,6 +207,30 @@
       videoUrl = "",
       imageUrl = "",
       previewReady = Promise.resolve();
+    let endingControls = [];
+    const ending = global.OFEnhancerTeaserEnding.mount({
+      preview,
+      getFile: () => hub.file(),
+      useFile: acceptFile,
+      locked: () =>
+        Boolean(context?.draft?.sessionId || context?.platform === "reddit"),
+      busy: () => hub.busy(),
+      onBusy(value) {
+        if (value) {
+          endingControls = [
+            ...document.querySelectorAll("input,select,textarea,button"),
+          ]
+            .filter((control) => !control.closest(".teaser-ending"))
+            .map((control) => [control, control.disabled]);
+          for (const [control] of endingControls) control.disabled = true;
+        } else {
+          for (const [control, disabled] of endingControls)
+            control.disabled = disabled;
+          endingControls = [];
+        }
+        notify("running", { running: value });
+      },
+    });
     updateLinked();
     function fail(error) {
       get("#uploadError").textContent = error.message;
@@ -229,6 +253,7 @@
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       videoUrl = URL.createObjectURL(file);
       preview.src = videoUrl;
+      ending.reset();
       try {
         const frame =
           (restored &&
@@ -324,16 +349,18 @@
         });
         await hub.chooseFrame();
       });
-    panel.querySelector("input").addEventListener("change", async (event) => {
-      const file = event.target.files?.[0];
-      if (file && !hub.busy()) {
-        try {
-          useThumbnail(await hub.normalizeThumbnail(file));
-        } catch (error) {
-          fail(error);
+    panel
+      .querySelector(".teaser-thumbnail-upload input")
+      .addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (file && !hub.busy()) {
+          try {
+            useThumbnail(await hub.normalizeThumbnail(file));
+          } catch (error) {
+            fail(error);
+          }
         }
-      }
-    });
+      });
     function acceptFile(file) {
       if (
         !file.size ||

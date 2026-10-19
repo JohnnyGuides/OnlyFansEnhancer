@@ -167,8 +167,15 @@ The daily calendar retains one primary Twitter draft and its thumbnail. Addition
 Reddit drafts appear as a compact count beneath that day. One teaser planner shows
 a square preview beside all destination posts; selecting a row edits that post's
 settings without opening another modal. Its first-frame poster and chosen images
-are square; the main uploader retains its existing landscape cover format. New
-Reddit posts start with the selected post's saved clip and can choose another.
+are square; the main uploader retains its existing landscape cover format.
+Twitter teasers offer **Suction ending** for square source videos at least one
+second long. The creator previews the final 0.9-second warp toward an adjustable
+Like-button guide before exporting a separate MP4, up to 1080 × 1080 with audio.
+The guide approximates X's timeline position; it cannot follow the real button
+across mobile or full-screen layouts and is not included in the exported video.
+**Use in draft** explicitly replaces the selected draft clip with the rendered
+copy; export alone leaves that selection and the original file unchanged.
+New Reddit posts start with the selected post's saved clip and can choose another.
 Each Reddit draft stores its own clip, first-frame thumbnail,
 subreddit and title. Each community has an inclusion checkbox; unchecking it
 keeps its media and title while removing it from the plan and calendar count.
