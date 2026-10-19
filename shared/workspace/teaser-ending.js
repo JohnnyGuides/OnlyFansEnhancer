@@ -77,6 +77,7 @@
       canvas,
       aim = DEFAULT_AIM,
       speed = 1,
+      mode = "during-video",
       signal,
       exportVideo = false,
       progress = () => {},
@@ -88,6 +89,8 @@
       throw new Error("Choose an aim position from 25% to 70%.");
     if (!Number.isFinite(speed) || speed < 0.5 || speed > 3)
       throw new Error("Choose an ending speed from 0.5× to 3×.");
+    if (!["last-frame", "during-video"].includes(mode))
+      throw new Error("Choose Last frame or During video.");
     const endingSeconds = ENDING_SECONDS / speed;
     const operation = new AbortController();
     const abort = () => operation.abort(signal?.reason);
@@ -117,7 +120,7 @@
         );
       if (!Number.isFinite(video.duration) || video.duration < 1)
         throw new Error("Choose a square teaser at least one second long.");
-      if (video.duration < endingSeconds)
+      if (mode === "during-video" && video.duration < endingSeconds)
         throw new Error(
           `This speed needs a clip at least ${endingSeconds.toFixed(1)} seconds long. Choose a faster speed.`,
         );
@@ -125,10 +128,13 @@
       canvas.width = canvas.height = size;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Video rendering is unavailable.");
-      const start = video.duration - endingSeconds;
+      const start =
+        mode === "last-frame" ? video.duration : video.duration - endingSeconds;
+      const totalDuration =
+        video.duration + (mode === "last-frame" ? endingSeconds : 0);
       const paint = () => {
         draw(context, video, (video.currentTime - start) / endingSeconds, aim);
-        progress(Math.min(1, video.currentTime / video.duration));
+        progress(Math.min(1, video.currentTime / totalDuration));
       };
       let finished;
       const chunks = [];
@@ -182,7 +188,7 @@
         void finished.catch(() => {});
       } else {
         const sought = waitFor(video, "seeked", operation.signal);
-        video.currentTime = start;
+        video.currentTime = Math.min(start, video.duration - 0.05);
         await sought;
       }
       operation.signal.throwIfAborted();
@@ -207,6 +213,20 @@
             }),
           ])
         : ended);
+      clearInterval(timer);
+      if (mode === "last-frame") {
+        const frozen = document.createElement("canvas");
+        frozen.width = frozen.height = size;
+        frozen.getContext("2d").drawImage(video, 0, 0, size, size);
+        const started = performance.now();
+        while (performance.now() - started < endingSeconds * 1000) {
+          operation.signal.throwIfAborted();
+          const elapsed = (performance.now() - started) / 1000;
+          draw(context, frozen, elapsed / endingSeconds, aim);
+          progress((video.duration + elapsed) / totalDuration);
+          await new Promise((resolve) => setTimeout(resolve, 1000 / 30));
+        }
+      }
       draw(context, video, 1, aim);
       if (!exportVideo) return null;
       // Include a fully collapsed frame in the actual encoded result.
@@ -248,17 +268,16 @@
       <header><h2>Suction ending</h2><button type="button" data-action="close" aria-label="Close ending settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
       <div class="teaser-ending-editor"><div class="teaser-ending-media"><div class="teaser-ending-stage">
         <canvas aria-label="Suction ending preview"></canvas>
-        <video playsinline muted aria-label="Exported teaser preview" hidden></video>
-        <button type="button" class="teaser-ending-replay" data-action="preview" aria-label="Preview ending" title="Replay ending"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 5 11 7-11 7Z"/></svg><span>Preview</span></button></div>
+        <video controls playsinline aria-label="Exported teaser preview" hidden></video>
+        </div>
         <div class="teaser-ending-target" aria-hidden="true"><span>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg>
         </span></div></div>
-        <div class="teaser-ending-settings"><label title="Approximate X timeline position; layouts vary."><span>Like position <output data-aim>42%</output></span><input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
-        <label><span>Speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label></div>
-      </div><footer>
+        <div class="teaser-ending-settings"><label>Warp<select aria-label="Warp mode"><option value="last-frame">Last frame</option><option value="during-video" selected>During video</option></select></label><label title="Approximate X timeline position; layouts vary."><span>Like position <output data-aim>42%</output></span><input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
+        <label><span>Speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label>
         <p role="status" class="teaser-ending-status"></p>
-        <div class="teaser-ending-actions"><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" class="primary" data-action="use" disabled>Apply ending</button></div>
-      </footer></dialog>`;
+        <div class="teaser-ending-actions"><button type="button" data-action="preview" aria-label="Preview ending">Preview</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" class="primary" data-action="use" disabled>Apply ending</button></div>
+      </div></div></dialog>`;
     preview.after(root);
     const dialog = root.querySelector("dialog");
     const enabled = root.querySelector('[type="checkbox"]');
@@ -267,6 +286,7 @@
     const rendered = root.querySelector("video");
     const aim = root.querySelector('[aria-label="Like button aim position"]');
     const speed = root.querySelector('[aria-label="Ending speed"]');
+    const mode = root.querySelector('[aria-label="Warp mode"]');
     const speedValue = root.querySelector("[data-speed]");
     const aimValue = root.querySelector("[data-aim]");
     const status = root.querySelector('[role="status"]');
@@ -279,7 +299,7 @@
       originalFile = null;
     function clear() {
       reviewed = false;
-      button("preview").querySelector("span").textContent = "Preview";
+      button("preview").hidden = false;
       output = null;
       rendered.pause();
       rendered.removeAttribute("src");
@@ -288,6 +308,8 @@
       outputUrl = "";
       rendered.hidden = true;
       canvas.hidden = false;
+      canvas.width = canvas.height = 480;
+      if (preview.readyState >= 2) draw(canvas.getContext("2d"), preview, 0);
       button("export").disabled = true;
       button("use").disabled = true;
     }
@@ -313,7 +335,7 @@
         );
     }
     syncControls();
-    for (const control of [aim, speed])
+    for (const control of [aim, speed, mode])
       control.addEventListener("input", () => {
         clear();
         syncControls();
@@ -323,8 +345,9 @@
       if (busy() || locked() || !getFile()) return;
       preview.pause();
       if (!output) {
-        canvas.width = canvas.height = 480;
-        if (preview.readyState >= 2) draw(canvas.getContext("2d"), preview, 0);
+        rendered.src = preview.currentSrc || preview.src;
+        rendered.hidden = false;
+        canvas.hidden = true;
       }
       dialog.showModal();
     }
@@ -360,46 +383,42 @@
       appliedFile = generated;
       useFile(generated);
     }
-    async function run(exportVideo, intent = "") {
-      if (
-        controller ||
-        busy() ||
-        locked() ||
-        !getFile() ||
-        (exportVideo && !reviewed)
-      )
-        return;
+    async function run() {
+      if (controller || busy() || locked() || !getFile()) return;
       const selected = getFile();
       const file = selected === appliedFile ? originalFile : selected;
       const operation = new AbortController();
       controller = operation;
       onBusy(true);
       aim.disabled =
+        mode.disabled =
         speed.disabled =
         enabled.disabled =
         gear.disabled =
-        button("preview").disabled =
         button("export").disabled =
         button("use").disabled =
           true;
       rendered.hidden = true;
       canvas.hidden = false;
-      status.textContent = exportVideo ? "Exporting…" : "Previewing…";
+      rendered.pause();
+      status.textContent = "Preparing preview…";
+      button("preview").textContent = "Cancel";
+      button("preview").setAttribute("aria-label", "Cancel preview");
       try {
         const generated = await process(file, {
           canvas,
           aim: Number(aim.value) / 100,
           speed: Number(speed.value),
+          mode: mode.value,
           signal: operation.signal,
-          exportVideo,
+          exportVideo: true,
           progress: (p) => {
-            if (exportVideo)
-              status.textContent = `Exporting… ${Math.round(p * 100)}%`;
+            status.textContent = `Preparing preview… ${Math.round(p * 100)}%`;
           },
         });
         if (getFile() !== selected || operation.signal.aborted) return;
         reviewed = true;
-        button("preview").querySelector("span").textContent = "Replay";
+        button("preview").hidden = true;
         if (generated) {
           output = generated;
           URL.revokeObjectURL(outputUrl);
@@ -408,8 +427,7 @@
           rendered.hidden = false;
           canvas.hidden = true;
           status.textContent = "";
-          if (intent === "apply") applyOutput();
-          else if (intent === "export") downloadOutput();
+          await rendered.play().catch(() => {});
         } else status.textContent = "";
       } catch (error) {
         reviewed = false;
@@ -419,29 +437,29 @@
         controller = null;
         aim.disabled =
           speed.disabled =
+          mode.disabled =
           enabled.disabled =
           gear.disabled =
           button("preview").disabled =
             false;
+        button("preview").textContent = "Preview";
+        button("preview").setAttribute("aria-label", "Preview ending");
         button("export").disabled = !reviewed;
         button("use").disabled = !reviewed;
         onBusy(false);
       }
     }
-    button("preview").addEventListener("click", () => void run(false));
+    button("preview").addEventListener("click", () => {
+      if (controller) controller.abort();
+      else void run();
+    });
     button("export").addEventListener("click", () => {
       if (controller || busy() || locked()) return;
       if (output) downloadOutput();
-      else void run(true, "export");
-    });
-    button("cancel").addEventListener("click", () => {
-      if (controller) controller.abort();
-      else dialog.close();
     });
     button("use").addEventListener("click", () => {
       if (controller || busy() || locked()) return;
       if (output) applyOutput();
-      else void run(true, "apply");
     });
     window.addEventListener("pagehide", () => {
       controller?.abort();

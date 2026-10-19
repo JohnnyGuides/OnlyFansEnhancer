@@ -170,11 +170,15 @@ settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format.
 Twitter teasers offer a compact **Suction ending** checkbox and a settings gear
 for square source videos at least one second long. The gear opens a modal
-containing the preview, aim, speed and export controls. The creator previews the ending warp toward an adjustable
+containing a seekable MP4 preview, warp mode, aim, speed and export controls. The creator previews the ending warp toward an adjustable
 Like-button guide before exporting a separate MP4, up to 1080 × 1080 with audio.
+**During video** warps the final moments of the playing clip. **Last frame**
+plays the clip unchanged, then appends a warp of its frozen final frame.
+Preview prepares the rendered MP4 once; its normal video controls support
+playing and seeking before applying or downloading the same file.
 Ending speed ranges from 0.5× to 3×; the default 1× takes 0.9 seconds. Changing
 the speed or aim requires another preview. Speed affects only the ending, with
-the rest of the clip and its audio timing unchanged. A clip shorter than the
+the rest of the clip and its audio timing unchanged. In During video mode, a clip shorter than the
 chosen ending needs a faster speed or a longer source.
 The guide approximates X's timeline position; it cannot follow the real button
 across mobile or full-screen layouts and is not included in the exported video.

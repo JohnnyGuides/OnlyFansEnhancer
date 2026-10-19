@@ -178,18 +178,6 @@ body.calendar-reddit-draft .upload-actions .action-status {
 .calendar-teaser .teaser-ending-stage {
   position: relative;
 }
-.calendar-teaser .teaser-ending-replay {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.calendar-teaser .teaser-ending-replay:disabled {
-  opacity: 0;
-  pointer-events: none;
-}
 .calendar-teaser .teaser-ending-settings label {
   margin: 0;
   font-size: 12px;
@@ -199,17 +187,14 @@ body.calendar-reddit-draft .upload-actions .action-status {
   justify-content: space-between;
   gap: 12px;
 }
+.calendar-teaser .teaser-ending-settings select {
+  width: 100%;
+  min-width: 0;
+}
 .calendar-teaser .teaser-ending-settings output {
   color: #b8c8d9;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
-}
-.calendar-teaser .teaser-ending-dialog footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 12px;
 }
 .calendar-teaser .teaser-ending canvas,
 .calendar-teaser .teaser-ending video {
@@ -300,9 +285,6 @@ body.calendar-reddit-draft .upload-actions .action-status {
   width: 100%;
   flex-wrap: wrap;
   gap: 6px;
-}
-.calendar-teaser .teaser-ending-actions [data-action="cancel"] {
-  margin-right: auto;
 }
 .calendar-teaser .teaser-ending :is(button, input):focus-visible {
   outline: 2px solid #68d8ff;

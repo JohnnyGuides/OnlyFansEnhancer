@@ -353,6 +353,9 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
       .getByLabel("Ending speed", { exact: true })
       .dispatchEvent("input");
     assert.equal(await editor.locator("[data-speed]").textContent(), "1.5×");
+    await editor
+      .getByLabel("Warp mode", { exact: true })
+      .selectOption("last-frame");
     assert.equal(
       await editor
         .getByRole("button", { name: "Export MP4", exact: true })
@@ -367,6 +370,21 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
         !document.querySelector('.teaser-ending [data-action="export"]')
           .disabled,
     );
+    const scrubbed = await editor.locator("video").evaluate(async (video) => {
+      video.pause();
+      const positions = [];
+      for (const time of [video.duration - 0.3, 0.25]) {
+        await new Promise((resolve) => {
+          video.addEventListener("seeked", resolve, { once: true });
+          video.currentTime = time;
+        });
+        positions.push(video.currentTime);
+      }
+      return { controls: video.controls, duration: video.duration, positions };
+    });
+    assert.equal(scrubbed.controls, true, "preview has normal video controls");
+    assert.ok(scrubbed.duration > 3.4 && scrubbed.duration < 3.9);
+    assert.ok(scrubbed.positions[0] > 3 && scrubbed.positions[1] < 0.3);
     const download = page.waitForEvent("download");
     await editor
       .getByRole("button", { name: "Export MP4", exact: true })

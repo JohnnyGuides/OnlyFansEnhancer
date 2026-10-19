@@ -15,7 +15,7 @@ function run(command, args) {
   return result.stdout;
 }
 
-function makeVideo(file, size, duration = 2.4) {
+function makeVideo(file, size, duration = 2.4, filter = "") {
   run("ffmpeg", [
     "-hide_banner",
     "-loglevel",
@@ -24,7 +24,7 @@ function makeVideo(file, size, duration = 2.4) {
     "-f",
     "lavfi",
     "-i",
-    `color=c=white:s=${size}:r=30:d=${duration}`,
+    `color=c=white:s=${size}:r=30:d=${duration}${filter ? `,${filter}` : ""}`,
     "-f",
     "lavfi",
     "-i",
@@ -285,6 +285,134 @@ test("ending speed changes encoded warp timing without speeding up the video", a
       assert.match(errors[1], /0.5× to 3×/);
       assert.match(errors[2], /0.5× to 3×/);
     });
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("last-frame mode preserves the original clip and audio before appending the configured warp", async () => {
+  const work = await makeScratch();
+  const source = path.join(work, "square.mp4");
+  const target = path.join(work, "last-frame.mp4");
+  const sourceDuration = 2.4;
+  const speed = 1.5;
+  const endingDuration = 0.9 / speed;
+  makeVideo(
+    source,
+    "320x320",
+    sourceDuration,
+    "drawbox=color=black:t=fill:enable='lt(t,1.2)'",
+  );
+  try {
+    await withPage(async (page) => {
+      await attach(page, source);
+      const download = page.waitForEvent("download");
+      await page.evaluate(async (speed) => {
+        const output = await OFEnhancerTeaserEnding.process(
+          document.querySelector("#source").files[0],
+          {
+            canvas: document.querySelector("#render"),
+            exportVideo: true,
+            mode: "last-frame",
+            speed,
+            aim: 0.68,
+          },
+        );
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(output);
+        link.download = output.name;
+        link.click();
+      }, speed);
+      await (await download).saveAs(target);
+
+      const invalidMode = await page.evaluate(async () => {
+        try {
+          await OFEnhancerTeaserEnding.process(
+            document.querySelector("#source").files[0],
+            { canvas: document.querySelector("#render"), mode: "unknown" },
+          );
+          return "";
+        } catch (error) {
+          return error.message;
+        }
+      });
+      assert.match(invalidMode, /mode|last.frame|during.video/i);
+    });
+
+    const duration = Number(
+      run("ffprobe", [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        target,
+      ]).trim(),
+    );
+    assert.ok(
+      Math.abs(duration - (sourceDuration + endingDuration)) < 0.25,
+      `last-frame mode appends ${endingDuration} seconds (${duration} total)`,
+    );
+    const originalStart = decodedFrame(target, 0.5);
+    assert.ok(
+      originalStart.every((value) => value < 30),
+      "the original clip begins with its black section",
+    );
+    const originalEnding = decodedFrame(target, sourceDuration - 0.2);
+    assert.ok(
+      originalEnding.every((value) => value > 230),
+      "the source remains unwarped until its original ending",
+    );
+    const appended = decodedFrame(target, sourceDuration + endingDuration / 2);
+    assert.ok(appended[0] < 30, "the appended section contains the warp");
+    assert.ok(
+      whiteCentroidX(appended, 320) > 0.53,
+      "the appended warp moves the frozen frame toward the selected aim",
+    );
+    const final = decodedFrame(target, duration - 0.05);
+    assert.ok(final.length > 0, "the final encoded frame decodes");
+    assert.ok(
+      final.every((value) => value < 80),
+      "the appended ending includes a fully collapsed frame",
+    );
+
+    const rmsAt = (at) => {
+      const audio = spawnSync("ffmpeg", [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        String(at),
+        "-i",
+        target,
+        "-t",
+        "0.15",
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "8000",
+        "-f",
+        "s16le",
+        "-",
+      ]);
+      assert.equal(audio.status, 0, audio.stderr.toString("utf8"));
+      let squares = 0;
+      const samples = audio.stdout.length / 2;
+      for (let index = 0; index < samples; index++) {
+        squares += audio.stdout.readInt16LE(index * 2) ** 2;
+      }
+      return samples ? Math.sqrt(squares / samples) : 0;
+    };
+    assert.ok(
+      rmsAt(1.8) > 500,
+      "original audio still plays at its original time",
+    );
+    assert.ok(
+      rmsAt(sourceDuration + 0.25) < 100,
+      "the appended warp does not replay or stretch the original audio",
+    );
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
