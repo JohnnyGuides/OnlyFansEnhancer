@@ -354,6 +354,33 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     );
     await page.mouse.up();
     assert.equal(await warpTarget.getAttribute("aria-valuenow"), "48");
+    const funnelWidth = editor.getByRole("slider", {
+      name: "Funnel width",
+      exact: true,
+    });
+    assert.equal(await funnelWidth.getAttribute("aria-valuenow"), "0");
+    await funnelWidth.press("End");
+    assert.equal(await funnelWidth.getAttribute("aria-valuenow"), "40");
+    await funnelWidth.press("Home");
+    assert.equal(await funnelWidth.getAttribute("aria-valuenow"), "0");
+    const widthBounds = await funnelWidth.boundingBox();
+    await page.mouse.move(
+      widthBounds.x + widthBounds.width - 2,
+      widthBounds.y + 6,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      targetBounds.x + targetBounds.width * (0.48 + 0.125),
+      targetBounds.y + 6,
+      { steps: 4 },
+    );
+    await page.mouse.up();
+    assert.equal(await funnelWidth.getAttribute("aria-valuenow"), "25");
+    assert.equal(
+      await warpTarget.getAttribute("aria-valuenow"),
+      "48",
+      "width adjustment preserves the target centre",
+    );
     assert.equal(
       await editor
         .getByRole("button", { name: "Export MP4", exact: true })

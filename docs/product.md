@@ -185,6 +185,10 @@ with the full 0–100% width available. X action icons show a timeline guide;
 Desktop web defaults to Like at 47%, Mobile web to 50%, based on measured
 X timeline layouts on 19 October 2026. Choosing a layout resets the target to
 its Like icon; custom placement is used in the actual rendered video.
+The paired handles above the X actions adjust funnel width from a point to
+40% of the video width while preserving the target centre. Pointer/touch and
+arrow-key changes invalidate the prepared preview; both warp modes render the
+chosen width and still end on a fully collapsed frame.
 The guide cannot follow the real button
 across mobile or full-screen layouts and is not included in the exported video.
 **Apply ending** renders and replaces the selected draft clip with the rendered copy. Unchecking

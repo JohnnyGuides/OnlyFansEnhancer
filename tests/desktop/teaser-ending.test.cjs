@@ -198,7 +198,7 @@ test("suction ending export is square, keeps audio, collapses toward aim, and pr
     const final = decodedFrame(outputPath, Math.max(0, duration - 0.08));
     assert.ok(
       final.every((value) => value < 80),
-      "the encoded ending contains a fully collapsed dark frame",
+      `the encoded ending contains a fully collapsed dark frame (duration ${duration}, seek ${Math.max(0, duration - 0.08)}, peak ${final.reduce((peak, value) => Math.max(peak, value), 0)})`,
     );
     assert.equal(
       crypto
@@ -413,6 +413,109 @@ test("last-frame mode preserves the original clip and audio before appending the
       rmsAt(sourceDuration + 0.25) < 100,
       "the appended warp does not replay or stretch the original audio",
     );
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("last-frame export widens the neck without moving its aim or preventing full collapse", async () => {
+  const work = await makeScratch();
+  const source = path.join(work, "square.mp4");
+  const width = 320;
+  const aim = 0.68;
+  makeVideo(source, `${width}x${width}`);
+  try {
+    await withPage(async (page) => {
+      await attach(page, source);
+      const bandMeasurements = [];
+      for (const neck of [0, 0.3]) {
+        const download = page.waitForEvent("download");
+        await page.evaluate(
+          async ({ neck, aim }) => {
+            const output = await OFEnhancerTeaserEnding.process(
+              document.querySelector("#source").files[0],
+              {
+                canvas: document.querySelector("#render"),
+                exportVideo: true,
+                mode: "last-frame",
+                neck,
+                aim,
+              },
+            );
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(output);
+            link.download = output.name;
+            link.click();
+          },
+          { neck, aim },
+        );
+        const target = path.join(work, `neck-${neck}.mp4`);
+        await (await download).saveAs(target);
+        const frame = decodedFrame(target, 3.03);
+        let count = 0;
+        let totalX = 0;
+        const bandHeight = 8;
+        for (let y = width - bandHeight; y < width; y++) {
+          for (let x = 0; x < width; x++) {
+            if (frame[(y * width + x) * 3] > 100) {
+              count++;
+              totalX += x;
+            }
+          }
+        }
+        assert.ok(count > 0, "the late warp has a visible lower edge");
+        bandMeasurements.push({
+          width: count / bandHeight,
+          center: totalX / count / width,
+        });
+        const duration = Number(
+          run("ffprobe", [
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            target,
+          ]).trim(),
+        );
+        const final = decodedFrame(target, duration - 0.05);
+        assert.ok(
+          final.length > 0,
+          `the final encoded frame decodes (neck ${neck}, duration ${duration}, seek ${duration - 0.05})`,
+        );
+        assert.ok(
+          final.every((value) => value < 80),
+          `neck ${neck} still collapses completely`,
+        );
+      }
+      assert.ok(
+        bandMeasurements[1].width > bandMeasurements[0].width + 35,
+        `a wider neck must visibly widen the lower edge (${bandMeasurements[0].width} -> ${bandMeasurements[1].width})`,
+      );
+      for (const band of bandMeasurements) {
+        assert.ok(
+          Math.abs(band.center - aim) < 0.04,
+          `the lower edge remains centered toward ${aim} (${band.center})`,
+        );
+      }
+      const invalidNecks = await page.evaluate(async () => {
+        const errors = [];
+        for (const neck of [-0.1, 0.5, NaN]) {
+          try {
+            await OFEnhancerTeaserEnding.process(
+              document.querySelector("#source").files[0],
+              { canvas: document.querySelector("#render"), neck },
+            );
+            errors.push("");
+          } catch (error) {
+            errors.push(error.message);
+          }
+        }
+        return errors;
+      });
+      for (const error of invalidNecks) assert.match(error, /neck|width/i);
+    });
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

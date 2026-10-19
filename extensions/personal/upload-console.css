@@ -226,6 +226,33 @@ body.calendar-reddit-draft .upload-actions .action-status {
   stroke: currentColor;
   stroke-width: 1.6;
 }
+.calendar-teaser .teaser-ending-neck {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: var(--ending-aim, 47%);
+  width: max(24px, var(--ending-neck, 0%));
+  height: 16px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+.calendar-teaser .teaser-ending-neck::before,
+.calendar-teaser .teaser-ending-neck::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border-block: 2px solid #68d8ff;
+}
+.calendar-teaser .teaser-ending-neck::before {
+  left: 0;
+  border-left: 2px solid #68d8ff;
+}
+.calendar-teaser .teaser-ending-neck::after {
+  right: 0;
+  border-right: 2px solid #68d8ff;
+}
 .calendar-teaser [data-x-action="reply"] {
   left: 1.8%;
 }
@@ -291,12 +318,14 @@ body.calendar-reddit-draft .upload-actions .action-status {
   height: 25px;
   border-left: 1px solid #68d8ff;
 }
-.calendar-teaser .teaser-ending-target-handle:focus-visible {
+.calendar-teaser .teaser-ending-target-handle:focus-visible,
+.calendar-teaser .teaser-ending-neck:focus-visible {
   outline: 2px solid #68d8ff;
   outline-offset: 1px;
   border-radius: 3px;
 }
-.calendar-teaser .teaser-ending-target-handle[aria-disabled="true"] {
+.calendar-teaser .teaser-ending-target-handle[aria-disabled="true"],
+.calendar-teaser .teaser-ending-neck[aria-disabled="true"] {
   cursor: wait;
 }
 .calendar-teaser .teaser-ending-target-caption {

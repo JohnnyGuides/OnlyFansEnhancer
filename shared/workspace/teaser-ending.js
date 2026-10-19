@@ -5,7 +5,7 @@
   const cancelled = () =>
     new global.DOMException("Export cancelled.", "AbortError");
 
-  function draw(context, source, progress, aim = DEFAULT_AIM) {
+  function draw(context, source, progress, aim = DEFAULT_AIM, neck = 0) {
     const size = context.canvas.width;
     const p = Math.min(1, Math.max(0, progress));
     context.fillStyle = "#000";
@@ -22,10 +22,9 @@
     // Thin image strips form a curved funnel; the lower edge contracts first.
     for (let row = 0; row < sourceSize; row += 2) {
       const t = row / sourceSize;
+      const bend = Math.pow(pull, 0.35) * Math.pow(t, 0.7);
       const width =
-        size *
-        Math.pow(1 - pull, 0.8) *
-        (1 - Math.pow(pull, 0.35) * Math.pow(t, 0.7));
+        size * (Math.pow(1 - pull, 0.8) * (1 - bend) + neck * pull * bend);
       const center =
         size / 2 +
         (target - size / 2) * (pull + (1 - pull) * t * t * Math.sqrt(pull)) +
@@ -78,6 +77,7 @@
       aim = DEFAULT_AIM,
       speed = 1,
       mode = "during-video",
+      neck = 0,
       signal,
       exportVideo = false,
       progress = () => {},
@@ -91,6 +91,8 @@
       throw new Error("Choose an ending speed from 0.5× to 3×.");
     if (!["last-frame", "during-video"].includes(mode))
       throw new Error("Choose Last frame or During video.");
+    if (!Number.isFinite(neck) || neck < 0 || neck > 0.4)
+      throw new Error("Choose a funnel width from 0% to 40%.");
     const endingSeconds = ENDING_SECONDS / speed;
     const operation = new AbortController();
     const abort = () => operation.abort(signal?.reason);
@@ -133,7 +135,13 @@
       const totalDuration =
         video.duration + (mode === "last-frame" ? endingSeconds : 0);
       const paint = () => {
-        draw(context, video, (video.currentTime - start) / endingSeconds, aim);
+        draw(
+          context,
+          video,
+          (video.currentTime - start) / endingSeconds,
+          aim,
+          neck,
+        );
         progress(Math.min(1, video.currentTime / totalDuration));
       };
       let finished;
@@ -222,15 +230,19 @@
         while (performance.now() - started < endingSeconds * 1000) {
           operation.signal.throwIfAborted();
           const elapsed = (performance.now() - started) / 1000;
-          draw(context, frozen, elapsed / endingSeconds, aim);
+          draw(context, frozen, elapsed / endingSeconds, aim, neck);
           progress((video.duration + elapsed) / totalDuration);
           await new Promise((resolve) => setTimeout(resolve, 1000 / 30));
         }
       }
-      draw(context, video, 1, aim);
+      draw(context, video, 1, aim, neck);
       if (!exportVideo) return null;
-      // Include a fully collapsed frame in the actual encoded result.
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      // Keep the video tail longer than audio encoder delay, with fresh black frames.
+      stream.getAudioTracks().forEach((track) => track.stop());
+      for (let frame = 0; frame < 4; frame++) {
+        draw(context, video, 1, aim, neck);
+        await new Promise((resolve) => setTimeout(resolve, 1000 / 30));
+      }
       operation.signal.throwIfAborted();
       recorder.stop();
       const blob = await finished;
@@ -272,6 +284,7 @@
         </div>
         <div class="teaser-ending-target" data-layout="desktop" title="X timeline guide; positions vary by viewer layout.">
           <div class="teaser-ending-target-track">
+            <div class="teaser-ending-neck" role="slider" tabindex="0" aria-label="Funnel width" aria-valuemin="0" aria-valuemax="40" aria-valuenow="0" aria-valuetext="Point" aria-orientation="horizontal" title="Drag either edge to widen or narrow the funnel. Arrow keys adjust the width."></div>
             <div class="teaser-ending-target-handle" role="slider" tabindex="0" aria-label="Warp target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="47" aria-valuetext="47% across video" aria-orientation="horizontal"></div>
             <span data-x-action="reply" title="Reply"><svg viewBox="0 0 24 24"><path d="M21 11.5a9 9 0 0 1-9 9H4l2-4a9 9 0 1 1 15-5Z"/></svg></span>
             <span data-x-action="repost" title="Repost"><svg viewBox="0 0 24 24"><path d="m3 7 4-4 4 4M7 3v13a3 3 0 0 0 3 3h3m8-2-4 4-4-4m4 4V8a3 3 0 0 0-3-3h-3"/></svg></span>
@@ -279,7 +292,7 @@
             <span data-x-action="views" title="Views"><svg viewBox="0 0 24 24"><path d="M4 20V9m6 11V4m6 16v-8m5 8V2"/></svg></span>
             <span data-x-action="bookmark" title="Bookmark"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4Z"/></svg></span>
             <span data-x-action="share" title="Share"><svg viewBox="0 0 24 24"><path d="M12 15V2m-5 5 5-5 5 5M4 13v8h16v-8"/></svg></span>
-          </div><div class="teaser-ending-target-caption">Warp target <output data-aim>47%</output></div>
+          </div><div class="teaser-ending-target-caption"><span>Target <output data-aim>47%</output></span><span>Width <output data-neck>Point</output></span></div>
         </div></div>
         <div class="teaser-ending-settings"><label>Warp<select aria-label="Warp mode"><option value="last-frame">Last frame</option><option value="during-video" selected>During video</option></select></label>
         <label>X timeline<select aria-label="X timeline layout"><option value="desktop">Desktop web</option><option value="mobile">Mobile web</option></select></label>
@@ -297,7 +310,11 @@
     const target = root.querySelector(".teaser-ending-target");
     const track = root.querySelector(".teaser-ending-target-track");
     const layout = root.querySelector('[aria-label="X timeline layout"]');
-    let aimPercent = DEFAULT_AIM * 100;
+    const neckControl = root.querySelector('[aria-label="Funnel width"]');
+    const neckValue = root.querySelector("[data-neck]");
+    let aimPercent = DEFAULT_AIM * 100,
+      neckPercent = 0,
+      dragWidth = false;
     const speed = root.querySelector('[aria-label="Ending speed"]');
     const mode = root.querySelector('[aria-label="Warp mode"]');
     const speedValue = root.querySelector("[data-speed]");
@@ -338,6 +355,10 @@
     }
     function syncControls() {
       root.style.setProperty("--ending-aim", `${aimPercent}%`);
+      root.style.setProperty("--ending-neck", `${neckPercent}%`);
+      neckValue.value = neckPercent ? `${neckPercent}%` : "Point";
+      neckControl.setAttribute("aria-valuenow", String(neckPercent));
+      neckControl.setAttribute("aria-valuetext", neckValue.value);
       aimValue.value = `${aimPercent}%`;
       speedValue.value = `${Number(speed.value)}×`;
       speed.setAttribute("aria-valuetext", speedValue.value);
@@ -363,14 +384,32 @@
       syncControls();
       status.textContent = "";
     }
+    function setNeck(value) {
+      if (controller || busy() || locked()) return;
+      neckPercent = Math.min(40, Math.max(0, Math.round(value)));
+      clear();
+      if (preview.readyState >= 2)
+        draw(
+          canvas.getContext("2d"),
+          preview,
+          0.75,
+          aimPercent / 100,
+          neckPercent / 100,
+        );
+      syncControls();
+      status.textContent = "";
+    }
     function point(event) {
       const bounds = track.getBoundingClientRect();
-      setAim(((event.clientX - bounds.left) / bounds.width) * 100);
+      const percent = ((event.clientX - bounds.left) / bounds.width) * 100;
+      if (dragWidth) setNeck(Math.abs(percent - aimPercent) * 2);
+      else setAim(percent);
     }
     track.addEventListener("pointerdown", (event) => {
       if (controller || busy() || locked() || event.button !== 0) return;
       track.setPointerCapture(event.pointerId);
-      aim.focus();
+      dragWidth = Boolean(event.target.closest(".teaser-ending-neck"));
+      (dragWidth ? neckControl : aim).focus();
       point(event);
       event.preventDefault();
     });
@@ -388,6 +427,18 @@
       if (next === undefined) return;
       event.preventDefault();
       setAim(next);
+    });
+    neckControl.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? 10 : 1;
+      const next = {
+        ArrowLeft: neckPercent - step,
+        ArrowRight: neckPercent + step,
+        Home: 0,
+        End: 40,
+      }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      setNeck(next);
     });
     layout.addEventListener("change", () => {
       target.dataset.layout = layout.value;
@@ -443,6 +494,7 @@
       controller = operation;
       onBusy(true);
       aim.setAttribute("aria-disabled", "true");
+      neckControl.setAttribute("aria-disabled", "true");
       layout.disabled =
         mode.disabled =
         speed.disabled =
@@ -461,6 +513,7 @@
         const generated = await process(file, {
           canvas,
           aim: aimPercent / 100,
+          neck: neckPercent / 100,
           speed: Number(speed.value),
           mode: mode.value,
           signal: operation.signal,
@@ -489,6 +542,7 @@
       } finally {
         controller = null;
         aim.setAttribute("aria-disabled", "false");
+        neckControl.setAttribute("aria-disabled", "false");
         layout.disabled =
           speed.disabled =
           mode.disabled =
