@@ -169,8 +169,12 @@ a square preview beside all destination posts; selecting a row edits that post's
 settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format.
 Twitter teasers offer **Suction ending** for square source videos at least one
-second long. The creator previews the final 0.9-second warp toward an adjustable
+second long. The creator previews the ending warp toward an adjustable
 Like-button guide before exporting a separate MP4, up to 1080 × 1080 with audio.
+Ending speed ranges from 0.5× to 3×; the default 1× takes 0.9 seconds. Changing
+the speed or aim requires another preview. Speed affects only the ending, with
+the rest of the clip and its audio timing unchanged. A clip shorter than the
+chosen ending needs a faster speed or a longer source.
 The guide approximates X's timeline position; it cannot follow the real button
 across mobile or full-screen layouts and is not included in the exported video.
 **Use in draft** explicitly replaces the selected draft clip with the rendered

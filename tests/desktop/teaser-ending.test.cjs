@@ -15,7 +15,7 @@ function run(command, args) {
   return result.stdout;
 }
 
-function makeVideo(file, size) {
+function makeVideo(file, size, duration = 2.4) {
   run("ffmpeg", [
     "-hide_banner",
     "-loglevel",
@@ -24,11 +24,11 @@ function makeVideo(file, size) {
     "-f",
     "lavfi",
     "-i",
-    `color=c=white:s=${size}:r=30:d=2.4`,
+    `color=c=white:s=${size}:r=30:d=${duration}`,
     "-f",
     "lavfi",
     "-i",
-    "sine=frequency=440:sample_rate=44100:duration=2.4",
+    `sine=frequency=440:sample_rate=44100:duration=${duration}`,
     "-c:v",
     "libx264",
     "-preset",
@@ -212,6 +212,79 @@ test("suction ending export is square, keeps audio, collapses toward aim, and pr
       original,
       "source file bytes remain unchanged",
     );
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("ending speed changes encoded warp timing without speeding up the video", async () => {
+  const work = await makeScratch();
+  const source = path.join(work, "square.mp4");
+  const short = path.join(work, "short.mp4");
+  makeVideo(source, "320x320");
+  makeVideo(short, "320x320", 1.2);
+  try {
+    await withPage(async (page) => {
+      await attach(page, source);
+      for (const speed of [0.5, 3]) {
+        const download = page.waitForEvent("download");
+        await page.evaluate(async (speed) => {
+          const output = await OFEnhancerTeaserEnding.process(
+            document.querySelector("#source").files[0],
+            {
+              canvas: document.querySelector("#render"),
+              exportVideo: true,
+              speed,
+            },
+          );
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(output);
+          link.download = output.name;
+          link.click();
+        }, speed);
+        const target = path.join(work, `${speed}.mp4`);
+        await (await download).saveAs(target);
+        const frame = decodedFrame(target, 1.5);
+        assert.ok(
+          speed === 3 ? frame[0] > 230 : frame[0] < 30,
+          "the faster ending starts later; slow warp is already underway at 1.5 s",
+        );
+        const duration = Number(
+          run("ffprobe", [
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            target,
+          ]).trim(),
+        );
+        assert.ok(
+          Math.abs(duration - 2.4) < 0.3,
+          "clip playback duration stays unchanged",
+        );
+      }
+      await attach(page, short);
+      const errors = await page.evaluate(async () => {
+        const errors = [];
+        for (const speed of [0.5, 0, 4]) {
+          try {
+            await OFEnhancerTeaserEnding.process(
+              document.querySelector("#source").files[0],
+              { canvas: document.querySelector("#render"), speed },
+            );
+            errors.push("");
+          } catch (error) {
+            errors.push(error.message);
+          }
+        }
+        return errors;
+      });
+      assert.match(errors[0], /at least 1.8 seconds.*faster speed/);
+      assert.match(errors[1], /0.5× to 3×/);
+      assert.match(errors[2], /0.5× to 3×/);
+    });
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

@@ -282,6 +282,29 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     await editor
       .getByText("Ending previewed. Ready to export.", { exact: true })
       .waitFor();
+    assert.equal(
+      await editor
+        .getByRole("button", { name: "Export MP4", exact: true })
+        .isDisabled(),
+      false,
+    );
+    await editor.getByLabel("Ending speed", { exact: true }).fill("1.5");
+    await editor
+      .getByLabel("Ending speed", { exact: true })
+      .dispatchEvent("input");
+    assert.equal(await editor.locator("[data-speed]").textContent(), "1.5×");
+    assert.equal(
+      await editor
+        .getByRole("button", { name: "Export MP4", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await editor
+      .getByRole("button", { name: "Preview ending", exact: true })
+      .click();
+    await editor
+      .getByText("Ending previewed. Ready to export.", { exact: true })
+      .waitFor();
     await editor
       .getByRole("button", { name: "Export MP4", exact: true })
       .click();

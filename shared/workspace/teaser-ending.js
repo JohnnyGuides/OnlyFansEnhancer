@@ -76,6 +76,7 @@
     {
       canvas,
       aim = DEFAULT_AIM,
+      speed = 1,
       signal,
       exportVideo = false,
       progress = () => {},
@@ -85,6 +86,9 @@
       throw new Error("Choose a teaser video under 512 MB.");
     if (!Number.isFinite(aim) || aim < 0.25 || aim > 0.7)
       throw new Error("Choose an aim position from 25% to 70%.");
+    if (!Number.isFinite(speed) || speed < 0.5 || speed > 3)
+      throw new Error("Choose an ending speed from 0.5× to 3×.");
+    const endingSeconds = ENDING_SECONDS / speed;
     const operation = new AbortController();
     const abort = () => operation.abort(signal?.reason);
     const hidden = () => {
@@ -113,13 +117,17 @@
         );
       if (!Number.isFinite(video.duration) || video.duration < 1)
         throw new Error("Choose a square teaser at least one second long.");
+      if (video.duration < endingSeconds)
+        throw new Error(
+          `This speed needs a clip at least ${endingSeconds.toFixed(1)} seconds long. Choose a faster speed.`,
+        );
       const size = Math.min(1080, video.videoWidth) & ~1;
       canvas.width = canvas.height = size;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Video rendering is unavailable.");
-      const start = Math.max(0, video.duration - ENDING_SECONDS);
+      const start = video.duration - endingSeconds;
       const paint = () => {
-        draw(context, video, (video.currentTime - start) / ENDING_SECONDS, aim);
+        draw(context, video, (video.currentTime - start) / endingSeconds, aim);
         progress(Math.min(1, video.currentTime / video.duration));
       };
       let finished;
@@ -242,6 +250,7 @@
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg>
         </span></div>
         <label>Aim toward Like <input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
+        <label><span>Ending speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label>
         <p class="hint">Approximate X timeline position. Adjust the aim for your layout; mobile and full-screen views can differ.</p>
         <div class="teaser-ending-actions"><button type="button" data-action="preview">Preview ending</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" data-action="cancel" hidden>Cancel</button></div>
         <div class="teaser-ending-actions" data-result hidden><a download>Download MP4</a><button type="button" data-action="use">Use in draft</button></div>
@@ -250,7 +259,9 @@
     preview.after(root);
     const canvas = root.querySelector("canvas");
     const rendered = root.querySelector("video");
-    const aim = root.querySelector("input");
+    const aim = root.querySelector('[aria-label="Like button aim position"]');
+    const speed = root.querySelector('[aria-label="Ending speed"]');
+    const speedValue = root.querySelector("[data-speed]");
     const status = root.querySelector('[role="status"]');
     const button = (action) => root.querySelector(`[data-action="${action}"]`);
     const result = root.querySelector("[data-result]");
@@ -280,10 +291,14 @@
       root.open = false;
       root.hidden = !sourceFile || locked();
     }
-    aim.addEventListener("input", () => {
-      clear();
-      root.style.setProperty("--ending-aim", `${aim.value}%`);
-    });
+    for (const control of [aim, speed])
+      control.addEventListener("input", () => {
+        clear();
+        root.style.setProperty("--ending-aim", `${aim.value}%`);
+        speedValue.value = `${Number(speed.value)}×`;
+        speed.setAttribute("aria-valuetext", speedValue.value);
+        status.textContent = "Preview the updated ending before exporting.";
+      });
     root.addEventListener("toggle", () => {
       if (root.open && (busy() || locked())) root.open = false;
       preview.hidden = root.open;
@@ -308,6 +323,7 @@
       controller = operation;
       onBusy(true);
       aim.disabled =
+        speed.disabled =
         button("preview").disabled =
         button("export").disabled =
           true;
@@ -322,6 +338,7 @@
         const generated = await process(file, {
           canvas,
           aim: Number(aim.value) / 100,
+          speed: Number(speed.value),
           signal: operation.signal,
           exportVideo,
           progress: (p) => {
@@ -352,7 +369,7 @@
             : error.message;
       } finally {
         controller = null;
-        aim.disabled = button("preview").disabled = false;
+        aim.disabled = speed.disabled = button("preview").disabled = false;
         button("export").disabled = !reviewed;
         button("cancel").hidden = true;
         onBusy(false);
