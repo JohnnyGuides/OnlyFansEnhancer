@@ -326,8 +326,34 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
         !document.querySelector('.teaser-ending [data-action="export"]')
           .disabled,
     );
-    await editor.getByLabel("Like button aim position").fill("48");
-    await editor.getByLabel("Like button aim position").dispatchEvent("input");
+    const warpTarget = editor.getByRole("slider", {
+      name: "Warp target",
+      exact: true,
+    });
+    assert.equal(await warpTarget.getAttribute("aria-valuenow"), "47");
+    await editor.getByLabel("X timeline layout").selectOption("mobile");
+    assert.equal(await warpTarget.getAttribute("aria-valuenow"), "50");
+    await editor.getByLabel("X timeline layout").selectOption("desktop");
+    assert.equal(await warpTarget.getAttribute("aria-valuenow"), "47");
+    await warpTarget.press("End");
+    assert.equal(await warpTarget.getAttribute("aria-valuenow"), "100");
+    await warpTarget.press("Home");
+    assert.equal(await warpTarget.getAttribute("aria-valuenow"), "0");
+    const targetBounds = await editor
+      .locator(".teaser-ending-target-track")
+      .boundingBox();
+    await page.mouse.move(
+      targetBounds.x + targetBounds.width * 0.3,
+      targetBounds.y + 8,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      targetBounds.x + targetBounds.width * 0.48,
+      targetBounds.y + 8,
+      { steps: 4 },
+    );
+    await page.mouse.up();
+    assert.equal(await warpTarget.getAttribute("aria-valuenow"), "48");
     assert.equal(
       await editor
         .getByRole("button", { name: "Export MP4", exact: true })

@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
   const ENDING_SECONDS = 0.9;
-  const DEFAULT_AIM = 0.42;
+  const DEFAULT_AIM = 0.47;
   const cancelled = () =>
     new global.DOMException("Export cancelled.", "AbortError");
 
@@ -85,8 +85,8 @@
   ) {
     if (!(file instanceof File) || !file.size || file.size >= 512 * 1024 * 1024)
       throw new Error("Choose a teaser video under 512 MB.");
-    if (!Number.isFinite(aim) || aim < 0.25 || aim > 0.7)
-      throw new Error("Choose an aim position from 25% to 70%.");
+    if (!Number.isFinite(aim) || aim < 0 || aim > 1)
+      throw new Error("Choose a warp target from 0% to 100%.");
     if (!Number.isFinite(speed) || speed < 0.5 || speed > 3)
       throw new Error("Choose an ending speed from 0.5× to 3×.");
     if (!["last-frame", "during-video"].includes(mode))
@@ -270,10 +270,19 @@
         <canvas aria-label="Suction ending preview"></canvas>
         <video controls playsinline aria-label="Exported teaser preview" hidden></video>
         </div>
-        <div class="teaser-ending-target" aria-hidden="true"><span>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg>
-        </span></div></div>
-        <div class="teaser-ending-settings"><label>Warp<select aria-label="Warp mode"><option value="last-frame">Last frame</option><option value="during-video" selected>During video</option></select></label><label title="Approximate X timeline position; layouts vary."><span>Like position <output data-aim>42%</output></span><input type="range" min="25" max="70" value="42" aria-label="Like button aim position"></label>
+        <div class="teaser-ending-target" data-layout="desktop" title="X timeline guide; positions vary by viewer layout.">
+          <div class="teaser-ending-target-track">
+            <div class="teaser-ending-target-handle" role="slider" tabindex="0" aria-label="Warp target" aria-valuemin="0" aria-valuemax="100" aria-valuenow="47" aria-valuetext="47% across video" aria-orientation="horizontal"></div>
+            <span data-x-action="reply" title="Reply"><svg viewBox="0 0 24 24"><path d="M21 11.5a9 9 0 0 1-9 9H4l2-4a9 9 0 1 1 15-5Z"/></svg></span>
+            <span data-x-action="repost" title="Repost"><svg viewBox="0 0 24 24"><path d="m3 7 4-4 4 4M7 3v13a3 3 0 0 0 3 3h3m8-2-4 4-4-4m4 4V8a3 3 0 0 0-3-3h-3"/></svg></span>
+            <span data-x-action="like" title="Like"><svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg></span>
+            <span data-x-action="views" title="Views"><svg viewBox="0 0 24 24"><path d="M4 20V9m6 11V4m6 16v-8m5 8V2"/></svg></span>
+            <span data-x-action="bookmark" title="Bookmark"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4Z"/></svg></span>
+            <span data-x-action="share" title="Share"><svg viewBox="0 0 24 24"><path d="M12 15V2m-5 5 5-5 5 5M4 13v8h16v-8"/></svg></span>
+          </div><div class="teaser-ending-target-caption">Warp target <output data-aim>47%</output></div>
+        </div></div>
+        <div class="teaser-ending-settings"><label>Warp<select aria-label="Warp mode"><option value="last-frame">Last frame</option><option value="during-video" selected>During video</option></select></label>
+        <label>X timeline<select aria-label="X timeline layout"><option value="desktop">Desktop web</option><option value="mobile">Mobile web</option></select></label>
         <label><span>Speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label>
         <p role="status" class="teaser-ending-status"></p>
         <div class="teaser-ending-actions"><button type="button" data-action="preview" aria-label="Preview ending">Preview</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" class="primary" data-action="use" disabled>Apply ending</button></div>
@@ -284,7 +293,11 @@
     const gear = root.querySelector(".teaser-ending-gear");
     const canvas = root.querySelector("canvas");
     const rendered = root.querySelector("video");
-    const aim = root.querySelector('[aria-label="Like button aim position"]');
+    const aim = root.querySelector('[aria-label="Warp target"]');
+    const target = root.querySelector(".teaser-ending-target");
+    const track = root.querySelector(".teaser-ending-target-track");
+    const layout = root.querySelector('[aria-label="X timeline layout"]');
+    let aimPercent = DEFAULT_AIM * 100;
     const speed = root.querySelector('[aria-label="Ending speed"]');
     const mode = root.querySelector('[aria-label="Warp mode"]');
     const speedValue = root.querySelector("[data-speed]");
@@ -324,23 +337,62 @@
       root.hidden = !sourceFile || locked();
     }
     function syncControls() {
-      root.style.setProperty("--ending-aim", `${aim.value}%`);
-      aimValue.value = `${aim.value}%`;
+      root.style.setProperty("--ending-aim", `${aimPercent}%`);
+      aimValue.value = `${aimPercent}%`;
       speedValue.value = `${Number(speed.value)}×`;
       speed.setAttribute("aria-valuetext", speedValue.value);
-      for (const control of [aim, speed])
+      aim.setAttribute("aria-valuenow", String(aimPercent));
+      aim.setAttribute("aria-valuetext", `${aimPercent}% across video`);
+      for (const control of [speed])
         control.style.setProperty(
           "--range-fill",
           `${((Number(control.value) - Number(control.min)) / (Number(control.max) - Number(control.min))) * 100}%`,
         );
     }
     syncControls();
-    for (const control of [aim, speed, mode])
+    for (const control of [speed, mode])
       control.addEventListener("input", () => {
         clear();
         syncControls();
         status.textContent = "";
       });
+    function setAim(value) {
+      if (controller || busy() || locked()) return;
+      aimPercent = Math.min(100, Math.max(0, Math.round(value)));
+      clear();
+      syncControls();
+      status.textContent = "";
+    }
+    function point(event) {
+      const bounds = track.getBoundingClientRect();
+      setAim(((event.clientX - bounds.left) / bounds.width) * 100);
+    }
+    track.addEventListener("pointerdown", (event) => {
+      if (controller || busy() || locked() || event.button !== 0) return;
+      track.setPointerCapture(event.pointerId);
+      aim.focus();
+      point(event);
+      event.preventDefault();
+    });
+    track.addEventListener("pointermove", (event) => {
+      if (track.hasPointerCapture(event.pointerId)) point(event);
+    });
+    aim.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? 10 : 1;
+      const next = {
+        ArrowLeft: aimPercent - step,
+        ArrowRight: aimPercent + step,
+        Home: 0,
+        End: 100,
+      }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      setAim(next);
+    });
+    layout.addEventListener("change", () => {
+      target.dataset.layout = layout.value;
+      setAim(layout.value === "mobile" ? 50 : 47);
+    });
     function open() {
       if (busy() || locked() || !getFile()) return;
       preview.pause();
@@ -390,7 +442,8 @@
       const operation = new AbortController();
       controller = operation;
       onBusy(true);
-      aim.disabled =
+      aim.setAttribute("aria-disabled", "true");
+      layout.disabled =
         mode.disabled =
         speed.disabled =
         enabled.disabled =
@@ -407,7 +460,7 @@
       try {
         const generated = await process(file, {
           canvas,
-          aim: Number(aim.value) / 100,
+          aim: aimPercent / 100,
           speed: Number(speed.value),
           mode: mode.value,
           signal: operation.signal,
@@ -435,7 +488,8 @@
           error.name === "AbortError" ? "Cancelled" : error.message;
       } finally {
         controller = null;
-        aim.disabled =
+        aim.setAttribute("aria-disabled", "false");
+        layout.disabled =
           speed.disabled =
           mode.disabled =
           enabled.disabled =

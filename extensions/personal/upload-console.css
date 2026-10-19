@@ -205,14 +205,106 @@ body.calendar-reddit-draft .upload-actions .action-status {
   border-radius: 10px;
 }
 .calendar-teaser .teaser-ending-target {
+  color: #8f9dab;
+}
+.calendar-teaser .teaser-ending-target-track {
   position: relative;
-  height: 24px;
+  height: 38px;
+  touch-action: none;
+  cursor: crosshair;
+}
+.calendar-teaser .teaser-ending-target-track span {
+  position: absolute;
+  top: 16px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.calendar-teaser .teaser-ending-target-track svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+.calendar-teaser [data-x-action="reply"] {
+  left: 1.8%;
+}
+.calendar-teaser [data-x-action="repost"] {
+  left: 24.4%;
+}
+.calendar-teaser [data-x-action="like"] {
+  left: 47%;
   color: #f580b1;
 }
-.calendar-teaser .teaser-ending-target span {
+.calendar-teaser [data-x-action="views"] {
+  left: 69.6%;
+}
+.calendar-teaser [data-x-action="bookmark"] {
+  left: 92.3%;
+}
+.calendar-teaser [data-x-action="share"] {
+  left: 98.2%;
+}
+.calendar-teaser [data-layout="mobile"] [data-x-action="reply"] {
+  left: 4.2%;
+}
+.calendar-teaser [data-layout="mobile"] [data-x-action="repost"] {
+  left: 27.1%;
+}
+.calendar-teaser [data-layout="mobile"] [data-x-action="like"] {
+  left: 50%;
+}
+.calendar-teaser [data-layout="mobile"] [data-x-action="views"] {
+  left: 72.9%;
+}
+.calendar-teaser [data-layout="mobile"] [data-x-action="bookmark"] {
+  display: none;
+}
+.calendar-teaser [data-layout="mobile"] [data-x-action="share"] {
+  left: 95.8%;
+}
+.calendar-teaser .teaser-ending-target-handle {
   position: absolute;
-  left: var(--ending-aim, 42%);
+  z-index: 1;
+  top: 0;
+  left: var(--ending-aim, 47%);
+  width: 24px;
+  height: 38px;
   transform: translateX(-50%);
+  cursor: ew-resize;
+}
+.calendar-teaser .teaser-ending-target-handle::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  background: #68d8ff;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.calendar-teaser .teaser-ending-target-handle::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  height: 25px;
+  border-left: 1px solid #68d8ff;
+}
+.calendar-teaser .teaser-ending-target-handle:focus-visible {
+  outline: 2px solid #68d8ff;
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+.calendar-teaser .teaser-ending-target-handle[aria-disabled="true"] {
+  cursor: wait;
+}
+.calendar-teaser .teaser-ending-target-caption {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #b8c8d9;
+  font-variant-numeric: tabular-nums;
 }
 .calendar-teaser .teaser-ending label {
   display: grid;
