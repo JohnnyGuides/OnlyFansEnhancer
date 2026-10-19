@@ -269,9 +269,13 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     const editor = frame.locator(".teaser-ending");
     assert.ok(
       await editor.evaluate(
-        (item) => item.getBoundingClientRect().height <= 36,
+        (item) =>
+          item.getBoundingClientRect().height <=
+          item.querySelector(".teaser-ending-gear").getBoundingClientRect()
+            .height +
+            1,
       ),
-      "collapsed control stays small",
+      "collapsed control stays one shared-button row high",
     );
     if (process.env.OFENHANCER_SUCTION_REVIEW_DIR) {
       fs.mkdirSync(process.env.OFENHANCER_SUCTION_REVIEW_DIR, {

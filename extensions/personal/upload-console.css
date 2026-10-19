@@ -138,26 +138,6 @@ body.calendar-reddit-draft .upload-actions .action-status {
   color: #edf3fc;
   margin: 0;
 }
-.calendar-teaser .teaser-ending-gear,
-.calendar-teaser .teaser-ending-dialog header button {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #b8c8d9;
-  cursor: pointer;
-}
-.calendar-teaser .teaser-ending-gear:hover,
-.calendar-teaser .teaser-ending-dialog header button:hover {
-  background: #21303e;
-  color: #fff;
-}
 .calendar-teaser .teaser-ending-dialog {
   box-sizing: border-box;
   width: min(520px, calc(100% - 24px));
@@ -205,15 +185,6 @@ body.calendar-reddit-draft .upload-actions .action-status {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-height: 32px;
-  padding: 5px 9px;
-  border: 1px solid #647180;
-  border-radius: 7px;
-  background: rgb(8 13 18 / 90%);
-  color: #edf3fc;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
 }
 .calendar-teaser .teaser-ending-replay:disabled {
   opacity: 0;
@@ -313,6 +284,9 @@ body.calendar-reddit-draft .upload-actions .action-status {
   .calendar-teaser .teaser-ending-settings {
     gap: 8px;
   }
+  .calendar-teaser .teaser-ending-actions [data-action="use"] {
+    flex: 1 0 100%;
+  }
 }
 .calendar-teaser .teaser-ending .hint,
 .calendar-teaser .teaser-ending-status {
@@ -327,31 +301,8 @@ body.calendar-reddit-draft .upload-actions .action-status {
   flex-wrap: wrap;
   gap: 6px;
 }
-.calendar-teaser .teaser-ending-actions button,
-.calendar-teaser .teaser-ending-actions a {
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 12px;
-  border: 1px solid #344657;
-  border-radius: 8px;
-  background: #17222e;
-  color: #edf3fc;
-  text-decoration: none;
-  cursor: pointer;
-}
-.calendar-teaser .teaser-ending-actions button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 .calendar-teaser .teaser-ending-actions [data-action="cancel"] {
   margin-right: auto;
-  border-color: transparent;
-  background: transparent;
-  color: #b8c8d9;
-}
-.calendar-teaser .teaser-ending-actions [data-action="use"]:enabled {
-  background: #087b9e;
-  border-color: #29b9dc;
 }
 .calendar-teaser .teaser-ending :is(button, input):focus-visible {
   outline: 2px solid #68d8ff;
@@ -1792,10 +1743,12 @@ button:disabled {
   min-height: 38px;
   padding: 7px 12px;
   font-size: 0.8rem;
+  font-weight: 550;
+}
+.file-actions button:not(.primary) {
   border: 1px solid #3d4859;
   background: #1b2430;
   color: #f1f5fa;
-  font-weight: 550;
 }
 .file-actions [data-remove-file] {
   background: transparent;

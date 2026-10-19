@@ -240,7 +240,7 @@
 
   function mount({ preview, getFile, useFile, locked, busy, onBusy }) {
     const root = document.createElement("div");
-    root.className = "teaser-ending";
+    root.className = "teaser-ending file-actions";
     root.hidden = true;
     root.innerHTML = `<label class="teaser-ending-toggle"><input type="checkbox" aria-label="Suction ending">Suction ending</label>
       <button type="button" class="teaser-ending-gear" aria-label="Suction ending settings" title="Ending settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m9 3-.6 2.5-2.2 1.3L3.7 6l-2 3.5 1.9 1.8v2.5l-1.9 1.7 2 3.5 2.5-.8 2.2 1.3L9 22h4l.6-2.5 2.2-1.3 2.5.8 2-3.5-1.9-1.7v-2.5l1.9-1.8-2-3.5-2.5.8-2.2-1.3L13 3Z"/><circle cx="11" cy="12.5" r="3"/></svg></button>
@@ -257,7 +257,7 @@
         <label><span>Speed <output data-speed>1×</output></span><input type="range" min="0.5" max="3" step="0.25" value="1" aria-label="Ending speed" aria-valuetext="1×"></label></div>
       </div><footer>
         <p role="status" class="teaser-ending-status"></p>
-        <div class="teaser-ending-actions"><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" data-action="use" disabled>Apply ending</button></div>
+        <div class="teaser-ending-actions"><button type="button" data-action="cancel">Cancel</button><button type="button" data-action="export" disabled>Export MP4</button><button type="button" class="primary" data-action="use" disabled>Apply ending</button></div>
       </footer></dialog>`;
     preview.after(root);
     const dialog = root.querySelector("dialog");
