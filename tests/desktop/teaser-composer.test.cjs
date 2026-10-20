@@ -176,13 +176,19 @@ async function mount(page, linked = false, delaySettings = false) {
   );
   await page.goto(`${origin}/host`);
   await page.locator("#open-day").click();
-  await page.locator(".xt-clip-choices").waitFor();
+  await page.locator(".xt-clip-choices, .xt-composer-frame").waitFor();
   return errors;
 }
 
 async function chooseSyntheticVideo(page) {
   const chooser = page.waitForEvent("filechooser");
-  await page.locator(".xt-clip-add").click();
+  if (await page.locator(".xt-clip-add").count())
+    await page.locator(".xt-clip-add").click();
+  else
+    await page
+      .frameLocator(".xt-composer-frame")
+      .getByRole("button", { name: "Choose or drop teaser video" })
+      .click();
   await (await chooser).setFiles(VIDEO);
   await page.locator(".xt-composer-frame").waitFor();
   await page.waitForFunction(() =>
@@ -211,7 +217,7 @@ async function chooseSyntheticVideo(page) {
   return frame;
 }
 
-test("empty catalogue or filter keeps Choose video available", async () => {
+test("empty catalogue opens the editor directly and accepts a chosen video", async () => {
   const page = await browser.newPage();
   try {
     const errors = await mount(page);
@@ -223,19 +229,12 @@ test("empty catalogue or filter keeps Choose video available", async () => {
         episodes: [],
         request: async () => ({ clips: [] }),
         renderCatalogue: () => {
-          const empty = document.createElement("div");
-          empty.textContent =
-            "No catalogue episodes yet. Import the catalogue first.";
-          return empty;
+          throw new Error("An empty catalogue must not open its selector");
         },
       }),
     );
-    assert.equal(
-      await page
-        .getByRole("button", { name: "Choose a new teaser video" })
-        .isVisible(),
-      true,
-    );
+    await page.locator(".xt-composer-frame").waitFor();
+    assert.equal(await page.locator(".xt-clip-choices").count(), 0);
     const frame = await chooseSyntheticVideo(page);
     assert.equal(
       await frame.locator(".teaser-video-preview").isVisible(),
@@ -1198,7 +1197,7 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
         request: async () => ({ clips: [] }),
       }),
     );
-    await page.locator(".xt-clip-choices").waitFor();
+    await page.locator(".xt-composer-frame").waitFor();
     const nextDay = await chooseSyntheticVideo(page);
     assert.equal(
       await nextDay.getByLabel("Posting time", { exact: true }).inputValue(),
@@ -1761,30 +1760,33 @@ test("dropping a video opens the inherited calendar day without a date picker", 
   try {
     const errors = await mount(page);
     const bytes = fs.readFileSync(VIDEO);
-    await page.locator(".xt-clip-choices").evaluate((grid, encoded) => {
-      const binary = atob(encoded);
-      const payload = Uint8Array.from(binary, (character) =>
-        character.charCodeAt(0),
-      );
-      const data = new DataTransfer();
-      data.items.add(
-        new File([payload], "preview-test.mp4", { type: "video/mp4" }),
-      );
-      grid.dispatchEvent(
-        new DragEvent("dragover", {
-          dataTransfer: data,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      grid.dispatchEvent(
-        new DragEvent("drop", {
-          dataTransfer: data,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    }, bytes.toString("base64"));
+    await page
+      .frameLocator(".xt-composer-frame")
+      .locator(".teaser-preview-panel")
+      .evaluate((grid, encoded) => {
+        const binary = atob(encoded);
+        const payload = Uint8Array.from(binary, (character) =>
+          character.charCodeAt(0),
+        );
+        const data = new DataTransfer();
+        data.items.add(
+          new File([payload], "preview-test.mp4", { type: "video/mp4" }),
+        );
+        grid.dispatchEvent(
+          new DragEvent("dragover", {
+            dataTransfer: data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        grid.dispatchEvent(
+          new DragEvent("drop", {
+            dataTransfer: data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }, bytes.toString("base64"));
     await page.locator(".xt-composer-frame").waitFor();
     await page.waitForFunction(() =>
       document

@@ -710,6 +710,10 @@
       catalogueObserver?.disconnect();
       delete dialog.dataset.editor;
       handoff?.close();
+      if (!episode && !episodes.length) {
+        edit();
+        return;
+      }
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.after(destinations);

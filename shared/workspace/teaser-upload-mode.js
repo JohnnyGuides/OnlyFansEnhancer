@@ -600,8 +600,7 @@
         !(
           event.data.file instanceof File ||
           (event.data.file === null &&
-            typeof event.data.episodeKey === "string" &&
-            (event.data.episodeKey || event.data.loadingMedia === true))
+            typeof event.data.episodeKey === "string")
         )
       )
         return;
