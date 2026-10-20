@@ -10,7 +10,11 @@
   function desktopRequest(operation, payload) {
     return new Promise((resolve, reject) => {
       const id = requestId();
-      const timeout = ["getStatus", "getChromeReadiness"].includes(operation)
+      const timeout = [
+        "getStatus",
+        "getChromeReadiness",
+        "checkChromeConnection",
+      ].includes(operation)
         ? setTimeout(() => {
             pending.delete(id);
             reject(new Error("Desktop connection check timed out."));

@@ -426,6 +426,12 @@ The source tree contains no generated packages or native binaries.
 preparation. Readiness messages bypass the catalogue/Google dispatcher. Only the
 desktop WebView advertises `chrome-readiness`; the narrower extension-hosted
 workspace does not infer Chrome absence from unsupported desktop diagnostics.
+The WebView additionally advertises `chrome-connection-check` for explicit
+`checkChromeConnection` calls. These can restore a missing or invalid owned bridge
+only after package, permanent-install, settings, identity and registration-ownership
+checks. They preserve settings bytes and never create an identity, reset Chrome,
+or advance a pending reset. `getChromeReadiness` remains read-only. Settings
+diagnostics name invalid fields and accept the optional Vegas template path.
 The native relay replaces `bridgeExtensionId` with Chrome's invocation origin.
 `BrowserUploadChannel` requires matching effective identity plus a current setup
 challenge before counting traffic as live. This is local diagnostic evidence,

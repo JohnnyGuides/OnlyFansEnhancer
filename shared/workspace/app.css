@@ -1473,6 +1473,18 @@ dialog::backdrop {
   line-height: 1.5;
   color: #b5bfce;
 }
+
+#chromeSetupMessage {
+  margin: 18px 0;
+}
+
+.chrome-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
 #chromeSetupDialog h3 {
   font-size: 0.95rem;
   margin: 0 0 6px;

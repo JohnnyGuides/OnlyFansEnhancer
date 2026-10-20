@@ -127,7 +127,7 @@
     "not-found": "Chrome not found",
     setup: "Setup required",
     offline: "Chrome not connected",
-    repair: "Chrome setup needs repair",
+    repair: "Chrome connection issue",
     "reset-pending": "Fresh reset: action needed",
     connected: "Chrome connected",
     choose: "Choose Chrome browser",
@@ -145,11 +145,8 @@
     for (const node of document.querySelectorAll(".chrome-readiness-message"))
       node.textContent = `${label}. ${value.message}`;
     document.querySelector("#chromeSetupMessage").textContent =
-      value.state === "repair"
-        ? "Chrome setup needs attention. Open troubleshooting below."
-        : `${label}. ${value.message}`;
-    document.querySelector("#chromeSetupError").textContent =
-      value.setupError || "";
+      value.message || value.setupError || label;
+    document.querySelector("#chromeSetupError").textContent = "";
     document.querySelector("#chromeResetNotice").hidden = !value.resetPending;
     document.querySelector("#chromeResetExtensionId").textContent =
       value.resetExtensionId || value.extensionId || "";
@@ -158,9 +155,10 @@
     document.querySelector("#chromeReplacementTask").hidden =
       !value.resetPending || removing;
     document.querySelector("#chromeExtensionFolder").textContent =
-      value.extensionFolder ||
-      "Select Set up Chrome to find the installed extension-keyed folder.";
+      value.extensionFolder || "Available after setup.";
     document.querySelector("#chromeSetupSteps").hidden =
+      !value.chromeFound || removing;
+    document.querySelector("#chromeManualSetup").hidden =
       !value.chromeFound || removing;
     for (const button of document.querySelectorAll("[data-chrome-action]")) {
       button.hidden =
@@ -217,10 +215,11 @@
         hour: "2-digit",
         minute: "2-digit",
       });
+      const repair = value.repairMessage || "";
       document.querySelector("#chromeConnectionFeedback").textContent =
-        `${result} · ${time}`;
+        `${!chromeSetupDialog.open && repair ? repair : result} · ${time}`;
       document.querySelector("#chromeSetupActionStatus").textContent =
-        `${chromeLabels[value.state] || result}. ${value.message || ""}`;
+        `${chromeSetupDialog.open && repair ? `${repair} ` : ""}Checked ${time}.`;
     };
     if (manual) {
       chromeCheckPending = true;
@@ -238,7 +237,7 @@
       renderChrome({
         ...chromeReadiness,
         state: "checking",
-        message: "Checking the Chrome connection…",
+        message: chromeReadiness?.message || "Checking the Chrome connection…",
       });
     }
     const generation = ++chromePollGeneration;
@@ -260,7 +259,11 @@
       versionLabel.textContent = `v${status.productVersion}`;
       agentSetting.textContent = `Available · protocol ${status.protocolVersion}`;
       const value = status.capabilities?.includes("chrome-readiness")
-        ? await global.OFEnhancerHost.request("getChromeReadiness")
+        ? await global.OFEnhancerHost.request(
+            manual && status.capabilities.includes("chrome-connection-check")
+              ? "checkChromeConnection"
+              : "getChromeReadiness",
+          )
         : {
             state: "unsupported",
             message:

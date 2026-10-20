@@ -186,7 +186,10 @@ async function testQuickChromeCheck(browser, port) {
       message:
         checkState === "connected"
           ? "Ready to prepare uploads."
-          : "Synthetic connection issue.",
+          : "The native bridge registration points to another installation.",
+      ...(checkState === "connected"
+        ? { repairMessage: "Windows bridge repaired." }
+        : {}),
       browserStatus: { expiresInMilliseconds: 10000 },
     });
     globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
@@ -195,9 +198,12 @@ async function testQuickChromeCheck(browser, port) {
         return {
           productVersion: "test",
           protocolVersion: 1,
-          capabilities: ["chrome-readiness"],
+          capabilities: ["chrome-readiness", "chrome-connection-check"],
         };
-      if (operation === "getChromeReadiness") {
+      if (
+        operation === "getChromeReadiness" ||
+        operation === "checkChromeConnection"
+      ) {
         if (holdCheck)
           return new Promise((resolve) => {
             globalThis.finishCheck = () => resolve(readiness());
@@ -213,6 +219,13 @@ async function testQuickChromeCheck(browser, port) {
       .locator("#connectionLabel")
       .getByText("Chrome not connected", { exact: true })
       .waitFor();
+    assert.equal(
+      (await page.evaluate(() => checkOperations)).includes(
+        "checkChromeConnection",
+      ),
+      false,
+      "automatic observations never run a repair check",
+    );
     await page.evaluate(() => {
       holdCheck = true;
       checkOperations = [];
@@ -233,7 +246,7 @@ async function testQuickChromeCheck(browser, port) {
     );
     assert.deepEqual(await page.evaluate(() => checkOperations), [
       "getStatus",
-      "getChromeReadiness",
+      "checkChromeConnection",
     ]);
     await page.evaluate(() => {
       checkState = "connected";
@@ -247,7 +260,7 @@ async function testQuickChromeCheck(browser, port) {
     assert.equal(await page.locator("#chromeConnection").isDisabled(), false);
     assert.match(
       await page.locator("#chromeConnectionFeedback").textContent(),
-      /Connection confirmed/,
+      /Windows bridge repaired\./,
     );
 
     // Reading connection details never prepares or replaces an installation.
@@ -258,7 +271,10 @@ async function testQuickChromeCheck(browser, port) {
     await page.locator("#chromeConnectionDetails").click();
     await page
       .locator("#chromeSetupMessage")
-      .getByText("Setup required", { exact: false })
+      .getByText(
+        "The native bridge registration points to another installation.",
+        { exact: true },
+      )
       .waitFor();
     assert.equal(
       (await page.evaluate(() => checkOperations)).includes("prepareChrome"),
@@ -267,12 +283,40 @@ async function testQuickChromeCheck(browser, port) {
     await page.locator("#checkChrome").click();
     await page
       .locator("#chromeSetupActionStatus")
-      .getByText("Synthetic connection issue.", { exact: false })
+      .getByText("Checked", { exact: false })
       .waitFor();
-    await page.locator("#closeChromeSetup").click();
+    assert.equal(
+      await page.locator("#chromeManualSetup").evaluate((node) => node.open),
+      false,
+    );
+    assert.equal(await page.locator("#checkChrome").isVisible(), true);
+    await page.evaluate(() => {
+      checkState = "repair";
+      checkOperations = [];
+    });
+    await page.locator("#checkChrome").click();
+    await page
+      .locator("#connectionLabel")
+      .getByText("Chrome connection issue", { exact: true })
+      .waitFor();
+    assert.equal(
+      await page
+        .locator("#chromeSetupDialog")
+        .getByText(
+          "The native bridge registration points to another installation.",
+          { exact: true },
+        )
+        .count(),
+      1,
+    );
+    assert.equal(await page.locator("#chromeSetupError").textContent(), "");
+    assert.deepEqual(await page.evaluate(() => checkOperations), [
+      "getStatus",
+      "checkChromeConnection",
+    ]);
     const output = path.join(
       require("../support/paths.cjs").repositoryRoot,
-      ".local/connection-review",
+      ".local/connection-review-v2",
     );
     fs.mkdirSync(output, { recursive: true });
     await page.screenshot({
@@ -323,6 +367,7 @@ async function testChromeExtensionsCopyAndConnectedAction(browser, port) {
   await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.locator("#chromeConnectionDetails").click();
   const dialog = page.locator("#chromeSetupDialog");
+  await dialog.locator("#chromeManualSetup > summary").click();
   const actions = dialog.locator("button:visible");
   const extensionButton = dialog.getByRole("button", {
     name: "Open Chrome extensions",
@@ -349,7 +394,7 @@ async function testChromeReadinessStates(browser, port) {
   const labels = {
     setup: "Setup required",
     offline: "Chrome not connected",
-    repair: "Chrome setup needs repair",
+    repair: "Chrome connection issue",
     connected: "Chrome connected",
     choose: "Choose Chrome browser",
   };
@@ -386,6 +431,13 @@ async function testChromeReadinessStates(browser, port) {
       await page.locator("body").getAttribute("data-connected"),
       String(state === "connected"),
     );
+    if (state === "offline") {
+      await page.locator("#chromeConnection").click();
+      await page
+        .locator("#chromeConnectionFeedback")
+        .getByText("No live Chrome connection", { exact: false })
+        .waitFor();
+    }
     await page.locator("#chromeConnectionDetails").focus();
     await page.keyboard.press("Enter");
     assert.equal(

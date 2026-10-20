@@ -9,7 +9,8 @@ namespace OFEnhancer.Desktop;
 internal sealed record ChromeIntegrationView(string State, string Message, bool HostAvailable,
     bool ChromeFound, bool Prepared, string? ExtensionId, string? ExtensionFolder,
     object BrowserStatus, string? SetupError = null, bool CanOpenExtensions = false, bool ResetPending = false,
-    string? ResetExtensionId = null, string? ResetStage = null, string? RemovalEvidence = null);
+    string? ResetExtensionId = null, string? ResetStage = null, string? RemovalEvidence = null,
+    string? RepairMessage = null);
 
 // Only fixed OFEnhancer package paths and current-user registration are writable here.
 // Registry inspection is diagnostic evidence, not proof that an extension is loaded.
@@ -33,7 +34,7 @@ internal sealed class ChromeIntegration
     private static byte[] ReadBounded(string path, int limit = 65536)
     {
         using var stream = File.OpenRead(path);
-        if (stream.Length <= 0 || stream.Length > limit) throw new InvalidOperationException("The setup file has an invalid size. Repair OFEnhancer.");
+        if (stream.Length <= 0 || stream.Length > limit) throw new InvalidOperationException($"Invalid setup file size: {Path.GetFileName(path)}.");
         var bytes = new byte[checked((int)stream.Length)];
         stream.ReadExactly(bytes);
         return bytes;
@@ -87,7 +88,7 @@ internal sealed class ChromeIntegration
                 {
                     folder = ResolveFolder(id);
                     string[] registered = registrationTargets();
-                    if (registered.Length == 0) error = "No owned native bridge registration was found in the Windows registry views checked. Check setup to repair it.";
+                    if (registered.Length == 0) error = "The Windows bridge registration is missing.";
                     else if (registered.Any(target => !SamePath(target, NativeManifest))) error = "Another installation owns the native bridge registration. Resolve that installation before repairing.";
                     else
                     {
@@ -100,7 +101,17 @@ internal sealed class ChromeIntegration
             }
             catch (Exception exception) when (exception is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException or FormatException)
             {
-                error = exception is InvalidOperationException ? exception.Message : "The installed native bridge or extension package could not be verified. Check setup.";
+                error = exception switch
+                {
+                    InvalidOperationException => exception.Message,
+                    FileNotFoundException missing => $"Missing setup file: {Path.GetFileName(missing.FileName)}.",
+                    DirectoryNotFoundException => "The installed bridge or extension folder is missing.",
+                    UnauthorizedAccessException => "Windows denied access to the bridge or extension files.",
+                    JsonException => "The bridge or extension manifest contains invalid JSON.",
+                    FormatException => "The packaged extension identity key is invalid.",
+                    KeyNotFoundException => "The bridge or extension manifest is missing required fields.",
+                    _ => "The bridge or extension files could not be read.",
+                };
             }
             channel.ConfigureIntegration(prepared ? id : null, fingerprint);
             object status = channel.Status();
@@ -118,7 +129,7 @@ internal sealed class ChromeIntegration
                 "reset-pending" => channel.Reset!.Message,
                 "repair" => error!,
                 "setup" => "Select Set up Chrome, then follow the steps below.",
-                "offline" => "Finish the steps below, then check connection.",
+                "offline" => "Chrome has not responded. Open Chrome or reload the existing OFEnhancer extension.",
                 "choose" => "Choose the Chrome window to use in Upload.",
                 _ => "Ready to prepare uploads."
             };
@@ -127,6 +138,44 @@ internal sealed class ChromeIntegration
                 live > 0 && (selected || live == 1 && !selectionRequired), resetting,
                 channel.Reset?.PreviousExtensionId, resetting ? channel.Reset?.Stage.ToString().ToLowerInvariant() : null,
                 resetting ? channel.Reset?.RemovalEvidence.ToString() : null);
+        }
+    }
+
+    // Explicit checks may restore only this verified installation's existing bridge.
+    // Status polling never writes setup or changes an extension identity.
+    internal ChromeIntegrationView Check(bool allowRepair = true)
+    {
+        lock (gate)
+        {
+            ChromeIntegrationView view = Get();
+            if (!allowRepair || view.Prepared || !view.ChromeFound || view.ResetPending || view.ExtensionId is not { } id)
+                return view;
+            try
+            {
+                ValidateSettings();
+                VerifyPackage();
+                if (!permanentInstall()) return view;
+                ResolveFolder(id);
+                string[] targets = registrationTargets();
+                if (targets.Any(target => !SamePath(target, NativeManifest))) return view;
+                // A missing legacy registration does not prove its Chrome load location.
+                if (id != CanonicalId() && targets.Length == 0) return view;
+                CommitManifest(BridgeManifest(id));
+                register(NativeManifest);
+                ChromeIntegrationView checkedView = Get();
+                return checkedView.Prepared ? checkedView with { RepairMessage = "Windows bridge repaired." } : checkedView;
+            }
+            catch (Exception exception) when (exception is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException or FormatException)
+            {
+                string reason = exception switch
+                {
+                    UnauthorizedAccessException => "Windows denied access to the bridge files or registration.",
+                    IOException => "The Windows bridge files could not be written.",
+                    InvalidOperationException => exception.Message,
+                    _ => view.Message,
+                };
+                return view with { Message = reason, SetupError = reason };
+            }
         }
     }
 
@@ -176,10 +225,12 @@ internal sealed class ChromeIntegration
         string[] origins = manifest.GetProperty("allowed_origins").EnumerateArray()
             .Select(item => item.GetString() ?? "").Order(StringComparer.Ordinal).ToArray();
         string[] expected = [$"chrome-extension://{id}/"];
-        if (manifest.GetProperty("name").GetString() != HostName || manifest.GetProperty("type").GetString() != "stdio"
-            || !SamePath(manifest.GetProperty("path").GetString()!, NativeExecutable)
-            || !origins.SequenceEqual(expected, StringComparer.Ordinal))
-            throw new InvalidOperationException("The owned native bridge manifest does not match the effective extension identity. Check setup to repair it.");
+        if (manifest.GetProperty("name").GetString() != HostName || manifest.GetProperty("type").GetString() != "stdio")
+            throw new InvalidOperationException("The Windows bridge manifest has the wrong host name or type.");
+        if (!SamePath(manifest.GetProperty("path").GetString()!, NativeExecutable))
+            throw new InvalidOperationException("The Windows bridge points to the wrong executable.");
+        if (!origins.SequenceEqual(expected, StringComparer.Ordinal))
+            throw new InvalidOperationException("The Windows bridge allows a different extension ID.");
     }
 
     internal ChromeIntegrationView Prepare()
@@ -265,15 +316,19 @@ internal sealed class ChromeIntegration
     private void WriteRegistration(string id)
     {
         // Atomic file/settings commits make retries recoverable. No settings or Chrome storage migration.
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { name = HostName, description = "OFEnhancer desktop bridge", path = NativeExecutable, type = "stdio", allowed_origins = new[] { $"chrome-extension://{id}/" } });
+        byte[] bytes = BridgeManifest(id);
         // Unreadable settings must never be replaced by defaults derived from an empty load.
         DesktopSettings current = DesktopSettings.Empty;
         if (File.Exists(settings.SettingsPath) && !settings.TryLoad(out current))
-            throw new InvalidOperationException("Existing settings need repair. They were preserved; no new identity was assigned.");
+            throw new InvalidOperationException("The settings file became unreadable while preparing Chrome.");
         CommitManifest(bytes);
         settings.Save(current with { ExtensionId = id });
         register(NativeManifest);
     }
+
+    private byte[] BridgeManifest(string id) => JsonSerializer.SerializeToUtf8Bytes(new {
+        name = HostName, description = "OFEnhancer desktop bridge", path = NativeExecutable,
+        type = "stdio", allowed_origins = new[] { $"chrome-extension://{id}/" } });
 
     private void CommitManifest(byte[] bytes)
     {
@@ -301,28 +356,31 @@ internal sealed class ChromeIntegration
     {
         if (File.Exists(settings.SettingsPath))
         {
-            const string repair = "Existing settings need repair. They were preserved; no new identity was assigned.";
             JsonDocument parsed;
             // Truncated or corrupt settings are a settings problem, not a package problem.
             try { parsed = JsonDocument.Parse(ReadBounded(settings.SettingsPath)); }
-            catch (JsonException) { throw new InvalidOperationException(repair); }
+            catch (JsonException) { throw new InvalidOperationException("The settings file contains incomplete or invalid JSON."); }
             using var existing = parsed;
-            if (existing.RootElement.ValueKind != JsonValueKind.Object
-                || existing.RootElement.EnumerateObject().Any(property => property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId" or "googleSheetUrl" or "xTeaserRoot" or "xTeaserRevertListPath"))
-                || existing.RootElement.TryGetProperty("extensionId", out var oldId) && oldId.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeExtensionId(oldId.GetString()) is null
-                || existing.RootElement.TryGetProperty("googleOAuthClientId", out var google) && google.ValueKind != JsonValueKind.Null && AppConfiguration.NormalizeGoogleOAuthClientId(google.GetString()) is null
-                || existing.RootElement.TryGetProperty("browserId", out var browser) && browser.ValueKind != JsonValueKind.Null && BrowserSelection.NormalizeId(browser.GetString()) is null
-                || existing.RootElement.TryGetProperty("googleSheetUrl", out var sheet) && sheet.ValueKind != JsonValueKind.Null && (sheet.ValueKind != JsonValueKind.String || !IsValidGoogleSheetUrl(sheet.GetString()))
-                || !IsValidOptionalLocalPath(existing.RootElement, "xTeaserRoot")
-                || !IsValidOptionalLocalPath(existing.RootElement, "xTeaserRevertListPath"))
-                throw new InvalidOperationException(repair);
+            JsonElement values = existing.RootElement;
+            if (values.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException("The settings file must contain a JSON object.");
+            foreach (var property in values.EnumerateObject())
+                if (property.Name is not ("extensionId" or "googleOAuthClientId" or "browserId" or "googleSheetUrl" or "xTeaserRoot" or "xTeaserRevertListPath" or "xTeaserTemplatePath"))
+                    throw new InvalidOperationException($"Unrecognized settings field: {(property.Name.Length <= 64 ? property.Name : "unknown field")}.");
+            foreach (var (name, validate) in new (string, Func<string?, bool>)[] {
+                ("extensionId", value => AppConfiguration.NormalizeExtensionId(value) is not null),
+                ("googleOAuthClientId", value => AppConfiguration.NormalizeGoogleOAuthClientId(value) is not null),
+                ("browserId", value => BrowserSelection.NormalizeId(value) is not null),
+                ("googleSheetUrl", IsValidGoogleSheetUrl),
+                ("xTeaserRoot", value => DesktopSettingsStore.NormalizeLocalPath(value) is not null),
+                ("xTeaserRevertListPath", value => DesktopSettingsStore.NormalizeLocalPath(value) is not null),
+                ("xTeaserTemplatePath", value => DesktopSettingsStore.NormalizeLocalPath(value) is not null),
+            })
+                if (values.TryGetProperty(name, out JsonElement value) && value.ValueKind != JsonValueKind.Null
+                    && (value.ValueKind != JsonValueKind.String || !validate(value.GetString())))
+                    throw new InvalidOperationException($"Invalid settings field: {name}.");
         }
     }
-
-    // Teaser folder settings are optional local paths validated like the settings store does.
-    private static bool IsValidOptionalLocalPath(JsonElement root, string name)
-        => !root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null
-            || value.ValueKind == JsonValueKind.String && DesktopSettingsStore.NormalizeLocalPath(value.GetString()) is not null;
 
     private static bool IsValidGoogleSheetUrl(string? value)
     {

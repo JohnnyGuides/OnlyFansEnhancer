@@ -334,8 +334,11 @@ selection before upload work. Observing status neither selects a browser nor
 queues work. Ten-second expiry and check failures remove current green status.
 The relay check does not establish separate X-host or publishing-workflow health.
 The sidebar connection button runs a quick check in place, with a checking state,
-result and check time. Its adjacent gear opens details. Opening details does not
-prepare or repair Chrome; those remain explicit actions.
+result and check time. An explicit check can restore this verified installation's
+Windows bridge without rewriting settings or changing the extension identity.
+Foreign registrations, unknown legacy locations and pending resets stay untouched.
+Status polling remains read-only. Its adjacent gear opens details with one precise
+diagnostic; manual setup and advanced controls stay folded.
 
 Fresh personal setup prepares the installed keyed package and owned current-user
 registration. The user still enables Developer mode, chooses Load unpacked, and

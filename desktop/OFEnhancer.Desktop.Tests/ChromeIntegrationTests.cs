@@ -16,6 +16,7 @@ public sealed class ChromeIntegrationTests
         internal string[] Targets = [];
         internal bool Chrome = true;
         internal bool FailRegistration;
+        internal bool Permanent = true;
         internal Action? OnIdentityRead;
         internal string Manifest => Path.Combine(Root, "native", ChromeIntegration.HostName + ".json");
 
@@ -39,7 +40,7 @@ public sealed class ChromeIntegrationTests
                 () => Chrome ? new("chrome", "Google Chrome", "fixture.exe") : null,
                 () => Targets,
                 manifest => { if (FailRegistration) throw new IOException("injected registry failure"); Targets = [manifest]; },
-                () => true);
+                () => Permanent);
         }
         public void Dispose() { Channel.Dispose(); Directory.Delete(Root, true); }
     }
@@ -136,7 +137,7 @@ public sealed class ChromeIntegrationTests
 
         ChromeIntegrationView view = fixture.Integration.Get();
 
-        Assert.AreEqual("Existing settings need repair. They were preserved; no new identity was assigned.", view.SetupError);
+        Assert.AreEqual("The settings file contains incomplete or invalid JSON.", view.SetupError);
     }
 
     [TestMethod]
@@ -150,19 +151,80 @@ public sealed class ChromeIntegrationTests
         {
             XTeaserRoot = teaserRoot,
             XTeaserRevertListPath = Path.Combine(fixture.Root, "revert.csv"),
+            XTeaserTemplatePath = Path.Combine(fixture.Root, "another-media-root", "template.veg"),
         });
 
         ChromeIntegrationView view = fixture.Integration.Get();
         Assert.IsTrue(view.Prepared, view.SetupError);
         Assert.AreNotEqual("repair", view.State);
+        byte[] configured = File.ReadAllBytes(fixture.Settings.SettingsPath);
+        Assert.IsNull(fixture.Integration.Check().RepairMessage, "Valid template settings do not need repair");
+        CollectionAssert.AreEqual(configured, File.ReadAllBytes(fixture.Settings.SettingsPath));
 
         string json = File.ReadAllText(fixture.Settings.SettingsPath);
         File.WriteAllText(fixture.Settings.SettingsPath, json.Replace(
             JsonSerializer.Serialize(teaserRoot), "\"relative\\\\folder\""));
         Assert.AreEqual("repair", fixture.Integration.Get().State);
+        Assert.AreEqual("Invalid settings field: xTeaserRoot.", fixture.Integration.Get().SetupError);
 
         File.WriteAllText(fixture.Settings.SettingsPath, json.TrimEnd().TrimEnd('}') + ",\"unknownSetting\":true}");
         Assert.AreEqual("repair", fixture.Integration.Get().State);
+        Assert.AreEqual("Unrecognized settings field: unknownSetting.", fixture.Integration.Get().SetupError);
+    }
+
+    [TestMethod]
+    public void ExplicitCheckRepairsOwnMissingRegistrationWithoutRewritingSettings()
+    {
+        using var fixture = new Fixture();
+        fixture.Settings.Save(DesktopSettings.Empty with { ExtensionId = ChromeIntegration.CanonicalExtensionId });
+        byte[] original = File.ReadAllBytes(fixture.Settings.SettingsPath);
+        Assert.AreEqual("The Windows bridge registration is missing.", fixture.Integration.Get().SetupError);
+        Assert.IsFalse(File.Exists(fixture.Manifest), "Observing status cannot repair setup");
+        ChromeIntegrationView checkedView = fixture.Integration.Check();
+        Assert.IsTrue(checkedView.Prepared);
+        Assert.AreEqual("offline", checkedView.State, "Repair is not proof of a Chrome connection");
+        Assert.AreEqual("Windows bridge repaired.", checkedView.RepairMessage);
+        CollectionAssert.AreEqual(original, File.ReadAllBytes(fixture.Settings.SettingsPath));
+        CollectionAssert.AreEqual(new[] { fixture.Manifest }, fixture.Targets);
+        Assert.IsNull(fixture.Integration.Check().RepairMessage, "A healthy registration is not rewritten on every check");
+    }
+
+    [TestMethod]
+    public void ExplicitCheckDoesNotGuessAnIdentityOrTakeOverForeignOrUnknownLegacyRegistration()
+    {
+        using var fixture = new Fixture();
+        Assert.AreEqual("setup", fixture.Integration.Check().State);
+        Assert.IsFalse(File.Exists(fixture.Manifest));
+        fixture.Settings.Save(DesktopSettings.Empty with { ExtensionId = ChromeIntegration.CanonicalExtensionId });
+        string foreign = Path.Combine(fixture.Root, "other-install", "native.json");
+        fixture.Targets = [foreign];
+        Assert.IsNull(fixture.Integration.Check().RepairMessage);
+        CollectionAssert.AreEqual(new[] { foreign }, fixture.Targets);
+        Assert.IsFalse(File.Exists(fixture.Manifest));
+        fixture.Targets = [];
+        fixture.Settings.Save(DesktopSettings.Empty with { ExtensionId = new string('b', 32) });
+        Assert.IsNull(fixture.Integration.Check().RepairMessage);
+        Assert.IsFalse(File.Exists(fixture.Manifest));
+        fixture.Settings.Save(DesktopSettings.Empty with { ExtensionId = ChromeIntegration.CanonicalExtensionId });
+        Assert.IsNull(fixture.Integration.Check(allowRepair: false).RepairMessage);
+        Assert.IsFalse(File.Exists(fixture.Manifest));
+        fixture.Permanent = false;
+        Assert.IsNull(fixture.Integration.Check().RepairMessage);
+        Assert.IsFalse(File.Exists(fixture.Manifest));
+    }
+
+    [TestMethod]
+    public void FailedAutomaticRepairReportsTheWriteErrorAndPreservesIdentity()
+    {
+        using var fixture = new Fixture();
+        fixture.Settings.Save(DesktopSettings.Empty with { ExtensionId = ChromeIntegration.CanonicalExtensionId });
+        fixture.FailRegistration = true;
+        ChromeIntegrationView checkedView = fixture.Integration.Check();
+        Assert.AreEqual("repair", checkedView.State);
+        Assert.AreEqual("The Windows bridge files could not be written.", checkedView.Message);
+        Assert.IsNull(checkedView.RepairMessage);
+        Assert.AreEqual(ChromeIntegration.CanonicalExtensionId, fixture.Settings.Load().ExtensionId);
+        Assert.AreEqual(0, fixture.Targets.Length);
     }
 
     [TestMethod]
@@ -279,6 +341,7 @@ ative\host.json";
         BreakCondition(fixture, condition);
         var before = Snapshot(fixture, journal);
         try { fixture.Integration.Get(); } catch (Exception) { }
+        try { fixture.Integration.Check(); } catch (Exception) { }
         AssertUnchanged(fixture, journal, before);
         Assert.AreEqual(ChromeResetStage.Replacement, fixture.Channel.Reset!.Stage);
     }

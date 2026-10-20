@@ -268,18 +268,19 @@ public partial class MainWindow : Window, IDisposable
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
         if (XTeaserController.Operations.Contains(operation)) return await HandleTeaserMessage(root, operation);
-        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "prepareOpeningFrame", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "copyTeaserFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "prepareOpeningFrame", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "copyTeaserFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "checkChromeConnection", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try
         {
             if (!Guid.TryParse(requestId, out _)) throw new InvalidOperationException("invalid-request");
             JsonElement payload = root.GetProperty("payload");
             object result;
-            if (operation is "getStatus" or "getChromeReadiness" or "prepareChrome" or "openChrome" or "openChromeExtensions" or "installChromeInfo" or "revealChromeExtension")
+            if (operation is "getStatus" or "getChromeReadiness" or "checkChromeConnection" or "prepareChrome" or "openChrome" or "openChromeExtensions" or "installChromeInfo" or "revealChromeExtension")
             {
                 if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any()) throw new InvalidOperationException("invalid-payload");
-                if (operation == "getStatus") result = AgentStatus.Current with { Capabilities = [.. AgentStatus.Current.Capabilities, "chrome-readiness"] };
+                if (operation == "getStatus") result = AgentStatus.Current with { Capabilities = [.. AgentStatus.Current.Capabilities, "chrome-readiness", "chrome-connection-check"] };
                 else if (operation == "getChromeReadiness") result = await Task.Run(chromeIntegration.Get);
+                else if (operation == "checkChromeConnection") result = await Task.Run(() => chromeIntegration.Check(!hasExtensionOverride));
                 else if (operation == "prepareChrome")
                 {
                     if (hasExtensionOverride) throw new InvalidOperationException("Chrome is using a command-line extension override. Start without that override to change saved setup.");
