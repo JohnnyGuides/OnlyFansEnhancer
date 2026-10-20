@@ -3984,7 +3984,6 @@ body.calendar-teaser {
 /* Separate the media, writing and publishing tasks without new control styles. */
 .calendar-teaser .teaser-planner-media {
   padding-right: 20px;
-  border-right: 1px solid #293646;
 }
 .calendar-teaser .teaser-choose-video {
   width: calc(100% - 20px);
