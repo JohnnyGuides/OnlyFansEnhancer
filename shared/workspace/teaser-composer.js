@@ -219,6 +219,32 @@
       tools.style.top = `${bounds.bottom + 8}px`;
       tools.style.left = `${Math.max(12, Math.min(bounds.right - 200, window.innerWidth - 212))}px`;
     });
+    const compactToolbar = global.matchMedia("(max-width: 640px)");
+    function layoutTools() {
+      if (!dialog.dataset.editor) return;
+      tools.hidePopover();
+      const episodeAction = dialog.querySelector(".teaser-link-episode");
+      const secondary = [
+        dialog.querySelector(".teaser-copy-file"),
+        dialog.querySelector(".xt-episode-folder"),
+      ].filter(Boolean);
+      if (compactToolbar.matches) {
+        if (episodeAction) tools.append(episodeAction);
+        for (const button of secondary) tools.append(button);
+        more.hidden = false;
+      } else {
+        if (episodeAction)
+          heading.insertBefore(
+            episodeAction,
+            heading.querySelector(".xt-change-clip") ||
+              heading.querySelector(".xt-vegas-trigger") ||
+              more,
+          );
+        for (const button of secondary) heading.insertBefore(button, more);
+        more.hidden = true;
+      }
+    }
+    compactToolbar.addEventListener("change", layoutTools);
     const destinations = node("div", "xt-composer-destinations");
     destinations.hidden = true;
     destinations.setAttribute("role", "group");
@@ -657,6 +683,8 @@
         context.file = event.data.file;
         context.clipId = null;
         context.loadingMedia = false;
+        const replace = heading.querySelector(".xt-change-clip");
+        if (replace) replace.textContent = "Replace video";
       }
       handoff?.receive(event.data || {});
       if (event.data?.type === "ofenhancer:teaser-ready")
@@ -691,7 +719,7 @@
           event.data.episodeKey !== context?.episodeKey
         ) {
           context.episodeKey = event.data.episodeKey;
-          const folder = tools.querySelector(".xt-episode-folder");
+          const folder = dialog.querySelector(".xt-episode-folder");
           if (folder) folder.disabled = false;
           void handoff?.setEpisode(context.episodeKey, !postId);
         }
@@ -699,7 +727,7 @@
       if (event.data?.type === "ofenhancer:teaser-running") {
         running = event.data.running === true;
         more.disabled = running;
-        const episodeButton = heading.querySelector(".teaser-link-episode");
+        const episodeButton = dialog.querySelector(".teaser-link-episode");
         if (episodeButton)
           episodeButton.disabled =
             running || Boolean(context?.draft?.sessionId);
@@ -759,6 +787,7 @@
         stopPreview();
         stopEditorLoading();
         document.removeEventListener("visibilitychange", visibilityChanged);
+        compactToolbar.removeEventListener("change", layoutTools);
         handoff?.close();
         window.removeEventListener("message", receive);
         dialog.remove();
@@ -807,7 +836,7 @@
         platform: postId ? "reddit" : "x",
         loadingMedia: Boolean(clip && !file),
       };
-      const back = action("Replace video");
+      const back = action(file || clip ? "Replace video" : "Choose video");
       back.classList.add("xt-change-clip");
       heading.querySelector(".xt-choose-video")?.remove();
       heading.querySelector(".xt-change-clip")?.remove();
@@ -817,7 +846,16 @@
       tools.hidePopover();
       tools.replaceChildren();
       more.hidden = false;
-      const folder = action("Open episode folder");
+      heading.insertBefore(
+        back,
+        heading.querySelector(".xt-vegas-trigger") || more,
+      );
+      const folder = action("");
+      folder.setAttribute("aria-label", "Open episode folder");
+      folder.title = "Open episode folder";
+      folder.classList.add("xt-toolbar-secondary");
+      folder.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg><span>Open episode folder</span>';
       folder.classList.add("xt-episode-folder");
       folder.disabled = !context.episodeKey;
       folder.addEventListener("click", async () => {
@@ -831,6 +869,7 @@
         }
       });
       tools.append(folder);
+      layoutTools();
       close.setAttribute("aria-label", "Close");
       close.innerHTML =
         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg>';
@@ -849,10 +888,6 @@
       const frame = iframe;
       iframe.addEventListener("load", () => {
         if (iframe !== frame || !dialog.isConnected) return;
-        const mediaHeading = frame.contentDocument?.querySelector(
-          ".teaser-media-header",
-        );
-        if (mediaHeading) mediaHeading.append(back);
         const episodeButton = frame.contentDocument?.querySelector(
           ".teaser-link-episode",
         );
@@ -866,12 +901,14 @@
         }
         const copy = frame.contentDocument?.querySelector(".teaser-copy-file");
         if (copy) {
-          tools.querySelector(".teaser-copy-file")?.remove();
-          copy.classList.add("xt-action");
-          copy.replaceChildren(document.createTextNode("Copy to .TWEETS"));
+          dialog.querySelector(".teaser-copy-file")?.remove();
+          copy.classList.add("xt-action", "xt-toolbar-secondary");
+          copy.innerHTML =
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg><span>Copy to .TWEETS</span>';
           copy.addEventListener("click", () => tools.hidePopover());
           tools.append(copy);
         }
+        layoutTools();
         const posts = frame.contentDocument?.querySelector(
           ".teaser-planner-posts",
         );

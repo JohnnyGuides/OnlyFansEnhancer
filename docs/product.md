@@ -177,9 +177,10 @@ settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format.
 
 The teaser editor keeps the video unobstructed. **Episode** changes its catalogue
-association; **Replace video**, beside the player, selects another file while
-preserving caption, schedule and link edits. Folder and copy actions live in the
-header's file menu. Its **Vegas** menu contains project selection and render details.
+association; **Replace video** in the header selects another file while
+preserving caption, schedule and link edits. Replace video and Vegas remain directly
+available; folder/copy shortcuts are compact header icons. Only narrow windows
+move secondary actions into the file menu. Its **Vegas** menu contains project selection and render details.
 Discarding edits uses an in-app confirmation with **Keep editing** focused by default.
 The preview, window and action buttons stay in place while media loads or a
 thumbnail frame is selected. The dialog chooses its initial layout before opening;

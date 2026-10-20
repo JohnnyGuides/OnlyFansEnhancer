@@ -1709,3 +1709,34 @@ html:has(.xt-picker[open]) {
     max-width: calc(100vw - 12px);
   }
 }
+
+.xt-composer-dialog[data-editor] .xt-composer-heading {
+  gap: 6px;
+}
+.xt-composer-dialog[data-editor] .xt-composer-heading .xt-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.xt-composer-dialog[data-editor]
+  .xt-composer-heading
+  .xt-toolbar-secondary
+  span {
+  display: none;
+}
+.xt-composer-dialog[data-editor] .xt-composer-heading .xt-action[hidden] {
+  display: none;
+}
+@media (max-width: 640px) {
+  .xt-composer-dialog[data-editor] .xt-composer-heading {
+    padding: 10px;
+    gap: 5px;
+  }
+  .xt-composer-dialog[data-editor] .xt-composer-heading .xt-action {
+    padding: 6px 8px;
+  }
+}

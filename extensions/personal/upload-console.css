@@ -4057,27 +4057,9 @@ body.calendar-teaser {
 .calendar-teaser .teaser-association {
   display: none;
 }
-.calendar-teaser .teaser-media-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 32px;
-  margin: 0 0 8px;
-  color: #a6b4c5;
-  font-size: 12px;
-}
-.calendar-teaser .teaser-media-header button {
-  padding: 6px 9px;
-  font-size: 12px;
-}
 .calendar-teaser .teaser-video-stage {
   position: relative;
 }
 .calendar-teaser .teaser-choose-video {
   top: 0;
-}
-.calendar-teaser
-  .teaser-planner-media:has(.teaser-video-preview[hidden])
-  .xt-change-clip {
-  visibility: hidden;
 }

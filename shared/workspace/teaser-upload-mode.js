@@ -59,12 +59,6 @@
     });
     const preview = panel.querySelector("video"),
       image = panel.querySelector("img");
-    const mediaHeading = document.createElement("div");
-    mediaHeading.className = "teaser-media-header file-actions";
-    const videoLabel = document.createElement("span");
-    videoLabel.textContent = "Video";
-    mediaHeading.append(videoLabel);
-    preview.before(mediaHeading);
     const chooseVideo = document.createElement("button");
     chooseVideo.type = "button";
     chooseVideo.className = "teaser-choose-video";

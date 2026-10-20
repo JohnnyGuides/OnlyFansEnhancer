@@ -182,6 +182,9 @@ async function mount(page, linked = false, delaySettings = false) {
 
 async function folderButton(page) {
   if (
+    (await page
+      .getByRole("button", { name: "File actions", exact: true })
+      .isVisible()) &&
     !(await page
       .locator(".xt-composer-tools")
       .evaluate((menu) => menu.matches(":popover-open")))
@@ -398,9 +401,14 @@ test("a misnamed teaser can be linked and copied with its caption and thumbnail 
     await page.screenshot({
       path: path.join(output, "teaser-copy-desktop.png"),
     });
-    await page
-      .getByRole("button", { name: "File actions", exact: true })
-      .click();
+    if (
+      await page
+        .getByRole("button", { name: "File actions", exact: true })
+        .isVisible()
+    )
+      await page
+        .getByRole("button", { name: "File actions", exact: true })
+        .click();
     await copy.click();
     await page
       .locator(".xt-composer-status")
@@ -1804,9 +1812,9 @@ test("episode without a teaser opens its folder and accepts a video in the same 
       await page
         .locator(".xt-episode-folder")
         .evaluate((folder) =>
-          folder.parentElement.classList.contains("xt-composer-tools"),
+          folder.parentElement.classList.contains("xt-composer-heading"),
         ),
-      "episode folder lives in the file actions menu",
+      "episode folder is directly available in the desktop header",
     );
     await page.screenshot({
       path: path.join(
@@ -2003,9 +2011,6 @@ test("composer ignores forged messages and prevents closing while upload is runn
         location.origin,
       ),
     );
-    await page
-      .getByRole("button", { name: "File actions", exact: true })
-      .waitFor();
     await page.waitForFunction(
       () => !document.querySelector('[aria-label="File actions"]').disabled,
     );
@@ -3052,10 +3057,16 @@ test("video replacement preserves post edits and discard uses an in-app dialog",
       .getByRole("button", { name: "Change linked episode", exact: true })
       .waitFor();
     assert.equal(await frame.locator(".teaser-association").isVisible(), false);
+    await frame.evaluate(() => {
+      globalThis.OFEnhancerDesktopUpload = {
+        ...globalThis.OFEnhancerDesktopUpload,
+        copyTeaser: async () => ({}),
+      };
+    });
     await frame.locator("#socialCaption").fill("A caption to keep");
     await frame.getByLabel("Posting time", { exact: true }).fill("19:35");
     const choosing = page.waitForEvent("filechooser");
-    await frame
+    await page
       .getByRole("button", { name: "Replace video", exact: true })
       .click();
     await (
@@ -3080,6 +3091,24 @@ test("video replacement preserves post edits and discard uses an in-app dialog",
     );
     await frame.waitForFunction(
       () => document.querySelector(".teaser-video-preview").readyState >= 2,
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "File actions", exact: true })
+        .isVisible(),
+      false,
+    );
+    assert.equal(
+      await page.locator(".xt-composer-heading .teaser-copy-file").isVisible(),
+      true,
+    );
+    assert.equal(
+      await page.locator(".xt-composer-heading .xt-episode-folder").isVisible(),
+      true,
+    );
+    assert.equal(
+      await page.locator(".xt-composer-heading .xt-change-clip").isVisible(),
+      true,
     );
     const output = path.join(repositoryRoot, ".local/teaser-controls-review");
     fs.mkdirSync(output, { recursive: true });
@@ -3106,6 +3135,26 @@ test("video replacement preserves post edits and discard uses an in-app dialog",
       path: path.join(output, "editor-phone.png"),
       animations: "disabled",
     });
+    assert.equal(
+      await page
+        .getByRole("button", { name: "File actions", exact: true })
+        .isVisible(),
+      true,
+    );
+    await page
+      .getByRole("button", { name: "File actions", exact: true })
+      .click();
+    assert.equal(
+      await page.locator(".xt-composer-tools .teaser-copy-file").isVisible(),
+      true,
+    );
+    assert.equal(
+      await page.locator(".xt-composer-tools .xt-episode-folder").isVisible(),
+      true,
+    );
+    await page
+      .getByRole("button", { name: "File actions", exact: true })
+      .click();
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await page
       .getByRole("button", { name: "Discard changes", exact: true })
