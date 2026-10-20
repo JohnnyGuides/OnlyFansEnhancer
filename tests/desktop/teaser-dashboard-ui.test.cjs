@@ -1929,6 +1929,7 @@ test("teaser modal traps and restores focus, cancels cleanly and fits desktop an
           scrollWidth: node.scrollWidth,
           clientWidth: node.clientWidth,
           addRight: add.right,
+          addHeight: add.height,
         };
       });
       assert.ok(
@@ -1936,6 +1937,11 @@ test("teaser modal traps and restores focus, cancels cleanly and fits desktop an
       );
       assert.ok(dimensions.scrollWidth <= dimensions.clientWidth);
       assert.ok(dimensions.addRight <= dimensions.right);
+      assert.equal(
+        dimensions.addHeight,
+        74,
+        "catalogue upload tile keeps the compact episode height",
+      );
       if (options.viewport) assert.ok(dimensions.width <= 390);
       await page.keyboard.press("Tab");
       await page.keyboard.press("Shift+Tab");
