@@ -74,7 +74,7 @@ async function installHost(page) {
     globalThis.__OFENHANCER_TEST_HOST__ = (operation, payload) => {
       if (operation === "getStatus")
         return Promise.resolve({
-          productVersion: "0.20.113",
+          productVersion: "0.20.114",
           protocolVersion: 1,
           capabilities: ["desktop-shell"],
           testData: true,
