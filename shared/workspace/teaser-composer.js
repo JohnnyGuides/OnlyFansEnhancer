@@ -748,6 +748,7 @@
       };
       const back = action("Change clip");
       back.classList.add("xt-change-clip");
+      heading.querySelector(".xt-choose-video")?.remove();
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.querySelector(".teaser-copy-file")?.remove();
@@ -905,6 +906,7 @@
         edit();
         return;
       }
+      heading.querySelector(".xt-choose-video")?.remove();
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.querySelector(".teaser-copy-file")?.remove();
@@ -927,7 +929,13 @@
         const file = input.files?.[0];
         if (file) edit(file);
       });
-      grid.append(add);
+      if (episode) {
+        add.className = "xt-action xt-choose-video";
+        add.title = "Choose video";
+        add.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 3H5v18h14V8ZM14 3v5h5M8 14h8m-4-4v8"/></svg>';
+        heading.insertBefore(add, close);
+      } else grid.append(add);
       content.replaceChildren(grid, input);
       grid.addEventListener("dragover", (event) => {
         event.preventDefault();
