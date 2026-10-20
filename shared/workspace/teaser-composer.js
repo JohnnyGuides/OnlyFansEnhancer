@@ -144,6 +144,8 @@
         try {
           const result = await fetchPreview();
           if (!choice.isConnected) return;
+          if (typeof result.posterUrl !== "string" || !result.posterUrl)
+            throw new Error("Video preview unavailable.");
           image.onload = () => {
             image.hidden = false;
             media.dataset.loaded = "true";

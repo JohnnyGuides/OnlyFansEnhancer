@@ -753,14 +753,19 @@ test("catalogue gallery groups seasons under titles, badges teasers and filters 
     assert.deepEqual(await badges("series-a-e4"), []);
     assert.deepEqual(await badges("series-a-e6"), [["failed", "✕1"]]);
     assert.match(
-      await tile("series-a-e1").getAttribute("title"),
+      await tile("series-a-e1").getAttribute("aria-description"),
       /^Series A E1 · Series A E1 · 2 posted · 1 ready · best \d+%$/,
     );
     assert.match(
-      await tile("series-a-e4").getAttribute("title"),
+      await tile("series-a-e4").getAttribute("aria-description"),
       /no teasers$/,
     );
 
+    assert.equal(
+      await tile("series-a-e1").getAttribute("title"),
+      null,
+      "episode cards do not display native hover tooltips",
+    );
     // Thumbnails come from the desktop thumbnail host; untouched videos are grey.
     const thumb = (key) => tile(key).locator("img.xt-thumb-image");
     assert.equal(
@@ -1783,11 +1788,11 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
       ],
     );
     assert.match(
-      await recommendations.nth(0).getAttribute("title"),
+      await recommendations.nth(0).getAttribute("aria-description"),
       /No comparable history/,
     );
     assert.match(
-      await recommendations.nth(1).getAttribute("title"),
+      await recommendations.nth(1).getAttribute("aria-description"),
       /No comparable history/,
     );
     assert.equal(
@@ -2024,19 +2029,19 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
       ["new-e1", "zulu-e4", "sparse-e2"],
     );
     assert.match(
-      await suggestions.nth(0).getAttribute("title"),
+      await suggestions.nth(0).getAttribute("aria-description"),
       /Category above usual/,
     );
     assert.match(
-      await suggestions.nth(1).getAttribute("title"),
+      await suggestions.nth(1).getAttribute("aria-description"),
       /3 comparable posts/,
     );
     assert.match(
-      await suggestions.nth(1).getAttribute("title"),
+      await suggestions.nth(1).getAttribute("aria-description"),
       /Series above usual/,
     );
     assert.match(
-      await suggestions.nth(2).getAttribute("title"),
+      await suggestions.nth(2).getAttribute("aria-description"),
       /No comparable history/,
     );
     // Remove the insufficient/unknown candidates to reveal the weaker series.
@@ -2076,7 +2081,7 @@ test("recommendations use age-matched history, resist viral outliers and fall ba
     assert.match(
       await second.page
         .locator('.xt-composer-dialog [data-episode-key="weak-e4"]')
-        .getAttribute("title"),
+        .getAttribute("aria-description"),
       /Series below usual/,
     );
     assert.deepEqual(second.errors, []);

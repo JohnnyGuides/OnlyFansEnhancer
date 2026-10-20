@@ -1412,7 +1412,7 @@
       return row;
     }
 
-    function cardTooltip(episode) {
+    function episodeDescription(episode) {
       const parts = [episode.title];
       if (episode.series)
         parts.unshift(
@@ -1463,7 +1463,7 @@
       card.dataset.key = `episode-${episode.itemId}`;
       card.dataset.itemId = episode.itemId;
       card.dataset.cover = coverOf(episode);
-      card.title = cardTooltip(episode);
+      card.setAttribute("aria-description", episodeDescription(episode));
       const frame = thumbnail(episode);
       frame.append(badges(episode));
       card.append(frame);
@@ -1612,7 +1612,6 @@
               recommendation.rank + (onSelect ? 1 : 0),
             );
             choice.dataset.episodeKey = episode.sourceKey;
-            choice.title = `${episode.title} · ${description}`;
             choice.setAttribute("aria-description", description);
           }
           card.dataset.category = category;

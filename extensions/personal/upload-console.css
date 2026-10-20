@@ -92,7 +92,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 .calendar-teaser .teaser-preview-panel {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 20px;
   margin-bottom: 16px;
 }
@@ -3978,5 +3978,79 @@ body.calendar-teaser {
   }
   .calendar-teaser #saveTeaserDraft {
     min-width: 80px;
+  }
+}
+
+/* Separate the media, writing and publishing tasks without new control styles. */
+.calendar-teaser .teaser-planner-media {
+  padding-right: 20px;
+  border-right: 1px solid #293646;
+}
+.calendar-teaser .teaser-choose-video {
+  width: calc(100% - 20px);
+  color: #b8c6d6;
+  font-size: 14px;
+  font-weight: 500;
+  border-color: #3d5266;
+}
+.calendar-teaser
+  .teaser-planner-media:has(.teaser-video-preview[hidden])
+  .teaser-media-controls {
+  visibility: hidden;
+}
+.calendar-teaser .teaser-planner-settings > label {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.calendar-teaser #socialCaption {
+  height: 96px;
+  min-height: 96px;
+  font-size: 14px;
+}
+.calendar-teaser .teaser-planner-publishing {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #293646;
+}
+.calendar-teaser .teaser-planner-publishing label {
+  margin: 0 0 6px;
+  color: #a6b4c5;
+  font-size: 12px;
+  font-weight: 500;
+}
+.calendar-teaser .teaser-planner-publishing .teaser-schedule-field {
+  margin: 0;
+}
+.calendar-teaser .teaser-planner-publishing .teaser-schedule-row {
+  margin: 0;
+  gap: 12px;
+}
+.calendar-teaser .teaser-planner-publishing input {
+  font-weight: 400;
+}
+.calendar-teaser .teaser-planner-posts h3 {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a6b4c5;
+}
+.calendar-teaser #uploadActions.upload-actions {
+  border-top: 1px solid #293646;
+  border-radius: 0;
+}
+@media (max-width: 620px) {
+  .calendar-teaser .teaser-planner-media {
+    padding-right: 0;
+    border-right: 0;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #293646;
+  }
+  .calendar-teaser .teaser-choose-video {
+    width: 100%;
+  }
+  .calendar-teaser .teaser-planner-publishing .teaser-schedule-row {
+    gap: 8px;
   }
 }

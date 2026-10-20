@@ -100,9 +100,12 @@
     scheduleRow.append(timeLabel, replyLabel, linkFields);
     const customLink = get("#socialCustomPaidLinkField");
     scheduleRow.after(customLink);
+    const publishing = document.createElement("div");
+    publishing.className = "teaser-planner-publishing";
+    publishing.append(scheduleRow, customLink);
     panel
       .querySelector(".teaser-planner-settings")
-      .append(captionLabel, caption, scheduleRow, customLink);
+      .append(captionLabel, caption, publishing);
     const PREFS = "OFEnhancerTeaserPreferencesV1";
     let preferences = {};
     try {
@@ -766,6 +769,7 @@
         replyLabel.hidden = true;
         linkFields.hidden = true;
         customLink.hidden = true;
+        publishing.hidden = true;
         automatic.closest("label").hidden = true;
         get("#uploadButton").hidden = true;
         get("#uploadButton").disabled = true;

@@ -1427,6 +1427,7 @@ html:has(.xt-picker[open]) {
   flex-direction: column;
 }
 .xt-composer-dialog[data-editor] .xt-composer-heading {
+  border-bottom: 1px solid #293646;
   flex: none;
   flex-wrap: nowrap;
   gap: 8px;
