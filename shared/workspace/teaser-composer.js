@@ -937,8 +937,16 @@
         const file = event.dataTransfer?.files?.[0];
         if (file && !loading) edit(file);
       });
+      title.textContent =
+        episode?.title || `Teaser planner · ${dayLabel(date)}`;
+      title.title = `${title.textContent} · ${dayLabel(date)}`;
       if (episode) {
-        const folder = action("Open episode folder");
+        const folder = action("");
+        folder.classList.add("xt-episode-folder");
+        folder.setAttribute("aria-label", "Open episode folder");
+        folder.title = "Open episode folder";
+        folder.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg>';
         folder.addEventListener("click", async () => {
           try {
             await request("openTeaserEpisodeFolder", {
@@ -949,10 +957,7 @@
               "The episode folder is unavailable. Choose a finished teaser video instead.";
           }
         });
-        content.prepend(
-          node("p", "xt-composer-episode", episode.title),
-          folder,
-        );
+        heading.insertBefore(folder, close);
       }
       let clips = [];
       let catalogueView = null;

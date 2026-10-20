@@ -1354,10 +1354,7 @@ html:has(.xt-picker[open]) {
 .xt-clip-add .xt-plus {
   font-size: 36px;
 }
-.xt-composer-episode {
-  color: #afbed2;
-  margin: 0 0 12px;
-}
+
 @media (max-width: 600px) {
   .xt-composer-dialog:has(.xt-composer-catalogue) {
     width: 100%;
