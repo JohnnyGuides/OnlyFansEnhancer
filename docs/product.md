@@ -169,10 +169,12 @@ a square preview beside all destination posts; selecting a row edits that post's
 settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format.
 
-The teaser editor keeps its preview, window and action buttons in place while
-media loads or a thumbnail frame is selected. **Edit in Vegas** remembers the
-episode's chosen `.veg` project, whatever its name. Other projects remain
-available in the project selector or **Choose project…**. **New from template**
+The teaser editor has one header row, one compact media-control row and one
+footer. Its **Vegas** menu contains project selection and render details.
+The preview, window and action buttons stay in place while media loads or a
+thumbnail frame is selected. **Edit in Vegas** remembers the episode's chosen
+`.veg` project, whatever its name. Other projects remain available in the project
+selector or **Choose project…**. **New from template**
 creates an episode-local copy of the existing Vegas template.
 Opening a project reserves an unused render name in the teaser output folder;
 **Copy name** and **Copy folder** provide the two Vegas render fields.

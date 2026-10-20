@@ -318,9 +318,28 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
       actions: await frame.locator("#uploadActions").boundingBox(),
     });
     const before = await geometry();
+    assert.ok(before.dialog.height <= 500, "desktop editor stays compact");
+    assert.ok(
+      (await page.locator(".xt-composer-heading").boundingBox()).height < 64,
+      "one header row",
+    );
+    assert.ok(
+      (await frame.locator(".teaser-media-controls").boundingBox()).height <=
+        40,
+      "thumbnail and suction share one row",
+    );
+    assert.ok(
+      before.actions.height <= 64,
+      "footer has no redundant status row",
+    );
+    await page
+      .getByRole("button", { name: "Vegas project and render", exact: true })
+      .click();
+    await page.getByLabel("Vegas project", { exact: true }).waitFor();
     await page
       .getByRole("button", { name: "Edit in Vegas", exact: true })
       .click();
+    await page.keyboard.press("Escape");
     await waitDraft((draft) => draft?.renderPending);
     const pending = await page.evaluate(() =>
       OFEnhancerTeaserDrafts.get("2026-10-06"),
@@ -426,12 +445,23 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
       await page
         .locator(".xt-composer-dialog")
         .screenshot({ path: path.join(output, "teaser-handoff-desktop.png") });
+      await page
+        .getByRole("button", { name: "Vegas project and render", exact: true })
+        .click();
+      await page.screenshot({
+        path: path.join(output, "teaser-vegas-details.png"),
+      });
+      await page.keyboard.press("Escape");
       await page.setViewportSize({ width: 390, height: 844 });
       await page
         .locator(".xt-composer-dialog")
         .screenshot({ path: path.join(output, "teaser-handoff-phone.png") });
       assert.ok(
         (await page.locator(".xt-composer-dialog").boundingBox()).width <= 390,
+      );
+      assert.ok(
+        (await page.locator(".xt-composer-heading").boundingBox()).height < 64,
+        "phone keeps one header row",
       );
       assert.ok((await frame.locator("#uploadButton").boundingBox()).y < 844);
     }
@@ -451,6 +481,9 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
         document.querySelector(".xt-render-state").textContent ===
         "New render available",
     );
+    await page
+      .getByRole("button", { name: "Vegas project and render", exact: true })
+      .click();
     assert.equal(
       await page
         .getByRole("button", { name: "Use updated render" })
@@ -1333,6 +1366,13 @@ for (const caption of ["Preview test", "My edited caption"])
       );
       await page.locator(".xt-episode-choice").click();
       await page.getByRole("button", { name: "Open episode folder" }).waitFor();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector(".xt-composer-frame")
+            ?.contentDocument?.querySelector("#socialCaption")?.value ===
+          "Preview test",
+      );
       const frame = page
         .frames()
         .find((item) => item.url().includes("?teaserDay="));

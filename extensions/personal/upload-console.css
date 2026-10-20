@@ -3805,6 +3805,28 @@ a {
 .calendar-teaser .thumbnail-frame-header h2 {
   font-size: 16px;
 }
+@media (min-width: 651px) and (max-height: 500px) {
+  .calendar-teaser .thumbnail-frame-dialog[open] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .calendar-teaser
+    .thumbnail-frame-dialog
+    > :is(.thumbnail-frame-header, .file-actions, #thumbnailFrameStatus) {
+    grid-column: 1 / -1;
+  }
+  .calendar-teaser .thumbnail-frame-dialog > .thumbnail-frame-preview {
+    grid-column: 1;
+    grid-row: 2;
+    width: min(240px, calc(100dvh - 160px));
+    align-self: center;
+  }
+  .calendar-teaser .thumbnail-frame-timeline {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: center;
+    margin-left: 0;
+  }
+}
 /* Calendar composition keeps its viewport and action positions during media work. */
 body.calendar-teaser {
   height: 100dvh;
@@ -3845,48 +3867,112 @@ body.calendar-teaser {
 .calendar-teaser .teaser-association .xt-episode-folder {
   display: none;
 }
+.calendar-teaser .teaser-media-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin-top: 8px;
+}
 .calendar-teaser .teaser-thumbnail-panel {
-  min-height: 42px;
+  display: flex;
   flex-wrap: nowrap;
+  gap: 6px;
+  margin: 0;
+}
+.calendar-teaser
+  .teaser-media-controls
+  .teaser-thumbnail-panel
+  :is(button, .teaser-thumbnail-upload),
+.calendar-teaser .teaser-media-controls .teaser-ending-gear {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 6px;
+  margin: 0;
+}
+.calendar-teaser .teaser-use-frame img {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.calendar-teaser .teaser-use-frame:has(img:not([hidden])) > svg {
+  display: none;
 }
 .calendar-teaser .teaser-ending[hidden] {
   display: flex;
   visibility: hidden;
   pointer-events: none;
 }
-.calendar-teaser .teaser-ending {
-  min-height: 30px;
+.calendar-teaser .teaser-media-controls .teaser-ending {
+  flex: 1;
+  justify-content: flex-end;
+  margin: 0;
+  gap: 6px;
+  font-size: 12px;
 }
 .calendar-teaser .teaser-planner-posts {
   min-height: 44px;
 }
 .calendar-teaser #uploadActions.upload-actions {
+  position: relative;
   box-sizing: border-box;
-  min-height: 100px;
+  min-height: 60px;
   flex: none;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
   padding-block: 10px;
 }
 .calendar-teaser #uploadActions > .social-auto-mode {
   margin-right: auto;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .calendar-teaser #uploadActions > .action-status {
-  display: block;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
   max-height: 42px;
   overflow: auto;
-  flex-basis: 100%;
-  order: 2;
-  min-height: 30px;
   margin: 0;
+  background: #101821;
+  font-size: 12px;
+}
+.calendar-teaser #matchStatus {
+  display: none;
 }
 .calendar-teaser #uploadActions > .action-secondary {
-  order: 3;
+  display: contents;
 }
-.calendar-teaser #uploadActions > #uploadButton {
-  grid-row: 1;
+.calendar-teaser #uploadActions > :is(#saveTeaserDraft, #uploadButton) {
+  flex: none;
+}
+.calendar-teaser #saveTeaserDraft {
+  min-width: 86px;
+}
+.calendar-teaser .teaser-thumbnail-upload:focus-visible {
+  outline: 2px solid #68d8ff;
+  outline-offset: 2px;
+}
+@media (max-width: 620px) {
+  .calendar-teaser #uploadActions.upload-actions {
+    gap: 6px;
+  }
+  .calendar-teaser #uploadActions > :is(#saveTeaserDraft, #uploadButton) {
+    font-size: 12px;
+    padding-inline: 8px;
+  }
+  .calendar-teaser #saveTeaserDraft {
+    min-width: 80px;
+  }
 }

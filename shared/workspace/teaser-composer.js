@@ -518,6 +518,8 @@
           location.origin,
         );
       if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
+      if (event.data?.type === "ofenhancer:teaser-dirty")
+        delete status.dataset.saved;
       if (
         event.data?.type === "ofenhancer:teaser-episode" &&
         typeof event.data.title === "string"
@@ -545,13 +547,16 @@
         iframe.style.height = `${Math.min(20000, Math.max(200, event.data.height))}px`;
       if (event.data?.type === "ofenhancer:teaser-saved") {
         dirty = false;
+        status.dataset.saved = "true";
         status.textContent = postId
           ? "Reddit draft saved locally · not scheduled."
           : "Draft saved for this day.";
         void refreshDestinations().catch((error) => {
+          delete status.dataset.saved;
           status.textContent = error.message;
         });
         Promise.resolve(onSaved()).catch(() => {
+          delete status.dataset.saved;
           status.textContent = "Draft saved. Refresh the calendar to see it.";
         });
       }
@@ -570,6 +575,7 @@
       { once: true },
     );
     function edit(file = null, clip = null, draft = null) {
+      delete status.dataset.saved;
       if (
         file &&
         (!file.size ||
@@ -618,6 +624,17 @@
         }
       });
       heading.insertBefore(folder, close);
+      for (const [button, path] of [
+        [back, '<path d="m8 3-5 5 5 5M3 8h15m-2 3 5 5-5 5m5-5H6"/>'],
+        [folder, '<path d="M3 7V5h6l2 2h10v13H3Z"/>'],
+        [close, '<path d="m6 6 12 12M6 18 18 6"/>'],
+      ]) {
+        if (button.querySelector("svg")) continue;
+        const label = button.textContent;
+        button.setAttribute("aria-label", label);
+        button.title = label;
+        button.innerHTML = `<svg class="xt-compact-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${path}</svg><span>${label}</span>`;
+      }
       back.addEventListener("click", () => {
         if (
           !running &&
@@ -673,6 +690,7 @@
         status.textContent = "";
       } catch (error) {
         if (!current()) return;
+        delete status.dataset.saved;
         context.loadingMedia = false;
         status.textContent = linked
           ? `${error.message} Open the episode folder to create a replacement.`
@@ -688,6 +706,7 @@
       }
     }
     async function choose() {
+      delete status.dataset.saved;
       catalogueObserver?.disconnect();
       delete dialog.dataset.editor;
       handoff?.close();

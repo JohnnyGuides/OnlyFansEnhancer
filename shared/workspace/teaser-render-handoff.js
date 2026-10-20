@@ -13,7 +13,22 @@
   }) {
     const bar = document.createElement("div");
     bar.className = "xt-render-handoff";
-    bar.hidden = true;
+    bar.setAttribute("popover", "auto");
+    bar.id = `teaser-vegas-${date}`;
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "xt-action xt-vegas-trigger";
+    trigger.innerHTML =
+      'Vegas<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+    trigger.hidden = true;
+    trigger.setAttribute("popovertarget", bar.id);
+    trigger.setAttribute("aria-label", "Vegas project and render");
+    heading.insertBefore(trigger, heading.querySelector("button"));
+    trigger.addEventListener("click", () => {
+      const bounds = trigger.getBoundingClientRect();
+      bar.style.top = `${bounds.bottom + 8}px`;
+      bar.style.left = `${Math.max(12, Math.min(bounds.left, window.innerWidth - 412))}px`;
+    });
     const project = document.createElement("select");
     project.setAttribute("aria-label", "Vegas project");
     const button = (text, run) => {
@@ -25,6 +40,7 @@
         "click",
         () =>
           void run().catch((error) => {
+            delete status.dataset.saved;
             status.textContent = error.message;
           }),
       );
@@ -52,7 +68,16 @@
       await poll();
     });
     review.hidden = true;
-    bar.append(project, edit, browse, name, copyName, folder, state, review);
+    const projectLabel = document.createElement("label");
+    projectLabel.textContent = "Vegas project";
+    projectLabel.append(project);
+    const projectActions = document.createElement("div");
+    projectActions.className = "xt-render-actions";
+    projectActions.append(edit, browse);
+    const output = document.createElement("div");
+    output.className = "xt-render-output";
+    output.append(name, copyName, folder);
+    bar.append(projectLabel, projectActions, output, state, review);
     heading.after(bar);
     let meta = {},
       key = "",
@@ -94,6 +119,7 @@
       project.disabled = browse.disabled = isBusy();
       name.textContent = meta.renderName || "";
       name.title = meta.renderPath || "";
+      output.hidden = !meta.renderName;
       copyName.hidden = folder.hidden = !meta.renderName;
     }
     project.addEventListener("change", () => {
@@ -192,7 +218,8 @@
         clearTimeout(timer);
         key = episodeKey;
         active = enabled && Boolean(key);
-        bar.hidden = !active;
+        trigger.hidden = !active;
+        bar.hidePopover();
         meta = {};
         awaiting = 0;
         locked = Boolean(getContext()?.draft?.sessionId);
@@ -248,7 +275,8 @@
         active = false;
         ++generation;
         clearTimeout(timer);
-        bar.hidden = true;
+        trigger.hidden = true;
+        bar.hidePopover();
       },
     };
   }

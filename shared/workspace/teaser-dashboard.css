@@ -1417,10 +1417,11 @@ html:has(.xt-picker[open]) {
   color: #65cfff;
   font-size: 0.9rem;
 }
+/* The editor has one toolbar; Vegas details stay in its popover. */
 .xt-composer-dialog[data-editor] {
   box-sizing: border-box;
-  width: min(1080px, calc(100vw - 32px));
-  height: min(660px, calc(100dvh - 32px));
+  width: min(1040px, calc(100vw - 32px));
+  height: min(480px, calc(100dvh - 32px));
   max-height: calc(100dvh - 32px);
   overflow: hidden;
 }
@@ -1431,6 +1432,7 @@ html:has(.xt-picker[open]) {
 .xt-composer-dialog[data-editor] .xt-composer-heading {
   flex: none;
   flex-wrap: nowrap;
+  gap: 8px;
 }
 .xt-composer-dialog[data-editor] .xt-composer-heading h2 {
   white-space: nowrap;
@@ -1441,61 +1443,92 @@ html:has(.xt-picker[open]) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 12px 20px 0;
+  padding: 16px 20px 0;
 }
 .xt-composer-dialog[data-editor] .xt-composer-frame {
   height: 100% !important;
   margin: 0;
 }
 .xt-composer-dialog[data-editor] .xt-composer-status {
-  flex: none;
-  display: block;
-  min-height: 18px;
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 60px;
+  margin: 0;
   font-size: 12px;
-  margin: 4px 20px 10px;
+  background: #101821;
 }
-.xt-render-handoff {
-  box-sizing: border-box;
-  min-height: 64px;
-  align-content: center;
-  display: flex;
-  flex: none;
-  flex-wrap: wrap;
+.xt-composer-dialog[data-editor] .xt-composer-status:empty,
+.xt-composer-dialog[data-editor] .xt-composer-status[data-saved] {
+  display: none;
+}
+.xt-vegas-trigger {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 20px;
-  border-block: 1px solid #293b4b;
 }
-.xt-render-handoff[hidden],
+.xt-vegas-trigger[hidden],
 .xt-render-handoff [hidden] {
   display: none;
 }
+.xt-compact-icon {
+  display: none;
+}
+.xt-render-handoff {
+  box-sizing: border-box;
+  inset: auto;
+  width: min(400px, calc(100vw - 24px));
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid #344657;
+  border-radius: 12px;
+  background: #101821;
+  color: #edf3fc;
+  font: inherit;
+  font-size: 13px;
+}
+.xt-render-handoff:popover-open {
+  display: grid;
+  gap: 12px;
+}
+.xt-render-handoff label {
+  display: grid;
+  gap: 8px;
+}
 .xt-render-handoff select {
+  width: 100%;
   min-width: 0;
-  max-width: 240px;
+  padding: 8px;
   border: 1px solid #344657;
   border-radius: 8px;
   background: #17222e;
   color: #edf3fc;
-  padding: 8px;
   font: inherit;
-  font-size: 12px;
 }
-.xt-render-handoff .xt-action {
-  padding: 7px 10px;
-  font-size: 12px;
+.xt-render-actions {
+  display: flex;
+  gap: 8px;
+}
+.xt-render-output {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #293b4b;
+  padding-top: 12px;
 }
 .xt-render-name {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
 }
 .xt-render-state {
   color: #b7c9d9;
   font-size: 12px;
-  margin-left: auto;
+}
+.xt-render-state:empty {
+  display: none;
 }
 @media (max-width: 600px) {
   .xt-composer-dialog[data-editor] {
@@ -1504,24 +1537,25 @@ html:has(.xt-picker[open]) {
     max-height: calc(100dvh - 12px);
   }
   .xt-composer-dialog[data-editor] .xt-composer-heading {
-    gap: 6px;
     padding: 10px;
-    flex-wrap: wrap;
+    gap: 6px;
+    flex-wrap: nowrap;
   }
   .xt-composer-dialog[data-editor] .xt-composer-heading h2 {
-    flex-basis: 100%;
+    flex-basis: auto;
+    font-size: 14px;
   }
   .xt-composer-dialog[data-editor] .xt-composer-heading .xt-action {
-    padding: 7px 9px;
-    font-size: 12px;
+    padding: 7px 8px;
   }
-  .xt-render-handoff {
-    min-height: 150px;
-    padding: 8px 10px;
-    gap: 6px;
+  .xt-composer-dialog[data-editor]
+    .xt-composer-heading
+    .xt-action:has(.xt-compact-icon)
+    span {
+    display: none;
   }
-  .xt-render-handoff select {
-    max-width: 160px;
+  .xt-composer-dialog[data-editor] .xt-compact-icon {
+    display: block;
   }
   .xt-composer-dialog[data-editor] .xt-composer-content {
     padding-inline: 10px;

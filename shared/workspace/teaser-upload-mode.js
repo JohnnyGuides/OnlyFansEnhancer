@@ -12,11 +12,15 @@
     document.body.append(frameDialog);
     frameDialog.querySelector("h2").textContent = "Choose frame";
     const get = (selector) => document.querySelector(selector);
-    const notify = (type, extra = {}) =>
+    const notify = (type, extra = {}) => {
+      const button = get("#saveTeaserDraft");
+      if (button && (type === "saved" || type === "dirty"))
+        button.textContent = type === "saved" ? "Saved" : "Save draft";
       window.parent.postMessage(
         { type: `ofenhancer:teaser-${type}`, ...extra },
         location.origin,
       );
+    };
     const caption = get("#socialCaption");
     const captionLabel = caption.previousElementSibling;
     caption.maxLength = 280;
@@ -26,8 +30,18 @@
     const panel = document.createElement("div");
     panel.className = "teaser-preview-panel";
     panel.innerHTML =
-      '<div class="teaser-planner-media"><video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-thumbnail-panel"><img alt="Teaser thumbnail" hidden><button type="button" class="teaser-use-frame">Choose frame</button><label class="teaser-thumbnail-upload">Image<input type="file" accept="image/png,image/jpeg" hidden></label></div></div><div class="teaser-planner-settings"><div class="teaser-planner-posts"></div></div>';
+      '<div class="teaser-planner-media"><video class="teaser-video-preview" controls playsinline preload="auto" aria-label="Teaser preview"></video><div class="teaser-media-controls file-actions"><div class="teaser-thumbnail-panel"><button type="button" class="teaser-use-frame" aria-label="Choose frame" title="Choose thumbnail frame"><img alt="Teaser thumbnail" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m3 16 5-5 4 4 3-3 6 6"/></svg></button><label class="teaser-thumbnail-upload" title="Upload thumbnail image"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 16V3m-4 4 4-4 4 4M4 15v5h16v-5"/></svg><input type="file" accept="image/png,image/jpeg" aria-label="Upload thumbnail image" hidden></label></div></div></div><div class="teaser-planner-settings"><div class="teaser-planner-posts"></div></div>';
     caption.previousElementSibling.before(panel);
+    const uploadThumbnail = panel.querySelector(".teaser-thumbnail-upload");
+    uploadThumbnail.setAttribute("role", "button");
+    uploadThumbnail.setAttribute("tabindex", "0");
+    uploadThumbnail.setAttribute("aria-label", "Upload thumbnail image");
+    uploadThumbnail.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        uploadThumbnail.querySelector("input").click();
+      }
+    });
     const preview = panel.querySelector("video"),
       image = panel.querySelector("img");
     const chooseVideo = document.createElement("button");
@@ -251,6 +265,9 @@
         notify("running", { running: value });
       },
     });
+    panel
+      .querySelector(".teaser-media-controls")
+      .append(panel.querySelector(".teaser-ending"));
     updateLinked();
     function fail(error) {
       get("#uploadError").textContent = error.message;
