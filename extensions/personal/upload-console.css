@@ -3805,3 +3805,88 @@ a {
 .calendar-teaser .thumbnail-frame-header h2 {
   font-size: 16px;
 }
+/* Calendar composition keeps its viewport and action positions during media work. */
+body.calendar-teaser {
+  height: 100dvh;
+  overflow: hidden;
+}
+.calendar-teaser main {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.calendar-teaser #uploaderPanel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.calendar-teaser .teaser-planner-media {
+  position: relative;
+}
+.calendar-teaser .teaser-planner-media > .teaser-video-preview[hidden] {
+  display: block;
+  visibility: hidden;
+}
+.calendar-teaser .teaser-choose-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  aspect-ratio: 1;
+  height: auto;
+  min-height: 0;
+}
+.calendar-teaser .teaser-association {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+}
+.calendar-teaser .teaser-association .xt-episode-folder {
+  display: none;
+}
+.calendar-teaser .teaser-thumbnail-panel {
+  min-height: 42px;
+  flex-wrap: nowrap;
+}
+.calendar-teaser .teaser-ending[hidden] {
+  display: flex;
+  visibility: hidden;
+  pointer-events: none;
+}
+.calendar-teaser .teaser-ending {
+  min-height: 30px;
+}
+.calendar-teaser .teaser-planner-posts {
+  min-height: 44px;
+}
+.calendar-teaser #uploadActions.upload-actions {
+  box-sizing: border-box;
+  min-height: 100px;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-block: 10px;
+}
+.calendar-teaser #uploadActions > .social-auto-mode {
+  margin-right: auto;
+}
+.calendar-teaser #uploadActions > .action-status {
+  display: block;
+  max-height: 42px;
+  overflow: auto;
+  flex-basis: 100%;
+  order: 2;
+  min-height: 30px;
+  margin: 0;
+}
+.calendar-teaser #uploadActions > .action-secondary {
+  order: 3;
+}
+.calendar-teaser #uploadActions > #uploadButton {
+  grid-row: 1;
+}

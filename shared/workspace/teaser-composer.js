@@ -151,6 +151,21 @@
       loading = false,
       running = false,
       postId = "";
+    const handoff = global.OFEnhancerTeaserRenderHandoff?.mount({
+      dialog,
+      heading,
+      date,
+      request,
+      status,
+      getContext: () => context,
+      getFrame: () => iframe,
+      busy: () =>
+        running ||
+        loading ||
+        Boolean(context?.draft?.sessionId) ||
+        Boolean(postId),
+      loadFile: (clip, current) => clipFile(clip, request, status, current),
+    });
     async function refreshDestinations() {
       const scrollTop = destination.scrollTop;
       const [reddit, twitter, batch] = await Promise.all([
@@ -496,6 +511,7 @@
         event.origin !== location.origin
       )
         return;
+      handoff?.receive(event.data || {});
       if (event.data?.type === "ofenhancer:teaser-ready")
         iframe.contentWindow.postMessage(
           { type: "ofenhancer:teaser-context", ...context },
@@ -505,13 +521,26 @@
       if (
         event.data?.type === "ofenhancer:teaser-episode" &&
         typeof event.data.title === "string"
-      )
+      ) {
         title.textContent = event.data.title || `Teaser · ${dayLabel(date)}`;
-      if (event.data?.type === "ofenhancer:teaser-running")
+        if (
+          event.data.episodeKey &&
+          event.data.episodeKey !== context?.episodeKey
+        ) {
+          context.episodeKey = event.data.episodeKey;
+          const folder = heading.querySelector(".xt-episode-folder");
+          if (folder) folder.disabled = false;
+          void handoff?.setEpisode(context.episodeKey, !postId);
+        }
+      }
+      if (event.data?.type === "ofenhancer:teaser-running") {
         running = event.data.running === true;
+        handoff?.refresh();
+      }
       if (
         event.data?.type === "ofenhancer:teaser-size" &&
-        Number.isFinite(event.data.height)
+        Number.isFinite(event.data.height) &&
+        !dialog.dataset.editor
       )
         iframe.style.height = `${Math.min(20000, Math.max(200, event.data.height))}px`;
       if (event.data?.type === "ofenhancer:teaser-saved") {
@@ -532,6 +561,7 @@
       "close",
       () => {
         catalogueObserver?.disconnect();
+        handoff?.close();
         window.removeEventListener("message", receive);
         dialog.remove();
         active = null;
@@ -551,6 +581,7 @@
         return;
       }
       catalogueObserver?.disconnect();
+      dialog.dataset.editor = "true";
       dirty = Boolean(file && !draft);
       title.textContent =
         episodes.find((item) => item.sourceKey === draft?.episodeKey)?.title ||
@@ -574,6 +605,19 @@
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.insertBefore(back, close);
+      const folder = action("Open episode folder");
+      folder.classList.add("xt-episode-folder");
+      folder.disabled = !context.episodeKey;
+      folder.addEventListener("click", async () => {
+        try {
+          await request("openTeaserEpisodeFolder", {
+            episodeKey: context.episodeKey,
+          });
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      });
+      heading.insertBefore(folder, close);
       back.addEventListener("click", () => {
         if (
           !running &&
@@ -594,12 +638,6 @@
         "load",
         () => {
           if (iframe !== frame || !dialog.isConnected) return;
-          const folder =
-            frame.contentDocument?.querySelector(".xt-episode-folder");
-          if (folder) {
-            folder.classList.add("xt-action");
-            heading.insertBefore(folder, close);
-          }
           const posts = frame.contentDocument?.querySelector(
             ".teaser-planner-posts",
           );
@@ -611,13 +649,7 @@
         { once: true },
       );
       content.replaceChildren(iframe);
-      content.animate(
-        [
-          { opacity: 0, transform: "translateY(6px)" },
-          { opacity: 1, transform: "none" },
-        ],
-        { duration: 180, easing: "ease-out" },
-      );
+      void handoff?.setEpisode(context.episodeKey, !postId);
       status.textContent = postId ? "Local Reddit draft · not scheduled." : "";
     }
     async function editClip(clip, linked) {
@@ -652,10 +684,13 @@
         );
       } finally {
         loading = false;
+        handoff?.refresh();
       }
     }
     async function choose() {
       catalogueObserver?.disconnect();
+      delete dialog.dataset.editor;
+      handoff?.close();
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.after(destinations);

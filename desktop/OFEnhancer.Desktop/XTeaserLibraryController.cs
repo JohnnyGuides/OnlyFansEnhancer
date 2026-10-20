@@ -55,7 +55,7 @@ internal sealed partial class XTeaserController
         {
             if (clipReads.Count >= 4) throw new GoogleCatalogueControllerException("teaser-read-busy");
             string root = settings().XTeaserRoot ?? throw new GoogleCatalogueControllerException("x-teaser-inactive");
-            XTeaserLibraryClip clip = store.GetXTeaserLibrary().SingleOrDefault(c => c.ClipId == clipId)
+            XTeaserLibraryClip clip = store.GetXTeaserLibraryClip(clipId)
                 ?? throw new GoogleCatalogueControllerException("teaser-clip-not-found");
             string path = XTeaserFolder.ResolveInside(root, clip.RelPath)
                 ?? throw new GoogleCatalogueControllerException("unsafe-teaser-clip");

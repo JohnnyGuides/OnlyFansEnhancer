@@ -331,6 +331,25 @@ folder operation validates the catalogue key and configured local parent, then
 resolves an exact folder name at that parent or one grouping level below it.
 Missing or ambiguous matches and reparse points are refused.
 
+The composer keeps a fixed viewport, square media stage and reserved action area
+while files load or frame selection opens. `teaser-render-handoff.js` uses the
+native `getTeaserEdit`, `openTeaserProject`, `createTeaserProject`,
+`chooseTeaserProject` and `checkTeaserRender` operations. Episode settings remember
+the selected Vegas project independently of its filename and reserve one unused
+`episode__tNN.mp4` output per day. Template creation copies the configured media
+root's `_template/_.-TEMPLATE-._.veg` into the episode without overwriting files.
+The original template is never edited. A native picker can authorize an existing
+project outside that folder; web requests cannot supply arbitrary full paths.
+
+Only the expected output is polled while the editor is open. A stable size/mtime,
+read handle denying writers, hash and browser decode precede replacement. Normal
+file changes invalidate the ready cache immediately; a 15-second rehash also
+detects rewrites preserving timestamps. Each replacement updates only its indexed
+path, retains draft fields and refreshes the first-frame or chosen-frame thumbnail;
+uploaded images survive. Pending render drafts persist without a video. Execution
+checkpoints prevent automatic replacement; a new render remains available for
+review. No Vegas render automation or live-post replacement is performed.
+
 X plans optionally carry minute-aligned UTC time, IANA timezone, the sensitive
 warning and reply delay. The social ledger records scheduleAttempted before the
 final click; an uncertain result cannot click Schedule again. A one-minute Chrome

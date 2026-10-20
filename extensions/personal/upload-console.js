@@ -3634,12 +3634,8 @@
             : job.scheduleAttempted
               ? "unresolved"
               : "prepared";
-        void globalThis.OFEnhancerTeaserDrafts.checkpoint(
-          calendarTeaser.day,
-          status,
-          activeSession.id,
-        )
-          .then(() => calendarTeaser.notify("saved"))
+        void calendarTeaser
+          .checkpoint(status, activeSession.id)
           .catch((error) => {
             uploadError.textContent = error.message;
           });
@@ -4662,11 +4658,7 @@
         if (socialPlan) {
           await activeSession.whenBound;
           if (calendarTeaser)
-            await globalThis.OFEnhancerTeaserDrafts.checkpoint(
-              calendarTeaser.day,
-              "preparing",
-              sessionId,
-            );
+            await calendarTeaser.checkpoint("preparing", sessionId);
           prepareDispatched = true;
           const preparedSocial = await sendMessage({
             type: "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
@@ -4679,11 +4671,7 @@
           });
           activeSession.accepted = true;
           if (calendarTeaser)
-            await globalThis.OFEnhancerTeaserDrafts.checkpoint(
-              calendarTeaser.day,
-              "prepared",
-              sessionId,
-            );
+            await calendarTeaser.checkpoint("prepared", sessionId);
           for (const [destination, target] of Object.entries(
             preparedSocial.socialDistribution?.targets || {},
           ))
@@ -6195,7 +6183,11 @@
           );
         if (!frameOperationCurrent(generation, source, proof)) return;
         if (calendarTeaser) {
-          calendarTeaser.setThumbnail(generated);
+          calendarTeaser.setThumbnail(generated, {
+            kind: "frame",
+            seconds,
+            crop: selectedFrameCrop,
+          });
           closeFrameDialog();
           return;
         }

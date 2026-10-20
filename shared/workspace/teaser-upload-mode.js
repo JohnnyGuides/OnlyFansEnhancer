@@ -131,7 +131,20 @@
       association.hidden = Boolean(hub.candidate());
       changeMatch.title = "Choose a catalogue episode";
       const title = hub.candidate()?.title || context?.file?.name;
-      if (title) notify("episode", { title });
+      if (
+        context &&
+        hub.candidate()?.id &&
+        context.episodeKey !== hub.candidate().id
+      ) {
+        context.episodeKey = hub.candidate().id;
+        context.renderPending = false;
+        context.renderHash = "";
+      }
+      if (title)
+        notify("episode", {
+          title,
+          episodeKey: hub.candidate()?.id || context?.episodeKey || "",
+        });
       folder.hidden = !hub.candidate();
       changeMatch.setAttribute("aria-label", "Link episode");
     };
@@ -198,10 +211,12 @@
         context?.postId || "",
       );
       context.draft = draft;
+      notify("render-lock", { locked: true });
       notify("saved");
       return draft;
     }
     let thumbnail = null,
+      thumbnailSelection = { kind: "auto" },
       context = null,
       revision = 0,
       videoUrl = "",
@@ -211,7 +226,12 @@
     const ending = global.OFEnhancerTeaserEnding.mount({
       preview,
       getFile: () => hub.file(),
-      useFile: acceptFile,
+      useFile: (file) =>
+        acceptFile(file, {
+          clipId: context?.clipId,
+          renderHash: context?.renderHash,
+          preserve: true,
+        }),
       locked: () =>
         Boolean(context?.draft?.sessionId || context?.platform === "reddit"),
       busy: () => hub.busy(),
@@ -235,7 +255,8 @@
     function fail(error) {
       get("#uploadError").textContent = error.message;
     }
-    function useThumbnail(file, dirty = true) {
+    function useThumbnail(file, dirty = true, selection = thumbnailSelection) {
+      thumbnailSelection = selection;
       ++revision;
       if (imageUrl) URL.revokeObjectURL(imageUrl);
       thumbnail = file;
@@ -249,6 +270,9 @@
       preview.hidden = false;
       panel.querySelector(".teaser-thumbnail-panel").hidden = false;
       chooseVideo.hidden = true;
+      panel
+        .querySelectorAll(".teaser-use-frame,.teaser-thumbnail-upload input")
+        .forEach((control) => (control.disabled = false));
       const current = ++revision;
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       videoUrl = URL.createObjectURL(file);
@@ -262,9 +286,15 @@
                 type: restored.type || "image/png",
               }),
             ))) ||
-          (await global.CreatorMediaGenerator.thumbnailFromVideo(file, 0, {
-            square: true,
-          }));
+          (await global.CreatorMediaGenerator.thumbnailFromVideo(
+            file,
+            thumbnailSelection.kind === "frame"
+              ? thumbnailSelection.seconds
+              : 0,
+            thumbnailSelection.kind === "frame"
+              ? thumbnailSelection.crop
+              : { square: true },
+          ));
         if (current === revision) useThumbnail(frame, !restored);
       } catch (error) {
         fail(
@@ -275,7 +305,8 @@
       }
     }
     async function saveDraft() {
-      if (!hub.file()) throw new Error("Choose a teaser video.");
+      if (!hub.file() && !context?.renderPending)
+        throw new Error("Choose a teaser video.");
       if (
         !time.validity.valid ||
         !time.value ||
@@ -302,10 +333,14 @@
         caption: caption.value,
         episodeKey: candidate?.id || "",
         clipId: context?.clipId,
+        renderPending: context?.renderPending === true,
+        renderHash: context?.renderHash || "",
+        thumbnailSelection,
         time: time.value,
         replyDelayMinutes: Number(replyDelay.value),
         paidUrl: hub.paidUrl(),
       });
+      context.draft = saved;
       notify("saved");
       if (!reddit) remember();
       if (!reddit && candidate?.id && window.parent.OFEnhancerHost) {
@@ -355,13 +390,15 @@
         const file = event.target.files?.[0];
         if (file && !hub.busy()) {
           try {
-            useThumbnail(await hub.normalizeThumbnail(file));
+            useThumbnail(await hub.normalizeThumbnail(file), true, {
+              kind: "image",
+            });
           } catch (error) {
             fail(error);
           }
         }
       });
-    function acceptFile(file) {
+    function acceptFile(file, render = null) {
       if (
         !file.size ||
         file.size >= 512 * 1024 * 1024 ||
@@ -373,12 +410,25 @@
       file.source = "generated";
       if (context && context.file !== file) context.clipId = null;
       if (context) context.file = file;
+      if (context && render) {
+        context.clipId = render.clipId;
+        context.renderHash = render.renderHash;
+        if (!render.preserve) context.renderPending = true;
+      } else if (context) {
+        context.renderPending = false;
+        context.renderHash = "";
+        thumbnailSelection = { kind: "auto" };
+        notify("render-manual");
+      }
       if (context) context.loadingMedia = false;
       save.disabled = Boolean(context?.draft?.sessionId);
       chooseVideo.textContent = "Choose or drop teaser video";
       chooseVideo.title = "";
       hub.setFile(file);
-      previewReady = showFile(file);
+      previewReady = showFile(
+        file,
+        render && thumbnailSelection.kind === "image" ? thumbnail : null,
+      );
       notify("dirty");
       if (!hub.candidate())
         void hub
@@ -406,6 +456,95 @@
       if (
         event.source === window.parent &&
         event.origin === location.origin &&
+        event.data?.date === day &&
+        context &&
+        event.data.episodeKey === context.episodeKey
+      ) {
+        if (
+          event.data.type === "ofenhancer:teaser-render-waiting" &&
+          !hub.busy() &&
+          !context.draft?.sessionId &&
+          context.platform !== "reddit"
+        ) {
+          context.renderPending = true;
+          try {
+            await saveDraft();
+          } catch (error) {
+            fail(error);
+          }
+          return;
+        }
+        if (event.data.type === "ofenhancer:teaser-render-file") {
+          const result = event.data;
+          const currentRevision = revision;
+          if (
+            hub.busy() ||
+            context.draft?.sessionId ||
+            context.platform === "reddit" ||
+            !(result.file instanceof File)
+          ) {
+            notify("render-review");
+            return;
+          }
+          const probe = document.createElement("video");
+          const probeUrl = URL.createObjectURL(result.file);
+          try {
+            await new Promise((resolve, reject) => {
+              const timer = setTimeout(
+                () => reject(new Error("The render cannot be previewed yet.")),
+                10000,
+              );
+              probe.onloadeddata = () => {
+                clearTimeout(timer);
+                resolve();
+              };
+              probe.onerror = () => {
+                clearTimeout(timer);
+                reject(
+                  new Error(
+                    "The render is not playable. Render again and retry.",
+                  ),
+                );
+              };
+              probe.preload = "auto";
+              probe.src = probeUrl;
+            });
+            if (
+              currentRevision !== revision ||
+              result.episodeKey !== context.episodeKey ||
+              hub.busy() ||
+              context.draft?.sessionId
+            ) {
+              notify("render-review");
+              return;
+            }
+            acceptFile(result.file, result);
+            await previewReady;
+            if (
+              context.file !== result.file ||
+              result.episodeKey !== context.episodeKey ||
+              hub.busy() ||
+              context.draft?.sessionId
+            ) {
+              notify("render-review");
+              return;
+            }
+            await saveDraft();
+            notify("render-attached", { renderHash: result.renderHash });
+          } catch (error) {
+            fail(error);
+            notify("render-review");
+          } finally {
+            probe.removeAttribute("src");
+            probe.load();
+            URL.revokeObjectURL(probeUrl);
+          }
+          return;
+        }
+      }
+      if (
+        event.source === window.parent &&
+        event.origin === location.origin &&
         event.data?.type === "ofenhancer:teaser-file-error" &&
         event.data.date === day &&
         event.data.clipId === context?.clipId &&
@@ -427,7 +566,11 @@
       ) {
         context.file = event.data.file;
         context.loadingMedia = false;
-        acceptFile(context.file);
+        acceptFile(context.file, {
+          clipId: event.data.clipId,
+          renderHash: "",
+          preserve: true,
+        });
         save.disabled = false;
         return;
       }
@@ -447,6 +590,11 @@
         return;
       accepted = true;
       context = event.data;
+      thumbnailSelection = context.draft?.thumbnailSelection || {
+        kind: context.draft?.thumbnail ? "image" : "auto",
+      };
+      context.renderPending = context.draft?.renderPending === true;
+      context.renderHash = context.draft?.renderHash || "";
       save.disabled = Boolean(context.loadingMedia);
       if (context.loadingMedia) chooseVideo.textContent = "Loading video…";
       if (context.mediaError) {
@@ -490,7 +638,9 @@
         previewReady = showFile(context.file, context.draft?.thumbnail);
       else {
         preview.hidden = true;
-        panel.querySelector(".teaser-thumbnail-panel").hidden = true;
+        panel
+          .querySelectorAll(".teaser-use-frame,.teaser-thumbnail-upload input")
+          .forEach((control) => (control.disabled = true));
       }
       if (context.draft?.sessionId) {
         save.disabled = true;
@@ -559,7 +709,8 @@
       notify,
       locked: () => Boolean(context?.draft?.sessionId),
       thumbnail: () => thumbnail,
-      setThumbnail: useThumbnail,
+      setThumbnail: (file, selection) =>
+        useThumbnail(file, true, selection || { kind: "auto" }),
       options: () => {
         if (
           !time.validity.valid ||

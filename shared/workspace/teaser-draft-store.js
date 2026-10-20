@@ -83,10 +83,15 @@
   async function save(draft) {
     if (
       !validDay(draft?.date) ||
-      !(draft.file instanceof File) ||
-      !draft.file.size ||
-      draft.file.size >= MAX_FILE ||
-      !/\.(mp4|mov|m4v|webm)$/i.test(draft.file.name) ||
+      (!(
+        draft.renderPending === true &&
+        draft.file === null &&
+        draft.episodeKey
+      ) &&
+        (!(draft.file instanceof File) ||
+          !draft.file.size ||
+          draft.file.size >= MAX_FILE ||
+          !/\.(mp4|mov|m4v|webm)$/i.test(draft.file.name))) ||
       typeof draft.caption !== "string" ||
       draft.caption.length > 280 ||
       (draft.time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(draft.time)) ||
@@ -104,6 +109,9 @@
       caption: draft.caption,
       episodeKey: String(draft.episodeKey || ""),
       clipId: draft.clipId || null,
+      renderPending: draft.renderPending === true,
+      renderHash: String(draft.renderHash || ""),
+      thumbnailSelection: draft.thumbnailSelection || { kind: "auto" },
       time: /^\d{2}:\d{2}$/.test(draft.time || "") ? draft.time : "18:00",
       replyDelayMinutes:
         Number.isInteger(draft.replyDelayMinutes) &&
@@ -130,7 +138,7 @@
             others.length >= 61 ||
             others.reduce(
               (size, item) => size + (item.file?.size || 0),
-              record.file.size +
+              (record.file?.size || 0) +
                 posts.result.reduce(
                   (size, item) => size + (item.file?.size || 0),
                   0,

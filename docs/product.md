@@ -168,6 +168,21 @@ Reddit drafts appear as a compact count beneath that day. One teaser planner sho
 a square preview beside all destination posts; selecting a row edits that post's
 settings without opening another modal. Its first-frame poster and chosen images
 are square; the main uploader retains its existing landscape cover format.
+
+The teaser editor keeps its preview, window and action buttons in place while
+media loads or a thumbnail frame is selected. **Edit in Vegas** remembers the
+episode's chosen `.veg` project, whatever its name. Other projects remain
+available in the project selector or **Choose project…**. **New from template**
+creates an episode-local copy of the existing Vegas template.
+Opening a project reserves an unused render name in the teaser output folder;
+**Copy name** and **Copy folder** provide the two Vegas render fields.
+After rendering there, the finished video attaches automatically while the
+editor is open, including after reopening a saved pending draft. Rendering over
+that same output again refreshes the preview without changing the caption,
+posting time or destinations. Automatic and selected-frame thumbnails refresh;
+uploaded thumbnail images stay. A teaser already tied to an upload run keeps its
+current media and shows that an updated render is available for review.
+
 Twitter teasers offer a compact **Suction ending** checkbox and a settings gear
 for square source videos at least one second long. The gear opens a modal
 containing a seekable MP4 preview, warp mode, target, speed and export controls. The creator previews the ending warp toward an adjustable

@@ -144,6 +144,7 @@
     "app/teaser-dashboard.css": "shared/workspace/teaser-dashboard.css",
     "app/teaser-dashboard.js": "shared/workspace/teaser-dashboard.js",
     "app/teaser-draft-store.js": "shared/workspace/teaser-draft-store.js",
+    "app/teaser-render-handoff.js": "shared/workspace/teaser-render-handoff.js",
     "app/teaser-composer.js": "shared/workspace/teaser-composer.js",
     "app/teaser-upload-mode.js": "shared/workspace/teaser-upload-mode.js",
     "app/teaser-ending.js": "shared/workspace/teaser-ending.js",

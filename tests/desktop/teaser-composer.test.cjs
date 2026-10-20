@@ -18,7 +18,7 @@ let origin;
 let browser;
 
 const hostPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/teaser-dashboard.css"></head><body>
-<button id="open-day">Open Tuesday</button><script src="/app/teaser-draft-store.js"></script><script src="/app/teaser-composer.js"></script><script>
+<button id="open-day">Open Tuesday</button><script src="/app/teaser-draft-store.js"></script><script src="/app/teaser-render-handoff.js"></script><script src="/app/teaser-composer.js"></script><script>
 document.querySelector('#open-day').addEventListener('click', () => OFEnhancerTeaserComposer.open({date:'${DAY}',episodes:[],request:async op=>op==='getTeaserClips'?{clips:[]}:{ok:true}}));
 </script></body></html>`;
 
@@ -210,6 +210,263 @@ async function chooseSyntheticVideo(page) {
   );
   return frame;
 }
+
+test("Vegas handoff resumes pending drafts and refreshes same-name renders without moving the editor", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 1000 },
+  });
+  const waitDraft = async (predicate) => {
+    for (let i = 0; i < 120; i++) {
+      const draft = await page.evaluate(() =>
+        OFEnhancerTeaserDrafts.get("2026-10-06"),
+      );
+      if (predicate(draft)) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Draft did not reach the expected render state");
+  };
+  const bytes = fs.readFileSync(VIDEO);
+  const replacement = Buffer.concat([bytes, Buffer.from("rerender-test")]);
+  const fixture = (buffer) => ({
+    chunk: buffer.toString("base64"),
+    size: buffer.length,
+    sha256: require("node:crypto")
+      .createHash("sha256")
+      .update(buffer)
+      .digest("hex"),
+  });
+  try {
+    const errors = await mount(page, true);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.evaluate(
+      ({ first, second }) => {
+        window.renderFixtures = [first, second];
+        window.renderVersion = -1;
+        window.renderPrepared = false;
+        window.editRequests = [];
+        window.openEdit = () =>
+          OFEnhancerTeaserComposer.open({
+            date: "2026-10-06",
+            episode: { sourceKey: "preview-test", title: "Preview test" },
+            episodes: [{ sourceKey: "preview-test", title: "Preview test" }],
+            request: async (op, payload) => {
+              editRequests.push({ op, payload });
+              const meta = {
+                episodeKey: "preview-test",
+                projectName: "TEASR.veg",
+                projects: [
+                  { name: "TEASR.veg", suggested: true },
+                  { name: "episode.veg", suggested: false },
+                ],
+                templateAvailable: true,
+                renderName: renderPrepared ? "preview-test__t01.mp4" : "",
+                renderFolder: "D:\\Media\\.TWEETS",
+                renderPath: "D:\\Media\\.TWEETS\\preview-test__t01.mp4",
+              };
+              if (op === "getTeaserClips") return { clips: [] };
+              if (op === "openTeaserProject") {
+                renderPrepared = true;
+                return { ...meta, renderName: "preview-test__t01.mp4" };
+              }
+              if (op === "getTeaserEdit") return meta;
+              if (op === "checkTeaserRender") {
+                if (renderVersion < 0) return { ...meta, status: "waiting" };
+                return {
+                  ...meta,
+                  status: "ready",
+                  clip: {
+                    clipId: `render-${renderVersion}`,
+                    name: "preview-test__t01.mp4",
+                    lastModified: 1,
+                    ...renderFixtures[renderVersion],
+                  },
+                };
+              }
+              if (op === "getTeaserClipChunk")
+                return {
+                  ...renderFixtures[Number(payload.clipId.slice(-1))],
+                  clipId: payload.clipId,
+                  offset: 0,
+                  token: "fixture",
+                  name: "preview-test__t01.mp4",
+                  done: true,
+                };
+              return { ok: true };
+            },
+          });
+        void openEdit();
+      },
+      { first: fixture(bytes), second: fixture(replacement) },
+    );
+    await page.locator(".xt-composer-frame").waitFor();
+    let frame = page
+      .frames()
+      .find((item) => item.url().includes("?teaserDay="));
+    if (!frame) {
+      await page.waitForFunction(() =>
+        document
+          .querySelector("iframe")
+          ?.contentDocument?.querySelector("#socialCaption"),
+      );
+      frame = page.frames().find((item) => item.url().includes("?teaserDay="));
+    }
+    await frame.locator("#socialCaption").fill("My edited caption");
+    await frame.getByLabel("Posting time", { exact: true }).fill("19:45");
+    const geometry = async () => ({
+      dialog: await page.locator(".xt-composer-dialog").boundingBox(),
+      actions: await frame.locator("#uploadActions").boundingBox(),
+    });
+    const before = await geometry();
+    await page
+      .getByRole("button", { name: "Edit in Vegas", exact: true })
+      .click();
+    await waitDraft((draft) => draft?.renderPending);
+    const pending = await page.evaluate(() =>
+      OFEnhancerTeaserDrafts.get("2026-10-06"),
+    );
+    assert.equal(pending.file, null);
+    assert.equal(pending.caption, "My edited caption");
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.evaluate(() => {
+      renderVersion = 0;
+      void openEdit();
+    });
+    await waitDraft((draft) => draft?.clipId === "render-0");
+    frame = page.frames().find((item) => item.url().includes("?teaserDay="));
+    assert.equal(
+      await frame.locator("#socialCaption").inputValue(),
+      "My edited caption",
+    );
+    assert.equal(
+      await frame.getByLabel("Posting time", { exact: true }).inputValue(),
+      "19:45",
+    );
+    assert.deepEqual(await geometry(), before);
+    await frame.locator(".teaser-thumbnail-upload input").setInputFiles({
+      name: "custom.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZ8AAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(
+      async () =>
+        (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.thumbnailSelection
+          ?.kind === "image",
+    );
+    const imageBefore = await page.evaluate(async () => [
+      ...new Uint8Array(
+        await (
+          await OFEnhancerTeaserDrafts.get("2026-10-06")
+        ).thumbnail.arrayBuffer(),
+      ),
+    ]);
+    await page.evaluate(() => {
+      renderVersion = 1;
+    });
+    await waitDraft((draft) => draft?.clipId === "render-1");
+    const updated = await page.evaluate(async () => {
+      const item = await OFEnhancerTeaserDrafts.get("2026-10-06");
+      return {
+        name: item.file.name,
+        size: item.file.size,
+        caption: item.caption,
+        time: item.time,
+        image: [...new Uint8Array(await item.thumbnail.arrayBuffer())],
+      };
+    });
+    assert.equal(updated.size, replacement.length);
+    assert.equal(updated.name, "preview-test__t01.mp4");
+    assert.equal(updated.caption, "My edited caption");
+    assert.equal(updated.time, "19:45");
+    assert.deepEqual(updated.image, imageBefore);
+    assert.deepEqual(await geometry(), before);
+    await frame
+      .getByRole("button", { name: "Choose frame", exact: true })
+      .click();
+    await frame.waitForFunction(
+      () => !document.querySelector("#useThumbnailFrame").disabled,
+    );
+    await frame.locator("#thumbnailFrameTime").evaluate((input) => {
+      input.value = "500";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await frame.waitForFunction(
+      () => document.querySelector("#thumbnailFrameVideo").currentTime >= 0.9,
+    );
+    await frame.locator("#useThumbnailFrame").click();
+    await frame.waitForFunction(
+      () => !document.querySelector("#thumbnailFrameDialog").open,
+    );
+    assert.deepEqual(await geometry(), before);
+    await frame.locator("#saveTeaserDraft").click();
+    await waitDraft((draft) => draft?.thumbnailSelection?.kind === "frame");
+    await page.evaluate(() => {
+      renderVersion = 0;
+    });
+    await waitDraft((draft) => draft?.clipId === "render-0");
+    const selection = await page.evaluate(
+      async () =>
+        (await OFEnhancerTeaserDrafts.get("2026-10-06")).thumbnailSelection,
+    );
+    assert.equal(selection.kind, "frame");
+    assert.ok(selection.seconds >= 0.9);
+    await frame.locator(".teaser-video-preview").evaluate(async (video) => {
+      video.muted = true;
+      await video.play();
+      video.pause();
+    });
+    const output = process.env.OFENHANCER_HANDOFF_REVIEW_DIR;
+    if (output) {
+      fs.mkdirSync(output, { recursive: true });
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(output, "teaser-handoff-desktop.png") });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page
+        .locator(".xt-composer-dialog")
+        .screenshot({ path: path.join(output, "teaser-handoff-phone.png") });
+      assert.ok(
+        (await page.locator(".xt-composer-dialog").boundingBox()).width <= 390,
+      );
+      assert.ok((await frame.locator("#uploadButton").boundingBox()).y < 844);
+    }
+    await page.evaluate(() => {
+      const f = document.querySelector("iframe");
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: f.contentWindow,
+          origin: location.origin,
+          data: { type: "ofenhancer:teaser-render-lock", locked: true },
+        }),
+      );
+      renderVersion = 1;
+    });
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".xt-render-state").textContent ===
+        "New render available",
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Use updated render" })
+        .isDisabled(),
+      true,
+    );
+    assert.equal(
+      (await page.evaluate(() => OFEnhancerTeaserDrafts.get("2026-10-06")))
+        .clipId,
+      "render-0",
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
 
 test("square teaser previews its Like-directed ending before MP4 export and draft replacement", async () => {
   const work = fs.mkdtempSync(
@@ -611,6 +868,13 @@ test("starting a new calendar draft keeps the teaser editor and selected clip", 
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.locator("#open-day").click();
     await page.locator(".xt-composer-frame").waitFor();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-frame")
+        ?.contentWindow?.location.href.includes(
+          "upload-console.html?teaserDay=",
+        ),
+    );
     frame = page
       .frames()
       .find((item) => item.url().includes("upload-console.html?teaserDay="));
@@ -1061,7 +1325,10 @@ for (const caption of ["Preview test", "My edited caption"])
         OFEnhancerTeaserComposer.open({
           date: "2026-10-06",
           episodes: [{ sourceKey: "preview-test", title: "Preview test" }],
-          request: async () => ({ clips: [] }),
+          request: async (op, payload) =>
+            op === "openTeaserEpisodeFolder"
+              ? window.OFEnhancerHost.request(op, payload)
+              : { clips: [] },
         }),
       );
       await page.locator(".xt-episode-choice").click();

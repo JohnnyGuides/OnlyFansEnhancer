@@ -109,6 +109,7 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
         "getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
         "requestXScan", "getXScanActivity",
         "getTeaserClips", "getTeaserClipChunk", "openTeaserEpisodeFolder", "resolveScheduledTeaserResult",
+        "getTeaserEdit", "openTeaserProject", "createTeaserProject", "chooseTeaserProject", "checkTeaserRender",
     };
 
     internal const int MaxPlanDaysAhead = 60;
@@ -117,6 +118,9 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
     // access runs on the serial request dispatcher.
     internal async Task<object> HandleAsync(string operation, JsonElement payload) => operation switch
     {
+        "getTeaserEdit" => await dispatcher.EnqueueAsync<object>(() => GetTeaserEdit(payload)).ConfigureAwait(false),
+        "checkTeaserRender" => await dispatcher.EnqueueAsync<object>(() => CheckTeaserRender(payload)).ConfigureAwait(false),
+        "openTeaserProject" or "createTeaserProject" or "chooseTeaserProject" => await dispatcher.EnqueueAsync<object>(() => PrepareTeaserProject(payload, operation)).ConfigureAwait(false),
         "getTeaserOverview" => await dispatcher.EnqueueAsync<object>(() => Overview(payload)).ConfigureAwait(false),
         "undoTeaserClipMove" => await UndoAsync(payload).ConfigureAwait(false),
         "getTeaserReplyQueue" => await dispatcher.EnqueueAsync<object>(() => ReplyQueue(payload)).ConfigureAwait(false),
