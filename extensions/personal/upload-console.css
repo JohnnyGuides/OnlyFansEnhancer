@@ -3850,7 +3850,7 @@ body.calendar-teaser {
 .calendar-teaser .teaser-planner-media {
   position: relative;
 }
-.calendar-teaser .teaser-planner-media > .teaser-video-preview[hidden] {
+.calendar-teaser .teaser-video-stage > .teaser-video-preview[hidden] {
   display: block !important;
   visibility: hidden;
 }
@@ -3986,7 +3986,7 @@ body.calendar-teaser {
   padding-right: 20px;
 }
 .calendar-teaser .teaser-choose-video {
-  width: calc(100% - 20px);
+  width: 100%;
   color: #b8c6d6;
   font-size: 14px;
   font-weight: 500;
@@ -4052,4 +4052,32 @@ body.calendar-teaser {
   .calendar-teaser .teaser-planner-publishing .teaser-schedule-row {
     gap: 8px;
   }
+}
+
+.calendar-teaser .teaser-association {
+  display: none;
+}
+.calendar-teaser .teaser-media-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  margin: 0 0 8px;
+  color: #a6b4c5;
+  font-size: 12px;
+}
+.calendar-teaser .teaser-media-header button {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.calendar-teaser .teaser-video-stage {
+  position: relative;
+}
+.calendar-teaser .teaser-choose-video {
+  top: 0;
+}
+.calendar-teaser
+  .teaser-planner-media:has(.teaser-video-preview[hidden])
+  .xt-change-clip {
+  visibility: hidden;
 }

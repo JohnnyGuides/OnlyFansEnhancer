@@ -169,3 +169,87 @@ test("the shared helper stays off third-party documents and attaches only to our
     await page.close();
   }
 });
+
+test("confirmation accepts explicitly, uses safe default focus and restores its opener", async () => {
+  const page = await setup();
+  try {
+    await page.locator("dialog button").focus();
+    await page.evaluate(() => {
+      globalThis.confirmationResult = null;
+      OFEnhancerDialogDismiss.confirm({
+        title: "Discard changes?",
+        message: "Your unsaved edits will be lost.",
+        acceptLabel: "Discard changes",
+        cancelLabel: "Keep editing",
+      }).then((result) => {
+        globalThis.confirmationResult = result;
+      });
+    });
+    const modal = page.locator(".xt-confirm-dialog");
+    assert.equal(await modal.getAttribute("role"), "alertdialog");
+    assert.equal(await modal.locator("h2").textContent(), "Discard changes?");
+    assert.equal(
+      await modal.locator("p").textContent(),
+      "Your unsaved edits will be lost.",
+    );
+    assert.equal(
+      await modal
+        .getByRole("button", { name: "Keep editing" })
+        .evaluate((button) => button === document.activeElement),
+      true,
+    );
+    await modal.getByRole("button", { name: "Discard changes" }).click();
+    await page.waitForFunction(() => globalThis.confirmationResult === true);
+    assert.equal(await modal.count(), 0);
+    assert.equal(
+      await page.locator("dialog").evaluate((dialog) => dialog.open),
+      true,
+    );
+    assert.equal(
+      await page
+        .locator("dialog button")
+        .evaluate((button) => button === document.activeElement),
+      true,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("confirmation cancellation, Escape and outside clicks keep changes and remove the prompt", async () => {
+  const page = await setup();
+  try {
+    for (const dismissal of ["cancel", "escape", "outside"]) {
+      await page.locator("dialog button").focus();
+      await page.evaluate(() => {
+        globalThis.confirmationResult = null;
+        OFEnhancerDialogDismiss.confirm({
+          title: "Discard changes?",
+          message: "Unsaved edits will be lost.",
+        }).then((result) => {
+          globalThis.confirmationResult = result;
+        });
+      });
+      const modal = page.locator(".xt-confirm-dialog");
+      await modal.waitFor();
+      if (dismissal === "cancel")
+        await modal.getByRole("button", { name: "Keep editing" }).click();
+      else if (dismissal === "escape") await page.keyboard.press("Escape");
+      else await page.mouse.click(5, 5);
+      await page.waitForFunction(() => globalThis.confirmationResult === false);
+      assert.equal(await modal.count(), 0);
+      assert.equal(
+        await page.locator("dialog").evaluate((dialog) => dialog.open),
+        true,
+      );
+      assert.equal(
+        await page
+          .locator("dialog button")
+          .evaluate((button) => button === document.activeElement),
+        true,
+      );
+    }
+  } finally {
+    await page.close();
+  }
+});

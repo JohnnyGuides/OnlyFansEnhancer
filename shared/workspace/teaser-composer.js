@@ -204,6 +204,21 @@
     const title = node("h2", "", `Teaser planner · ${dayLabel(date)}`);
     const close = action("Close");
     heading.append(title, close);
+    const more = action("");
+    more.hidden = true;
+    more.setAttribute("aria-label", "File actions");
+    more.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+    const tools = node("div", "xt-render-handoff xt-composer-tools");
+    tools.id = `teaser-file-actions-${date}`;
+    tools.setAttribute("popover", "auto");
+    more.setAttribute("popovertarget", tools.id);
+    heading.insertBefore(more, close);
+    more.addEventListener("click", () => {
+      const bounds = more.getBoundingClientRect();
+      tools.style.top = `${bounds.bottom + 8}px`;
+      tools.style.left = `${Math.max(12, Math.min(bounds.right - 200, window.innerWidth - 212))}px`;
+    });
     const destinations = node("div", "xt-composer-destinations");
     destinations.hidden = true;
     destinations.setAttribute("role", "group");
@@ -247,7 +262,7 @@
     const content = node("div", "xt-composer-content");
     const status = node("p", "xt-composer-status");
     status.setAttribute("role", "status");
-    dialog.append(heading, destinations, content, status);
+    dialog.append(heading, tools, destinations, content, status);
     document.body.append(dialog);
     const opener = document.activeElement;
     let iframe = null,
@@ -541,12 +556,15 @@
         loading = false;
       }
     });
+    const confirmDiscard = () =>
+      global.OFEnhancerDialogDismiss.confirm({
+        title: "Discard changes?",
+        message: "Your unsaved teaser edits will be lost.",
+        acceptLabel: "Discard changes",
+        cancelLabel: "Keep editing",
+      });
     async function switchPost(id) {
-      if (
-        running ||
-        loading ||
-        (dirty && !confirm("Switch posts and discard unsaved changes?"))
-      ) {
+      if (running || loading || (dirty && !(await confirmDiscard()))) {
         return;
       }
       destinations.querySelector(".xt-planner-community-picker")?.remove();
@@ -575,7 +593,17 @@
       }
     }
     removePost.addEventListener("click", async () => {
-      if (running || loading || !confirm("Remove this Reddit draft?")) return;
+      if (
+        running ||
+        loading ||
+        !(await global.OFEnhancerDialogDismiss.confirm({
+          title: "Remove draft?",
+          message: "This Reddit draft will be removed.",
+          acceptLabel: "Remove draft",
+          cancelLabel: "Keep draft",
+        }))
+      )
+        return;
       try {
         await global.OFEnhancerTeaserDrafts.removePost(postId);
         dirty = false;
@@ -585,14 +613,20 @@
         status.textContent = error.message;
       }
     });
-    const closeDialog = () => {
+    let confirming = false;
+    const closeDialog = async () => {
       if (running) {
         status.textContent =
           "Keep this window open while Twitter preparation is running.";
         return;
       }
-      if (dirty && !confirm("Close without saving the changes to this teaser?"))
-        return;
+      if (confirming) return;
+      if (dirty) {
+        confirming = true;
+        const discard = await confirmDiscard();
+        confirming = false;
+        if (!discard || running) return;
+      }
       if (dialog.dataset.closing) return;
       dialog.dataset.closing = "true";
       dialog.inert = true;
@@ -616,6 +650,14 @@
         event.origin !== location.origin
       )
         return;
+      if (
+        event.data?.type === "ofenhancer:teaser-render-manual" &&
+        event.data.file instanceof File
+      ) {
+        context.file = event.data.file;
+        context.clipId = null;
+        context.loadingMedia = false;
+      }
       handoff?.receive(event.data || {});
       if (event.data?.type === "ofenhancer:teaser-ready")
         iframe.contentWindow.postMessage(
@@ -634,9 +676,11 @@
           close.focus();
         }
       }
-      if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
-      if (event.data?.type === "ofenhancer:teaser-dirty")
+      if (event.data?.type === "ofenhancer:teaser-dirty") {
+        dirty = true;
+        if (status.dataset.saved) status.textContent = "";
         delete status.dataset.saved;
+      }
       if (
         event.data?.type === "ofenhancer:teaser-episode" &&
         typeof event.data.title === "string"
@@ -647,13 +691,18 @@
           event.data.episodeKey !== context?.episodeKey
         ) {
           context.episodeKey = event.data.episodeKey;
-          const folder = heading.querySelector(".xt-episode-folder");
+          const folder = tools.querySelector(".xt-episode-folder");
           if (folder) folder.disabled = false;
           void handoff?.setEpisode(context.episodeKey, !postId);
         }
       }
       if (event.data?.type === "ofenhancer:teaser-running") {
         running = event.data.running === true;
+        more.disabled = running;
+        const episodeButton = heading.querySelector(".teaser-link-episode");
+        if (episodeButton)
+          episodeButton.disabled =
+            running || Boolean(context?.draft?.sessionId);
         handoff?.refresh();
       }
       if (
@@ -758,17 +807,21 @@
         platform: postId ? "reddit" : "x",
         loadingMedia: Boolean(clip && !file),
       };
-      const back = action("Change clip");
+      const back = action("Replace video");
       back.classList.add("xt-change-clip");
       heading.querySelector(".xt-choose-video")?.remove();
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.querySelector(".teaser-copy-file")?.remove();
-      heading.insertBefore(back, close);
+      heading.querySelector(".teaser-link-episode")?.remove();
+      tools.hidePopover();
+      tools.replaceChildren();
+      more.hidden = false;
       const folder = action("Open episode folder");
       folder.classList.add("xt-episode-folder");
       folder.disabled = !context.episodeKey;
       folder.addEventListener("click", async () => {
+        tools.hidePopover();
         try {
           await request("openTeaserEpisodeFolder", {
             episodeKey: context.episodeKey,
@@ -777,27 +830,15 @@
           status.textContent = error.message;
         }
       });
-      heading.insertBefore(folder, close);
-      for (const [button, path] of [
-        [back, '<path d="m8 3-5 5 5 5M3 8h15m-2 3 5 5-5 5m5-5H6"/>'],
-        [folder, '<path d="M3 7V5h6l2 2h10v13H3Z"/>'],
-        [close, '<path d="m6 6 12 12M6 18 18 6"/>'],
-      ]) {
-        if (button.querySelector("svg")) continue;
-        const label = button.textContent;
-        button.setAttribute("aria-label", label);
-        button.title = label;
-        button.innerHTML = `<svg class="xt-compact-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${path}</svg><span>${label}</span>`;
-      }
+      tools.append(folder);
+      close.setAttribute("aria-label", "Close");
+      close.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg>';
       back.addEventListener("click", () => {
-        if (
-          !running &&
-          (!dirty || confirm("Replace this clip and discard unsaved changes?"))
-        ) {
-          dirty = false;
-          iframe = null;
-          void choose();
-        }
+        if (!running && !loading)
+          iframe?.contentDocument
+            ?.querySelector("#uploadSocialTeaser")
+            ?.click();
       });
       iframe = node("iframe", "xt-composer-frame");
       iframe.style.visibility = "hidden";
@@ -808,14 +849,28 @@
       const frame = iframe;
       iframe.addEventListener("load", () => {
         if (iframe !== frame || !dialog.isConnected) return;
+        const mediaHeading = frame.contentDocument?.querySelector(
+          ".teaser-media-header",
+        );
+        if (mediaHeading) mediaHeading.append(back);
+        const episodeButton = frame.contentDocument?.querySelector(
+          ".teaser-link-episode",
+        );
+        if (episodeButton) {
+          heading.querySelector(".teaser-link-episode")?.remove();
+          episodeButton.classList.add("xt-action");
+          heading.insertBefore(
+            episodeButton,
+            heading.querySelector(".xt-vegas-trigger") || more,
+          );
+        }
         const copy = frame.contentDocument?.querySelector(".teaser-copy-file");
         if (copy) {
-          heading.querySelector(".teaser-copy-file")?.remove();
+          tools.querySelector(".teaser-copy-file")?.remove();
           copy.classList.add("xt-action");
-          heading.insertBefore(
-            copy,
-            heading.querySelector(".xt-episode-folder") || close,
-          );
+          copy.replaceChildren(document.createTextNode("Copy to .TWEETS"));
+          copy.addEventListener("click", () => tools.hidePopover());
+          tools.append(copy);
         }
         const posts = frame.contentDocument?.querySelector(
           ".teaser-planner-posts",
@@ -890,6 +945,10 @@
       }
     }
     async function choose() {
+      more.hidden = true;
+      tools.hidePopover();
+      tools.replaceChildren();
+      heading.querySelector(".teaser-link-episode")?.remove();
       stopEditorLoading();
       stopPreview();
       previewObserver?.disconnect();

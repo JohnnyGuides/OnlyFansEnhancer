@@ -1666,3 +1666,46 @@ html:has(.xt-picker[open]) {
     white-space: nowrap;
   }
 }
+
+.xt-composer-dialog .xt-action[hidden] {
+  display: none;
+}
+.xt-composer-tools {
+  width: 200px;
+  padding: 6px;
+}
+.xt-composer-tools:popover-open {
+  gap: 4px;
+}
+.xt-composer-tools .xt-action {
+  text-align: left;
+}
+.xt-confirm-dialog {
+  width: min(360px, calc(100vw - 32px));
+  padding: 20px;
+}
+.xt-confirm-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.xt-confirm-dialog p {
+  margin: 0;
+  color: #afbed2;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.xt-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.xt-composer-status {
+  pointer-events: none;
+}
+@media (max-width: 600px) {
+  .xt-composer-dialog[data-editor] {
+    max-width: calc(100vw - 12px);
+  }
+}

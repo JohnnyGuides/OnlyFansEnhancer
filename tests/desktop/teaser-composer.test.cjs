@@ -180,6 +180,18 @@ async function mount(page, linked = false, delaySettings = false) {
   return errors;
 }
 
+async function folderButton(page) {
+  if (
+    !(await page
+      .locator(".xt-composer-tools")
+      .evaluate((menu) => menu.matches(":popover-open")))
+  )
+    await page
+      .getByRole("button", { name: "File actions", exact: true })
+      .click();
+  return page.getByRole("button", { name: "Open episode folder", exact: true });
+}
+
 async function chooseSyntheticVideo(page) {
   const chooser = page.waitForEvent("filechooser");
   if (await page.locator(".xt-clip-add").count())
@@ -256,12 +268,16 @@ test("opening shows the editor layout once and never paints the unfinished Uploa
       "hide the uninitialized uploader",
     );
     assert.equal(
-      await page.locator(".xt-composer-dialog").getAttribute("data-editor"),
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .getAttribute("data-editor"),
       "true",
     );
     assert.equal(await page.locator(".xt-editor-loading").count(), 0);
     assert.equal(
-      await page.locator(".xt-composer-dialog").isVisible(),
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .isVisible(),
       false,
       "do not open a blank modal before the form exists",
     );
@@ -290,7 +306,9 @@ test("empty catalogue opens the editor directly and accepts a chosen video", asy
   try {
     const errors = await mount(page);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.evaluate(() =>
       OFEnhancerTeaserComposer.open({
         date: "2026-10-06",
@@ -308,12 +326,7 @@ test("empty catalogue opens the editor directly and accepts a chosen video", asy
       await frame.locator(".teaser-video-preview").isVisible(),
       true,
     );
-    assert.equal(
-      await page
-        .getByRole("button", { name: "Open episode folder" })
-        .isDisabled(),
-      true,
-    );
+    assert.equal(await (await folderButton(page)).isDisabled(), true);
     assert.deepEqual(errors, []);
   } finally {
     await page.close();
@@ -359,16 +372,13 @@ test("a misnamed teaser can be linked and copied with its caption and thumbnail 
     await frame
       .locator(".teaser-thumbnail-panel img")
       .waitFor({ state: "visible" });
-    const copy = page.getByRole("button", {
-      name: "Copy to .TWEETS",
-      exact: true,
-    });
+    const copy = page.locator(".teaser-copy-file");
     assert.equal(
       await copy.isDisabled(),
       true,
       "episode must be explicitly linked before import",
     );
-    await frame
+    await page
       .getByRole("button", { name: "Link episode", exact: true })
       .click();
     await frame.locator('#catalogueCards [data-row="2"]').click();
@@ -379,7 +389,7 @@ test("a misnamed teaser can be linked and copied with its caption and thumbnail 
     await page.waitForFunction(
       () => !document.querySelector(".teaser-copy-file").disabled,
     );
-    assert.equal(await copy.locator("svg").isVisible(), true);
+    assert.equal(await copy.textContent(), "Copy to .TWEETS");
     await frame.waitForFunction(
       () => document.querySelector(".teaser-video-preview").readyState >= 2,
     );
@@ -388,6 +398,9 @@ test("a misnamed teaser can be linked and copied with its caption and thumbnail 
     await page.screenshot({
       path: path.join(output, "teaser-copy-desktop.png"),
     });
+    await page
+      .getByRole("button", { name: "File actions", exact: true })
+      .click();
     await copy.click();
     await page
       .locator(".xt-composer-status")
@@ -485,7 +498,9 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
   try {
     const errors = await mount(page, true);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.evaluate(
       ({ first, second }) => {
         window.renderFixtures = [first, second];
@@ -561,7 +576,9 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
     await frame.locator("#socialCaption").fill("My edited caption");
     await frame.getByLabel("Posting time", { exact: true }).fill("19:45");
     const geometry = async () => ({
-      dialog: await page.locator(".xt-composer-dialog").boundingBox(),
+      dialog: await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .boundingBox(),
       actions: await frame.locator("#uploadActions").boundingBox(),
     });
     const before = await geometry();
@@ -597,7 +614,9 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
     assert.equal(pending.file, null);
     assert.equal(pending.caption, "My edited caption");
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.evaluate(() => {
       renderVersion = 0;
       void openEdit();
@@ -707,7 +726,11 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
         .locator(".xt-composer-dialog")
         .screenshot({ path: path.join(output, "teaser-handoff-phone.png") });
       assert.ok(
-        (await page.locator(".xt-composer-dialog").boundingBox()).width <= 390,
+        (
+          await page
+            .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+            .boundingBox()
+        ).width <= 390,
       );
       assert.ok(
         (await page.locator(".xt-composer-heading").boundingBox()).height < 64,
@@ -821,12 +844,14 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
       fs.mkdirSync(process.env.OFENHANCER_SUCTION_REVIEW_DIR, {
         recursive: true,
       });
-      await page.locator(".xt-composer-dialog").screenshot({
-        path: path.join(
-          process.env.OFENHANCER_SUCTION_REVIEW_DIR,
-          "suction-planner-compact.png",
-        ),
-      });
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .screenshot({
+          path: path.join(
+            process.env.OFENHANCER_SUCTION_REVIEW_DIR,
+            "suction-planner-compact.png",
+          ),
+        });
     }
     await editor
       .getByRole("checkbox", { name: "Suction ending", exact: true })
@@ -1000,9 +1025,11 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
           video.currentTime = video.duration - 0.45;
         });
       });
-      await page.locator(".xt-composer-dialog").screenshot({
-        path: path.join(captures, "suction-editor-desktop.png"),
-      });
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .screenshot({
+          path: path.join(captures, "suction-editor-desktop.png"),
+        });
       await page.setViewportSize({ width: 390, height: 1000 });
       assert.equal(
         await frame.evaluate(
@@ -1341,7 +1368,9 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     );
     assert.ok(saved.thumbnailSize > 0);
     assert.match(
-      await page.locator(".xt-composer-dialog").getAttribute("aria-label"),
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .getAttribute("aria-label"),
       /Tuesday, Oct 6/,
     );
 
@@ -1394,12 +1423,16 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       "19:20",
     );
     assert.match(
-      await page.locator(".xt-composer-dialog").getAttribute("aria-label"),
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .getAttribute("aria-label"),
       /Tuesday, Oct 6/,
     );
     assert.deepEqual(errors, []);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.evaluate(() =>
       OFEnhancerTeaserComposer.open({
         date: "2026-10-07",
@@ -1436,7 +1469,9 @@ test("indexed clip opens editing before transfer and keeps caption edits when th
   try {
     const errors = await mount(page, true);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     const bytes = fs.readFileSync(VIDEO);
     const sha256 = require("node:crypto")
       .createHash("sha256")
@@ -1472,10 +1507,7 @@ test("indexed clip opens editing before transfer and keeps caption edits when th
       .locator('.xt-clip-choice[data-episode-key="preview-test"]')
       .click();
     const frame = page.frameLocator(".xt-composer-frame");
-    await page
-      .locator(".xt-composer-heading")
-      .getByRole("button", { name: "Open episode folder", exact: true })
-      .waitFor();
+    await (await folderButton(page)).waitFor();
     assert.equal(
       await frame
         .getByRole("button", { name: "Link episode", exact: true })
@@ -1603,7 +1635,9 @@ for (const caption of ["Preview test", "My edited caption"])
     try {
       const errors = await mount(page, true, true);
       await page.getByRole("button", { name: "Close", exact: true }).click();
-      await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .waitFor({ state: "detached" });
       await page.evaluate(() =>
         OFEnhancerTeaserComposer.open({
           date: "2026-10-06",
@@ -1615,7 +1649,7 @@ for (const caption of ["Preview test", "My edited caption"])
         }),
       );
       await page.locator(".xt-episode-choice").click();
-      await page.getByRole("button", { name: "Open episode folder" }).waitFor();
+      await (await folderButton(page)).waitFor();
       await page.waitForFunction(
         () =>
           document
@@ -1665,12 +1699,7 @@ for (const caption of ["Preview test", "My edited caption"])
           .isVisible(),
         false,
       );
-      assert.equal(
-        await page
-          .getByRole("button", { name: "Open episode folder" })
-          .isVisible(),
-        true,
-      );
+      assert.equal(await (await folderButton(page)).isVisible(), true);
       await page.evaluate(() => {
         window.folderRequests = [];
         window.OFEnhancerHost = {
@@ -1678,7 +1707,7 @@ for (const caption of ["Preview test", "My edited caption"])
             window.folderRequests.push({ op, payload }),
         };
       });
-      await page.getByRole("button", { name: "Open episode folder" }).click();
+      await (await folderButton(page)).click();
       assert.deepEqual(await page.evaluate(() => window.folderRequests), [
         {
           op: "openTeaserEpisodeFolder",
@@ -1710,7 +1739,9 @@ test("episode without a teaser opens its folder and accepts a video in the same 
   try {
     const errors = await mount(page, true);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.evaluate(() => {
       window.folderRequests = [];
       window.OFEnhancerHost = {
@@ -1734,7 +1765,7 @@ test("episode without a teaser opens its folder and accepts a video in the same 
           item.url().includes("upload-console.html?teaserDay="),
         ) ||
       (await new Promise((resolve) => page.once("framenavigated", resolve)));
-    await page.getByRole("button", { name: "Open episode folder" }).waitFor();
+    await (await folderButton(page)).waitFor();
     assert.equal(
       await frame
         .getByRole("button", { name: "Link episode", exact: true })
@@ -1749,7 +1780,7 @@ test("episode without a teaser opens its folder and accepts a video in the same 
     assert.equal(await automatic.isChecked(), true);
     await automatic.uncheck();
     assert.equal(await automatic.isChecked(), false);
-    await page.getByRole("button", { name: "Open episode folder" }).click();
+    await (await folderButton(page)).click();
     assert.deepEqual(
       await page.evaluate(() =>
         window.folderRequests.filter(
@@ -1772,12 +1803,10 @@ test("episode without a teaser opens its folder and accepts a video in the same 
     assert.ok(
       await page
         .locator(".xt-episode-folder")
-        .evaluate(
-          (folder) =>
-            folder.parentElement.classList.contains("xt-composer-heading") &&
-            folder.nextElementSibling.textContent === "Close",
+        .evaluate((folder) =>
+          folder.parentElement.classList.contains("xt-composer-tools"),
         ),
-      "episode folder shortcut sits at the top right beside Close",
+      "episode folder lives in the file actions menu",
     );
     await page.screenshot({
       path: path.join(
@@ -1814,7 +1843,9 @@ test("unavailable indexed teaser offers the linked episode folder", async () => 
   try {
     await mount(page, true);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.evaluate(() => {
       window.OFEnhancerHost = {
         request: async (op) => {
@@ -1857,7 +1888,7 @@ test("unavailable indexed teaser offers the linked episode folder", async () => 
           item.url().includes("upload-console.html?teaserDay="),
         ) ||
       (await new Promise((resolve) => page.once("framenavigated", resolve)));
-    await page.getByRole("button", { name: "Open episode folder" }).waitFor();
+    await (await folderButton(page)).waitFor();
     await frame
       .getByRole("button", { name: "Choose replacement video" })
       .waitFor({ state: "visible" });
@@ -1972,9 +2003,19 @@ test("composer ignores forged messages and prevents closing while upload is runn
         location.origin,
       ),
     );
-    page.once("dialog", (prompt) => prompt.accept());
+    await page
+      .getByRole("button", { name: "File actions", exact: true })
+      .waitFor();
+    await page.waitForFunction(
+      () => !document.querySelector('[aria-label="File actions"]').disabled,
+    );
     await page.mouse.click(1, 1);
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .getByRole("button", { name: "Discard changes", exact: true })
+      .click();
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     assert.deepEqual(errors, []);
   } finally {
     await page.close();
@@ -2034,7 +2075,9 @@ test("dropping a video opens the inherited calendar day without a date picker", 
         ?.textContent.includes("preview-test.mp4"),
     );
     assert.match(
-      await page.locator(".xt-composer-dialog").getAttribute("aria-label"),
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .getAttribute("aria-label"),
       /Tuesday, Oct 6/,
     );
     assert.equal(
@@ -2192,12 +2235,14 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       fs.mkdirSync(process.env.OFENHANCER_TEASER_SCREENSHOTS, {
         recursive: true,
       });
-      await page.locator(".xt-composer-dialog").screenshot({
-        path: path.join(
-          process.env.OFENHANCER_TEASER_SCREENSHOTS,
-          "reddit-before-preparation.png",
-        ),
-      });
+      await page
+        .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+        .screenshot({
+          path: path.join(
+            process.env.OFENHANCER_TEASER_SCREENSHOTS,
+            "reddit-before-preparation.png",
+          ),
+        });
     }
     await reddit
       .getByRole("button", { name: "Prepare Reddit", exact: true })
@@ -2343,9 +2388,11 @@ test("Reddit drafts keep separate clips and titles without replacing the Twitter
       .frames()
       .find((item) => item.url().includes("upload-console.html?teaserDay="));
     await other.locator("#socialCaption").waitFor();
-    page.once("dialog", (dialog) => dialog.accept());
     await other
       .getByRole("button", { name: "Remove post", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Remove draft", exact: true })
       .click();
     await page.waitForFunction(
       async (DAY) => (await OFEnhancerTeaserDrafts.listPosts(DAY)).length === 1,
@@ -2434,9 +2481,11 @@ test("worksheet targets share Reddit batch timing, survive midnight and keep a b
     await frame.getByLabel("Search worksheet communities").fill("community_02");
     await frame.locator(".xt-planner-community:visible input").check();
     await frame.getByLabel("Search worksheet communities").fill("");
-    await page.locator(".xt-composer-dialog").screenshot({
-      path: path.join(pickerCaptures, "community-pills-selected.png"),
-    });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .screenshot({
+        path: path.join(pickerCaptures, "community-pills-selected.png"),
+      });
     await frame
       .getByRole("button", { name: "Add selected (2)", exact: true })
       .click();
@@ -2881,7 +2930,9 @@ test("editor is usable before catalogue lookup completes and keeps early edits",
   try {
     await mount(page, true);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
     await page.addInitScript(() => {
       const client = CreatorCatalogueClient;
       const get = client.getCatalogueSnapshot;
@@ -2932,17 +2983,19 @@ test("editor is usable before catalogue lookup completes and keeps early edits",
     assert.equal(viewport.scrollbar, "none");
     const output = path.join(repositoryRoot, ".local/editor-ready-review");
     fs.mkdirSync(output, { recursive: true });
-    await page.locator(".xt-composer-dialog").screenshot({
-      path: path.join(output, "early-editor-desktop.png"),
-      animations: "disabled",
-    });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .screenshot({
+        path: path.join(output, "early-editor-desktop.png"),
+        animations: "disabled",
+      });
     await page.evaluate(() =>
       document
         .querySelector(".xt-composer-frame")
         .contentWindow.finishAssociation(),
     );
-    await editor
-      .getByRole("button", { name: "Change episode", exact: true })
+    await page
+      .getByRole("button", { name: "Change linked episode", exact: true })
       .waitFor();
     assert.equal(
       await editor.locator("#socialCaption").inputValue(),
@@ -2971,16 +3024,96 @@ test("editor is usable before catalogue lookup completes and keeps early edits",
       mediaBox.y + mediaBox.height <= settingsBox.y,
       "empty media keeps its space above the phone form",
     );
-    await page.locator(".xt-composer-dialog").screenshot({
-      path: path.join(output, "early-editor-phone.png"),
-      animations: "disabled",
-    });
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .screenshot({
+        path: path.join(output, "early-editor-phone.png"),
+        animations: "disabled",
+      });
     assert.equal(
       await editor
         .locator("body")
         .evaluate((body) => body.scrollWidth > innerWidth),
       false,
     );
+  } finally {
+    await page.close();
+  }
+});
+
+test("video replacement preserves post edits and discard uses an in-app dialog", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 850 },
+  });
+  try {
+    const errors = await mount(page, true);
+    const frame = await chooseSyntheticVideo(page);
+    await page
+      .getByRole("button", { name: "Change linked episode", exact: true })
+      .waitFor();
+    assert.equal(await frame.locator(".teaser-association").isVisible(), false);
+    await frame.locator("#socialCaption").fill("A caption to keep");
+    await frame.getByLabel("Posting time", { exact: true }).fill("19:35");
+    const choosing = page.waitForEvent("filechooser");
+    await frame
+      .getByRole("button", { name: "Replace video", exact: true })
+      .click();
+    await (
+      await choosing
+    ).setFiles({
+      name: "replacement.mp4",
+      mimeType: "video/mp4",
+      buffer: fs.readFileSync(VIDEO),
+    });
+    await frame.waitForFunction(() =>
+      document
+        .querySelector("#socialFileSummary")
+        .textContent.includes("replacement.mp4"),
+    );
+    assert.equal(
+      await frame.locator("#socialCaption").inputValue(),
+      "A caption to keep",
+    );
+    assert.equal(
+      await frame.getByLabel("Posting time", { exact: true }).inputValue(),
+      "19:35",
+    );
+    await frame.waitForFunction(
+      () => document.querySelector(".teaser-video-preview").readyState >= 2,
+    );
+    const output = path.join(repositoryRoot, ".local/teaser-controls-review");
+    fs.mkdirSync(output, { recursive: true });
+    await page.locator(".xt-composer-dialog").screenshot({
+      path: path.join(output, "editor-desktop.png"),
+      animations: "disabled",
+    });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    const confirm = page.getByRole("alertdialog", { name: "Discard changes?" });
+    await confirm.waitFor();
+    await confirm.screenshot({
+      path: path.join(output, "discard-dialog.png"),
+      animations: "disabled",
+    });
+    await confirm
+      .getByRole("button", { name: "Keep editing", exact: true })
+      .click();
+    assert.equal(
+      await frame.locator("#socialCaption").inputValue(),
+      "A caption to keep",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator(".xt-composer-dialog").screenshot({
+      path: path.join(output, "editor-phone.png"),
+      animations: "disabled",
+    });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Discard changes", exact: true })
+      .click();
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }

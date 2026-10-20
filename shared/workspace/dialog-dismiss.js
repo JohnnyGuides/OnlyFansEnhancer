@@ -88,7 +88,63 @@
       true,
     );
   }
-  global.OFEnhancerDialogDismiss = Object.freeze({ attach });
+  let confirmationId = 0;
+  function confirm({
+    title,
+    message,
+    acceptLabel = "Discard changes",
+    cancelLabel = "Keep editing",
+  }) {
+    const opener = document.activeElement;
+    const modal = document.createElement("dialog");
+    modal.className = "xt-composer-dialog xt-confirm-dialog";
+    modal.setAttribute("role", "alertdialog");
+    const id = `xt-confirm-${++confirmationId}`;
+    const heading = document.createElement("h2");
+    heading.id = `${id}-title`;
+    heading.textContent = title;
+    const description = document.createElement("p");
+    description.id = `${id}-description`;
+    description.textContent = message;
+    modal.setAttribute("aria-labelledby", heading.id);
+    modal.setAttribute("aria-describedby", description.id);
+    const form = document.createElement("form");
+    form.method = "dialog";
+    const actions = document.createElement("footer");
+    actions.className = "xt-confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "submit";
+    cancel.className = "xt-action";
+    cancel.value = "cancel";
+    cancel.textContent = cancelLabel;
+    cancel.autofocus = true;
+    const accept = document.createElement("button");
+    accept.type = "submit";
+    accept.className = "xt-action xt-confirm-accept";
+    accept.value = "confirm";
+    accept.textContent = acceptLabel;
+    actions.append(cancel, accept);
+    form.append(actions);
+    modal.append(heading, description, form);
+    // Keep an isolated confirmation dismissible without attaching to other UI.
+    attach(modal);
+    document.body.append(modal);
+    return new Promise((resolve) => {
+      modal.addEventListener(
+        "close",
+        () => {
+          const accepted = modal.returnValue === "confirm";
+          modal.remove();
+          if (opener?.isConnected) opener.focus();
+          resolve(accepted);
+        },
+        { once: true },
+      );
+      modal.showModal();
+      cancel.focus();
+    });
+  }
+  global.OFEnhancerDialogDismiss = Object.freeze({ attach, confirm });
   if (document.currentScript?.hasAttribute("data-app-dialogs"))
     attach(document);
 })(globalThis);

@@ -59,11 +59,21 @@
     });
     const preview = panel.querySelector("video"),
       image = panel.querySelector("img");
+    const mediaHeading = document.createElement("div");
+    mediaHeading.className = "teaser-media-header file-actions";
+    const videoLabel = document.createElement("span");
+    videoLabel.textContent = "Video";
+    mediaHeading.append(videoLabel);
+    preview.before(mediaHeading);
     const chooseVideo = document.createElement("button");
     chooseVideo.type = "button";
     chooseVideo.className = "teaser-choose-video";
     chooseVideo.textContent = "Choose or drop teaser video";
     preview.before(chooseVideo);
+    const stage = document.createElement("div");
+    stage.className = "teaser-video-stage";
+    chooseVideo.before(stage);
+    stage.append(chooseVideo, preview);
     chooseVideo.addEventListener("click", () =>
       get("#uploadSocialTeaser").click(),
     );
@@ -155,6 +165,7 @@
     association.className = "teaser-association";
     const changeMatch = document.createElement("button");
     changeMatch.type = "button";
+    changeMatch.className = "teaser-link-episode";
     changeMatch.textContent = "Link episode";
     changeMatch.setAttribute("aria-expanded", "false");
     association.append(changeMatch, folder);
@@ -193,14 +204,15 @@
       association.hidden = Boolean(
         hub.candidate() && context?.platform === "reddit",
       );
-      changeMatch.textContent = hub.candidate()
-        ? "Change episode"
-        : "Link episode";
+      changeMatch.innerHTML =
+        '<svg class="xt-compact-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m10 13 4-4m-6 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 3 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><span>' +
+        (hub.candidate() ? "Episode" : "Link episode") +
+        "</span>";
       changeMatch.disabled =
         copying ||
         hub.busy() ||
         Boolean(context?.loadingMedia || context?.draft?.sessionId);
-      changeMatch.title = "Choose a catalogue episode";
+      changeMatch.removeAttribute("title");
       const title = hub.candidate()?.title || context?.file?.name;
       if (
         context &&
@@ -218,7 +230,10 @@
           episodeKey: hub.candidate()?.id || context?.episodeKey || "",
         });
       folder.hidden = !hub.candidate();
-      changeMatch.setAttribute("aria-label", changeMatch.textContent);
+      changeMatch.setAttribute(
+        "aria-label",
+        hub.candidate() ? "Change linked episode" : "Link episode",
+      );
       updateCopy();
     };
     changeMatch.addEventListener("click", () => {
@@ -576,7 +591,7 @@
         context.renderPending = false;
         context.renderHash = "";
         thumbnailSelection = { kind: "auto" };
-        notify("render-manual");
+        notify("render-manual", { file });
       }
       if (context) context.loadingMedia = false;
       save.disabled = Boolean(context?.draft?.sessionId);
