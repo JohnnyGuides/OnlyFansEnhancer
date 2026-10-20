@@ -69,9 +69,10 @@ internal sealed partial class XTeaserController
         catch (GoogleCatalogueControllerException) { return null; }
     }
 
-    private string ReserveRender(string key, string date, XTeaserEdit edit)
+    private string ReserveRender(string key, string date, XTeaserEdit edit, string extension = ".mp4", bool reuseReservation = true)
     {
-        if (edit.Renders.TryGetValue(date, out string? reserved)) return reserved;
+        if (reuseReservation && edit.Renders.TryGetValue(date, out string? reserved)
+            && string.Equals(Path.GetExtension(reserved), extension, StringComparison.OrdinalIgnoreCase)) return reserved;
         string root = settings().XTeaserRoot ?? throw new GoogleCatalogueControllerException("x-teaser-inactive");
         _ = XTeaserFolder.ResolveInside(root, "probe.mp4") ?? throw new GoogleCatalogueControllerException("unsafe-teaser-clip");
         if (!Directory.Exists(root)) throw new GoogleCatalogueControllerException("x-teaser-root-unavailable");
@@ -79,9 +80,9 @@ internal sealed partial class XTeaserController
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (int index = 1; index <= 999; index++)
         {
-            string name = $"{key}__t{index:00}.mp4";
+            string name = $"{key}__t{index:00}{extension}";
             if (used.Contains(name) || new[] { "", "Done", Path.Combine("Done", "Good"), Path.Combine("Done", "Failed") }
-                .Any(folder => File.Exists(Path.Combine(root, folder, name)))) continue;
+                .Any(folder => File.Exists(Path.Combine(root, folder, name)) || Directory.Exists(Path.Combine(root, folder, name)))) continue;
             return name;
         }
         throw new GoogleCatalogueControllerException("teaser-render-names-exhausted");

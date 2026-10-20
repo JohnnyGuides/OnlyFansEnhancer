@@ -37,15 +37,61 @@
           <button type="button" data-view="settings">Settings</button>
         </nav>
 
-        <button
-          type="button"
-          id="chromeConnection"
-          class="connection"
-          aria-label="Check Chrome connection and setup"
-        >
-          <span class="connection-dot" aria-hidden="true"></span>
-          <span id="connectionLabel" role="status">Checking Chrome…</span>
-        </button>
+        <div class="chrome-connection">
+          <button
+            type="button"
+            id="chromeConnection"
+            class="connection"
+            aria-label="Check Chrome connection"
+            title="Check Chrome connection"
+          >
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="connectionLabel" role="status">Checking Chrome…</span>
+            <svg
+              class="connection-refresh"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <path d="M20 7v5h-5M4 17v-5h5" />
+              <path
+                d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            id="chromeConnectionDetails"
+            class="secondary-button chrome-setup-trigger"
+            aria-label="Chrome connection details"
+            title="Chrome connection details"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z"
+              />
+            </svg>
+          </button>
+          <p
+            id="chromeConnectionFeedback"
+            class="connection-feedback"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </div>
       </aside>
 
       <main id="workspace" tabindex="-1">
@@ -72,7 +118,7 @@
           <p id="actionStatus" class="action-status" role="status"></p>
           <p class="chrome-readiness-message">Checking Chrome…</p>
           <button type="button" class="secondary-button chrome-setup-trigger">
-            Check Chrome setup
+            Connection details
           </button>
         </section>
 
@@ -330,7 +376,7 @@
             </form>
           </section>
           <button type="button" class="secondary-button chrome-setup-trigger">
-            Check Chrome setup
+            Connection details
           </button>
           <details id="googleSetup" class="settings-disclosure">
             <summary>Developer setup</summary>
@@ -390,7 +436,7 @@
 
     <dialog id="chromeSetupDialog" aria-labelledby="chromeSetupTitle">
       <div class="chrome-dialog-heading">
-        <h2 id="chromeSetupTitle">Connect Chrome</h2>
+        <h2 id="chromeSetupTitle">Chrome connection</h2>
         <button type="button" id="closeChromeSetup" autofocus>Close</button>
       </div>
       <p id="chromeSetupMessage" role="status"></p>

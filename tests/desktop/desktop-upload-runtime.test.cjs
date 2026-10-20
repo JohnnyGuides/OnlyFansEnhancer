@@ -242,6 +242,80 @@ function host(
   };
 }
 
+test("copying a teaser stages verified chunks locally without requiring Chrome", async () => {
+  const chunks = [];
+  const fixture = host(
+    (request) => {
+      if (request.operation === "stageGeneratedMediaChunk") {
+        chunks.push(request.payload);
+        return { staged: request.payload.final };
+      }
+      assert.equal(request.operation, "copyTeaserFile");
+      return { name: "episode-a__t01.webm" };
+    },
+    () => ({ connected: false, browsers: [] }),
+  );
+  fixture.context.File = File;
+  fixture.context.btoa = btoa;
+  const bytes = new Uint8Array(300_000).fill(37);
+  const file = new File([bytes], "misplaced video.webm", {
+    lastModified: 1780000000000,
+  });
+  const result = await fixture.context.OFEnhancerDesktopUpload.copyTeaser(
+    file,
+    "episode-a",
+    "2026-10-20",
+  );
+  assert.equal(result.name, "episode-a__t01.webm");
+  assert.equal(chunks.length, 2);
+  assert.equal(chunks[1].offset, 256 * 1024);
+  assert.ok(
+    chunks.every(
+      (chunk) =>
+        chunk.name === "teaser.webm" &&
+        chunk.role === "social" &&
+        /^[a-f0-9]{48}$/.test(chunk.sessionId),
+    ),
+  );
+  const staged = Buffer.concat(
+    chunks.map((chunk) => Buffer.from(chunk.chunk, "base64")),
+  );
+  assert.deepEqual(staged, Buffer.from(bytes));
+  assert.equal(
+    chunks[0].sha256,
+    require("node:crypto").createHash("sha256").update(staged).digest("hex"),
+  );
+  const copy = fixture.requests.at(-1).payload;
+  assert.equal(copy.sessionId, chunks[0].sessionId);
+  assert.equal(copy.episodeKey, "episode-a");
+  assert.equal(copy.date, "2026-10-20");
+  assert.equal(file.name, "misplaced video.webm");
+  assert.equal(
+    fixture.requests.some(
+      (request) => request.operation === "getUploadBrowsers",
+    ),
+    false,
+  );
+});
+
+test("an incomplete staged teaser is never submitted for copying", async () => {
+  const fixture = host(() => ({ staged: false }));
+  fixture.context.File = File;
+  fixture.context.btoa = btoa;
+  await assert.rejects(
+    fixture.context.OFEnhancerDesktopUpload.copyTeaser(
+      new File(["video"], "wrong.mp4"),
+      "episode-a",
+      "2026-10-20",
+    ),
+    /staging did not complete/,
+  );
+  assert.deepEqual(
+    fixture.requests.map((request) => request.operation),
+    ["stageGeneratedMediaChunk"],
+  );
+});
+
 test("Chrome extensions opens a tab in the existing normal window and rejects other pages", async () => {
   const fixture = extension();
   const created = [];

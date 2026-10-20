@@ -338,6 +338,30 @@
   const openingFrameLeadIns = new Map();
   globalThis.OFEnhancerDesktopUpload = Object.freeze({
     refreshBrowsers,
+    async copyTeaser(file, episodeKey, date) {
+      if (!(file instanceof File) || !/\.(mp4|mov|m4v|webm)$/i.test(file.name))
+        throw new Error("Choose a teaser video first.");
+      const extension = file.name
+        .slice(file.name.lastIndexOf("."))
+        .toLowerCase();
+      const staged = new File([file], `teaser${extension}`, {
+        type: file.type,
+        lastModified: file.lastModified || Date.now(),
+      });
+      const sessionId = [...crypto.getRandomValues(new Uint8Array(24))]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      await stageGeneratedMedia(staged, sessionId, "social");
+      return call("copyTeaserFile", {
+        sessionId,
+        role: "social",
+        name: staged.name,
+        size: staged.size,
+        lastModified: staged.lastModified,
+        episodeKey,
+        date,
+      });
+    },
     loadDevelopmentFixtures: () => call("loadDevelopmentFixtures"),
     async prepareOpeningFrame(file, selection) {
       if (!(file instanceof File))

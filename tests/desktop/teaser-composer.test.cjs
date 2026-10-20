@@ -306,6 +306,144 @@ test("empty catalogue opens the editor directly and accepts a chosen video", asy
   }
 });
 
+test("a misnamed teaser can be linked and copied with its caption and thumbnail intact", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 900 },
+  });
+  try {
+    const errors = await mount(page, true);
+    const frame = page
+      .frames()
+      .find((item) => item.url().includes("upload-console.html?teaserDay="));
+    await frame.evaluate(() => {
+      globalThis.__copyCalls = [];
+      globalThis.OFEnhancerDesktopUpload = {
+        async copyTeaser(file, episodeKey, date) {
+          __copyCalls.push({
+            name: file.name,
+            episodeKey,
+            date,
+            size: file.size,
+          });
+          await new Promise((resolve) => (globalThis.__finishCopy = resolve));
+          return {
+            name: "preview-test__t01.mp4",
+            clip: {
+              clipId: 45,
+              lastModified: 1780000000000,
+              sha256: "c".repeat(64),
+            },
+          };
+        },
+      };
+    });
+    await frame.locator("#uploadSocialTeaser").setInputFiles({
+      name: "totally wrong filename.mp4",
+      mimeType: "video/mp4",
+      buffer: fs.readFileSync(VIDEO),
+    });
+    await frame
+      .locator(".teaser-thumbnail-panel img")
+      .waitFor({ state: "visible" });
+    const copy = page.getByRole("button", {
+      name: "Copy to .TWEETS",
+      exact: true,
+    });
+    assert.equal(
+      await copy.isDisabled(),
+      true,
+      "episode must be explicitly linked before import",
+    );
+    await frame
+      .getByRole("button", { name: "Link episode", exact: true })
+      .click();
+    await frame.locator('#catalogueCards [data-row="2"]').click();
+    await frame.locator("#socialCaption").fill("A caption worth keeping");
+    const thumbnail = await frame
+      .locator(".teaser-thumbnail-panel img")
+      .getAttribute("src");
+    await page.waitForFunction(
+      () => !document.querySelector(".teaser-copy-file").disabled,
+    );
+    assert.equal(await copy.locator("svg").isVisible(), true);
+    await frame.waitForFunction(
+      () => document.querySelector(".teaser-video-preview").readyState >= 2,
+    );
+    const output = path.join(repositoryRoot, ".local/teaser-copy-review");
+    fs.mkdirSync(output, { recursive: true });
+    await page.screenshot({
+      path: path.join(output, "teaser-copy-desktop.png"),
+    });
+    await copy.click();
+    await page
+      .locator(".xt-composer-status")
+      .filter({ hasText: "Copying to .TWEETS" })
+      .waitFor();
+    assert.equal(await copy.isDisabled(), true);
+    await frame.evaluate(() => __finishCopy());
+    await page
+      .locator(".xt-composer-status")
+      .filter({ hasText: "Copied as preview-test__t01.mp4" })
+      .waitFor();
+    assert.equal(
+      await frame.locator("#socialCaption").inputValue(),
+      "A caption worth keeping",
+    );
+    assert.equal(
+      await frame.locator(".teaser-thumbnail-panel img").getAttribute("src"),
+      thumbnail,
+    );
+    const draft = await page.evaluate(() =>
+      OFEnhancerTeaserDrafts.get("2026-10-06").then((item) => ({
+        name: item.file.name,
+        episodeKey: item.episodeKey,
+        clipId: item.clipId,
+        renderHash: item.renderHash,
+        caption: item.caption,
+      })),
+    );
+    assert.deepEqual(draft, {
+      name: "preview-test__t01.mp4",
+      episodeKey: "preview-test",
+      clipId: 45,
+      renderHash: "c".repeat(64),
+      caption: "A caption worth keeping",
+    });
+    assert.deepEqual(
+      await frame.evaluate(() =>
+        __copyCalls.map(({ name, episodeKey, date }) => ({
+          name,
+          episodeKey,
+          date,
+        })),
+      ),
+      [
+        {
+          name: "totally wrong filename.mp4",
+          episodeKey: "preview-test",
+          date: DAY,
+        },
+      ],
+    );
+    assert.equal(
+      await copy.isDisabled(),
+      true,
+      "completed copy is not repeated",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(
+      await frame.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page.screenshot({ path: path.join(output, "teaser-copy-phone.png") });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("Vegas handoff resumes pending drafts and refreshes same-name renders without moving the editor", async () => {
   const page = await browser.newPage({
     viewport: { width: 1365, height: 1000 },

@@ -268,7 +268,7 @@ public partial class MainWindow : Window, IDisposable
         JsonElement root = document.RootElement;
         string operation = root.GetProperty("operation").GetString() ?? "";
         if (XTeaserController.Operations.Contains(operation)) return await HandleTeaserMessage(root, operation);
-        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "prepareOpeningFrame", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
+        if (!new[] { "getStatus", "browserRequest", "deliverUploadFile", "prepareOpeningFrame", "deliverCatalogueThumbnail", "stageGeneratedMediaChunk", "deliverGeneratedMedia", "copyTeaserFile", "getUploadBrowsers", "selectUploadBrowser", "getChromeReadiness", "prepareChrome", "openChrome", "openChromeExtensions", "installChromeInfo", "revealChromeExtension", "loadDevelopmentFixtures", "deliverDevelopmentFixture", "freshChromeReset", "continueChromeReset" }.Contains(operation)) return null;
         string requestId = root.GetProperty("requestId").GetString() ?? "";
         try
         {
@@ -360,6 +360,12 @@ public partial class MainWindow : Window, IDisposable
             {
                 if (additionalObjects.Count != 0) throw new InvalidOperationException("invalid-payload");
                 result = new { staged = generatedUploadMedia.Append(payload) is not null };
+            }
+            else if (operation == "copyTeaserFile")
+            {
+                if (additionalObjects.Count != 0) throw new InvalidOperationException("invalid-payload");
+                FileInfo source = generatedUploadMedia.Resolve(payload);
+                result = await dispatcher.EnqueueAsync<object>(() => xTeasers.CopyTeaserFile(payload, source));
             }
             else if (operation == "deliverGeneratedMedia")
             {

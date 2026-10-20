@@ -342,6 +342,14 @@ The optional saved `xTeaserTemplatePath` supports a template on a different medi
 root; the inferred path remains the fallback. The original template is never edited. A native picker can authorize an existing
 project outside that folder; web requests cannot supply arbitrary full paths.
 
+Desktop teaser imports reuse the verified, bounded generated-media staging path.
+The WebView-only `copyTeaserFile` operation resolves that staged file, validates
+the linked catalogue episode, and publishes a temporary copy into the configured
+teaser root under an unused `episode__tNN` name with the source extension. It
+never overwrites another file or changes the original. Matching ready copies are
+verified before retry reuse. The imported clip is indexed and becomes the day's
+watched output; draft caption and thumbnail selections survive the handoff.
+
 Only the expected output is polled while the editor is open. A stable size/mtime,
 read handle denying writers, hash and browser decode precede replacement. Normal
 file changes invalidate the ready cache immediately; a 15-second rehash also

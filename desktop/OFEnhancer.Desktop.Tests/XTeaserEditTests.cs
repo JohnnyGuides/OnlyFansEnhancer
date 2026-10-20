@@ -8,6 +8,57 @@ namespace OFEnhancer.Desktop.Tests;
 public sealed class XTeaserEditTests
 {
     [TestMethod]
+    public void CopyNamesTheLinkedEpisodePreservesOriginalAndNeverOverwrites()
+    {
+        using Fixture fixture = new();
+        string source = Path.Combine(fixture.Root, "misnamed final.MOV");
+        byte[] bytes = [1, 2, 3, 4, 5];
+        File.WriteAllBytes(source, bytes);
+        DateTime originalTime = File.GetLastWriteTimeUtc(source);
+        string occupied = Path.Combine(fixture.Tweets, "ep-a__t01.mov");
+        File.WriteAllText(occupied, "keep existing teaser");
+        Directory.Delete(fixture.Episode); // Linking a clip does not require a Vegas project folder.
+        JsonElement copied = fixture.Copy(source);
+        Assert.AreEqual("ep-a__t02.mov", copied.GetProperty("name").GetString());
+        CollectionAssert.AreEqual(bytes, File.ReadAllBytes(source));
+        CollectionAssert.AreEqual(bytes, File.ReadAllBytes(copied.GetProperty("path").GetString()!));
+        Assert.AreEqual(originalTime, File.GetLastWriteTimeUtc(source));
+        Assert.AreEqual("keep existing teaser", File.ReadAllText(occupied));
+        long id = copied.GetProperty("clip").GetProperty("clipId").GetInt64();
+        Assert.AreEqual("ep-a", fixture.Store.GetXTeaserLibraryClip(id)!.EpisodeKey);
+        Assert.AreEqual("ep-a__t02.mov", fixture.Store.GetXTeaserEdit("ep-a").Renders["2026-10-20"]);
+        Assert.AreEqual(id, fixture.Copy(source).GetProperty("clip").GetProperty("clipId").GetInt64(), "Retry reuses the identical managed copy");
+        Assert.AreEqual(2, Directory.GetFiles(fixture.Tweets).Length);
+    }
+
+    [TestMethod]
+    public void CopyRejectsUnknownEpisodeAndUnavailableRootBeforeWriting()
+    {
+        using Fixture fixture = new();
+        string source = Path.Combine(fixture.Root, "source.mp4");
+        File.WriteAllText(source, "source video");
+        Assert.ThrowsException<GoogleCatalogueControllerException>(() => fixture.Copy(source, "unknown"));
+        Assert.ThrowsException<GoogleCatalogueControllerException>(() => fixture.Copy(source, "../ep-a"));
+        fixture.RenderRoot = Path.Combine(fixture.Root, "missing");
+        Assert.ThrowsException<GoogleCatalogueControllerException>(() => fixture.Copy(source));
+        Assert.IsFalse(Directory.Exists(fixture.RenderRoot));
+        Assert.AreEqual(0, Directory.GetFiles(fixture.Tweets).Length);
+        Assert.AreEqual("source video", File.ReadAllText(source));
+    }
+
+    [TestMethod]
+    public async Task CopyPreservesWebmFormatAndVegasStillReservesMp4()
+    {
+        using Fixture fixture = new();
+        string source = Path.Combine(fixture.Root, "wrong.webm");
+        File.WriteAllText(source, "webm bytes");
+        Assert.AreEqual("ep-a__t01.webm", fixture.Copy(source).GetProperty("name").GetString());
+        File.WriteAllText(Path.Combine(fixture.Episode, "TEASR.veg"), "project");
+        JsonElement prepared = await fixture.Call("openTeaserProject", "TEASR.veg");
+        Assert.AreEqual(".mp4", Path.GetExtension(prepared.GetProperty("renderName").GetString()));
+    }
+
+    [TestMethod]
     public async Task TemplateOnAnotherMediaRootPersistsAndCopiesWithoutEditingOriginal()
     {
         using Fixture fixture = new();
@@ -183,6 +234,9 @@ public sealed class XTeaserEditTests
         }
         internal async Task Error(string operation, string expected, string? project = null)
             => Assert.AreEqual(expected, (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() => Call(operation, project))).Code);
+        internal JsonElement Copy(string source, string key = "ep-a") => JsonSerializer.SerializeToElement(
+            controller.CopyTeaserFile(JsonSerializer.SerializeToElement(new { episodeKey = key, date = "2026-10-20", role = "social" }), new FileInfo(source)),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         public void Dispose() { controller.Dispose(); Store.Dispose(); Directory.Delete(Root, true); }
     }
 }

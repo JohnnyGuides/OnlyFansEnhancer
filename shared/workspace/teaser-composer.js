@@ -545,6 +545,29 @@
         handoff?.refresh();
       }
       if (
+        [
+          "ofenhancer:teaser-copying",
+          "ofenhancer:teaser-copy-error",
+          "ofenhancer:teaser-imported",
+        ].includes(event.data?.type)
+      )
+        delete status.dataset.saved;
+      if (event.data?.type === "ofenhancer:teaser-copying")
+        status.textContent = "Copying to .TWEETS…";
+      if (event.data?.type === "ofenhancer:teaser-copy-error")
+        status.textContent = event.data.message;
+      if (
+        event.data?.type === "ofenhancer:teaser-imported" &&
+        event.data.episodeKey === context?.episodeKey &&
+        event.data.file instanceof File
+      ) {
+        context.file = event.data.file;
+        context.clipId = event.data.clipId;
+        context.draft = event.data.draft;
+        status.textContent = `Copied as ${event.data.file.name}`;
+        void handoff?.setEpisode(context.episodeKey, !postId);
+      }
+      if (
         event.data?.type === "ofenhancer:teaser-size" &&
         Number.isFinite(event.data.height) &&
         !dialog.dataset.editor
@@ -615,6 +638,7 @@
       back.classList.add("xt-change-clip");
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
+      heading.querySelector(".teaser-copy-file")?.remove();
       heading.insertBefore(back, close);
       const folder = action("Open episode folder");
       folder.classList.add("xt-episode-folder");
@@ -661,6 +685,15 @@
         "load",
         () => {
           if (iframe !== frame || !dialog.isConnected) return;
+          const copy =
+            frame.contentDocument?.querySelector(".teaser-copy-file");
+          if (copy) {
+            copy.classList.add("xt-action");
+            heading.insertBefore(
+              copy,
+              heading.querySelector(".xt-episode-folder") || close,
+            );
+          }
           const posts = frame.contentDocument?.querySelector(
             ".teaser-planner-posts",
           );
@@ -722,6 +755,7 @@
       }
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
+      heading.querySelector(".teaser-copy-file")?.remove();
       heading.after(destinations);
       destinations.hidden = true;
       const grid = node("div", "xt-clip-choices");

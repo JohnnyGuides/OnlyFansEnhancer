@@ -251,11 +251,59 @@ nav button[aria-current="page"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: auto;
+  margin-top: 0;
   padding: 14px 10px 0;
   border-top: 1px solid #272d38;
   color: #aeb6c3;
   font-size: 0.82rem;
+}
+
+.chrome-connection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.chrome-connection .connection {
+  min-width: 0;
+  padding: 10px;
+}
+
+.connection-dot,
+.connection-refresh {
+  flex-shrink: 0;
+}
+
+.connection-refresh {
+  margin-left: auto;
+}
+
+#chromeConnectionDetails {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+}
+
+.connection-feedback {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #b9c4d1;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.connection-feedback:empty {
+  display: none;
+}
+
+button.connection:hover {
+  border-color: #5a6575;
+  background: #202633;
+}
+
+button.connection:disabled {
+  cursor: progress;
 }
 
 .connection-dot {
@@ -272,6 +320,10 @@ body[data-connected="true"] .connection-dot {
 
 body[data-connected="false"] .connection-dot {
   background: #f07272;
+}
+
+body[data-chrome-state="checking"] .connection-dot {
+  background: #d7ae65;
 }
 
 main {
@@ -1172,6 +1224,12 @@ dialog::backdrop {
     margin-top: 0;
     padding: 0;
     border-top: 0;
+  }
+
+  .chrome-connection {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    margin-top: 0;
   }
 
   main {

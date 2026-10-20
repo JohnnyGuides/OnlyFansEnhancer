@@ -141,8 +141,47 @@
     changeMatch.setAttribute("aria-expanded", "false");
     association.append(changeMatch, folder);
     get("#catalogueControls").prepend(association);
+    const copyFile = document.createElement("button");
+    copyFile.type = "button";
+    copyFile.className = "teaser-copy-file";
+    copyFile.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg>';
+    copyFile.setAttribute("aria-label", "Copy to .TWEETS");
+    panel.querySelector(".teaser-media-controls").append(copyFile);
+    let copying = false,
+      copiedFor = null;
+    const updateCopy = () => {
+      const copied =
+        copiedFor?.file === hub.file() &&
+        copiedFor?.episodeKey === hub.candidate()?.id;
+      copyFile.hidden =
+        !global.OFEnhancerDesktopUpload?.copyTeaser ||
+        context?.platform === "reddit";
+      copyFile.disabled =
+        copying ||
+        copied ||
+        !hub.file() ||
+        !hub.candidate() ||
+        endingControls.length > 0 ||
+        hub.busy() ||
+        Boolean(context?.draft?.sessionId);
+      copyFile.title = copied
+        ? "Copied to .TWEETS"
+        : hub.candidate()
+          ? "Copy to .TWEETS"
+          : "Link an episode before copying to .TWEETS";
+    };
     const updateLinked = () => {
-      association.hidden = Boolean(hub.candidate());
+      association.hidden = Boolean(
+        hub.candidate() && context?.platform === "reddit",
+      );
+      changeMatch.textContent = hub.candidate()
+        ? "Change episode"
+        : "Link episode";
+      changeMatch.disabled =
+        copying ||
+        hub.busy() ||
+        Boolean(context?.loadingMedia || context?.draft?.sessionId);
       changeMatch.title = "Choose a catalogue episode";
       const title = hub.candidate()?.title || context?.file?.name;
       if (
@@ -151,6 +190,7 @@
         context.episodeKey !== hub.candidate().id
       ) {
         context.episodeKey = hub.candidate().id;
+        context.clipId = null;
         context.renderPending = false;
         context.renderHash = "";
       }
@@ -160,7 +200,8 @@
           episodeKey: hub.candidate()?.id || context?.episodeKey || "",
         });
       folder.hidden = !hub.candidate();
-      changeMatch.setAttribute("aria-label", "Link episode");
+      changeMatch.setAttribute("aria-label", changeMatch.textContent);
+      updateCopy();
     };
     changeMatch.addEventListener("click", () => {
       const expanded = document.body.classList.toggle("teaser-matching");
@@ -170,7 +211,13 @@
     get("#catalogueControls").addEventListener("click", () =>
       setTimeout(updateLinked, 0),
     );
-    get("#catalogueRow").addEventListener("change", updateLinked);
+    get("#catalogueRow").addEventListener("change", () => {
+      updateLinked();
+      if (hub.candidate()) {
+        document.body.classList.remove("teaser-matching");
+        changeMatch.setAttribute("aria-expanded", "false");
+      }
+    });
     const automatic = get('input[name="socialMode"][value="autonomous"]');
     automatic.closest("label").title =
       "Unchecked: prepare the Twitter draft for manual posting. Checked: post or schedule, then add the first reply.";
@@ -226,6 +273,7 @@
       );
       context.draft = draft;
       notify("render-lock", { locked: true });
+      updateCopy();
       notify("saved");
       return draft;
     }
@@ -236,6 +284,77 @@
       videoUrl = "",
       imageUrl = "",
       previewReady = Promise.resolve();
+    copyFile.addEventListener("click", async () => {
+      const file = hub.file(),
+        episodeKey = hub.candidate()?.id;
+      if (
+        copying ||
+        !file ||
+        !episodeKey ||
+        hub.busy() ||
+        context?.draft?.sessionId
+      )
+        return;
+      copying = true;
+      const controls = [
+        chooseVideo,
+        changeMatch,
+        save,
+        get("#uploadButton"),
+        get("#uploadSocialTeaser"),
+        ...get("#catalogueControls").querySelectorAll("button,input,select"),
+        ...panel.querySelectorAll(".teaser-ending button,.teaser-ending input"),
+      ].map((control) => [control, control.disabled]);
+      for (const [control] of controls) control.disabled = true;
+      document.body.classList.remove("teaser-matching");
+      changeMatch.setAttribute("aria-expanded", "false");
+      updateCopy();
+      notify("running", { running: true });
+      notify("copying");
+      let copiedName = "";
+      try {
+        const result = await global.OFEnhancerDesktopUpload.copyTeaser(
+          file,
+          episodeKey,
+          day,
+        );
+        if (hub.file() !== file || hub.candidate()?.id !== episodeKey)
+          throw new Error(
+            `Copied as ${result.name}. The selected clip changed during copying.`,
+          );
+        copiedName = result.name;
+        const managed = new File([file], result.name, {
+          type: file.type,
+          lastModified: result.clip.lastModified,
+        });
+        managed.source = "generated";
+        hub.setFile(managed);
+        context.file = managed;
+        context.clipId = result.clip.clipId;
+        context.renderHash = result.clip.sha256;
+        context.renderPending = false;
+        const draft = await saveDraft();
+        copiedFor = { file: managed, episodeKey };
+        updateLinked();
+        notify("imported", {
+          file: managed,
+          episodeKey,
+          clipId: context.clipId,
+          draft,
+        });
+      } catch (error) {
+        notify("copy-error", {
+          message: copiedName
+            ? `Copied as ${copiedName}. Draft not saved: ${error.message}`
+            : error.message,
+        });
+      } finally {
+        copying = false;
+        for (const [control, disabled] of controls) control.disabled = disabled;
+        updateCopy();
+        notify("running", { running: false });
+      }
+    });
     let endingControls = [];
     const ending = global.OFEnhancerTeaserEnding.mount({
       preview,
@@ -263,6 +382,7 @@
           endingControls = [];
         }
         notify("running", { running: value });
+        updateCopy();
       },
     });
     panel
@@ -416,6 +536,7 @@
         }
       });
     function acceptFile(file, render = null) {
+      if (copying) return;
       if (
         !file.size ||
         file.size >= 512 * 1024 * 1024 ||
@@ -447,6 +568,7 @@
         render && thumbnailSelection.kind === "image" ? thumbnail : null,
       );
       notify("dirty");
+      updateLinked();
       if (!hub.candidate())
         void hub
           .associate(context?.episodeKey || "", "")

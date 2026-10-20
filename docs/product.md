@@ -159,6 +159,11 @@ it, and defaults its local thumbnail to the first frame. Catalogue matching can 
 accepted or changed; an exact episode-folder shortcut supports making a new clip.
 When the catalogue has no episodes, the modal opens the empty editor directly.
 Choosing or linking a video does not rename or relocate its source file.
+In the desktop editor, **Change episode** corrects a match before posting. The
+header's **Copy to .TWEETS** action copies the selected video into the configured
+teaser folder as `episode__tNN` with its original extension. It keeps the original,
+never overwrites another teaser, and saves the managed copy in the current draft
+without replacing the caption or thumbnail. Identical retries reuse the copy.
 Caption, thumbnail, posting time, link and reply delay are saved as a local draft.
 Posting time, reply delay and link-provider choice are remembered for new drafts;
 catalogue links resolve for the newly matched episode. Send to Twitter stays visible
@@ -328,6 +333,9 @@ can establish integration liveness; multiple live browsers require explicit
 selection before upload work. Observing status neither selects a browser nor
 queues work. Ten-second expiry and check failures remove current green status.
 The relay check does not establish separate X-host or publishing-workflow health.
+The sidebar connection button runs a quick check in place, with a checking state,
+result and check time. Its adjacent gear opens details. Opening details does not
+prepare or repair Chrome; those remain explicit actions.
 
 Fresh personal setup prepares the installed keyed package and owned current-user
 registration. The user still enables Developer mode, chooses Load unpacked, and

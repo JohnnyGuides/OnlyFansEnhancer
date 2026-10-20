@@ -119,12 +119,13 @@
   let chromePollGeneration = 0;
   let chromeExpiry;
   let chromePoll;
+  let chromeCheckPending = false;
   const chromeSetupDialog = document.querySelector("#chromeSetupDialog");
   const chromeLabels = {
     checking: "Checking Chrome…",
     unavailable: "Desktop agent unavailable",
     "not-found": "Chrome not found",
-    setup: "Set up Chrome",
+    setup: "Setup required",
     offline: "Chrome not connected",
     repair: "Chrome setup needs repair",
     "reset-pending": "Fresh reset: action needed",
@@ -137,6 +138,7 @@
     chromeReadiness = value;
     const label = chromeLabels[value.state] || chromeLabels.checking;
     document.body.dataset.connected = String(value.state === "connected");
+    document.body.dataset.chromeState = value.state;
     connectionLabel.textContent = label;
     document.querySelector("#extensionSetting").textContent =
       `${label}. ${value.message}`;
@@ -187,17 +189,70 @@
     ).disabled = !value.extensionFolder;
   }
 
-  async function refreshChrome() {
+  async function refreshChrome({ manual = false } = {}) {
+    if (chromeCheckPending) return;
+    const finishCheck = (value) => {
+      if (!manual) return;
+      chromeCheckPending = false;
+      for (const button of document.querySelectorAll(
+        "#chromeConnection, #checkChrome",
+      )) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+      }
+      const result =
+        {
+          connected: "Connection confirmed",
+          offline: "No live Chrome connection",
+          setup: "Setup required",
+          repair: "Connection needs attention",
+          choose: "Choose a Chrome window",
+          "not-found": "Chrome not found",
+          "reset-pending": "Reset pending",
+          checking: "No fresh Chrome response",
+          unsupported: "Chrome check unavailable",
+          unavailable: "Desktop check failed",
+        }[value.state] || value.message;
+      const time = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      document.querySelector("#chromeConnectionFeedback").textContent =
+        `${result} · ${time}`;
+      document.querySelector("#chromeSetupActionStatus").textContent =
+        `${chromeLabels[value.state] || result}. ${value.message || ""}`;
+    };
+    if (manual) {
+      chromeCheckPending = true;
+      clearTimeout(chromeExpiry);
+      for (const button of document.querySelectorAll(
+        "#chromeConnection, #checkChrome",
+      )) {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+      }
+      document.querySelector("#chromeConnectionFeedback").textContent =
+        "Checking connection…";
+      document.querySelector("#chromeSetupActionStatus").textContent =
+        "Checking connection…";
+      renderChrome({
+        ...chromeReadiness,
+        state: "checking",
+        message: "Checking the Chrome connection…",
+      });
+    }
     const generation = ++chromePollGeneration;
     const started = performance.now();
     // An unanswered observation cannot retain a green state indefinitely.
     const timeout = setTimeout(() => {
       if (generation !== chromePollGeneration) return;
       ++chromePollGeneration;
-      renderChrome({
+      const value = {
         state: "unavailable",
         message: "The desktop connection check did not respond. Check again.",
-      });
+      };
+      renderChrome(value);
+      finishCheck(value);
     }, 4000);
     try {
       const status = await global.OFEnhancerHost.request("getStatus");
@@ -220,6 +275,7 @@
       if (value.state === "connected" && remaining <= 0)
         value.state = "checking";
       renderChrome(value);
+      finishCheck(value);
       if (value.state === "connected")
         chromeExpiry = setTimeout(
           () => {
@@ -235,29 +291,21 @@
       clearTimeout(chromeExpiry);
       clearTimeout(timeout);
       agentSetting.textContent = "Unavailable";
-      renderChrome({
+      const value = {
         state: "unavailable",
         message: "Start OFEnhancer to reconnect.",
-      });
+      };
+      renderChrome(value);
+      finishCheck(value);
     }
   }
 
   async function showChromeSetup() {
     chromeSetupDialog.showModal();
     await refreshChrome();
-    const prepare = document.querySelector(
-      '[data-chrome-action="prepareChrome"]',
-    );
-    if (
-      chromeReadiness?.chromeFound &&
-      !prepare.disabled &&
-      ((!chromeReadiness.prepared && chromeReadiness.state === "setup") ||
-        (chromeReadiness.resetPending && !chromeReadiness.extensionFolder))
-    )
-      prepare.click();
   }
   document.querySelector("#chromeConnection").addEventListener("click", () => {
-    void showChromeSetup();
+    void refreshChrome({ manual: true });
   });
   for (const button of document.querySelectorAll(".chrome-setup-trigger"))
     button.addEventListener("click", () => {
@@ -268,7 +316,7 @@
     .addEventListener("click", () => chromeSetupDialog.close());
   document
     .querySelector("#checkChrome")
-    .addEventListener("click", refreshChrome);
+    .addEventListener("click", () => void refreshChrome({ manual: true }));
   for (const button of document.querySelectorAll("[data-chrome-action]"))
     button.addEventListener("click", async () => {
       if (

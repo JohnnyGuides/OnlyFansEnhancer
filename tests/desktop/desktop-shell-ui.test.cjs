@@ -45,6 +45,7 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     await testOfflineBridgeRecovery(browser, address.port);
     await testChromeReadinessStates(browser, address.port);
+    await testQuickChromeCheck(browser, address.port);
     await testStaleChromeObservation(browser, address.port);
     await testChromeExtensionsCopyAndConnectedAction(browser, address.port);
     for (const viewport of viewports) {
@@ -138,7 +139,7 @@ async function main() {
         "page",
       );
       assert.deepEqual(errors, [], `${viewport.name} console errors`);
-      await page.locator("#chromeConnection").focus();
+      await page.locator("#chromeConnectionDetails").focus();
       await page.keyboard.press("Enter");
       assert.equal(
         await page
@@ -153,7 +154,7 @@ async function main() {
       await page.keyboard.press("Escape");
       assert.equal(
         await page
-          .locator("#chromeConnection")
+          .locator("#chromeConnectionDetails")
           .evaluate((node) => node === document.activeElement),
         true,
       );
@@ -166,6 +167,133 @@ async function main() {
   console.log(
     "PASS: shared desktop shell rendered at desktop, compact, and mobile widths",
   );
+}
+
+async function testQuickChromeCheck(browser, port) {
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+  });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    globalThis.checkOperations = [];
+    globalThis.holdCheck = false;
+    globalThis.checkState = "offline";
+    const readiness = () => ({
+      state: checkState,
+      chromeFound: true,
+      prepared: checkState !== "setup",
+      message:
+        checkState === "connected"
+          ? "Ready to prepare uploads."
+          : "Synthetic connection issue.",
+      browserStatus: { expiresInMilliseconds: 10000 },
+    });
+    globalThis.__OFENHANCER_TEST_HOST__ = async (operation) => {
+      checkOperations.push(operation);
+      if (operation === "getStatus")
+        return {
+          productVersion: "test",
+          protocolVersion: 1,
+          capabilities: ["chrome-readiness"],
+        };
+      if (operation === "getChromeReadiness") {
+        if (holdCheck)
+          return new Promise((resolve) => {
+            globalThis.finishCheck = () => resolve(readiness());
+          });
+        return readiness();
+      }
+      throw new Error("unsupported-operation");
+    };
+  });
+  try {
+    await page.goto(`http://127.0.0.1:${port}/index.html`);
+    await page
+      .locator("#connectionLabel")
+      .getByText("Chrome not connected", { exact: true })
+      .waitFor();
+    await page.evaluate(() => {
+      holdCheck = true;
+      checkOperations = [];
+    });
+    await page.locator("#chromeConnection").click();
+    await page.waitForFunction(() => typeof finishCheck === "function");
+    assert.equal(await page.locator("#chromeConnection").isDisabled(), true);
+    assert.equal(await page.locator("#checkChrome").isDisabled(), true);
+    assert.equal(
+      await page.locator("#chromeConnectionFeedback").textContent(),
+      "Checking connection…",
+    );
+    assert.equal(
+      await page
+        .locator("#chromeSetupDialog")
+        .evaluate((dialog) => dialog.open),
+      false,
+    );
+    assert.deepEqual(await page.evaluate(() => checkOperations), [
+      "getStatus",
+      "getChromeReadiness",
+    ]);
+    await page.evaluate(() => {
+      checkState = "connected";
+      holdCheck = false;
+      finishCheck();
+    });
+    await page
+      .locator("#connectionLabel")
+      .getByText("Chrome connected", { exact: true })
+      .waitFor();
+    assert.equal(await page.locator("#chromeConnection").isDisabled(), false);
+    assert.match(
+      await page.locator("#chromeConnectionFeedback").textContent(),
+      /Connection confirmed/,
+    );
+
+    // Reading connection details never prepares or replaces an installation.
+    await page.evaluate(() => {
+      checkState = "setup";
+      checkOperations = [];
+    });
+    await page.locator("#chromeConnectionDetails").click();
+    await page
+      .locator("#chromeSetupMessage")
+      .getByText("Setup required", { exact: false })
+      .waitFor();
+    assert.equal(
+      (await page.evaluate(() => checkOperations)).includes("prepareChrome"),
+      false,
+    );
+    await page.locator("#checkChrome").click();
+    await page
+      .locator("#chromeSetupActionStatus")
+      .getByText("Synthetic connection issue.", { exact: false })
+      .waitFor();
+    await page.locator("#closeChromeSetup").click();
+    const output = path.join(
+      require("../support/paths.cjs").repositoryRoot,
+      ".local/connection-review",
+    );
+    fs.mkdirSync(output, { recursive: true });
+    await page.screenshot({
+      path: path.join(output, "connection-desktop.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page.screenshot({
+      path: path.join(output, "connection-mobile.png"),
+      fullPage: true,
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
 }
 
 async function testChromeExtensionsCopyAndConnectedAction(browser, port) {
@@ -193,7 +321,7 @@ async function testChromeExtensionsCopyAndConnectedAction(browser, port) {
     };
   });
   await page.goto(`http://127.0.0.1:${port}/index.html`);
-  await page.locator("#chromeConnection").click();
+  await page.locator("#chromeConnectionDetails").click();
   const dialog = page.locator("#chromeSetupDialog");
   const actions = dialog.locator("button:visible");
   const extensionButton = dialog.getByRole("button", {
@@ -219,7 +347,7 @@ async function testChromeExtensionsCopyAndConnectedAction(browser, port) {
 
 async function testChromeReadinessStates(browser, port) {
   const labels = {
-    setup: "Set up Chrome",
+    setup: "Setup required",
     offline: "Chrome not connected",
     repair: "Chrome setup needs repair",
     connected: "Chrome connected",
@@ -258,7 +386,7 @@ async function testChromeReadinessStates(browser, port) {
       await page.locator("body").getAttribute("data-connected"),
       String(state === "connected"),
     );
-    await page.locator("#chromeConnection").focus();
+    await page.locator("#chromeConnectionDetails").focus();
     await page.keyboard.press("Enter");
     assert.equal(
       await page.locator("#chromeSetupDialog").evaluate((node) => node.open),
@@ -267,7 +395,7 @@ async function testChromeReadinessStates(browser, port) {
     await page.keyboard.press("Escape");
     assert.equal(
       await page
-        .locator("#chromeConnection")
+        .locator("#chromeConnectionDetails")
         .evaluate((node) => node === document.activeElement),
       true,
     );
