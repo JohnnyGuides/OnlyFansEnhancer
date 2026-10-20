@@ -338,7 +338,8 @@ native `getTeaserEdit`, `openTeaserProject`, `createTeaserProject`,
 the selected Vegas project independently of its filename and reserve one unused
 `episode__tNN.mp4` output per day. Template creation copies the configured media
 root's `_template/_.-TEMPLATE-._.veg` into the episode without overwriting files.
-The original template is never edited. A native picker can authorize an existing
+The optional saved `xTeaserTemplatePath` supports a template on a different media
+root; the inferred path remains the fallback. The original template is never edited. A native picker can authorize an existing
 project outside that folder; web requests cannot supply arbitrary full paths.
 
 Only the expected output is polled while the editor is open. A stable size/mtime,

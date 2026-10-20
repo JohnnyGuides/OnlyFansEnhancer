@@ -8,6 +8,24 @@ namespace OFEnhancer.Desktop.Tests;
 public sealed class XTeaserEditTests
 {
     [TestMethod]
+    public async Task TemplateOnAnotherMediaRootPersistsAndCopiesWithoutEditingOriginal()
+    {
+        using Fixture fixture = new();
+        string template = Path.Combine(Directory.CreateDirectory(Path.Combine(fixture.Root, "other-media")).FullName, "template.veg");
+        File.WriteAllText(template, "original template");
+        DesktopSettingsStore settings = new(Path.Combine(fixture.Root, "settings.json"));
+        settings.Save(DesktopSettings.Empty with { XTeaserRoot = fixture.Tweets, XTeaserTemplatePath = template });
+        fixture.TemplatePath = settings.Load().XTeaserTemplatePath;
+        Assert.AreEqual(template, fixture.TemplatePath);
+        Assert.IsTrue((await fixture.Call("getTeaserEdit")).GetProperty("templateAvailable").GetBoolean());
+        await fixture.Call("createTeaserProject");
+        Assert.AreEqual("original template", File.ReadAllText(template));
+        Assert.AreEqual("original template", File.ReadAllText(Path.Combine(fixture.Episode, "ep-a__teaser.veg")));
+        settings.Save(settings.Load() with { BrowserId = BrowserSelection.SystemDefaultId });
+        Assert.AreEqual(template, settings.Load().XTeaserTemplatePath);
+    }
+
+    [TestMethod]
     public async Task ExplicitProjectSelectionPersistsAndNamesAreReservedPerDay()
     {
         using Fixture fixture = new();
@@ -127,6 +145,7 @@ public sealed class XTeaserEditTests
         internal string Episode => Path.Combine(Root, "ep-a");
         internal string Tweets => Path.Combine(Root, ".TWEETS");
         internal string? RenderRoot;
+        internal string? TemplatePath;
         internal DateTimeOffset Now = DateTimeOffset.Parse("2026-10-20T10:00:00Z");
         internal CatalogueStore Store = null!;
         private XTeaserController controller = null!;
@@ -143,7 +162,7 @@ public sealed class XTeaserEditTests
             Start();
         }
         private void Start() => controller = new XTeaserController(Store, new WebMessageDispatcher(_ => ""),
-            () => DesktopSettings.Empty with { XTeaserRoot = RenderRoot ?? Tweets }, () => Now) { OpenProject = Opened.Add, ChooseProject = _ => null };
+            () => DesktopSettings.Empty with { XTeaserRoot = RenderRoot ?? Tweets, XTeaserTemplatePath = TemplatePath }, () => Now) { OpenProject = Opened.Add, ChooseProject = _ => null };
         internal long Changes()
         {
             using var command = Store.Connection.CreateCommand();

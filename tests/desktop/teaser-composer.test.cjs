@@ -211,6 +211,48 @@ async function chooseSyntheticVideo(page) {
   return frame;
 }
 
+test("empty catalogue or filter keeps Choose video available", async () => {
+  const page = await browser.newPage();
+  try {
+    const errors = await mount(page);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.evaluate(() =>
+      OFEnhancerTeaserComposer.open({
+        date: "2026-10-06",
+        episodes: [],
+        request: async () => ({ clips: [] }),
+        renderCatalogue: () => {
+          const empty = document.createElement("div");
+          empty.textContent =
+            "No catalogue episodes yet. Import the catalogue first.";
+          return empty;
+        },
+      }),
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Choose a new teaser video" })
+        .isVisible(),
+      true,
+    );
+    const frame = await chooseSyntheticVideo(page);
+    assert.equal(
+      await frame.locator(".teaser-video-preview").isVisible(),
+      true,
+    );
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Open episode folder" })
+        .isDisabled(),
+      true,
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("Vegas handoff resumes pending drafts and refreshes same-name renders without moving the editor", async () => {
   const page = await browser.newPage({
     viewport: { width: 1365, height: 1000 },

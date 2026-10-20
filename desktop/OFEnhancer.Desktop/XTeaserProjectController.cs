@@ -52,7 +52,7 @@ internal sealed partial class XTeaserController
         string? root = Path.GetDirectoryName(store.ConfiguredThumbnailRoot ?? "");
         if (root is null) return null;
         string folder = Path.Combine(root, "_template");
-        string? candidate = TeaserTemplatePath;
+        string? candidate = TeaserTemplatePath ?? settings().XTeaserTemplatePath;
         if (candidate is null && Directory.Exists(folder))
         {
             string preferred = Path.Combine(folder, "_.-TEMPLATE-._.veg");

@@ -350,9 +350,13 @@ test("last-frame mode preserves the original clip and audio before appending the
         target,
       ]).trim(),
     );
+    // The encoder deliberately records four fresh black frames after the warp.
+    const encoderTailSeconds = 4 / 30;
     assert.ok(
-      Math.abs(duration - (sourceDuration + endingDuration)) < 0.25,
-      `last-frame mode appends ${endingDuration} seconds (${duration} total)`,
+      Math.abs(
+        duration - (sourceDuration + endingDuration + encoderTailSeconds),
+      ) < 0.25,
+      `last-frame mode appends ${endingDuration} seconds plus the encoding tail (${duration} total)`,
     );
     const originalStart = decodedFrame(target, 0.5);
     assert.ok(

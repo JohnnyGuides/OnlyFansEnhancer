@@ -56,7 +56,8 @@ internal sealed class DesktopSettingsStore
                 BrowserSelection.NormalizeId(payload.BrowserId),
                 NormalizeGoogleSheetUrl(payload.GoogleSheetUrl),
                 NormalizeLocalPath(payload.XTeaserRoot),
-                NormalizeLocalPath(payload.XTeaserRevertListPath)
+                NormalizeLocalPath(payload.XTeaserRevertListPath),
+                NormalizeLocalPath(payload.XTeaserTemplatePath)
             );
             return true;
         }
@@ -76,8 +77,9 @@ internal sealed class DesktopSettingsStore
         string? googleSheetUrl = NullOrValidatedGoogleSheetUrl(settings.GoogleSheetUrl);
         string? teaserRoot = NullOrValidatedLocalPath(settings.XTeaserRoot, "invalid-x-teaser-root");
         string? revertList = NullOrValidatedLocalPath(settings.XTeaserRevertListPath, "invalid-x-teaser-revert-list");
+        string? template = NullOrValidatedLocalPath(settings.XTeaserTemplatePath, "invalid-x-teaser-template");
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(
-            new DesktopSettingsPayload(extensionId, googleClientId, browserId, googleSheetUrl, teaserRoot, revertList),
+            new DesktopSettingsPayload(extensionId, googleClientId, browserId, googleSheetUrl, teaserRoot, revertList, template),
             JsonOptions
         );
         string? directory = Path.GetDirectoryName(_path);
@@ -192,7 +194,8 @@ internal sealed class DesktopSettingsStore
         [property: JsonPropertyName("browserId")] string? BrowserId,
         [property: JsonPropertyName("googleSheetUrl")] string? GoogleSheetUrl,
         [property: JsonPropertyName("xTeaserRoot")] string? XTeaserRoot = null,
-        [property: JsonPropertyName("xTeaserRevertListPath")] string? XTeaserRevertListPath = null
+        [property: JsonPropertyName("xTeaserRevertListPath")] string? XTeaserRevertListPath = null,
+        [property: JsonPropertyName("xTeaserTemplatePath")] string? XTeaserTemplatePath = null
     );
 }
 
@@ -202,7 +205,8 @@ internal sealed record DesktopSettings(
     string? BrowserId = null,
     string? GoogleSheetUrl = null,
     string? XTeaserRoot = null,
-    string? XTeaserRevertListPath = null
+    string? XTeaserRevertListPath = null,
+    string? XTeaserTemplatePath = null
 )
 {
     internal static DesktopSettings Empty { get; } = new(null, null);

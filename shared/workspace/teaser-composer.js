@@ -772,10 +772,10 @@
         const upload = node("li", "xt-card xt-upload-choice");
         add.className = "xt-episode xt-clip-add";
         upload.append(add);
-        const wall = catalogue.querySelector(".xt-cards");
+        let wall = catalogue.querySelector(".xt-cards");
         if (!wall) {
-          status.textContent = "";
-          return;
+          wall = node("ul", "xt-cards");
+          catalogue.append(wall);
         }
         wall.prepend(upload);
         const wrapper = node("div", "xt xt-composer-catalogue");
