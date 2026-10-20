@@ -239,10 +239,13 @@ test("opening shows the editor layout once and never paints the unfinished Uploa
         attributeFilter: ["open"],
       });
     });
+    let attempts = 0;
     await page.route("**/upload-console.js", async (route) => {
-      scriptRequested();
-      await startup;
-      await route.continue();
+      if (++attempts === 1) {
+        scriptRequested();
+        await startup;
+      }
+      await route.continue().catch(() => {});
     });
     const opening = mount(page);
     await requested;
@@ -256,8 +259,19 @@ test("opening shows the editor layout once and never paints the unfinished Uploa
       await page.locator(".xt-composer-dialog").getAttribute("data-editor"),
       "true",
     );
+    assert.equal(await page.locator(".xt-editor-loading").isVisible(), true);
+    const output = path.join(repositoryRoot, ".local/clip-preview-review");
+    fs.mkdirSync(output, { recursive: true });
+    await page
+      .locator(".xt-composer-dialog")
+      .screenshot({ path: path.join(output, "editor-loading.png") });
+    await page
+      .getByRole("button", { name: "Retry", exact: true })
+      .click({ timeout: 12000 });
     releaseStartup();
     const errors = await opening;
+    assert.equal(await page.locator(".xt-editor-loading").count(), 0);
+    assert.equal(attempts, 2, "retry reloads the same editor frame");
     assert.equal(
       await frame.isVisible(),
       true,
@@ -2728,6 +2742,112 @@ test("version-one Twitter drafts survive the destination-store upgrade", async (
         DAY,
       ),
       "old.mp4",
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("clip chooser uses distinct posters and only one intent-loaded playback", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1100, height: 780 },
+  });
+  try {
+    await page.route("**/poster-*.svg", (route) => {
+      const index = Number(
+        route
+          .request()
+          .url()
+          .match(/poster-(\d)/)[1],
+      );
+      return route.fulfill({
+        contentType: "image/svg+xml",
+        body: `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="${["#293b55", "#384c39", "#583b45"][index]}"/><circle cx="${70 + index * 80}" cy="90" r="45" fill="#81bbd7"/><text x="16" y="160" fill="white" font-size="22">Shot ${index + 1}</text></svg>`,
+      });
+    });
+    await page.route("**/preview.mp4", (route) =>
+      route.fulfill({ contentType: "video/mp4", body: fs.readFileSync(VIDEO) }),
+    );
+    await page.goto(`${origin}/host`);
+    await page.evaluate(async () => {
+      globalThis.previewRequests = [];
+      const episode = { sourceKey: "sample", title: "Example episode" };
+      await OFEnhancerTeaserComposer.open({
+        date: "2026-10-06",
+        episode,
+        episodes: [episode],
+        request: async (op, args) => {
+          if (op === "getTeaserClips")
+            return {
+              clips: ["far", "closer", "close"].map((name, index) => ({
+                clipId: String(index),
+                name: `example-episode__t0${index + 1}-${name}.mp4`,
+                episodeKey: "sample",
+              })),
+            };
+          if (op === "getTeaserClipPreview") {
+            previewRequests.push(args);
+            return {
+              posterUrl: `/poster-${args.clipId}.svg`,
+              duration: 12 + Number(args.clipId),
+              videoUrl: args.playback ? "/preview.mp4" : null,
+            };
+          }
+          return { ok: true };
+        },
+      });
+    });
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll(".xt-clip-media[data-loaded]").length === 3,
+    );
+    const cards = page.locator(".xt-clip-choice[data-episode-key]");
+    assert.deepEqual(await cards.locator("strong").allTextContents(), [
+      "t01-far",
+      "t02-closer",
+      "t03-close",
+    ]);
+    assert.equal(
+      await page.evaluate(
+        () => previewRequests.filter((r) => r.playback).length,
+      ),
+      0,
+    );
+    await cards.nth(0).hover();
+    await page.waitForFunction(
+      () => document.querySelector(".xt-clip-video")?.readyState >= 2,
+    );
+    assert.equal(await page.locator(".xt-clip-video").count(), 1);
+    await page.mouse.move(0, 0);
+    await cards.nth(1).focus();
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll(".xt-clip-video").length === 1 &&
+        previewRequests.filter((r) => r.playback).length === 2,
+    );
+    assert.equal(await page.locator(".xt-clip-video").count(), 1);
+    await page.getByRole("button", { name: "Close", exact: true }).focus();
+    assert.equal(await page.locator(".xt-clip-video").count(), 0);
+    const output = path.join(repositoryRoot, ".local/clip-preview-review");
+    fs.mkdirSync(output, { recursive: true });
+    await page
+      .locator(".xt-composer-dialog")
+      .screenshot({ path: path.join(output, "clip-choices-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page
+      .locator(".xt-composer-dialog")
+      .screenshot({ path: path.join(output, "clip-choices-phone.png") });
+    assert.equal(
+      await page.evaluate(
+        () =>
+          document.querySelector(".xt-composer-dialog").scrollWidth >
+          document.querySelector(".xt-composer-dialog").clientWidth,
+      ),
+      false,
+    );
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.waitForFunction(
+      () => !document.querySelector(".xt-composer-dialog"),
     );
   } finally {
     await page.close();

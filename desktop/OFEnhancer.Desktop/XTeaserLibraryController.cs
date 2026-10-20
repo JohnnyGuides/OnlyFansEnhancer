@@ -8,6 +8,29 @@ namespace OFEnhancer.Desktop;
 
 internal sealed partial class XTeaserController
 {
+    internal TeaserPreviewResource? OpenClipPreview(Uri uri) => clipPreviews.Open(uri);
+
+    private async Task<object> ClipPreviewAsync(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || payload.EnumerateObject().Any(property => property.Name is not ("clipId" or "playback"))
+            || !payload.TryGetProperty("clipId", out JsonElement id) || id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out long clipId) || clipId <= 0
+            || payload.TryGetProperty("playback", out JsonElement play) && play.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        bool playback = payload.TryGetProperty("playback", out play) && play.GetBoolean();
+        var input = await dispatcher.EnqueueAsync(() => (
+            Root: settings().XTeaserRoot ?? throw new GoogleCatalogueControllerException("x-teaser-inactive"),
+            Clip: store.GetXTeaserLibraryClip(clipId) ?? throw new GoogleCatalogueControllerException("teaser-clip-not-found"))).ConfigureAwait(false);
+        try
+        {
+            TeaserClipPreview preview = await clipPreviews.PrepareAsync(input.Root, input.Clip, playback).ConfigureAwait(false);
+            return new { posterUrl = preview.PosterUrl, duration = preview.Duration, videoUrl = preview.VideoUrl };
+        }
+        catch (GoogleCatalogueControllerException) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { throw new GoogleCatalogueControllerException("teaser-preview-unavailable"); }
+    }
+
     private readonly Dictionary<string, ClipRead> clipReads = new(StringComparer.Ordinal);
     private sealed record ClipRead(long ClipId, FileStream Stream, XTeaserLibraryClip Clip, DateTimeOffset Expires);
     private const long MaximumClipBytes = 512L * 1024 * 1024;

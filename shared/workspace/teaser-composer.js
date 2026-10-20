@@ -93,6 +93,109 @@
     }
     const dialog = node("dialog", "xt-composer-dialog");
     let catalogueObserver = null;
+    let previewObserver = null,
+      previewTimer = null,
+      previewGeneration = 0;
+    let playingPreview = null,
+      editorLoadTimer = null;
+    function stopPreview() {
+      clearTimeout(previewTimer);
+      previewGeneration++;
+      if (playingPreview) {
+        playingPreview.pause();
+        playingPreview.removeAttribute("src");
+        playingPreview.load();
+        playingPreview.remove();
+        playingPreview = null;
+      }
+    }
+    function stopEditorLoading() {
+      clearTimeout(editorLoadTimer);
+      content.querySelector(".xt-editor-loading")?.remove();
+      content.removeAttribute("aria-busy");
+    }
+    function previewCard(choice, clip) {
+      const media = node("span", "xt-clip-media");
+      const image = node("img", "");
+      image.alt = "";
+      image.hidden = true;
+      image.onerror = () => {
+        media.dataset.failed = "true";
+      };
+      const duration = node("span", "xt-clip-duration");
+      media.append(image, duration);
+      choice.prepend(media);
+      let posterPromise = null,
+        playbackPromise = null;
+      const fetchPreview = (playback = false) => {
+        if (playback)
+          return (playbackPromise ||= request("getTeaserClipPreview", {
+            clipId: clip.clipId,
+            playback: true,
+          }).catch((error) => {
+            playbackPromise = null;
+            throw error;
+          }));
+        return (posterPromise ||= request("getTeaserClipPreview", {
+          clipId: clip.clipId,
+        }));
+      };
+      choice.loadPoster = async () => {
+        try {
+          const result = await fetchPreview();
+          if (!choice.isConnected) return;
+          image.onload = () => {
+            image.hidden = false;
+            media.dataset.loaded = "true";
+          };
+          image.src = result.posterUrl;
+          if (Number.isFinite(result.duration)) {
+            const seconds = Math.round(result.duration);
+            duration.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+          }
+        } catch {
+          media.dataset.failed = "true";
+        }
+      };
+      const start = () => {
+        stopPreview();
+        const generation = previewGeneration;
+        previewTimer = setTimeout(async () => {
+          try {
+            const result = await fetchPreview(true);
+            if (
+              generation !== previewGeneration ||
+              !choice.isConnected ||
+              document.hidden ||
+              !result.videoUrl
+            )
+              return;
+            const video = node("video", "xt-clip-video");
+            video.muted = true;
+            video.loop = true;
+            video.playsInline = true;
+            video.preload = "none";
+            video.src = result.videoUrl;
+            playingPreview = video;
+            media.append(video);
+            await video.play();
+          } catch {
+            if (generation === previewGeneration) stopPreview();
+          }
+        }, 180);
+      };
+      choice.addEventListener("pointerenter", (event) => {
+        if (event.pointerType !== "touch") start();
+      });
+      choice.addEventListener("pointerleave", stopPreview);
+      choice.addEventListener("focus", start);
+      choice.addEventListener("blur", stopPreview);
+      previewObserver.observe(choice);
+    }
+    const visibilityChanged = () => {
+      if (document.hidden) stopPreview();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
     active = dialog;
     dialog.setAttribute("aria-label", `Teaser for ${dayLabel(date)}`);
     const heading = node("header", "xt-composer-heading");
@@ -520,8 +623,10 @@
       if (
         event.data?.type === "ofenhancer:teaser-initialized" &&
         event.data.date === date
-      )
+      ) {
         iframe.style.removeProperty("visibility");
+        stopEditorLoading();
+      }
       if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
       if (event.data?.type === "ofenhancer:teaser-dirty")
         delete status.dataset.saved;
@@ -594,6 +699,10 @@
       "close",
       () => {
         catalogueObserver?.disconnect();
+        previewObserver?.disconnect();
+        stopPreview();
+        stopEditorLoading();
+        document.removeEventListener("visibilitychange", visibilityChanged);
         handoff?.close();
         window.removeEventListener("message", receive);
         dialog.remove();
@@ -615,6 +724,9 @@
         return;
       }
       catalogueObserver?.disconnect();
+      previewObserver?.disconnect();
+      stopPreview();
+      stopEditorLoading();
       dialog.dataset.editor = "true";
       dirty = Boolean(file && !draft);
       title.textContent =
@@ -681,30 +793,57 @@
         : "Twitter teaser upload hub";
       iframe.src = `upload-console.html?teaserDay=${encodeURIComponent(date)}`;
       const frame = iframe;
-      iframe.addEventListener(
-        "load",
-        () => {
-          if (iframe !== frame || !dialog.isConnected) return;
-          const copy =
-            frame.contentDocument?.querySelector(".teaser-copy-file");
-          if (copy) {
-            copy.classList.add("xt-action");
-            heading.insertBefore(
-              copy,
-              heading.querySelector(".xt-episode-folder") || close,
-            );
-          }
-          const posts = frame.contentDocument?.querySelector(
-            ".teaser-planner-posts",
+      iframe.addEventListener("load", () => {
+        if (iframe !== frame || !dialog.isConnected) return;
+        const copy = frame.contentDocument?.querySelector(".teaser-copy-file");
+        if (copy) {
+          heading.querySelector(".teaser-copy-file")?.remove();
+          copy.classList.add("xt-action");
+          heading.insertBefore(
+            copy,
+            heading.querySelector(".xt-episode-folder") || close,
           );
-          if (posts) {
-            destinations.hidden = false;
-            posts.append(destinations);
-          }
-        },
-        { once: true },
-      );
+        }
+        const posts = frame.contentDocument?.querySelector(
+          ".teaser-planner-posts",
+        );
+        if (posts) {
+          destinations.hidden = false;
+          posts.append(destinations);
+        }
+      });
+      function showLoading() {
+        stopEditorLoading();
+        content.setAttribute("aria-busy", "true");
+        const shell = node("div", "xt-editor-loading");
+        const placeholder = node("div", "xt-editor-skeleton");
+        placeholder.setAttribute("aria-hidden", "true");
+        placeholder.innerHTML =
+          '<div class="xt-skeleton-media"></div><div class="xt-skeleton-fields"><i></i><i></i><i></i><i></i></div>';
+        const message = node(
+          "div",
+          "xt-editor-loading-status",
+          "Opening editor...",
+        );
+        message.setAttribute("role", "status");
+        shell.append(placeholder, message);
+        content.prepend(shell);
+        editorLoadTimer = setTimeout(() => {
+          if (iframe !== frame || !shell.isConnected) return;
+          message.textContent = "Editor is taking longer than usual.";
+          const retry = action("Retry");
+          retry.addEventListener("click", () => {
+            heading.after(destinations);
+            destinations.hidden = true;
+            frame.style.visibility = "hidden";
+            showLoading();
+            frame.contentWindow.location.reload();
+          });
+          message.append(retry);
+        }, 10000);
+      }
       content.replaceChildren(iframe);
+      showLoading();
       void handoff?.setEpisode(context.episodeKey, !postId);
       status.textContent = postId ? "Local Reddit draft · not scheduled." : "";
     }
@@ -745,6 +884,19 @@
       }
     }
     async function choose() {
+      stopEditorLoading();
+      stopPreview();
+      previewObserver?.disconnect();
+      previewObserver = new global.IntersectionObserver(
+        (entries) => {
+          for (const entry of entries)
+            if (entry.isIntersecting) {
+              previewObserver.unobserve(entry.target);
+              void entry.target.loadPoster();
+            }
+        },
+        { root: content, rootMargin: "100px" },
+      );
       delete status.dataset.saved;
       catalogueObserver?.disconnect();
       delete dialog.dataset.editor;
@@ -897,22 +1049,27 @@
             choice.title = `${recommendation.reason}. ${recommendation.detail}`;
             choice.setAttribute("aria-description", choice.title);
           }
-          if (linked?.thumbnailAssetId) {
-            const image = node("img", "");
-            image.alt = "";
-            image.loading = "lazy";
-            image.src = `https://thumbs.ofenhancer.local/${encodeURIComponent(linked.thumbnailAssetId)}`;
-            image.addEventListener("error", () => image.remove());
-            choice.append(image);
-          }
+          choice.title = clip.name;
+          choice.setAttribute("aria-label", `Open ${clip.name}`);
+          const stem = clip.name.replace(/\.[^.]+$/, "");
+          const shortName = episode
+            ? stem
+                .replace(/^.*?(?=(?:__?t\d+|teaser|teasr)[-_])/i, "")
+                .replace(/^_+/, "")
+            : stem;
           choice.append(
-            node("strong", "", linked?.title || clip.name),
+            node("strong", "", shortName || stem),
             node(
               "small",
               "",
-              clip.state === "failed" ? "Needs re-edit" : clip.name,
+              clip.state === "failed"
+                ? "Needs re-edit"
+                : episode
+                  ? clip.name.split(".").pop().toUpperCase()
+                  : linked?.title || "Unlinked clip",
             ),
           );
+          previewCard(choice, clip);
           choice.addEventListener("click", () => editClip(clip, linked));
           grid.append(choice);
         }

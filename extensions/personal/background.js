@@ -147,6 +147,7 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
       "getTeaserOverview",
       "getTeaserClips",
       "getTeaserClipChunk",
+      "getTeaserClipPreview",
       "getTeaserEdit",
       "openTeaserProject",
       "createTeaserProject",

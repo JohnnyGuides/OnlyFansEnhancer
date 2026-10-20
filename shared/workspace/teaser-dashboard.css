@@ -1561,3 +1561,165 @@ html:has(.xt-picker[open]) {
     padding-inline: 10px;
   }
 }
+
+/* Actual clip frames, with one lazy hover decoder shared by the chooser. */
+.xt-clip-choices {
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 10px;
+}
+.xt-clip-choice {
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 7px;
+  gap: 6px;
+}
+.xt-clip-choice strong {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.xt-clip-add {
+  justify-content: center;
+  min-height: 142px;
+}
+.xt-clip-media {
+  display: block;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #0b1119;
+}
+.xt-clip-media::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    #ffffff08 50%,
+    transparent 75%
+  );
+  background-size: 200% 100%;
+  animation: xt-preview-loading 1.5s linear infinite;
+}
+.xt-clip-media[data-loaded]::before,
+.xt-clip-media[data-failed]::before {
+  display: none;
+}
+.xt-clip-media img,
+.xt-clip-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 0;
+}
+.xt-clip-media img[hidden] {
+  display: none;
+}
+.xt-clip-duration {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 1;
+  color: #fff;
+  background: #080c12c9;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.xt-clip-duration:empty {
+  display: none;
+}
+.xt-composer-dialog[data-editor] .xt-composer-content {
+  position: relative;
+}
+.xt-editor-loading {
+  position: absolute;
+  inset: 16px 20px 0;
+  background: #101821;
+}
+.xt-editor-skeleton {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+}
+.xt-skeleton-media {
+  aspect-ratio: 1;
+  border-radius: 8px;
+}
+.xt-skeleton-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 12px;
+  align-content: start;
+  padding-top: 10px;
+}
+.xt-skeleton-fields i {
+  height: 52px;
+  border-radius: 7px;
+}
+.xt-skeleton-fields i:first-child {
+  grid-column: 1 / -1;
+  height: 100px;
+  margin-bottom: 8px;
+}
+.xt-skeleton-fields i:last-child {
+  grid-column: 1 / -1;
+}
+.xt-skeleton-media,
+.xt-skeleton-fields i {
+  background: linear-gradient(100deg, #1b2633 25%, #263342 50%, #1b2633 75%);
+  background-size: 200% 100%;
+  animation: xt-preview-loading 1.5s linear infinite;
+}
+.xt-editor-loading-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+  color: #afbed2;
+  font-size: 12px;
+}
+@keyframes xt-preview-loading {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (max-width: 600px) {
+  .xt-clip-choices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .xt-editor-loading {
+    inset: 10px 10px 0;
+    overflow: hidden;
+  }
+  .xt-editor-skeleton {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .xt-skeleton-media {
+    width: min(100%, 260px);
+    justify-self: center;
+  }
+  .xt-skeleton-fields {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .xt-composer-dialog:not([data-editor]):not(:has(.xt-composer-catalogue))
+    .xt-composer-heading {
+    flex-wrap: nowrap;
+  }
+  .xt-composer-dialog:not([data-editor]):not(:has(.xt-composer-catalogue))
+    .xt-composer-heading
+    h2 {
+    flex-basis: auto;
+    white-space: nowrap;
+  }
+}

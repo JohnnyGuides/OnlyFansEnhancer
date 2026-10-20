@@ -180,7 +180,13 @@ The teaser editor has one header row, one compact media-control row and one
 footer. Its **Vegas** menu contains project selection and render details.
 The preview, window and action buttons stay in place while media loads or a
 thumbnail frame is selected. The dialog chooses its initial layout before opening;
-the embedded uploader stays hidden until its teaser setup finishes.
+the embedded uploader stays hidden until its teaser setup finishes. A skeleton
+keeps its space visible during setup, with Retry if startup stalls.
+The clip chooser shows cached frames from each actual video, its filename and
+duration. Hovering or keyboard focus plays one muted, low-resolution six-second
+preview; other clips remain still. Posters load near the visible area and preview
+generation runs one job at a time. Touch users choose a card to open the full player.
+Re-rendered files receive fresh previews after the library indexes their changed fingerprint.
 **Edit in Vegas** remembers the episode's chosen
 `.veg` project, whatever its name. Other projects remain available in the project
 selector or **Choose project…**. **New from template**

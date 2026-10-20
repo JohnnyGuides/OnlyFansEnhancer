@@ -513,6 +513,8 @@ public partial class MainWindow : Window, IDisposable
             "https://thumbs.ofenhancer.local/*",
             CoreWebView2WebResourceContext.Image
         );
+        Browser.CoreWebView2.AddWebResourceRequestedFilter(
+            $"https://{TeaserClipPreviewStore.Host}/*", CoreWebView2WebResourceContext.All);
         Browser.CoreWebView2.WebResourceRequested += async (_, args) =>
         {
             CoreWebView2Deferral deferral = args.GetDeferral();
@@ -521,6 +523,19 @@ public partial class MainWindow : Window, IDisposable
                 // WebView2 request members are COM objects bound to this UI thread.
                 // Snapshot the URI before queuing the catalogue lookup on a worker.
                 string requestUri = args.Request.Uri;
+                if (new Uri(requestUri).Host == TeaserClipPreviewStore.Host)
+                {
+                    TeaserPreviewResource? preview = await Task.Run(() => xTeasers.OpenClipPreview(new Uri(requestUri)));
+                    if (preview is null) { SetThumbnailNotFound(args); return; }
+                    try
+                    {
+                        args.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+                            preview.Stream, 200, "OK",
+                            $"Content-Type: {preview.ContentType}\r\nContent-Length: {preview.Length}\r\nCache-Control: private, max-age=86400\r\nAccess-Control-Allow-Origin: https://app.ofenhancer.local\r\nX-Content-Type-Options: nosniff");
+                    }
+                    catch { preview.Stream.Dispose(); throw; }
+                    return;
+                }
                 ThumbnailResource? resource = await dispatcher.EnqueueAsync(
                     () => thumbnails.Open(new Uri(requestUri))
                 );

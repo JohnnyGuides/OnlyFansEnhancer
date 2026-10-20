@@ -22,6 +22,7 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
     internal static readonly TimeSpan FirstRunDelay = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan RunInterval = TimeSpan.FromHours(1);
     private readonly SemaphoreSlim running = new(1, 1);
+    private readonly TeaserClipPreviewStore clipPreviews = new();
     private System.Threading.Timer? timer;
 
     private DateTimeOffset Now => (clock ?? (() => DateTimeOffset.UtcNow))();
@@ -108,7 +109,7 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
     {
         "getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
         "requestXScan", "getXScanActivity",
-        "getTeaserClips", "getTeaserClipChunk", "openTeaserEpisodeFolder", "resolveScheduledTeaserResult",
+        "getTeaserClips", "getTeaserClipChunk", "getTeaserClipPreview", "openTeaserEpisodeFolder", "resolveScheduledTeaserResult",
         "getTeaserEdit", "openTeaserProject", "createTeaserProject", "chooseTeaserProject", "checkTeaserRender",
     };
 
@@ -131,6 +132,7 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
         "getXScanActivity" => ScanActivity(payload),
         "getTeaserClips" => await dispatcher.EnqueueAsync<object>(() => Library(payload)).ConfigureAwait(false),
         "getTeaserClipChunk" => await dispatcher.EnqueueAsync<object>(() => ClipChunk(payload)).ConfigureAwait(false),
+        "getTeaserClipPreview" => await ClipPreviewAsync(payload).ConfigureAwait(false),
         "resolveScheduledTeaserResult" => await dispatcher.EnqueueAsync<object>(() => ScheduledResult(payload)).ConfigureAwait(false),
         "openTeaserEpisodeFolder" => await dispatcher.EnqueueAsync<object>(() => OpenEpisodeFolder(payload)).ConfigureAwait(false),
         _ => throw new GoogleCatalogueControllerException("unsupported-operation"),
