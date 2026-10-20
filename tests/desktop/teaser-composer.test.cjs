@@ -2762,7 +2762,7 @@ test("clip chooser uses distinct posters and only one intent-loaded playback", a
       );
       return route.fulfill({
         contentType: "image/svg+xml",
-        body: `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="${["#293b55", "#384c39", "#583b45"][index]}"/><circle cx="${70 + index * 80}" cy="90" r="45" fill="#81bbd7"/><text x="16" y="160" fill="white" font-size="22">Shot ${index + 1}</text></svg>`,
+        body: `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="${["#293b55", "#384c39", "#583b45"][index]}"/><circle cx="${70 + index * 80}" cy="160" r="45" fill="#81bbd7"/><text x="16" y="296" fill="white" font-size="22">Shot ${index + 1}</text></svg>`,
       });
     });
     await page.route("**/preview.mp4", (route) =>
