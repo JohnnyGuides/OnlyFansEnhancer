@@ -174,7 +174,9 @@ are square; the main uploader retains its existing landscape cover format.
 The teaser editor has one header row, one compact media-control row and one
 footer. Its **Vegas** menu contains project selection and render details.
 The preview, window and action buttons stay in place while media loads or a
-thumbnail frame is selected. **Edit in Vegas** remembers the episode's chosen
+thumbnail frame is selected. The dialog chooses its initial layout before opening;
+the embedded uploader stays hidden until its teaser setup finishes.
+**Edit in Vegas** remembers the episode's chosen
 `.veg` project, whatever its name. Other projects remain available in the project
 selector or **Choose project…**. **New from template**
 creates an episode-local copy of the existing Vegas template.

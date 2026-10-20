@@ -687,6 +687,8 @@
         updateLinked();
       } catch (error) {
         fail(error);
+      } finally {
+        notify("initialized", { date: day });
       }
     });
     frameDialog.addEventListener("close", () =>

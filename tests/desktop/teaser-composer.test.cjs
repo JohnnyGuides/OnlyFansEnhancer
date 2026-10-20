@@ -217,6 +217,60 @@ async function chooseSyntheticVideo(page) {
   return frame;
 }
 
+test("opening shows the editor layout once and never paints the unfinished Upload Hub", async () => {
+  const page = await browser.newPage();
+  let releaseStartup;
+  const startup = new Promise((resolve) => (releaseStartup = resolve));
+  let scriptRequested;
+  const requested = new Promise((resolve) => (scriptRequested = resolve));
+  try {
+    await page.addInitScript(() => {
+      globalThis.openedTeaserLayouts = [];
+      new MutationObserver((records) => {
+        for (const record of records)
+          if (
+            record.target.matches?.(".xt-composer-dialog[open]") &&
+            record.attributeName === "open"
+          )
+            openedTeaserLayouts.push(record.target.dataset.editor || "chooser");
+      }).observe(document, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["open"],
+      });
+    });
+    await page.route("**/upload-console.js", async (route) => {
+      scriptRequested();
+      await startup;
+      await route.continue();
+    });
+    const opening = mount(page);
+    await requested;
+    const frame = page.locator(".xt-composer-frame");
+    assert.equal(
+      await frame.isVisible(),
+      false,
+      "hide the uninitialized uploader",
+    );
+    assert.equal(
+      await page.locator(".xt-composer-dialog").getAttribute("data-editor"),
+      "true",
+    );
+    releaseStartup();
+    const errors = await opening;
+    assert.equal(
+      await frame.isVisible(),
+      true,
+      "show the initialized teaser editor",
+    );
+    assert.deepEqual(await page.evaluate(() => openedTeaserLayouts), ["true"]);
+    assert.deepEqual(errors, []);
+  } finally {
+    releaseStartup();
+    await page.close();
+  }
+});
+
 test("empty catalogue opens the editor directly and accepts a chosen video", async () => {
   const page = await browser.newPage();
   try {

@@ -517,6 +517,11 @@
           { type: "ofenhancer:teaser-context", ...context },
           location.origin,
         );
+      if (
+        event.data?.type === "ofenhancer:teaser-initialized" &&
+        event.data.date === date
+      )
+        iframe.style.removeProperty("visibility");
       if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
       if (event.data?.type === "ofenhancer:teaser-dirty")
         delete status.dataset.saved;
@@ -646,6 +651,7 @@
         }
       });
       iframe = node("iframe", "xt-composer-frame");
+      iframe.style.visibility = "hidden";
       iframe.title = postId
         ? "Reddit teaser draft"
         : "Twitter teaser upload hub";
@@ -916,8 +922,6 @@
           : "Ready clips are unavailable. You can still choose a video.";
       }
     }
-    dialog.showModal();
-    close.focus();
     try {
       await refreshDestinations();
       const draft = await global.OFEnhancerTeaserDrafts.get(date);
@@ -927,6 +931,8 @@
       await choose();
       status.textContent = error.message;
     }
+    dialog.showModal();
+    close.focus();
   }
   global.OFEnhancerTeaserComposer = Object.freeze({ open, clipFile });
 })(globalThis);
