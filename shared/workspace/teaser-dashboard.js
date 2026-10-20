@@ -1910,17 +1910,6 @@
           event.preventDefault();
           closePicker();
         });
-        picker.addEventListener("click", (event) => {
-          if (event.target !== picker) return;
-          const bounds = picker.getBoundingClientRect();
-          if (
-            event.clientX < bounds.left ||
-            event.clientX > bounds.right ||
-            event.clientY < bounds.top ||
-            event.clientY > bounds.bottom
-          )
-            closePicker();
-        });
         picker.append(renderPicking());
         picker.append(renderFlow());
         root.append(picker);

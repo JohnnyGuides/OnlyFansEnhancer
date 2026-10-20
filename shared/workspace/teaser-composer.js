@@ -111,7 +111,7 @@
     }
     function stopEditorLoading() {
       clearTimeout(editorLoadTimer);
-      content.querySelector(".xt-editor-loading")?.remove();
+      content.querySelector(".xt-editor-error")?.remove();
       content.removeAttribute("aria-busy");
     }
     function previewCard(choice, clip) {
@@ -624,8 +624,13 @@
         event.data?.type === "ofenhancer:teaser-initialized" &&
         event.data.date === date
       ) {
+        context.formReady = true;
         iframe.style.removeProperty("visibility");
         stopEditorLoading();
+        if (!dialog.open) {
+          dialog.showModal();
+          close.focus();
+        }
       }
       if (event.data?.type === "ofenhancer:teaser-dirty") dirty = true;
       if (event.data?.type === "ofenhancer:teaser-dirty")
@@ -738,6 +743,11 @@
       context = {
         date,
         file,
+        episodeTitle:
+          episodes.find((item) => item.sourceKey === draft?.episodeKey)
+            ?.title ||
+          episode?.title ||
+          "",
         episodeKey:
           draft?.episodeKey || episode?.sourceKey || clip?.episodeKey || "",
         clipId: draft?.clipId || clip?.clipId || null,
@@ -813,38 +823,31 @@
           posts.append(destinations);
         }
       });
-      function showLoading() {
+      function waitForForm() {
         stopEditorLoading();
-        content.setAttribute("aria-busy", "true");
-        const shell = node("div", "xt-editor-loading");
-        const placeholder = node("div", "xt-editor-skeleton");
-        placeholder.setAttribute("aria-hidden", "true");
-        placeholder.innerHTML =
-          '<div class="xt-skeleton-media"></div><div class="xt-skeleton-fields"><i></i><i></i><i></i><i></i></div>';
-        const message = node(
-          "div",
-          "xt-editor-loading-status",
-          "Opening editor...",
-        );
-        message.setAttribute("role", "status");
-        shell.append(placeholder, message);
-        content.prepend(shell);
         editorLoadTimer = setTimeout(() => {
-          if (iframe !== frame || !shell.isConnected) return;
-          message.textContent = "Editor is taking longer than usual.";
+          if (iframe !== frame || !dialog.isConnected) return;
+          const error = node(
+            "div",
+            "xt-editor-error",
+            "The editor could not open.",
+          );
+          error.setAttribute("role", "alert");
           const retry = action("Retry");
           retry.addEventListener("click", () => {
             heading.after(destinations);
             destinations.hidden = true;
             frame.style.visibility = "hidden";
-            showLoading();
+            waitForForm();
             frame.contentWindow.location.reload();
           });
-          message.append(retry);
+          error.append(retry);
+          content.prepend(error);
+          if (!dialog.open) dialog.showModal();
         }, 10000);
       }
       content.replaceChildren(iframe);
-      showLoading();
+      waitForForm();
       void handoff?.setEpisode(context.episodeKey, !postId);
       status.textContent = postId ? "Local Reddit draft · not scheduled." : "";
     }
@@ -1135,8 +1138,10 @@
       await choose();
       status.textContent = error.message;
     }
-    dialog.showModal();
-    close.focus();
+    if (!dialog.open && (!iframe || context?.formReady)) {
+      dialog.showModal();
+      close.focus();
+    }
   }
   global.OFEnhancerTeaserComposer = Object.freeze({ open, clipFile });
 })(globalThis);

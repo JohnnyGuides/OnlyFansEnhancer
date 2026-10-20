@@ -6,6 +6,7 @@
     "app/app.js": "shared/workspace/app.js",
     "app/finalLogo.png": "shared/workspace/finalLogo.png",
     "app/host-bridge.js": "shared/workspace/host-bridge.js",
+    "app/dialog-dismiss.js": "shared/workspace/dialog-dismiss.js",
     "app/index.html": "shared/workspace/index.html",
     "app/legacy-thumbnails/ids.js": "shared/workspace/legacy-thumbnails/ids.js",
     "app/legacy-thumbnails/manifest.json": "shared/workspace/legacy-thumbnails/manifest.json",

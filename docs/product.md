@@ -180,8 +180,13 @@ The teaser editor has one header row, one compact media-control row and one
 footer. Its **Vegas** menu contains project selection and render details.
 The preview, window and action buttons stay in place while media loads or a
 thumbnail frame is selected. The dialog chooses its initial layout before opening;
-the embedded uploader stays hidden until its teaser setup finishes. A skeleton
-keeps its space visible during setup, with Retry if startup stalls.
+the embedded uploader opens as soon as its real form is ready. Catalogue lookup,
+readiness checks and media loading continue independently, preserving early caption,
+time and link edits. No skeleton blocks entry; Retry remains available if the form
+itself cannot start. The desktop editor fits the caption, schedule and custom link;
+short windows and phones retain scrolling without a visible scrollbar track.
+Clicking outside an OFEnhancer modal follows its normal close behavior, including
+unsaved-edit and active-upload guards. Nested modals close before their parent.
 The clip chooser shows cached frames from each actual video, its filename and
 duration. Hovering or keyboard focus plays one muted, low-resolution six-second
 preview; other clips remain still. Posters load near the visible area and preview

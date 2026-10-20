@@ -71,6 +71,10 @@ async function preparePage(browser, { url, html, settings, scripts }) {
     route.fulfill({ status: 200, contentType: "text/html", body: html }),
   );
   await page.goto(url);
+  if (scripts.includes("c4s-upload.js"))
+    await page.addScriptTag({
+      path: path.join(repositoryRoot, "app/dialog-dismiss.js"),
+    });
   for (const script of ["registry.js", "common.js", ...scripts]) {
     await page.addScriptTag({
       path: path.join(repositoryRoot, "workflows", script),
@@ -881,6 +885,10 @@ test("C4S 4K editor moves a badge, remembers its style, and sets the uploader th
         "Open the Previews step, then reopen this editor to set the thumbnail.",
       )
       .waitFor();
+    await c4s.page.mouse.click(5, 5);
+    await c4s.page.waitForFunction(
+      () => !document.querySelector("[data-ofenhancer-4k-editor]"),
+    );
     await c4s.context.close();
   } finally {
     await browser.close();

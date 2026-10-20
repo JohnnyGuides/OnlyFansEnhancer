@@ -721,6 +721,7 @@
       host.remove();
       lifecycleSignal?.removeEventListener("abort", close);
     }
+    globalThis.OFEnhancerDialogDismiss.attach(shadow);
     lifecycleSignal?.addEventListener("abort", close, { once: true });
     dialog.addEventListener("close", close, { once: true });
     shadow.querySelector(".close").addEventListener("click", close);

@@ -18,7 +18,7 @@ let origin;
 let browser;
 
 const hostPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/teaser-dashboard.css"></head><body>
-<button id="open-day">Open Tuesday</button><script src="/app/teaser-draft-store.js"></script><script src="/app/teaser-render-handoff.js"></script><script src="/app/teaser-composer.js"></script><script>
+<button id="open-day">Open Tuesday</button><script src="/app/dialog-dismiss.js" data-app-dialogs></script><script src="/app/teaser-draft-store.js"></script><script src="/app/teaser-render-handoff.js"></script><script src="/app/teaser-composer.js"></script><script>
 document.querySelector('#open-day').addEventListener('click', () => OFEnhancerTeaserComposer.open({date:'${DAY}',episodes:[],request:async op=>op==='getTeaserClips'?{clips:[]}:{ok:true}}));
 </script></body></html>`;
 
@@ -259,18 +259,18 @@ test("opening shows the editor layout once and never paints the unfinished Uploa
       await page.locator(".xt-composer-dialog").getAttribute("data-editor"),
       "true",
     );
-    assert.equal(await page.locator(".xt-editor-loading").isVisible(), true);
-    const output = path.join(repositoryRoot, ".local/clip-preview-review");
-    fs.mkdirSync(output, { recursive: true });
-    await page
-      .locator(".xt-composer-dialog")
-      .screenshot({ path: path.join(output, "editor-loading.png") });
+    assert.equal(await page.locator(".xt-editor-loading").count(), 0);
+    assert.equal(
+      await page.locator(".xt-composer-dialog").isVisible(),
+      false,
+      "do not open a blank modal before the form exists",
+    );
     await page
       .getByRole("button", { name: "Retry", exact: true })
       .click({ timeout: 12000 });
     releaseStartup();
     const errors = await opening;
-    assert.equal(await page.locator(".xt-editor-loading").count(), 0);
+    assert.equal(await page.locator(".xt-editor-error").count(), 0);
     assert.equal(attempts, 2, "retry reloads the same editor frame");
     assert.equal(
       await frame.isVisible(),
@@ -565,7 +565,10 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
       actions: await frame.locator("#uploadActions").boundingBox(),
     });
     const before = await geometry();
-    assert.ok(before.dialog.height <= 500, "desktop editor stays compact");
+    assert.ok(
+      before.dialog.height <= 560,
+      "desktop editor fits the custom URL without exceeding its fixed height",
+    );
     assert.ok(
       (await page.locator(".xt-composer-heading").boundingBox()).height < 64,
       "one header row",
@@ -1955,6 +1958,23 @@ test("composer ignores forged messages and prevents closing while upload is runn
       await page.locator(".xt-composer-status").textContent(),
       /Keep this window open/,
     );
+    await page.mouse.click(1, 1);
+    assert.equal(
+      await page
+        .locator(".xt-composer-dialog")
+        .evaluate((dialog) => dialog.open),
+      true,
+      "outside click respects an active upload",
+    );
+    await frame.evaluate(() =>
+      parent.postMessage(
+        { type: "ofenhancer:teaser-running", running: false },
+        location.origin,
+      ),
+    );
+    page.once("dialog", (prompt) => prompt.accept());
+    await page.mouse.click(1, 1);
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
     assert.deepEqual(errors, []);
   } finally {
     await page.close();
@@ -2848,6 +2868,118 @@ test("clip chooser uses distinct posters and only one intent-loaded playback", a
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.waitForFunction(
       () => !document.querySelector(".xt-composer-dialog"),
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("editor is usable before catalogue lookup completes and keeps early edits", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 800 },
+  });
+  try {
+    await mount(page, true);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.addInitScript(() => {
+      const client = CreatorCatalogueClient;
+      const get = client.getCatalogueSnapshot;
+      let pending = true;
+      client.getCatalogueSnapshot = async (...args) => {
+        if (pending) {
+          pending = false;
+          await new Promise((resolve) => {
+            globalThis.finishAssociation = resolve;
+          });
+        }
+        return get(...args);
+      };
+    });
+    await page.evaluate(() => {
+      const episode = { sourceKey: "preview-test", title: "Preview test" };
+      void OFEnhancerTeaserComposer.open({
+        date: "2026-10-06",
+        episode,
+        episodes: [episode],
+        request: async () => ({ clips: [] }),
+      });
+    });
+    const editor = page.frameLocator(".xt-composer-frame");
+    await editor.locator("#socialCaption").waitFor({ state: "visible" });
+    assert.equal(
+      await editor.locator("#socialCaption").inputValue(),
+      "Preview test",
+    );
+    assert.equal(await page.locator(".xt-editor-loading").count(), 0);
+    await editor.locator("#socialCaption").fill("Written before lookup");
+    await editor.getByLabel("Posting time", { exact: true }).fill("19:45");
+    await editor.locator("#socialPaidLink").selectOption("custom");
+    await editor
+      .locator("#socialCustomPaidLink")
+      .fill("https://example.com/my-video");
+    const viewport = await editor
+      .locator("#uploaderPanel")
+      .evaluate((panel) => ({
+        height: panel.clientHeight,
+        content: panel.scrollHeight,
+        scrollbar: getComputedStyle(panel).scrollbarWidth,
+      }));
+    assert.ok(
+      viewport.content <= viewport.height,
+      "desktop editor fits the custom URL field without scrolling",
+    );
+    assert.equal(viewport.scrollbar, "none");
+    const output = path.join(repositoryRoot, ".local/editor-ready-review");
+    fs.mkdirSync(output, { recursive: true });
+    await page.locator(".xt-composer-dialog").screenshot({
+      path: path.join(output, "early-editor-desktop.png"),
+      animations: "disabled",
+    });
+    await page.evaluate(() =>
+      document
+        .querySelector(".xt-composer-frame")
+        .contentWindow.finishAssociation(),
+    );
+    await editor
+      .getByRole("button", { name: "Change episode", exact: true })
+      .waitFor();
+    assert.equal(
+      await editor.locator("#socialCaption").inputValue(),
+      "Written before lookup",
+    );
+    assert.equal(
+      await editor.getByLabel("Posting time", { exact: true }).inputValue(),
+      "19:45",
+    );
+    assert.equal(
+      await editor.locator("#socialCustomPaidLink").inputValue(),
+      "https://example.com/my-video",
+    );
+    assert.equal(
+      await editor.locator("#socialPaidLink").inputValue(),
+      "custom",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mediaBox = await editor
+      .locator(".teaser-planner-media")
+      .boundingBox();
+    const settingsBox = await editor
+      .locator(".teaser-planner-settings")
+      .boundingBox();
+    assert.ok(
+      mediaBox.y + mediaBox.height <= settingsBox.y,
+      "empty media keeps its space above the phone form",
+    );
+    await page.locator(".xt-composer-dialog").screenshot({
+      path: path.join(output, "early-editor-phone.png"),
+      animations: "disabled",
+    });
+    assert.equal(
+      await editor
+        .locator("body")
+        .evaluate((body) => body.scrollWidth > innerWidth),
+      false,
     );
   } finally {
     await page.close();

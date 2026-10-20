@@ -1712,7 +1712,11 @@
           missingRuntime ||
           "Recorded-flow evidence is ready. Upload authorizes the selected social mode.";
       if (currentMatch) renderMatch(currentMatch);
-      else if (workflowMode?.value === "teaser") scheduleMatch();
+      else if (
+        workflowMode?.value === "teaser" &&
+        !document.body.classList.contains("calendar-teaser")
+      )
+        scheduleMatch();
     }
 
     function catalogueLink(candidate, platform) {
@@ -3044,7 +3048,11 @@
 
     function renderMatch(match) {
       const candidate = match.candidate;
-      if (!socialCaption.value.trim() && candidate.title)
+      if (
+        !socialCaption.value.trim() &&
+        candidate.title &&
+        socialCaption.dataset.teaserEdited !== "true"
+      )
         socialCaption.value = candidate.title;
       renderPaidLinkOptions(candidate);
       catalogueSelectionStatus.textContent =
@@ -6941,11 +6949,16 @@
         refreshSocialReview();
       },
       async associate(episodeKey, paidUrl) {
+        const initialLink = socialPaidLink.value;
+        const initialCustomUrl = socialCustomPaidLink.value;
         clearTimeout(matchTimer);
         const revision = ++matchRevision;
         const snapshot = await loadCatalogueSnapshot();
         if (revision !== matchRevision) return;
         currentSnapshot = snapshot;
+        const linkEdited =
+          socialPaidLink.value !== initialLink ||
+          socialCustomPaidLink.value !== initialCustomUrl;
         const normalized = (value) =>
           String(value || "")
             .toLowerCase()
@@ -6961,6 +6974,7 @@
         );
         if (matches.length === 1) {
           if (
+            !linkEdited &&
             socialPaidLink.value === "custom" &&
             !socialCustomPaidLink.value.trim()
           )
@@ -6971,7 +6985,7 @@
           });
         } else renderPicker();
         refreshSocialReview();
-        if (paidUrl) {
+        if (paidUrl && !linkEdited) {
           socialPaidLink.value = [...socialPaidLink.options].some(
             (option) => option.value === paidUrl,
           )

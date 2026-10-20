@@ -2509,6 +2509,7 @@ const CREATOR_SCRIPT_DEFINITIONS = Object.freeze([
     js: [
       "workflows/registry.js",
       "workflows/common.js",
+      "app/dialog-dismiss.js",
       "workflows/c4s-upload.js",
     ],
     runAt: "document_idle",

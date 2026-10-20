@@ -22,6 +22,21 @@
       );
     };
     const caption = get("#socialCaption");
+    caption.addEventListener("input", () => {
+      caption.dataset.teaserEdited = "true";
+    });
+    let linkEdited = false;
+    for (const control of [
+      get("#socialPaidLink"),
+      get("#socialCustomPaidLink"),
+    ]) {
+      control.addEventListener("input", () => {
+        linkEdited = true;
+      });
+      control.addEventListener("change", () => {
+        linkEdited = true;
+      });
+    }
     const captionLabel = caption.previousElementSibling;
     caption.maxLength = 280;
     caption.placeholder = "Write the teaser caption…";
@@ -283,7 +298,8 @@
       revision = 0,
       videoUrl = "",
       imageUrl = "",
-      previewReady = Promise.resolve();
+      previewReady = Promise.resolve(),
+      associationReady = Promise.resolve();
     copyFile.addEventListener("click", async () => {
       const file = hub.file(),
         episodeKey = hub.candidate()?.id;
@@ -442,6 +458,7 @@
       }
     }
     async function saveDraft() {
+      await associationReady;
       if (!hub.file() && !context?.renderPending)
         throw new Error("Choose a teaser video.");
       if (
@@ -468,7 +485,7 @@
         file: hub.file(),
         thumbnail,
         caption: caption.value,
-        episodeKey: candidate?.id || "",
+        episodeKey: candidate?.id || context?.episodeKey || "",
         clipId: context?.clipId,
         renderPending: context?.renderPending === true,
         renderHash: context?.renderHash || "",
@@ -570,10 +587,11 @@
       notify("dirty");
       updateLinked();
       if (!hub.candidate())
-        void hub
+        associationReady = hub
           .associate(context?.episodeKey || "", "")
           .then(() => {
-            hub.preferLink(preferences.linkKind, preferences.customUrl);
+            if (!linkEdited)
+              hub.preferLink(preferences.linkKind, preferences.customUrl);
             updateLinked();
           })
           .catch(fail);
@@ -758,7 +776,7 @@
       }
       if (context.file) context.file.source = "generated";
       hub.setFile(context.file);
-      caption.value = context.draft?.caption || "";
+      caption.value = context.draft?.caption ?? context.episodeTitle ?? "";
       time.value =
         context.draft?.time ||
         (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(preferences.time || "")
@@ -802,16 +820,22 @@
           }
         });
       }
-      try {
-        await hub.associate(context.episodeKey, context.draft?.paidUrl || "");
-        if (!context.draft)
-          hub.preferLink(preferences.linkKind, preferences.customUrl);
-        updateLinked();
-      } catch (error) {
-        fail(error);
-      } finally {
-        notify("initialized", { date: day });
-      }
+      if (context.draft?.paidUrl)
+        hub.preferLink("custom", context.draft.paidUrl);
+      else if (preferences.linkKind === "custom")
+        hub.preferLink("custom", preferences.customUrl);
+      // The form is ready now; catalogue/readiness work must not block typing.
+      notify("initialized", { date: day });
+      associationReady = (async () => {
+        try {
+          await hub.associate(context.episodeKey, context.draft?.paidUrl || "");
+          if (!context.draft && !linkEdited)
+            hub.preferLink(preferences.linkKind, preferences.customUrl);
+          updateLinked();
+        } catch (error) {
+          fail(error);
+        }
+      })();
     });
     frameDialog.addEventListener("close", () =>
       notify("size", {
@@ -839,6 +863,8 @@
       day,
       saveDraft,
       async resetDraft() {
+        delete caption.dataset.teaserEdited;
+        linkEdited = false;
         hub.setFile(context?.file || null);
         await hub.associate(context?.episodeKey || "", "");
         hub.preferLink(preferences.linkKind, preferences.customUrl);

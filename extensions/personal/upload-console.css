@@ -3842,12 +3842,16 @@ body.calendar-teaser {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: none;
+}
+.calendar-teaser #uploaderPanel::-webkit-scrollbar {
+  display: none;
 }
 .calendar-teaser .teaser-planner-media {
   position: relative;
 }
 .calendar-teaser .teaser-planner-media > .teaser-video-preview[hidden] {
-  display: block;
+  display: block !important;
   visibility: hidden;
 }
 .calendar-teaser .teaser-choose-video {
