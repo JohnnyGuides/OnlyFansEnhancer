@@ -178,8 +178,11 @@ are square; the main uploader retains its existing landscape cover format.
 
 A catalogue-linked Twitter teaser uses the episode's existing paid-video URL automatically
 (OnlyFans, Fansly, ManyVids, then Pornhub paid). The editor shows the selected service as a
-read-only link. A linked episode without a saved URL shows **No catalogue link** and cannot
-send until the catalogue has a valid link. Only unlinked videos ask for a custom URL.
+read-only link. When the episode has no link, the same field offers **Random video**,
+**OnlyFans profile**, **Fansly profile**, and a **Choose from available** video group.
+Profile defaults are the owner's supplied OnlyFans and Fansly profile URLs. A random
+choice is resolved once and saved with the draft. Fallbacks change the reply URL, never
+the teaser's episode association. Only unlinked videos also offer a custom URL.
 Custom URLs stay with their day draft and never become defaults for another episode.
 
 The teaser editor keeps the video unobstructed. **Episode** changes its catalogue

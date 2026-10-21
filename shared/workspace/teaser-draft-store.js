@@ -120,6 +120,15 @@
           ? draft.replyDelayMinutes
           : 15,
       paidUrl: String(draft.paidUrl || ""),
+      linkFallback:
+        /^(random|onlyfans|fansly|video:[A-Za-z0-9_-]{1,200})$/.test(
+          draft.linkFallback?.choice || "",
+        )
+          ? {
+              choice: draft.linkFallback.choice,
+              label: String(draft.linkFallback.label || "").slice(0, 300),
+            }
+          : null,
       status: "draft",
       updatedAt: Date.now(),
     };

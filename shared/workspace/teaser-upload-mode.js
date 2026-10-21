@@ -507,6 +507,7 @@
         time: time.value,
         replyDelayMinutes: Number(replyDelay.value),
         paidUrl: hub.paidUrl(),
+        linkFallback: hub.linkFallback(),
       });
       context.draft = saved;
       notify("saved");
@@ -843,7 +844,11 @@
       notify("initialized", { date: day });
       associationReady = (async () => {
         try {
-          await hub.associate(context.episodeKey, context.draft?.paidUrl || "");
+          await hub.associate(
+            context.episodeKey,
+            context.draft?.paidUrl || "",
+            context.draft?.linkFallback,
+          );
           if (!context.draft && !linkEdited)
             hub.preferLink(preferences.linkKind, preferences.customUrl);
           updateLinked();

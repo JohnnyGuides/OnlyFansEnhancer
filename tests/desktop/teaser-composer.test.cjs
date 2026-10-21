@@ -68,12 +68,13 @@ async function mount(
   linked = false,
   delaySettings = false,
   catalogueLinks = { onlyfansLink: "https://onlyfans.com/1/preview" },
+  extraRows = [],
 ) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.setDefaultTimeout(12_000);
   await page.addInitScript(
-    ({ linked, delaySettings, catalogueLinks }) => {
+    ({ linked, delaySettings, catalogueLinks, extraRows }) => {
       const values = {};
       globalThis.chrome = {
         storage: {
@@ -171,13 +172,14 @@ async function mount(
                   publicationState: {},
                   ...catalogueLinks,
                 },
+                ...extraRows,
               ]
             : [],
           emptyRow: { row: 3 },
         }),
       };
     },
-    { linked, delaySettings, catalogueLinks },
+    { linked, delaySettings, catalogueLinks, extraRows },
   );
   await page.goto(`${origin}/host`);
   await page.locator("#open-day").click();
@@ -3379,13 +3381,16 @@ test("selected episodes use catalogue links despite stale custom preferences and
           Boolean(document.querySelector(".teaser-catalogue-link")),
         expected,
       );
-      assert.equal(await frame.locator("#socialPaidLink").isVisible(), false);
+      assert.equal(
+        await frame.locator("#socialPaidLink").isVisible(),
+        !expected,
+      );
       assert.equal(
         await frame.locator("#socialCustomPaidLink").isVisible(),
         false,
       );
       const link = frame.locator(".teaser-catalogue-link");
-      assert.equal(await link.isVisible(), true);
+      assert.equal(await link.isVisible(), Boolean(expected));
       assert.equal(await link.getAttribute("href"), expected || null);
       if (!expected)
         assert.equal(await link.textContent(), "No catalogue link");
@@ -3443,6 +3448,12 @@ test("unlinked random videos ask for their own URL without reusing another episo
       true,
     );
     assert.equal(await frame.locator("#socialCustomPaidLink").inputValue(), "");
+    await frame.locator("#socialPaidLink").selectOption("fallback:onlyfans");
+    await frame.locator("#socialPaidLink").selectOption("custom");
+    assert.equal(
+      await frame.locator("#socialCustomPaidLink").isVisible(),
+      true,
+    );
     await frame
       .locator("#socialCustomPaidLink")
       .fill("https://onlyfans.com/2/random");
@@ -3454,6 +3465,94 @@ test("unlinked random videos ask for their own URL without reusing another episo
         (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.paidUrl ===
         "https://onlyfans.com/2/random",
     );
+  } finally {
+    await page.close();
+  }
+});
+
+test("missing-link fallbacks preserve the episode and freeze a random choice across reopening", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 900 },
+  });
+  try {
+    const other = (id, row, title) => ({
+      id,
+      row,
+      itemId: id,
+      title,
+      fingerprint: "b".repeat(64),
+      publicationState: {},
+      onlyfansLink: `https://onlyfans.com/${row}/preview`,
+    });
+    const errors = await mount(page, true, false, {}, [
+      other("other-first", 3, "Another video"),
+      other("other-second", 4, "Second video"),
+    ]);
+    let frame = await chooseSyntheticVideo(page);
+    await page
+      .getByRole("button", { name: "Change linked episode", exact: true })
+      .waitFor();
+    const save = async (url, choice) => {
+      await frame
+        .getByRole("button", { name: /^(Save draft|Saved)$/, exact: true })
+        .click();
+      await page.waitForFunction(
+        async ({ url, choice }) => {
+          const draft = await OFEnhancerTeaserDrafts.get("2026-10-06");
+          return (
+            draft?.paidUrl === url && draft?.linkFallback?.choice === choice
+          );
+        },
+        { url, choice },
+      );
+      const draft = await page.evaluate(() =>
+        OFEnhancerTeaserDrafts.get("2026-10-06"),
+      );
+      assert.equal(
+        draft.episodeKey,
+        "preview-test",
+        "fallback never reassigns the teaser episode",
+      );
+      assert.doesNotMatch(
+        await frame.locator("#socialErrors").textContent(),
+        /paid-video link|paid URL/,
+      );
+    };
+    await frame.locator("#socialPaidLink").selectOption("fallback:onlyfans");
+    await save("https://onlyfans.com/johnny_guides", "onlyfans");
+    await frame.locator("#socialPaidLink").selectOption("fallback:fansly");
+    await save("https://fansly.com/Johnny_Guides/posts", "fansly");
+    await frame
+      .locator("#socialPaidLink")
+      .selectOption("fallback:video:other-second");
+    await save("https://onlyfans.com/4/preview", "video:other-second");
+    await frame.evaluate(() => (Math.random = () => 0));
+    await frame.locator("#socialPaidLink").selectOption("fallback:random");
+    await save("https://onlyfans.com/3/preview", "random");
+    await frame
+      .locator("#socialCaption")
+      .fill("Caption changed after choosing fallback");
+    await save("https://onlyfans.com/3/preview", "random");
+    const output = path.join(repositoryRoot, ".local/teaser-fallback-review");
+    fs.mkdirSync(output, { recursive: true });
+    await frame
+      .locator(".teaser-schedule-row")
+      .screenshot({ path: path.join(output, "fallback-row.png") });
+    await page.screenshot({ path: path.join(output, "desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(output, "phone.png") });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.addInitScript(() => (Math.random = () => 0.999));
+    await page.locator("#open-day").click();
+    await page.locator(".xt-composer-frame").waitFor();
+    frame = page.frames().find((frame) => frame.url().includes("?teaserDay="));
+    await frame.waitForFunction(
+      () =>
+        document.querySelector("#socialPaidLink")?.value === "fallback:random",
+    );
+    await save("https://onlyfans.com/3/preview", "random");
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }

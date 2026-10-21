@@ -1136,6 +1136,7 @@
     let currentMatch = null;
     let currentProposal = null;
     let currentSnapshot = null;
+    let teaserFallback = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
     // Platforms the user confirmed another copy for in this run attempt.
@@ -1423,6 +1424,15 @@
 
     function currentPaidLink() {
       const selected = socialPaidLink.value;
+      if (selected.startsWith("fallback:")) {
+        return {
+          paidUrl:
+            teaserFallback?.choice === selected.slice(9)
+              ? teaserFallback.url
+              : "",
+          paidLinkSource: "",
+        };
+      }
       if (selected.startsWith("run:")) {
         return { paidUrl: "", paidLinkSource: selected.slice(4) };
       }
@@ -1500,44 +1510,137 @@
       socialPaidLink.append(option);
     }
 
+    const paidLinkPlatforms = [
+      ["onlyfans", "OnlyFans"],
+      ["fansly", "Fansly"],
+      ["manyvids", "ManyVids"],
+      ["pornhubPaid", "Pornhub"],
+    ];
+    const teaserProfileLinks = {
+      onlyfans: "https://onlyfans.com/johnny_guides",
+      fansly: "https://fansly.com/Johnny_Guides/posts",
+    };
+    function fallbackVideos() {
+      return (currentSnapshot?.rows || []).flatMap((row) => {
+        if (row.id === currentMatch?.candidate?.id) return [];
+        const platform = paidLinkPlatforms.find(([key]) =>
+          canonicalPaidUrl(catalogueLink(row, key)),
+        );
+        return platform
+          ? [
+              {
+                id: row.id,
+                title: row.title,
+                url: catalogueLink(row, platform[0]),
+                service: platform[1],
+              },
+            ]
+          : [];
+      });
+    }
+    function selectTeaserFallback(choice) {
+      const videos = fallbackVideos();
+      const video =
+        choice === "random"
+          ? videos[Math.floor(Math.random() * videos.length)]
+          : videos.find((row) => choice === `video:${row.id}`);
+      const url = teaserProfileLinks[choice] || video?.url;
+      teaserFallback = url
+        ? {
+            choice,
+            url,
+            episodeKey:
+              currentMatch?.candidate?.id ||
+              document.body.dataset.teaserEpisodeKey ||
+              "",
+            label:
+              video?.title ||
+              `${choice === "onlyfans" ? "OnlyFans" : "Fansly"} profile`,
+          }
+        : null;
+    }
     function renderPaidLinkOptions(candidate = currentMatch?.candidate || {}) {
       const previous = socialPaidLink.value;
-      const linkedTeaser =
-        document.body.classList.contains("calendar-teaser") &&
-        Boolean(candidate.id || document.body.dataset.teaserEpisodeKey);
+      const calendar = document.body.classList.contains("calendar-teaser");
+      const episodeKey =
+        candidate.id || document.body.dataset.teaserEpisodeKey || "";
+      const linkedTeaser = calendar && Boolean(episodeKey);
+      const links = paidLinkPlatforms.filter(([key]) =>
+        canonicalPaidUrl(catalogueLink(candidate, key)),
+      );
+      if (teaserFallback?.episodeKey !== episodeKey || links.length)
+        teaserFallback = null;
       socialPaidLink.replaceChildren();
-      addPaidLinkOption("", "Choose the paid-video link");
-      for (const [platform, label] of [
-        ["onlyfans", "OnlyFans"],
-        ["fansly", "Fansly"],
-        ["manyvids", "ManyVids"],
-        ["pornhubPaid", "Pornhub"],
-      ]) {
+      addPaidLinkOption(
+        "",
+        calendar && !links.length
+          ? "Choose fallback…"
+          : "Choose the paid-video link",
+      );
+      for (const [platform, label] of paidLinkPlatforms) {
         const url = catalogueLink(candidate, platform);
         if (url) addPaidLinkOption(url, `${label} · existing catalogue link`);
         else if (
           !linkedTeaser &&
           platform !== "pornhubPaid" &&
           selectedTargets().includes(platform)
-        ) {
+        )
           addPaidLinkOption(
             `run:${platform}`,
             `${label} · use the new link from this upload`,
           );
+      }
+      if (calendar && !links.length) {
+        const videos = fallbackVideos();
+        addPaidLinkOption(
+          "fallback:random",
+          teaserFallback?.choice === "random"
+            ? `Random · ${teaserFallback.label}`
+            : "Random video",
+        );
+        socialPaidLink.lastElementChild.disabled = !videos.length;
+        addPaidLinkOption("fallback:onlyfans", "OnlyFans profile");
+        addPaidLinkOption("fallback:fansly", "Fansly profile");
+        if (videos.length) {
+          const group = document.createElement("optgroup");
+          group.label = "Choose from available";
+          for (const video of videos) {
+            const option = document.createElement("option");
+            option.value = `fallback:video:${video.id}`;
+            option.textContent = `${video.title} · ${video.service}`;
+            group.append(option);
+          }
+          socialPaidLink.append(group);
         }
+        if (
+          teaserFallback &&
+          ![...socialPaidLink.options].some(
+            (option) => option.value === `fallback:${teaserFallback.choice}`,
+          )
+        )
+          addPaidLinkOption(
+            `fallback:${teaserFallback.choice}`,
+            teaserFallback.label,
+          );
       }
       if (!linkedTeaser)
         addPaidLinkOption("custom", "Use a custom paid-video URL");
       const available = [...socialPaidLink.options].map(
         (option) => option.value,
       );
-      if (previous && available.includes(previous)) {
-        socialPaidLink.value = previous;
-      } else {
-        socialPaidLink.value = available.find((value) => value) || "";
-      }
+      if (calendar && !links.length) {
+        socialPaidLink.value = teaserFallback
+          ? `fallback:${teaserFallback.choice}`
+          : linkedTeaser
+            ? ""
+            : "custom";
+      } else
+        socialPaidLink.value =
+          previous && available.includes(previous)
+            ? previous
+            : available.find((value) => value) || "";
       socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
-      socialPaidLink.hidden = linkedTeaser;
+      socialPaidLink.hidden = linkedTeaser && links.length > 0;
       let link = socialPaidLinkFields.querySelector(".teaser-catalogue-link");
       if (linkedTeaser && !link) {
         link = document.createElement("a");
@@ -1547,7 +1650,7 @@
         socialPaidLink.after(link);
       }
       if (link) {
-        link.hidden = !linkedTeaser;
+        link.hidden = !socialPaidLink.hidden;
         const url = canonicalPaidUrl(socialPaidLink.value);
         if (url) link.href = url;
         else link.removeAttribute("href");
@@ -6508,6 +6611,9 @@
       });
     }
     socialPaidLink.addEventListener("change", () => {
+      if (socialPaidLink.value.startsWith("fallback:"))
+        selectTeaserFallback(socialPaidLink.value.slice(9));
+      else teaserFallback = null;
       socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
       refreshSocialReview();
     });
@@ -6815,6 +6921,10 @@
       file: () => socialFile,
       candidate: () => currentMatch?.candidate,
       paidUrl: () => currentPaidLink().paidUrl || "",
+      linkFallback: () =>
+        socialPaidLink.value.startsWith("fallback:") && teaserFallback
+          ? { choice: teaserFallback.choice, label: teaserFallback.label }
+          : null,
       busy: () => runBusy || Boolean(activeSession),
       normalizeThumbnail: (file) => normalizeThumbnailFile(file, true),
       async prepareReddit(draft, checkpoint) {
@@ -6982,7 +7092,7 @@
         renderFilePickers();
         refreshSocialReview();
       },
-      async associate(episodeKey, paidUrl) {
+      async associate(episodeKey, paidUrl, savedFallback) {
         if (document.body.classList.contains("calendar-teaser")) {
           document.body.dataset.teaserEpisodeKey = episodeKey || "";
           renderPaidLinkOptions();
@@ -7010,6 +7120,20 @@
             : normalized(row.title).length > 4 &&
               filename.includes(normalized(row.title)),
         );
+        if (
+          savedFallback &&
+          canonicalPaidUrl(paidUrl) &&
+          /^(random|onlyfans|fansly|video:[A-Za-z0-9_-]{1,200})$/.test(
+            savedFallback.choice || "",
+          )
+        ) {
+          teaserFallback = {
+            choice: savedFallback.choice,
+            label: String(savedFallback.label || "Saved video").slice(0, 300),
+            url: paidUrl,
+            episodeKey: episodeKey || matches[0]?.id || "",
+          };
+        }
         if (matches.length === 1) {
           if (
             !linkEdited &&
