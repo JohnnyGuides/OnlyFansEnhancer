@@ -3528,6 +3528,7 @@ test("selected episodes use catalogue links despite stale custom preferences and
           ".local/teaser-catalogue-link-review",
         );
         fs.mkdirSync(output, { recursive: true });
+        await frame.getByRole("button", { name: "Choose reply link", exact: true }).focus();
         await frame
           .locator(".teaser-schedule-row")
           .screenshot({ path: path.join(output, "link-row.png") });
