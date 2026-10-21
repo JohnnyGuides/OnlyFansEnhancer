@@ -573,9 +573,12 @@
         !url.username &&
         !url.password &&
         !url.port &&
-        new Set(["onlyfans.com", "fansly.com", "www.manyvids.com"]).has(
-          url.hostname,
-        )
+        new Set([
+          "onlyfans.com",
+          "fansly.com",
+          "www.manyvids.com",
+          "www.pornhub.com",
+        ]).has(url.hostname)
         ? url.href
         : "";
     } catch {
@@ -743,7 +746,11 @@
       } else if (url) {
         paidLink = { kind: "url", url };
       } else {
-        errors.push("Choose the paid-video link for the first X reply.");
+        errors.push(
+          catalogue?.id
+            ? "This catalogue episode has no paid-video link."
+            : "Enter the video link for the first X reply.",
+        );
       }
     }
 
@@ -1495,23 +1502,32 @@
 
     function renderPaidLinkOptions(candidate = currentMatch?.candidate || {}) {
       const previous = socialPaidLink.value;
+      const linkedTeaser =
+        document.body.classList.contains("calendar-teaser") &&
+        Boolean(candidate.id || document.body.dataset.teaserEpisodeKey);
       socialPaidLink.replaceChildren();
       addPaidLinkOption("", "Choose the paid-video link");
       for (const [platform, label] of [
         ["onlyfans", "OnlyFans"],
         ["fansly", "Fansly"],
         ["manyvids", "ManyVids"],
+        ["pornhubPaid", "Pornhub"],
       ]) {
         const url = catalogueLink(candidate, platform);
         if (url) addPaidLinkOption(url, `${label} · existing catalogue link`);
-        else if (selectedTargets().includes(platform)) {
+        else if (
+          !linkedTeaser &&
+          platform !== "pornhubPaid" &&
+          selectedTargets().includes(platform)
+        ) {
           addPaidLinkOption(
             `run:${platform}`,
             `${label} · use the new link from this upload`,
           );
         }
       }
-      addPaidLinkOption("custom", "Use a custom paid-video URL");
+      if (!linkedTeaser)
+        addPaidLinkOption("custom", "Use a custom paid-video URL");
       const available = [...socialPaidLink.options].map(
         (option) => option.value,
       );
@@ -1521,6 +1537,24 @@
         socialPaidLink.value = available.find((value) => value) || "";
       }
       socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
+      socialPaidLink.hidden = linkedTeaser;
+      let link = socialPaidLinkFields.querySelector(".teaser-catalogue-link");
+      if (linkedTeaser && !link) {
+        link = document.createElement("a");
+        link.className = "teaser-catalogue-link";
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        socialPaidLink.after(link);
+      }
+      if (link) {
+        link.hidden = !linkedTeaser;
+        const url = canonicalPaidUrl(socialPaidLink.value);
+        if (url) link.href = url;
+        else link.removeAttribute("href");
+        link.textContent = url
+          ? socialPaidLink.selectedOptions[0].textContent.split(" · ")[0]
+          : "No catalogue link";
+      }
     }
 
     function presetRow(preset) {
@@ -6949,6 +6983,10 @@
         refreshSocialReview();
       },
       async associate(episodeKey, paidUrl) {
+        if (document.body.classList.contains("calendar-teaser")) {
+          document.body.dataset.teaserEpisodeKey = episodeKey || "";
+          renderPaidLinkOptions();
+        }
         const initialLink = socialPaidLink.value;
         const initialCustomUrl = socialCustomPaidLink.value;
         clearTimeout(matchTimer);
@@ -6985,7 +7023,14 @@
           });
         } else renderPicker();
         refreshSocialReview();
-        if (paidUrl && !linkEdited) {
+        if (
+          paidUrl &&
+          !linkEdited &&
+          !(
+            document.body.classList.contains("calendar-teaser") &&
+            currentMatch?.candidate?.id
+          )
+        ) {
           socialPaidLink.value = [...socialPaidLink.options].some(
             (option) => option.value === paidUrl,
           )

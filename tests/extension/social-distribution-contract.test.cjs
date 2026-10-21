@@ -311,3 +311,13 @@ test("manual Reddit draft preparation can omit publish traces but never X proof 
     /evidence|trace|SHA/i,
   );
 });
+
+test("accepts an existing catalogue Pornhub paid link without an upload dependency", () => {
+  const plan = loadContract().freezeDistributionPlan(
+    input({ paidUrl: "https://www.pornhub.com/view_video.php?viewkey=phpaid" }),
+  );
+  assert.equal(
+    plan.paidUrl,
+    "https://www.pornhub.com/view_video.php?viewkey=phpaid",
+  );
+});

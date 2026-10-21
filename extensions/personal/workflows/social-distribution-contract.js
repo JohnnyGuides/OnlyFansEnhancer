@@ -16,6 +16,7 @@
     "onlyfans.com",
     "fansly.com",
     "www.manyvids.com",
+    "www.pornhub.com",
   ]);
 
   function clean(value, maximum = 5000) {

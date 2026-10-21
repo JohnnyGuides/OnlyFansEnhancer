@@ -199,6 +199,19 @@ public sealed class UploadCatalogueTests
         Assert.AreEqual(0,test.Store.GetOpenSyncOperations().Count);
     }
 
+    [TestMethod]
+    public void UploadSnapshotPreservesPaidAndFreePornhubLinksSeparately()
+    {
+        using TestStore test = new();
+        test.Import(new Dictionary<string,string> {
+            ["pornhubFree"] = "https://www.pornhub.com/view_video.php?viewkey=phfree",
+            ["pornhubPaid"] = "https://www.pornhub.com/view_video.php?viewkey=phpaid"
+        });
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("https://www.pornhub.com/view_video.php?viewkey=phfree", row.PornhubLink);
+        Assert.AreEqual("https://www.pornhub.com/view_video.php?viewkey=phpaid", row.PornhubPaidLink);
+    }
+
     private sealed class TestStore : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "ofe-upload-" + Guid.NewGuid().ToString("N"));

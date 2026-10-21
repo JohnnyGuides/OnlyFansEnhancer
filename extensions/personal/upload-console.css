@@ -4063,3 +4063,16 @@ body.calendar-teaser {
 .calendar-teaser .teaser-choose-video {
   top: 0;
 }
+
+.calendar-teaser .teaser-catalogue-link {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  color: #a6b4c5;
+  font-size: 14px;
+}
+.calendar-teaser .teaser-catalogue-link[href] {
+  color: #67d3f5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

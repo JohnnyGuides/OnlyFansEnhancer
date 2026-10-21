@@ -63,12 +63,17 @@ after(async () => {
   await new Promise((resolve) => server?.close(resolve));
 });
 
-async function mount(page, linked = false, delaySettings = false) {
+async function mount(
+  page,
+  linked = false,
+  delaySettings = false,
+  catalogueLinks = { onlyfansLink: "https://onlyfans.com/1/preview" },
+) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.setDefaultTimeout(12_000);
   await page.addInitScript(
-    ({ linked, delaySettings }) => {
+    ({ linked, delaySettings, catalogueLinks }) => {
       const values = {};
       globalThis.chrome = {
         storage: {
@@ -164,7 +169,7 @@ async function mount(page, linked = false, delaySettings = false) {
                   releaseDate: "2026-10-01",
                   fingerprint: "a".repeat(64),
                   publicationState: {},
-                  onlyfansLink: "https://onlyfans.com/1/preview",
+                  ...catalogueLinks,
                 },
               ]
             : [],
@@ -172,7 +177,7 @@ async function mount(page, linked = false, delaySettings = false) {
         }),
       };
     },
-    { linked, delaySettings },
+    { linked, delaySettings, catalogueLinks },
   );
   await page.goto(`${origin}/host`);
   await page.locator("#open-day").click();
@@ -3027,10 +3032,11 @@ test("editor is usable before catalogue lookup completes and keeps early edits",
     assert.equal(await page.locator(".xt-editor-loading").count(), 0);
     await editor.locator("#socialCaption").fill("Written before lookup");
     await editor.getByLabel("Posting time", { exact: true }).fill("19:45");
-    await editor.locator("#socialPaidLink").selectOption("custom");
-    await editor
-      .locator("#socialCustomPaidLink")
-      .fill("https://example.com/my-video");
+    assert.equal(await editor.locator("#socialPaidLink").isVisible(), false);
+    assert.equal(
+      await editor.locator("#socialCustomPaidLink").isVisible(),
+      false,
+    );
     const viewport = await editor
       .locator("#uploaderPanel")
       .evaluate((panel) => ({
@@ -3068,12 +3074,12 @@ test("editor is usable before catalogue lookup completes and keeps early edits",
       "19:45",
     );
     assert.equal(
-      await editor.locator("#socialCustomPaidLink").inputValue(),
-      "https://example.com/my-video",
+      await editor.locator("#socialCustomPaidLink").isVisible(),
+      false,
     );
     assert.equal(
       await editor.locator("#socialPaidLink").inputValue(),
-      "custom",
+      "https://onlyfans.com/1/preview",
     );
     await page.setViewportSize({ width: 390, height: 844 });
     const mediaBox = await editor
@@ -3306,6 +3312,147 @@ test("Vegas project buttons dispatch the named project or template directly", as
     assert.equal(
       await page.locator(".xt-vegas-projects button:enabled").count(),
       0,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("selected episodes use catalogue links despite stale custom preferences and drafts", async () => {
+  for (const links of [
+    { onlyfansLink: "https://onlyfans.com/1/preview" },
+    {
+      pornhubPaidLink:
+        "https://www.pornhub.com/view_video.php?viewkey=phpreview",
+    },
+    {},
+  ]) {
+    const page = await browser.newPage({
+      viewport: { width: 1365, height: 900 },
+    });
+    try {
+      await page.addInitScript(() =>
+        localStorage.setItem(
+          "OFEnhancerTeaserPreferencesV1",
+          JSON.stringify({
+            linkKind: "custom",
+            customUrl: "https://onlyfans.com/999/wrong",
+          }),
+        ),
+      );
+      const errors = await mount(page, true, false, links);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+      await page.evaluate(
+        async (bytes) => {
+          await OFEnhancerTeaserDrafts.save({
+            date: "2026-10-06",
+            file: new File([new Uint8Array(bytes)], "preview-test.mp4", {
+              type: "video/mp4",
+            }),
+            caption: "Preview test",
+            episodeKey: "preview-test",
+            paidUrl: "https://onlyfans.com/999/wrong",
+          });
+        },
+        [...fs.readFileSync(VIDEO)],
+      );
+      await page.evaluate(
+        () =>
+          void OFEnhancerTeaserComposer.open({
+            date: "2026-10-06",
+            episode: { sourceKey: "preview-test", title: "Preview test" },
+            episodes: [{ sourceKey: "preview-test", title: "Preview test" }],
+            request: async (op) =>
+              op === "getTeaserClips" ? { clips: [] } : { ok: true },
+          }),
+      );
+      await page.locator(".xt-composer-frame").waitFor();
+      const frame = page
+        .frames()
+        .find((frame) => frame.url().includes("?teaserDay="));
+      assert.ok(frame);
+      const expected = links.onlyfansLink || links.pornhubPaidLink || "";
+      await frame.waitForFunction(
+        (expected) =>
+          document.querySelector("#socialPaidLink").value === expected &&
+          Boolean(document.querySelector(".teaser-catalogue-link")),
+        expected,
+      );
+      assert.equal(await frame.locator("#socialPaidLink").isVisible(), false);
+      assert.equal(
+        await frame.locator("#socialCustomPaidLink").isVisible(),
+        false,
+      );
+      const link = frame.locator(".teaser-catalogue-link");
+      assert.equal(await link.isVisible(), true);
+      assert.equal(await link.getAttribute("href"), expected || null);
+      if (!expected)
+        assert.equal(await link.textContent(), "No catalogue link");
+      await frame
+        .getByRole("button", { name: "Save draft", exact: true })
+        .click();
+      await page.waitForFunction(
+        async () =>
+          (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.paidUrl !==
+          "https://onlyfans.com/999/wrong",
+      );
+      assert.equal(
+        await page.evaluate(
+          async () => (await OFEnhancerTeaserDrafts.get("2026-10-06")).paidUrl,
+        ),
+        expected,
+      );
+      if (links.onlyfansLink) {
+        const output = path.join(
+          repositoryRoot,
+          ".local/teaser-catalogue-link-review",
+        );
+        fs.mkdirSync(output, { recursive: true });
+        await frame
+          .locator(".teaser-schedule-row")
+          .screenshot({ path: path.join(output, "link-row.png") });
+        await page.screenshot({ path: path.join(output, "desktop.png") });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.screenshot({ path: path.join(output, "phone.png") });
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  }
+});
+
+test("unlinked random videos ask for their own URL without reusing another episode link", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem(
+        "OFEnhancerTeaserPreferencesV1",
+        JSON.stringify({
+          linkKind: "custom",
+          customUrl: "https://onlyfans.com/999/wrong",
+        }),
+      ),
+    );
+    await mount(page);
+    const frame = await chooseSyntheticVideo(page);
+    assert.equal(await frame.locator("#socialPaidLink").isVisible(), true);
+    assert.equal(
+      await frame.locator("#socialCustomPaidLink").isVisible(),
+      true,
+    );
+    assert.equal(await frame.locator("#socialCustomPaidLink").inputValue(), "");
+    await frame
+      .locator("#socialCustomPaidLink")
+      .fill("https://onlyfans.com/2/random");
+    await frame
+      .getByRole("button", { name: "Save draft", exact: true })
+      .click();
+    await page.waitForFunction(
+      async () =>
+        (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.paidUrl ===
+        "https://onlyfans.com/2/random",
     );
   } finally {
     await page.close();

@@ -117,6 +117,9 @@
     } catch {
       /* Use defaults. */
     }
+    // Custom URLs belong to a day draft, never to the next episode.
+    if (preferences.linkKind === "custom") preferences.linkKind = "";
+    delete preferences.customUrl;
     const remember = () => {
       if (context?.platform === "reddit") return;
       const option = get("#socialPaidLink").selectedOptions[0];
@@ -135,8 +138,7 @@
             time: time.value,
             replyDelayMinutes: Number(replyDelay.value),
             linkKind,
-            customUrl:
-              linkKind === "custom" ? get("#socialCustomPaidLink").value : "",
+            customUrl: "",
           }),
         );
       } catch {
