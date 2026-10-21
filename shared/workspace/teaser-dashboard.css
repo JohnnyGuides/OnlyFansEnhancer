@@ -1428,6 +1428,8 @@ html:has(.xt-picker[open]) {
 }
 /* The editor has one toolbar; Vegas details stay in its popover. */
 .xt-composer-dialog[data-editor] {
+  /* Match the embedded calendar editor, including the surrounding inset. */
+  background: #101821;
   box-sizing: border-box;
   width: min(1040px, calc(100vw - 32px));
   height: min(560px, calc(100dvh - 32px));
