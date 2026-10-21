@@ -653,7 +653,9 @@ body.calendar-reddit-draft .upload-actions .action-status {
     #saveTeaserDraft,
     #uploadButton,
     #prepareCalendarReddit,
-    .teaser-remove-draft
+    .teaser-remove-draft,
+    .teaser-link-trigger,
+    .teaser-link-picker button
   ) {
   min-height: 40px;
   padding: 9px 12px;
@@ -4098,4 +4100,96 @@ body.calendar-teaser {
     > .social-auto-mode {
     flex-basis: 100%;
   }
+}
+
+.calendar-teaser .teaser-link-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+.teaser-link-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teaser-link-trigger svg {
+  flex: none;
+}
+.teaser-link-picker {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #344657;
+  border-radius: 10px;
+  background: #101821;
+  color: #edf3fc;
+}
+.teaser-link-picker:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.teaser-link-search {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.teaser-link-search input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.teaser-link-search select {
+  width: 115px;
+  margin: 0;
+}
+.teaser-link-results {
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+  max-height: 230px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.teaser-link-results button {
+  width: 100%;
+  text-align: left;
+}
+.teaser-link-result span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.teaser-link-result small {
+  display: block;
+  margin-top: 4px;
+  color: #a6b4c5;
+  font-size: 11px;
+  font-weight: 400;
+}
+.teaser-link-results p {
+  margin: 8px 0;
+  color: #a6b4c5;
+  font-size: 13px;
+}
+.teaser-link-defaults {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #293646;
+  flex: none;
+}
+.teaser-link-defaults button {
+  flex: 1;
+  white-space: nowrap;
 }

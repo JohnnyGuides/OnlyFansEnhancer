@@ -181,9 +181,12 @@ A catalogue-linked Twitter teaser uses the episode's existing video URL automati
 directly to the local database and do not require a Chrome connection. The editor waits
 for the lookup before showing missing-link choices. Form validation stays quiet until
 Upload/Send is clicked, then updates as fields are corrected. Invalid input never dispatches
-an upload; connection, active-run and adapter guards remain in force. The editor shows the selected service as a
-read-only link. When the episode has no link, the same field offers **Random video**,
-**OnlyFans profile**, **Fansly profile**, and a **Choose from available** video group.
+an upload; connection, active-run and adapter guards remain in force. The reply-link
+picker keeps the episode's own link selected by default. Its searchable suggestions
+start with OnlyFans videos, ranked by matching series, category, title and description
+from the local catalogue. Each suggestion shows its service and strongest matching
+signal; this is metadata ranking, not video-content analysis. The picker also offers
+other platforms, **Random video**, **OnlyFans profile**, and **Fansly profile**.
 Profile defaults are the owner's supplied OnlyFans and Fansly profile URLs. A random
 choice is resolved once and saved with the draft. Fallbacks change the reply URL, never
 the teaser's episode association. Only unlinked videos also offer a custom URL.

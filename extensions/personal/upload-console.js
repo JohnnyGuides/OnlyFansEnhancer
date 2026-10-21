@@ -1137,6 +1137,7 @@
     let currentProposal = null;
     let currentSnapshot = null;
     let teaserFallback = null;
+    let teaserLinkPicker = null;
     let snapshotPromise = null;
     let selectedCatalogueRow = null;
     // Platforms the user confirmed another copy for in this run attempt.
@@ -1531,8 +1532,10 @@
         return platform
           ? [
               {
+                ...row,
                 id: row.id,
                 title: row.title,
+                platform: platform[0],
                 url: catalogueLink(row, platform[0]),
                 service: platform[1],
               },
@@ -1570,8 +1573,7 @@
       const links = paidLinkPlatforms.filter(([key]) =>
         canonicalPaidUrl(catalogueLink(candidate, key)),
       );
-      if (teaserFallback?.episodeKey !== episodeKey || links.length)
-        teaserFallback = null;
+      if (teaserFallback?.episodeKey !== episodeKey) teaserFallback = null;
       socialPaidLink.replaceChildren();
       addPaidLinkOption(
         "",
@@ -1592,7 +1594,7 @@
             `${label} · use the new link from this upload`,
           );
       }
-      if (calendar && !links.length) {
+      if (calendar) {
         const videos = fallbackVideos();
         addPaidLinkOption(
           "fallback:random",
@@ -1603,17 +1605,6 @@
         socialPaidLink.lastElementChild.disabled = !videos.length;
         addPaidLinkOption("fallback:onlyfans", "OnlyFans profile");
         addPaidLinkOption("fallback:fansly", "Fansly profile");
-        if (videos.length) {
-          const group = document.createElement("optgroup");
-          group.label = "Choose from available";
-          for (const video of videos) {
-            const option = document.createElement("option");
-            option.value = `fallback:video:${video.id}`;
-            option.textContent = `${video.title} · ${video.service}`;
-            group.append(option);
-          }
-          socialPaidLink.append(group);
-        }
         if (
           teaserFallback &&
           ![...socialPaidLink.options].some(
@@ -1630,12 +1621,10 @@
       const available = [...socialPaidLink.options].map(
         (option) => option.value,
       );
-      if (calendar && !links.length) {
-        socialPaidLink.value = teaserFallback
-          ? `fallback:${teaserFallback.choice}`
-          : linkedTeaser
-            ? ""
-            : "custom";
+      if (calendar && teaserFallback)
+        socialPaidLink.value = `fallback:${teaserFallback.choice}`;
+      else if (calendar && !links.length) {
+        socialPaidLink.value = linkedTeaser ? "" : "custom";
       } else
         socialPaidLink.value =
           previous && available.includes(previous)
@@ -1655,8 +1644,41 @@
         link.rel = "noopener noreferrer";
         socialPaidLink.after(link);
       }
+      if (calendar && !teaserLinkPicker) {
+        teaserLinkPicker = globalThis.OFEnhancerTeaserLinkPicker.mount({
+          select: socialPaidLink,
+          getVideos: fallbackVideos,
+          getReference: () =>
+            currentMatch?.candidate || {
+              title:
+                socialCaption.value ||
+                titleFromFilename(socialFile?.name || ""),
+            },
+          getOwnLinks: () =>
+            paidLinkPlatforms.flatMap(([key, service]) => {
+              const url = canonicalPaidUrl(
+                catalogueLink(currentMatch?.candidate, key),
+              );
+              return url ? [{ url, service }] : [];
+            }),
+          choose: (value) => {
+            if (runBusy || activeSession || calendarTeaser?.locked()) return;
+            if (
+              ![...socialPaidLink.options].some(
+                (option) => option.value === value,
+              )
+            )
+              addPaidLinkOption(value, value);
+            socialPaidLink.value = value;
+            socialPaidLink.dispatchEvent(
+              new Event("change", { bubbles: true }),
+            );
+            socialPaidLink.dispatchEvent(new Event("input", { bubbles: true }));
+          },
+        });
+      }
       if (link) {
-        link.hidden = !socialPaidLink.hidden;
+        link.hidden = calendar || !socialPaidLink.hidden;
         const url = canonicalPaidUrl(socialPaidLink.value);
         if (url) link.href = url;
         else link.removeAttribute("href");
@@ -1668,6 +1690,27 @@
               : "Checking catalogue…"
             : "No catalogue link";
       }
+      teaserLinkPicker?.update({
+        label: cataloguePending
+          ? document.body.dataset.teaserCatalogueState === "error"
+            ? "Catalogue unavailable"
+            : "Checking catalogue…"
+          : teaserFallback
+            ? teaserFallback.choice === "random"
+              ? `Random · ${teaserFallback.label}`
+              : teaserFallback.label
+            : canonicalPaidUrl(socialPaidLink.value)
+              ? socialPaidLink.selectedOptions[0].textContent.split(" · ")[0]
+              : socialPaidLink.value === "custom"
+                ? "Custom link"
+                : "Choose reply link…",
+        disabled:
+          cataloguePending ||
+          runBusy ||
+          Boolean(activeSession) ||
+          socialPaidLink.disabled,
+        allowCustom: !linkedTeaser,
+      });
     }
 
     function presetRow(preset) {

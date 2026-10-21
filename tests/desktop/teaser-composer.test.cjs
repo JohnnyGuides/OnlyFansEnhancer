@@ -202,6 +202,13 @@ async function folderButton(page) {
   return page.getByRole("button", { name: "Open episode folder", exact: true });
 }
 
+async function chooseReplyLink(frame, value) {
+  await frame
+    .getByRole("button", { name: "Choose reply link", exact: true })
+    .click();
+  await frame.locator(`.teaser-link-picker [data-choice="${value}"]`).click();
+}
+
 async function chooseSyntheticVideo(page) {
   const chooser = page.waitForEvent("filechooser");
   if (await page.locator(".xt-clip-add").count())
@@ -3395,19 +3402,19 @@ test("selected episodes use catalogue links despite stale custom preferences and
           Boolean(document.querySelector(".teaser-catalogue-link")),
         expected,
       );
-      assert.equal(
-        await frame.locator("#socialPaidLink").isVisible(),
-        !expected,
-      );
+      assert.equal(await frame.locator("#socialPaidLink").isVisible(), false);
       assert.equal(
         await frame.locator("#socialCustomPaidLink").isVisible(),
         false,
       );
-      const link = frame.locator(".teaser-catalogue-link");
-      assert.equal(await link.isVisible(), Boolean(expected));
-      assert.equal(await link.getAttribute("href"), expected || null);
+      const link = frame.locator(".teaser-link-trigger");
+      assert.equal(await link.isVisible(), true);
+      assert.equal(
+        await frame.locator("#socialPaidLink").inputValue(),
+        expected,
+      );
       if (!expected)
-        assert.equal(await link.textContent(), "No catalogue link");
+        assert.equal(await link.textContent(), "Choose reply link…");
       await frame
         .getByRole("button", { name: "Save draft", exact: true })
         .click();
@@ -3456,14 +3463,14 @@ test("unlinked random videos ask for their own URL without reusing another episo
     );
     await mount(page);
     const frame = await chooseSyntheticVideo(page);
-    assert.equal(await frame.locator("#socialPaidLink").isVisible(), true);
+    assert.equal(await frame.locator(".teaser-link-trigger").isVisible(), true);
     assert.equal(
       await frame.locator("#socialCustomPaidLink").isVisible(),
       true,
     );
     assert.equal(await frame.locator("#socialCustomPaidLink").inputValue(), "");
-    await frame.locator("#socialPaidLink").selectOption("fallback:onlyfans");
-    await frame.locator("#socialPaidLink").selectOption("custom");
+    await chooseReplyLink(frame, "fallback:onlyfans");
+    await chooseReplyLink(frame, "custom");
     assert.equal(
       await frame.locator("#socialCustomPaidLink").isVisible(),
       true,
@@ -3532,16 +3539,14 @@ test("missing-link fallbacks preserve the episode and freeze a random choice acr
         /paid-video link|paid URL/,
       );
     };
-    await frame.locator("#socialPaidLink").selectOption("fallback:onlyfans");
+    await chooseReplyLink(frame, "fallback:onlyfans");
     await save("https://onlyfans.com/johnny_guides", "onlyfans");
-    await frame.locator("#socialPaidLink").selectOption("fallback:fansly");
+    await chooseReplyLink(frame, "fallback:fansly");
     await save("https://fansly.com/Johnny_Guides/posts", "fansly");
-    await frame
-      .locator("#socialPaidLink")
-      .selectOption("fallback:video:other-second");
+    await chooseReplyLink(frame, "fallback:video:other-second");
     await save("https://onlyfans.com/4/preview", "video:other-second");
     await frame.evaluate(() => (Math.random = () => 0));
-    await frame.locator("#socialPaidLink").selectOption("fallback:random");
+    await chooseReplyLink(frame, "fallback:random");
     await save("https://onlyfans.com/3/preview", "random");
     await frame
       .locator("#socialCaption")
@@ -3723,9 +3728,9 @@ test("a legacy unlinked filename resolves its catalogue Pornhub link automatical
       pornhubLink: "https://www.pornhub.com/view_video.php?viewkey=phlegacy",
     });
     const frame = await chooseSyntheticVideo(page);
-    await frame.locator(".teaser-catalogue-link").waitFor();
+    await frame.locator(".teaser-link-trigger").waitFor();
     assert.equal(
-      await frame.locator(".teaser-catalogue-link").getAttribute("href"),
+      await frame.locator("#socialPaidLink").inputValue(),
       "https://www.pornhub.com/view_video.php?viewkey=phlegacy",
     );
     assert.equal(await frame.locator("#socialPaidLink").isVisible(), false);
@@ -3812,8 +3817,138 @@ test("teaser validation stays quiet until Send and clears as fields are correcte
       await frame.locator("#socialErrors").textContent(),
       /social caption/,
     );
-    await frame.locator("#socialPaidLink").selectOption("fallback:onlyfans");
+    await chooseReplyLink(frame, "fallback:onlyfans");
     assert.equal(await frame.locator("#socialErrors").textContent(), "");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("reply picker recommends related OnlyFans videos without changing the episode", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 850 },
+  });
+  try {
+    const related = {
+      id: "related-video",
+      row: 3,
+      itemId: "related-video",
+      title: "River adventure continues",
+      seasonArc: "River Stories",
+      category: "Games",
+      fingerprint: "b".repeat(64),
+      onlyfansLink: "https://onlyfans.com/3/related",
+      publicationState: {},
+    };
+    const unrelated = {
+      ...related,
+      id: "unrelated-video",
+      row: 4,
+      itemId: "unrelated-video",
+      title: "A different story",
+      seasonArc: "Other",
+      category: "Other",
+      onlyfansLink: "https://onlyfans.com/4/other",
+    };
+    const otherPlatform = {
+      ...related,
+      id: "manyvids-video",
+      row: 5,
+      itemId: "manyvids-video",
+      onlyfansLink: "",
+      manyvidsLink: "https://www.manyvids.com/Video/5/river",
+    };
+    const errors = await mount(
+      page,
+      true,
+      false,
+      {
+        pornhubLink:
+          "https://www.pornhub.com/view_video.php?viewkey=phoriginal",
+        seasonArc: "River Stories",
+        category: "Games",
+      },
+      [unrelated, otherPlatform, related],
+    );
+    let frame = await chooseSyntheticVideo(page);
+    await frame
+      .getByRole("button", { name: "Choose reply link", exact: true })
+      .click();
+    const picker = frame.locator(".teaser-link-picker");
+    assert.equal(
+      await picker.getByLabel("Reply video platform").inputValue(),
+      "onlyfans",
+    );
+    assert.deepEqual(
+      await picker
+        .locator(".teaser-link-result")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => button.dataset.choice),
+        ),
+      ["fallback:video:related-video", "fallback:video:unrelated-video"],
+    );
+    assert.match(
+      await picker.locator(".teaser-link-result").first().textContent(),
+      /Same series/,
+    );
+    const output = path.join(repositoryRoot, ".local/related-link-review");
+    fs.mkdirSync(output, { recursive: true });
+    await picker.screenshot({ path: path.join(output, "picker-desktop.png") });
+    await picker.getByLabel("Find a reply video").fill("different");
+    assert.equal(await picker.locator(".teaser-link-result").count(), 1);
+    await picker.getByLabel("Find a reply video").fill("not in catalogue");
+    assert.match(await picker.textContent(), /No matching OnlyFans videos/);
+    await picker.getByLabel("Find a reply video").fill("");
+    await picker
+      .locator('[data-choice="fallback:video:related-video"]')
+      .click();
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(
+      async () =>
+        (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.linkFallback
+          ?.choice === "video:related-video",
+    );
+    const draft = await page.evaluate(async () => {
+      const draft = await OFEnhancerTeaserDrafts.get("2026-10-06");
+      return { episodeKey: draft.episodeKey, paidUrl: draft.paidUrl };
+    });
+    assert.deepEqual(draft, {
+      episodeKey: "preview-test",
+      paidUrl: "https://onlyfans.com/3/related",
+    });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
+    await page.locator("#open-day").click();
+    await page.locator(".xt-composer-frame").waitFor();
+    frame = page.frames().find((frame) => frame.url().includes("?teaserDay="));
+    await frame.waitForFunction(
+      () =>
+        document.querySelector("#socialPaidLink")?.value ===
+        "fallback:video:related-video",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await frame
+      .getByRole("button", { name: "Choose reply link", exact: true })
+      .click();
+    const mobilePicker = frame.locator(".teaser-link-picker");
+    const box = await mobilePicker.boundingBox();
+    assert.ok(
+      box.x >= 0 && box.x + box.width <= 390,
+      "picker fits a narrow window",
+    );
+    await mobilePicker.screenshot({
+      path: path.join(output, "picker-phone.png"),
+    });
+    await frame.getByLabel("Find a reply video").fill("continues");
+    await frame.locator("#socialCaption").click();
+    assert.equal(
+      await mobilePicker.evaluate((panel) => panel.matches(":popover-open")),
+      false,
+      "click-away dismisses the picker",
+    );
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

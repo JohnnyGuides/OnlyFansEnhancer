@@ -222,7 +222,8 @@
     "x-teaser.html": "extensions/personal/x-teaser.html",
     "x-teaser.js": "extensions/personal/x-teaser.js",
     "avatar-crop.js": "shared/identity-mask/avatar-crop.js",
-    "runtime.js": "shared/identity-mask/runtime.js"
+    "runtime.js": "shared/identity-mask/runtime.js",
+    "app/teaser-link-picker.js": "shared/workspace/teaser-link-picker.js"
   },
   "store": {
     "background.js": "extensions/store/background.js",
