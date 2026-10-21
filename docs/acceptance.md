@@ -1029,3 +1029,12 @@ the log.
 - Built committed source in an isolated 0.20.121 archive, preserving unrelated working-tree edits. Normal silent installer exited 0 with the success marker. All 1,333 installed manifest files matched. Confirmed the installed 0.20.121 desktop restarted with a visible window.
 - All 15 settings/data file fingerprints and 21 database table fingerprints matched before/after; database integrity remained `ok`. Extension identities and native registrations matched. No live upload or publication acceptance was performed.
 - Installer SHA-256: `ed6fece5da4636abadd1f9992b1f1fcfbf3489b4f161befee60e922318631d9b`.
+
+
+## 2026-10-21 — 0.20.122 normal update
+
+- Moves draft removal into the bottom-right footer beside Save draft and Send, reusing the footer button style. Preserves the removal control and its listeners when switching embedded destination editors; narrow layouts keep all actions within bounds.
+- Focused source checks passed for Twitter draft removal, footer style/order and phone fit, plus Reddit switching/removal and protected-run behavior. No full-suite rerun for this update.
+- Built committed source in an isolated 0.20.122 archive, preserving unrelated working-tree edits. Normal silent installer exited 0 with the success marker. All 1,333 installed manifest files matched. Confirmed the installed 0.20.122 desktop restarted with a visible window.
+- Settings/credential hashes, extension identities and native registrations matched before/after. Database integrity remained `ok`; only `sqlite_sequence`, `x_metric_samples`, and `x_posts` table fingerprints changed during runtime activity. No live upload or publication acceptance was performed.
+- Installer SHA-256: `b97268d67d6842dfe2c66d323e5af63c1f26f770dac27252c460564733153702`.
