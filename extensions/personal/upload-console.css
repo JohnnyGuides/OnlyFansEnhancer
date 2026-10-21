@@ -648,7 +648,13 @@ body.calendar-reddit-draft .upload-actions .action-status {
   margin-bottom: 8px;
 }
 .calendar-teaser .teaser-association button,
-.calendar-teaser :is(#saveTeaserDraft, #uploadButton, #prepareCalendarReddit) {
+.calendar-teaser
+  :is(
+    #saveTeaserDraft,
+    #uploadButton,
+    #prepareCalendarReddit,
+    .teaser-remove-draft
+  ) {
   min-height: 40px;
   padding: 9px 12px;
   border: 1px solid #344657;
@@ -714,7 +720,9 @@ body.calendar-reddit-draft .upload-actions .action-status {
   .calendar-teaser .social-auto-mode {
     grid-column: 1 / -1;
   }
-  .calendar-teaser .upload-actions > :is(#saveTeaserDraft, #uploadButton),
+  .calendar-teaser
+    .upload-actions
+    > :is(#saveTeaserDraft, #uploadButton, .teaser-remove-draft),
   .calendar-teaser .teaser-association button {
     grid-column: auto;
     grid-row: auto;
@@ -3958,7 +3966,9 @@ body.calendar-teaser {
 .calendar-teaser #uploadActions > .action-secondary {
   display: contents;
 }
-.calendar-teaser #uploadActions > :is(#saveTeaserDraft, #uploadButton) {
+.calendar-teaser
+  #uploadActions
+  > :is(#saveTeaserDraft, #uploadButton, .teaser-remove-draft) {
   flex: none;
 }
 .calendar-teaser #saveTeaserDraft {
@@ -3972,7 +3982,9 @@ body.calendar-teaser {
   .calendar-teaser #uploadActions.upload-actions {
     gap: 6px;
   }
-  .calendar-teaser #uploadActions > :is(#saveTeaserDraft, #uploadButton) {
+  .calendar-teaser
+    #uploadActions
+    > :is(#saveTeaserDraft, #uploadButton, .teaser-remove-draft) {
     font-size: 12px;
     padding-inline: 8px;
   }
@@ -4075,4 +4087,15 @@ body.calendar-teaser {
   color: #67d3f5;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+@media (max-width: 620px) {
+  .calendar-teaser #uploadActions:has(.teaser-remove-draft:not([hidden])) {
+    flex-wrap: wrap;
+  }
+  .calendar-teaser
+    #uploadActions:has(.teaser-remove-draft:not([hidden]))
+    > .social-auto-mode {
+    flex-basis: 100%;
+  }
 }

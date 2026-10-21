@@ -273,10 +273,11 @@
     postsHeading.append(node("h3", "", "Post to"), count);
     const communities = action("Choose communities");
     const removePost = action("Remove post");
+    removePost.classList.add("teaser-remove-draft");
     removePost.hidden = true;
     const postActions = node("div", "xt-planner-post-actions");
     const selectedInfo = node("p", "xt-planner-selected-info");
-    postActions.append(communities, removePost);
+    postActions.append(communities);
     destinations.append(
       postsHeading,
       batchControls,
@@ -598,6 +599,7 @@
       }
       destinations.querySelector(".xt-planner-community-picker")?.remove();
       // Preserve the controls before replacing their current iframe document.
+      postActions.append(removePost);
       heading.after(destinations);
       destinations.hidden = true;
       dirty = false;
@@ -949,6 +951,9 @@
           tools.append(copy);
         }
         layoutTools();
+        frame.contentDocument
+          ?.querySelector("#saveTeaserDraft")
+          ?.before(removePost);
         const posts = frame.contentDocument?.querySelector(
           ".teaser-planner-posts",
         );
@@ -969,6 +974,7 @@
           error.setAttribute("role", "alert");
           const retry = action("Retry");
           retry.addEventListener("click", () => {
+            postActions.append(removePost);
             heading.after(destinations);
             destinations.hidden = true;
             frame.style.visibility = "hidden";
@@ -1051,6 +1057,7 @@
       heading.querySelector(".xt-change-clip")?.remove();
       heading.querySelector(".xt-episode-folder")?.remove();
       heading.querySelector(".teaser-copy-file")?.remove();
+      postActions.append(removePost);
       heading.after(destinations);
       destinations.hidden = true;
       const grid = node("div", "xt-clip-choices");

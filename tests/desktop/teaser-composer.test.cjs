@@ -3602,6 +3602,40 @@ test("an accidental Twitter draft can be removed without deleting its video or R
       exact: true,
     });
     await remove.waitFor();
+    const buttonStyles = await frame
+      .locator("#uploadActions > :is(.teaser-remove-draft, #saveTeaserDraft)")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => {
+          const style = getComputedStyle(button);
+          return [
+            style.backgroundColor,
+            style.borderColor,
+            style.fontSize,
+            style.fontWeight,
+          ];
+        }),
+      );
+    assert.deepEqual(
+      buttonStyles[0],
+      buttonStyles[1],
+      "remove reuses the existing footer button style",
+    );
+    assert.equal(
+      await frame
+        .locator(".xt-planner-post-actions .teaser-remove-draft")
+        .count(),
+      0,
+    );
+    assert.deepEqual(
+      await frame
+        .locator("#uploadActions > button")
+        .evaluateAll((buttons) =>
+          buttons
+            .filter((button) => !button.hidden)
+            .map((button) => button.textContent),
+        ),
+      ["Remove draft", "Save draft", "Send to Twitter"],
+    );
     await remove.click();
     await page.getByRole("button", { name: "Keep draft", exact: true }).click();
     assert.ok(
@@ -3611,8 +3645,21 @@ test("an accidental Twitter draft can be removed without deleting its video or R
     fs.mkdirSync(output, { recursive: true });
     await page.screenshot({ path: path.join(output, "remove-draft.png") });
     await frame
-      .locator(".xt-planner-post-actions")
+      .locator("#uploadActions")
       .screenshot({ path: path.join(output, "draft-actions.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const footer = await frame.locator("#uploadActions").evaluate((node) => ({
+      width: node.clientWidth,
+      content: node.scrollWidth,
+    }));
+    assert.ok(
+      footer.content <= footer.width,
+      "footer actions fit narrow windows",
+    );
+    await frame
+      .locator("#uploadActions")
+      .screenshot({ path: path.join(output, "draft-actions-phone.png") });
+    await page.setViewportSize({ width: 1200, height: 850 });
     await remove.click();
     await page
       .locator(".xt-confirm-dialog")
