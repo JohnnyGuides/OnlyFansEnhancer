@@ -1011,3 +1011,12 @@ the log.
 - Built committed source plus the 24-file version-only bump in .local/teaser-release-0.20.119, preserving unrelated older working copies. Silent normal update exited 0 and logged Installation process succeeded. All 1,333 installed inventory files match the stage; the restarted desktop runs from its permanent install folder with version 0.20.119 and a nonzero main-window handle.
 - All 15 readable settings/data/credential file hashes and 21 catalogue table fingerprints are unchanged through the update/restart snapshot. SQLite integrity is ok; extension identities, native manifest and registry views are unchanged. No original media, credential change, profile reset or publication occurred. Existing Chrome extension reload and owner live acceptance remain pending.
 - Installer SHA-256: 29bfbd6f9fb6f8b37b0e73e35b1f19efa6bdf122abf54389dc652c259ffdd3cf. Package manifest SHA-256: 6cd4b6c039124a5984918ced26901e31eeedb34c001999be828bfd34036bfa49. Delivery evidence remains in the isolated workspace .local directory.
+
+
+## 2026-10-21 — 0.20.120 normal update
+
+- Includes immediate teaser catalogue opening, badge-only ready counts, direct Vegas project actions, cross-frame popover dismissal, automatic catalogue reply links (including projected Pornhub paid links), and draft-stable missing-link fallbacks to random/selected catalogue videos or the owner's supplied OnlyFans/Fansly profiles.
+- Focused browser checks covered the final fallback selection, preservation of episode association, random-choice restore, custom URL switching, and catalogue-link precedence; prior focused checks covered menu dismissal, draft restore, social contract/UI and paid-link projection. No full-suite rerun for this update.
+- Built an archive of committed source as 0.20.120, preserving unrelated working-tree version edits. Normal silent installer exited 0 with its success marker. Verified all 1,333 installed manifest files, version, unchanged settings/credential hashes, extension identities and native registrations; restarted the installed desktop with a visible window.
+- Database integrity remained `ok`; `sqlite_sequence`, `x_metric_samples`, and `x_posts` changed during live runtime activity. Other table fingerprints matched. No publication or live upload acceptance was performed.
+- Installer SHA-256: `291c885c1fd282d6a3d95bfcb52bcc41f263747bbd02fcb5d661063b98d6c0f9`.
