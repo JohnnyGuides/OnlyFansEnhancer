@@ -54,6 +54,7 @@ public sealed partial class WebMessageRouter(
                     saveBrowserPreference
                 ),
                 "getCatalogue" => WithCatalogue(requestId, request, GetCatalogue),
+                "getUploadCatalogueSnapshot" => WithCatalogue(requestId, request, GetUploadCatalogueSnapshot),
                 "importCatalogueSnapshot" => WithCatalogue(requestId, request, ImportCatalogue),
                 "scanThumbnails" => WithCatalogue(requestId, request, ScanThumbnails),
                 "confirmAssetBinding" => WithCatalogue(requestId, request, ConfirmBinding),
@@ -234,6 +235,12 @@ public sealed partial class WebMessageRouter(
         if (payload.PlanHash is null || !PlanHashPattern().IsMatch(payload.PlanHash))
             throw new WebPayloadException(new JsonException("Plan hash is invalid."));
         return googleCatalogue!.applyGoogleWorkbookMigration(payload.PlanHash);
+    }
+
+    private string GetUploadCatalogueSnapshot(WebRequest request)
+    {
+        DeserializePayload<EmptyPayload>(request.Payload);
+        return Success(request.RequestId, catalogue!.GetUploadCatalogueSnapshot());
     }
 
     private string GetCatalogue(WebRequest request)

@@ -127,10 +127,15 @@ public sealed class WebMessageRouterTests
         WebMessageRouter router = new(_ => throw new AssertFailedException(), () => null, store);
         string snapshot =
             """
-            {"version":1,"items":[{"sourceKey":"ashley-04","sourceRow":4,"title":"Ashley 04","description":"","plannedDate":"2026-09-11","series":"Ashley","episode":"04","xTeasers":2,"redditTeasers":1,"platformLinks":{}}]}
+            {"version":1,"items":[{"sourceKey":"ashley-04","sourceRow":4,"title":"Ashley 04","description":"","plannedDate":"2026-09-11","series":"Ashley","episode":"04","xTeasers":2,"redditTeasers":1,"platformLinks":{"pornhubFree":"https://www.pornhub.com/view_video.php?viewkey=phfixture"}}]}
             """;
 
         AssertOk(router.Handle(Request("importCatalogueSnapshot", new { json = snapshot })));
+        using JsonDocument uploadSnapshot = Parse(router.Handle(Request("getUploadCatalogueSnapshot", new { })));
+        JsonElement uploadRow = uploadSnapshot.RootElement.GetProperty("result").GetProperty("rows")[0];
+        Assert.AreEqual("ashley-04", uploadRow.GetProperty("id").GetString());
+        Assert.AreEqual("https://www.pornhub.com/view_video.php?viewkey=phfixture", uploadRow.GetProperty("pornhubLink").GetString());
+        AssertError(router.Handle(Request("getUploadCatalogueSnapshot", new { unexpected = true })), "invalid-payload");
         AssertOk(router.Handle(Request("scanThumbnails", new { root = thumbnailRoot })));
         using JsonDocument catalogue = Parse(router.Handle(Request("getCatalogue", new { })));
         JsonElement result = catalogue.RootElement.GetProperty("result");

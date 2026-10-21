@@ -8,6 +8,7 @@
     )
       return null;
     document.body.classList.add("calendar-teaser");
+    document.body.dataset.teaserCatalogueState = "loading";
     const frameDialog = document.querySelector("#thumbnailFrameDialog");
     document.body.append(frameDialog);
     frameDialog.querySelector("h2").textContent = "Choose frame";

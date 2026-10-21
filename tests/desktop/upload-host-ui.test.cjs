@@ -255,3 +255,108 @@ test("a lost connection turns the pill off and a reconnect fires the event again
     await browser.close();
   }
 });
+
+test("desktop catalogue reads work without Chrome and propagate local lookup errors", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(uploader);
+    await page.evaluate(() => {
+      let requestNumber = 0;
+      globalThis.crypto.randomUUID = () =>
+        `00000000-0000-4000-8000-${String(++requestNumber).padStart(12, "0")}`;
+      globalThis.catalogueCalls = [];
+      globalThis.failCatalogueRead = false;
+      let receive;
+      globalThis.chrome = {
+        webview: {
+          addEventListener(_name, listener) {
+            receive = listener;
+          },
+          postMessage(json) {
+            const request = JSON.parse(json);
+            catalogueCalls.push(request.operation);
+            let response = {
+              ok: true,
+              result: { browsers: [], connected: false },
+            };
+            if (request.operation === "getUploadCatalogueSnapshot")
+              response = failCatalogueRead
+                ? { ok: false, error: { code: "catalogue-unavailable" } }
+                : {
+                    ok: true,
+                    result: {
+                      source: "desktop",
+                      rows: [
+                        {
+                          id: "legacy-example",
+                          title: "Preview test",
+                          pornhubLink:
+                            "https://www.pornhub.com/view_video.php?viewkey=phfixture",
+                        },
+                      ],
+                    },
+                  };
+            queueMicrotask(() =>
+              receive({ data: { requestId: request.requestId, ...response } }),
+            );
+          },
+        },
+      };
+    });
+    await page.addScriptTag({ content: hostScript });
+    await page.addScriptTag({
+      content: fs.readFileSync(
+        path.join(
+          repositoryRoot,
+          "extensions/personal/workflows/catalogue-client.js",
+        ),
+        "utf8",
+      ),
+    });
+    const result = await page.evaluate(async () => ({
+      config: await CreatorCatalogueClient.loadConfig(),
+      snapshot: await CreatorCatalogueClient.getCatalogueSnapshot(),
+      calls: catalogueCalls,
+    }));
+    assert.equal(result.config.source, "desktop");
+    assert.equal(
+      result.snapshot.rows[0].pornhubLink,
+      "https://www.pornhub.com/view_video.php?viewkey=phfixture",
+    );
+    assert.equal(
+      result.calls.filter((op) => op === "getUploadCatalogueSnapshot").length,
+      1,
+    );
+    assert.equal(
+      result.calls.includes("browserRequest"),
+      false,
+      "local reads do not enter the Chrome bridge",
+    );
+    const error = await page.evaluate(async () => {
+      failCatalogueRead = true;
+      try {
+        await CreatorCatalogueClient.getCatalogueSnapshot();
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    });
+    assert.equal(error, "catalogue-unavailable");
+    const cancelled = await page.evaluate(async () => {
+      const controller = new AbortController();
+      controller.abort();
+      try {
+        await CreatorCatalogueClient.getCatalogueSnapshot({
+          signal: controller.signal,
+        });
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    assert.equal(cancelled, true);
+  } finally {
+    await browser.close();
+  }
+});

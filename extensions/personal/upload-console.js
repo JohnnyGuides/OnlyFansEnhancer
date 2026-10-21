@@ -1515,6 +1515,7 @@
       ["fansly", "Fansly"],
       ["manyvids", "ManyVids"],
       ["pornhubPaid", "Pornhub"],
+      ["pornhub", "Pornhub"],
     ];
     const teaserProfileLinks = {
       onlyfans: "https://onlyfans.com/johnny_guides",
@@ -1582,7 +1583,7 @@
         if (url) addPaidLinkOption(url, `${label} · existing catalogue link`);
         else if (
           !linkedTeaser &&
-          platform !== "pornhubPaid" &&
+          PAID_LINK_SOURCES.has(platform) &&
           selectedTargets().includes(platform)
         )
           addPaidLinkOption(
@@ -1640,9 +1641,13 @@
             ? previous
             : available.find((value) => value) || "";
       socialCustomPaidLinkField.hidden = socialPaidLink.value !== "custom";
-      socialPaidLink.hidden = linkedTeaser && links.length > 0;
+      const cataloguePending =
+        calendar && document.body.dataset.teaserCatalogueState !== "ready";
+      socialPaidLink.hidden =
+        (linkedTeaser && links.length > 0) || cataloguePending;
+      if (cataloguePending) socialCustomPaidLinkField.hidden = true;
       let link = socialPaidLinkFields.querySelector(".teaser-catalogue-link");
-      if (linkedTeaser && !link) {
+      if ((linkedTeaser || cataloguePending) && !link) {
         link = document.createElement("a");
         link.className = "teaser-catalogue-link";
         link.target = "_blank";
@@ -1656,7 +1661,11 @@
         else link.removeAttribute("href");
         link.textContent = url
           ? socialPaidLink.selectedOptions[0].textContent.split(" · ")[0]
-          : "No catalogue link";
+          : cataloguePending
+            ? document.body.dataset.teaserCatalogueState === "error"
+              ? "Catalogue unavailable"
+              : "Checking catalogue…"
+            : "No catalogue link";
       }
     }
 
@@ -1834,7 +1843,11 @@
       const value = socialDraft();
       socialErrors.textContent =
         value.enabled &&
-        !(document.body.classList.contains("calendar-teaser") && !socialFile)
+        !(
+          document.body.classList.contains("calendar-teaser") &&
+          (!socialFile ||
+            document.body.dataset.teaserCatalogueState !== "ready")
+        )
           ? value.errors.join(" ")
           : "";
       const missingTrace = value.errors.find((error) =>
@@ -7095,15 +7108,30 @@
       async associate(episodeKey, paidUrl, savedFallback) {
         if (document.body.classList.contains("calendar-teaser")) {
           document.body.dataset.teaserEpisodeKey = episodeKey || "";
-          renderPaidLinkOptions();
+          document.body.dataset.teaserCatalogueState = "loading";
+          refreshSocialReview();
         }
         const initialLink = socialPaidLink.value;
         const initialCustomUrl = socialCustomPaidLink.value;
         clearTimeout(matchTimer);
         const revision = ++matchRevision;
-        const snapshot = await loadCatalogueSnapshot();
+        let snapshot;
+        try {
+          snapshot = await loadCatalogueSnapshot();
+        } catch (error) {
+          if (
+            revision === matchRevision &&
+            document.body.classList.contains("calendar-teaser")
+          ) {
+            document.body.dataset.teaserCatalogueState = "error";
+            refreshSocialReview();
+          }
+          throw error;
+        }
         if (revision !== matchRevision) return;
         currentSnapshot = snapshot;
+        if (document.body.classList.contains("calendar-teaser"))
+          document.body.dataset.teaserCatalogueState = "ready";
         const linkEdited =
           socialPaidLink.value !== initialLink ||
           socialCustomPaidLink.value !== initialCustomUrl;

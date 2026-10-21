@@ -254,6 +254,8 @@
   }
 
   async function loadConfig() {
+    if (globalThis.OFEnhancerDesktopUpload?.getCatalogueSnapshot)
+      return normalizeConfig({ source: "desktop" }).value;
     const stored = await chrome.storage.local.get(STORAGE_KEY);
     const value =
       /** @type {{source?: string, endpoint?: string, secret?: string}} */ (
@@ -396,6 +398,19 @@
   }
 
   async function getCatalogueSnapshot(options) {
+    if (options?.signal?.aborted) throw new Error(CANCELLED_MESSAGE);
+    if (globalThis.OFEnhancerDesktopUpload?.getCatalogueSnapshot) {
+      const read = globalThis.OFEnhancerDesktopUpload.getCatalogueSnapshot();
+      if (!options?.signal) return read;
+      const signal = options.signal;
+      return new Promise((resolve, reject) => {
+        const cancel = () => reject(new Error(CANCELLED_MESSAGE));
+        signal.addEventListener("abort", cancel, { once: true });
+        read
+          .then(resolve, reject)
+          .finally(() => signal.removeEventListener("abort", cancel));
+      });
+    }
     return request(await loadConfig(), "getCatalogueSnapshot", {}, options);
   }
 

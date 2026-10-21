@@ -3043,6 +3043,11 @@ test("editor is usable before catalogue lookup completes and keeps early edits",
     await editor.getByLabel("Posting time", { exact: true }).fill("19:45");
     assert.equal(await editor.locator("#socialPaidLink").isVisible(), false);
     assert.equal(
+      await editor.locator("#socialErrors").textContent(),
+      "",
+      "catalogue lookup does not prematurely ask for a link",
+    );
+    assert.equal(
       await editor.locator("#socialCustomPaidLink").isVisible(),
       false,
     );
@@ -3334,6 +3339,7 @@ test("selected episodes use catalogue links despite stale custom preferences and
       pornhubPaidLink:
         "https://www.pornhub.com/view_video.php?viewkey=phpreview",
     },
+    { pornhubLink: "https://www.pornhub.com/view_video.php?viewkey=phfree" },
     {},
   ]) {
     const page = await browser.newPage({
@@ -3381,7 +3387,8 @@ test("selected episodes use catalogue links despite stale custom preferences and
         .frames()
         .find((frame) => frame.url().includes("?teaserDay="));
       assert.ok(frame);
-      const expected = links.onlyfansLink || links.pornhubPaidLink || "";
+      const expected =
+        links.onlyfansLink || links.pornhubPaidLink || links.pornhubLink || "";
       await frame.waitForFunction(
         (expected) =>
           document.querySelector("#socialPaidLink").value === expected &&
@@ -3701,6 +3708,61 @@ test("an accidental Twitter draft can be removed without deleting its video or R
       result.calls.find((call) => call.op === "clearTeaserPlanSlot").payload,
       { date: "2026-10-06" },
     );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a legacy unlinked filename resolves its catalogue Pornhub link automatically", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 850 },
+  });
+  try {
+    const errors = await mount(page, true, false, {
+      pornhubLink: "https://www.pornhub.com/view_video.php?viewkey=phlegacy",
+    });
+    const frame = await chooseSyntheticVideo(page);
+    await frame.locator(".teaser-catalogue-link").waitFor();
+    assert.equal(
+      await frame.locator(".teaser-catalogue-link").getAttribute("href"),
+      "https://www.pornhub.com/view_video.php?viewkey=phlegacy",
+    );
+    assert.equal(await frame.locator("#socialPaidLink").isVisible(), false);
+    assert.equal(
+      await frame.locator("#socialCustomPaidLink").isVisible(),
+      false,
+    );
+    assert.doesNotMatch(
+      await frame.locator("#socialErrors").textContent(),
+      /reply|link/,
+    );
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(
+      async () =>
+        (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.episodeKey ===
+        "preview-test",
+    );
+    const saved = await page.evaluate(async () => {
+      const draft = await OFEnhancerTeaserDrafts.get("2026-10-06");
+      return { episodeKey: draft.episodeKey, paidUrl: draft.paidUrl };
+    });
+    assert.deepEqual(saved, {
+      episodeKey: "preview-test",
+      paidUrl: "https://www.pornhub.com/view_video.php?viewkey=phlegacy",
+    });
+    const output = path.join(
+      repositoryRoot,
+      ".local/catalogue-resolution-review",
+    );
+    fs.mkdirSync(output, { recursive: true });
+    await frame
+      .locator(".teaser-schedule-row")
+      .screenshot({ path: path.join(output, "resolved-link.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await frame
+      .locator(".teaser-schedule-row")
+      .screenshot({ path: path.join(output, "resolved-link-phone.png") });
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

@@ -338,6 +338,7 @@
   const openingFrameLeadIns = new Map();
   globalThis.OFEnhancerDesktopUpload = Object.freeze({
     refreshBrowsers,
+    getCatalogueSnapshot: () => call("getUploadCatalogueSnapshot"),
     async copyTeaser(file, episodeKey, date) {
       if (!(file instanceof File) || !/\.(mp4|mov|m4v|webm)$/i.test(file.name))
         throw new Error("Choose a teaser video first.");
