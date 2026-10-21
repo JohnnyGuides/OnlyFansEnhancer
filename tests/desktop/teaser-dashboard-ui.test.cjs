@@ -1827,6 +1827,11 @@ test("day-scoped teaser modal ranks ready clips without mutating the calendar pl
     await modal.locator('[data-coverage="needs"]').click();
     assert.ok((await modal.locator(".xt-card").count()) < allCount);
     assert.equal(await modal.locator(".xt-upload-choice").count(), 1);
+    assert.equal(
+      await modal.locator(".xt-pick-reason").count(),
+      0,
+      "ready counts are shown once in badges",
+    );
     await modal.locator('[data-coverage="all"]').click();
     assert.equal(await modal.locator(".xt-card").count(), allCount);
     assert.equal((await calls(page, "setTeaserPlanSlot")).length, 0);
@@ -1935,6 +1940,9 @@ test("teaser modal traps and restores focus, cancels cleanly and fits desktop an
           clientWidth: node.clientWidth,
           addRight: add.right,
           addHeight: add.height,
+          episodeHeight: node
+            .querySelector(".xt-episode[data-episode-key]")
+            .getBoundingClientRect().height,
         };
       });
       assert.ok(
@@ -1942,10 +1950,9 @@ test("teaser modal traps and restores focus, cancels cleanly and fits desktop an
       );
       assert.ok(dimensions.scrollWidth <= dimensions.clientWidth);
       assert.ok(dimensions.addRight <= dimensions.right);
-      assert.equal(
-        dimensions.addHeight,
-        74,
-        "catalogue upload tile keeps the compact episode height",
+      assert.ok(
+        Math.abs(dimensions.addHeight - dimensions.episodeHeight) < 1,
+        "upload tile matches the thumbnail cards without redundant status rows",
       );
       if (options.viewport) assert.ok(dimensions.width <= 390);
       await page.keyboard.press("Tab");

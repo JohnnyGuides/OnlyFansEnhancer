@@ -1224,9 +1224,13 @@ html:has(.xt-picker[open]) {
   flex-direction: column;
   justify-content: center;
   gap: 4px;
-  height: 74px;
+  height: 56px;
   background: #18212d;
   border: 1px dashed #344253;
+}
+.xt-composer-catalogue .xt-clip-add .xt-plus {
+  font-size: 24px;
+  line-height: 1;
 }
 .xt-draft-cover {
   position: absolute;

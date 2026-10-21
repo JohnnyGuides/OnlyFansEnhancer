@@ -1476,14 +1476,12 @@
           card.tabIndex = -1;
         }
         const reason =
-          onSelect && pick !== "recommended"
-            ? `${episode.readyClips} ready`
-            : pick === "hidden"
-              ? "Recent or planned"
-              : pick === "dimmed"
-                ? "Busy category"
-                : `${episode.readyClips} ready`;
-        card.append(element("span", "xt-pick-reason", reason));
+          !onSelect && pick === "hidden"
+            ? "Recent or planned"
+            : !onSelect && pick === "dimmed"
+              ? "Busy category"
+              : "";
+        if (reason) card.append(element("span", "xt-pick-reason", reason));
       }
       card.addEventListener("click", () => {
         if (onSelect) {
