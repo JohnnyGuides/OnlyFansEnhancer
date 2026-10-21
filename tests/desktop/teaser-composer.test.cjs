@@ -3768,3 +3768,54 @@ test("a legacy unlinked filename resolves its catalogue Pornhub link automatical
     await page.close();
   }
 });
+
+test("teaser validation stays quiet until Send and clears as fields are corrected", async () => {
+  const page = await browser.newPage();
+  try {
+    const errors = await mount(page, true, false, {});
+    const frame = await chooseSyntheticVideo(page);
+    await page
+      .getByRole("button", { name: "Change linked episode", exact: true })
+      .waitFor();
+    await frame.locator("#socialCaption").fill("");
+    assert.equal(await frame.locator("#socialErrors").textContent(), "");
+    await frame.evaluate(() => {
+      globalThis.attemptMessages = [];
+      const send = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = (message, callback) => {
+        attemptMessages.push(message.type);
+        return send(message, callback);
+      };
+    });
+    await frame
+      .getByRole("button", { name: "Send to Twitter", exact: true })
+      .click();
+    assert.match(
+      await frame.locator("#socialErrors").textContent(),
+      /Enter the social caption/,
+    );
+    assert.match(
+      await frame.locator("#socialErrors").textContent(),
+      /no paid-video link/,
+    );
+    assert.equal(
+      await frame.evaluate(() =>
+        attemptMessages.some((type) =>
+          /PREPARE_CREATOR|START_CREATOR/.test(type),
+        ),
+      ),
+      false,
+      "invalid input never starts publishing",
+    );
+    await frame.locator("#socialCaption").fill("A corrected caption");
+    assert.doesNotMatch(
+      await frame.locator("#socialErrors").textContent(),
+      /social caption/,
+    );
+    await frame.locator("#socialPaidLink").selectOption("fallback:onlyfans");
+    assert.equal(await frame.locator("#socialErrors").textContent(), "");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});

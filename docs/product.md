@@ -179,7 +179,9 @@ are square; the main uploader retains its existing landscape cover format.
 A catalogue-linked Twitter teaser uses the episode's existing video URL automatically
 (OnlyFans, Fansly, ManyVids, Pornhub paid, then Pornhub free). Desktop catalogue reads go
 directly to the local database and do not require a Chrome connection. The editor waits
-for the lookup before showing missing-link choices or validation. The editor shows the selected service as a
+for the lookup before showing missing-link choices. Form validation stays quiet until
+Upload/Send is clicked, then updates as fields are corrected. Invalid input never dispatches
+an upload; connection, active-run and adapter guards remain in force. The editor shows the selected service as a
 read-only link. When the episode has no link, the same field offers **Random video**,
 **OnlyFans profile**, **Fansly profile**, and a **Choose from available** video group.
 Profile defaults are the owner's supplied OnlyFans and Fansly profile URLs. A random

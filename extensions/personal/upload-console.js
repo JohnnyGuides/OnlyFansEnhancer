@@ -1154,6 +1154,7 @@
     let recoveryUnavailable = false;
     let runBusy = false;
     let readiness = null;
+    let validationAttempted = false;
     let readinessRevision = 0;
     let renderedPicker = null;
     const lockedControls = new Map();
@@ -1842,6 +1843,7 @@
       }
       const value = socialDraft();
       socialErrors.textContent =
+        validationAttempted &&
         value.enabled &&
         !(
           document.body.classList.contains("calendar-teaser") &&
@@ -3077,7 +3079,7 @@
         runBusy ||
         Boolean(activeSession) ||
         !get("#resumePrompt").hidden ||
-        readiness?.ready !== true;
+        (readiness?.ready !== true && readiness?.validationRequired !== true);
       const ongoing =
         activeSession &&
         !activeSession.needsReconciliation &&
@@ -3138,10 +3140,22 @@
       const blocker = draftBlocker(value, social);
       updateUploadAction();
       if (blocker) {
+        const inputInvalid =
+          (!value.valid || !social.valid) &&
+          !social.errors.some(
+            (error) =>
+              error.startsWith("Record successful") ||
+              error.startsWith("Trace-derived"),
+          );
+        if (inputInvalid) readiness = { validationRequired: true };
+        updateUploadAction();
         matchStatus.textContent =
-          document.body.classList.contains("calendar-teaser") && !social.valid
+          inputInvalid && !validationAttempted
             ? ""
-            : blocker;
+            : document.body.classList.contains("calendar-teaser") &&
+                !social.valid
+              ? ""
+              : blocker;
         return;
       }
       matchStatus.textContent =
@@ -4465,7 +4479,7 @@
     }
 
     async function startUpload() {
-      if (runBusy || activeSession || readiness?.ready !== true) return;
+      if (runBusy || activeSession) return;
       if (calendarTeaser?.locked()) {
         uploadError.textContent =
           "Review this teaser's saved upload session before starting another.";
@@ -4473,9 +4487,17 @@
       }
       let prepareDispatched = false;
       let recheckAfterFailure = false;
+      validationAttempted = true;
       let value = validate(true);
       let social = socialDraft();
-      if (!value.valid || !social.valid || !currentMatch || activeSession)
+      socialErrors.textContent = social.enabled ? social.errors.join(" ") : "";
+      if (
+        !value.valid ||
+        !social.valid ||
+        !currentMatch ||
+        activeSession ||
+        readiness?.ready !== true
+      )
         return;
       if (
         value.targets.some(
@@ -5373,6 +5395,7 @@
     });
 
     function newUploadDraft() {
+      validationAttempted = false;
       const mode = workflowMode.value;
       if (activeSession) {
         activeSession.closed = true;
@@ -6614,7 +6637,10 @@
     ])
       input.addEventListener("change", renderFilePickers);
     renderFilePickers();
-    socialCaption.addEventListener("input", refreshSocialReview);
+    socialCaption.addEventListener("input", () => {
+      socialCaption.dataset.teaserEdited = "true";
+      refreshSocialReview();
+    });
     for (const control of [socialX, socialReddit]) {
       control.addEventListener("change", () => {
         if (socialReddit.checked && !subredditSnapshot) {

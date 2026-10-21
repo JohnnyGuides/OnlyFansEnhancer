@@ -1104,8 +1104,22 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
     await page.locator("#catalogueRow").selectOption("row:125");
     assert.equal(
       await page.locator("#uploadButton").isDisabled(),
-      true,
-      "an empty custom paid-link selection must still require a choice",
+      false,
+      "Upload allows an explicit validation attempt for an incomplete form",
+    );
+    assert.equal(await page.locator("#socialErrors").textContent(), "");
+    await page.locator("#uploadButton").click();
+    assert.match(await page.locator("#socialErrors").textContent(), /link/i);
+    assert.equal(
+      await page.evaluate(() =>
+        __socialUiMessages.some(
+          (message) =>
+            message.type === "PREPARE_CREATOR_SOCIAL_DISTRIBUTION" ||
+            message.type === "PREPARE_CREATOR_UPLOAD",
+        ),
+      ),
+      false,
+      "invalid link never dispatches a publish request",
     );
     await page
       .locator("#socialPaidLink")
