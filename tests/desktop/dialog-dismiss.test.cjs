@@ -253,3 +253,66 @@ test("confirmation cancellation, Escape and outside clicks keep changes and remo
     await page.close();
   }
 });
+
+test("popover click-away crosses editor frames without closing containing or manual menus", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<button id="outside">Outside</button>
+      <div id="menu" popover="auto">Vegas actions</div>
+      <div id="manual" popover="manual">Persistent</div>
+      <iframe srcdoc='<textarea aria-label="Caption"></textarea><div id="childMenu" popover="auto">Child actions</div>'></iframe>`);
+    await page.addScriptTag({ content: helper });
+    await page.evaluate(() => OFEnhancerDialogDismiss.attach(document));
+    const frame = page.frames()[1];
+    await frame.addScriptTag({ content: helper });
+    await frame.evaluate(() => OFEnhancerDialogDismiss.attach(document));
+    await page.evaluate(() => {
+      document.querySelector("#menu").showPopover();
+      document.querySelector("#manual").showPopover();
+    });
+    await frame.getByRole("textbox", { name: "Caption" }).click();
+    assert.equal(
+      await page.locator("#menu").evaluate((n) => n.matches(":popover-open")),
+      false,
+    );
+    assert.equal(
+      await page.locator("#manual").evaluate((n) => n.matches(":popover-open")),
+      true,
+    );
+    await frame.getByRole("textbox").fill("Still editable");
+    assert.equal(
+      await frame.getByRole("textbox").inputValue(),
+      "Still editable",
+    );
+    await frame.evaluate(() =>
+      document.querySelector("#childMenu").showPopover(),
+    );
+    await page.locator("#outside").click();
+    assert.equal(
+      await frame
+        .locator("#childMenu")
+        .evaluate((n) => n.matches(":popover-open")),
+      false,
+    );
+    await page.evaluate(() => {
+      const menu = document.querySelector("#menu");
+      menu.append(document.querySelector("iframe"));
+      menu.showPopover();
+    });
+    const contained = page.frames()[1];
+    await contained.addScriptTag({ content: helper });
+    await contained.evaluate(() => OFEnhancerDialogDismiss.attach(document));
+    await contained.getByRole("textbox").click();
+    assert.equal(
+      await page.locator("#menu").evaluate((n) => n.matches(":popover-open")),
+      true,
+    );
+    await page.locator("#outside").click();
+    assert.equal(
+      await page.locator("#menu").evaluate((n) => n.matches(":popover-open")),
+      false,
+    );
+  } finally {
+    await page.close();
+  }
+});

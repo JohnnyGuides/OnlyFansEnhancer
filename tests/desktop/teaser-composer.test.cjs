@@ -614,6 +614,18 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
       .getByRole("button", { name: "Edit TEASR.veg", exact: true })
       .waitFor();
     assert.equal(await page.locator(".xt-vegas-projects select").count(), 0);
+    await frame.locator("#socialCaption").click();
+    assert.equal(
+      await page
+        .locator(".xt-render-handoff:not(.xt-composer-tools)")
+        .evaluate((menu) => menu.matches(":popover-open")),
+      false,
+      "clicking the embedded caption dismisses Vegas without closing the editor",
+    );
+    await page
+      .getByRole("button", { name: "Vegas project and render", exact: true })
+      .click();
+
     const vegasOutput = path.join(
       repositoryRoot,
       ".local/vegas-actions-review",

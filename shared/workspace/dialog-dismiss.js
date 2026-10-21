@@ -35,6 +35,38 @@
       ? modal
       : null;
   }
+  function dismissFramePopovers(event, doc) {
+    // Native light dismissal does not cross iframe document boundaries.
+    const targets = new Map([[doc, event.target]]);
+    let top = doc;
+    try {
+      while (top.defaultView.frameElement) {
+        const frame = top.defaultView.frameElement;
+        top = frame.ownerDocument;
+        targets.set(top, frame);
+      }
+    } catch {
+      /* Other origins own their menu behavior. */
+    }
+    function visit(current) {
+      if (current !== doc) {
+        for (const menu of current.querySelectorAll(
+          '[popover="auto"]:popover-open, [popover="hint"]:popover-open',
+        )) {
+          const target = targets.get(current);
+          if (!target || !menu.contains(target)) menu.hidePopover();
+        }
+      }
+      for (const frame of current.querySelectorAll("iframe")) {
+        try {
+          if (frame.contentDocument) visit(frame.contentDocument);
+        } catch {
+          /* Other origins own their menu behavior. */
+        }
+      }
+    }
+    visit(top);
+  }
   function attach(root) {
     if (attached.has(root)) return;
     attached.add(root);
@@ -43,6 +75,8 @@
     root.addEventListener(
       "pointerdown",
       (event) => {
+        if (root.nodeType === 9 && event.button === 0)
+          dismissFramePopovers(event, root);
         released = null;
         pressed =
           event.button === 0 && event.isPrimary !== false
