@@ -39,6 +39,40 @@ async function xPage(browser, url, body) {
   return { context, page };
 }
 
+test("shared reply wording survives preparation and non-OnlyFans preview removal", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const { context, page } = await xPage(
+      browser,
+      "https://x.com/RecordedCreator/status/9000000000000000001",
+      `
+      <article><a href="/RecordedCreator/status/9000000000000000001">Main status</a></article>
+      <style>[contenteditable] { white-space: pre-wrap; }</style>
+      <div id="reply" role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div>
+      <div id="preview" hidden><div data-testid="card.wrapper"><a href="https://fansly.com/example">Fansly</a></div><button type="button" aria-label="Remove preview"></button></div>
+      <button type="button" data-testid="tweetButtonInline">Reply</button>
+      <script>
+        document.querySelector('#reply').addEventListener('input', () => { document.querySelector('#preview').hidden = false; });
+        document.querySelector('[aria-label="Remove preview"]').addEventListener('click', () => document.querySelector('#preview').remove());
+      </script>`,
+    );
+    const text = "My chosen wording\n-> https://fansly.com/example";
+    await page.evaluate(
+      (text) =>
+        CreatorXPublisherAdapter.prepareReply({
+          paidUrl: "https://fansly.com/example",
+          text,
+        }),
+      text,
+    );
+    assert.equal(await page.locator("#reply").innerText(), text);
+    assert.equal(await page.locator('[data-testid="card.wrapper"]').count(), 0);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
 test("X preparation fills one composer and waits for the recorded upload-ready state", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -524,6 +558,7 @@ test("manual X capture prepares the paid reply and removes its OnlyFans card wit
       const captured = await CreatorXPublisherAdapter.captureResult({
         mode: "manual",
         paidUrl: "https://onlyfans.com/123/creator",
+        text: "https://onlyfans.com/123/creator",
       });
       return {
         captured,
@@ -568,6 +603,7 @@ test("manual X polling leaves an already prepared paid reply untouched", async (
       captured: await CreatorXPublisherAdapter.captureResult({
         mode: "manual",
         paidUrl: "https://onlyfans.com/123/creator",
+        text: "https://onlyfans.com/123/creator",
       }),
       inputs: globalThis.__inputs,
       replyClicks: globalThis.__replyClicks,
@@ -607,6 +643,7 @@ test("X does not mistake a pre-existing same-author status link for this reply",
       CreatorXPublisherAdapter.captureResult({
         mode: "manual",
         paidUrl: "https://onlyfans.com/123/creator",
+        text: "https://onlyfans.com/123/creator",
       }),
     );
     assert.deepEqual(captured, {
@@ -653,6 +690,7 @@ test("autonomous X capture arms, posts, and captures the first reply after card 
       const captured = await CreatorXPublisherAdapter.captureResult({
         mode: "autonomous",
         paidUrl: "https://onlyfans.com/123/creator",
+        text: "https://onlyfans.com/123/creator",
         async beforeReplyCommit(main) {
           globalThis.__events.push(`armed:${main.resultId}`);
           return { armed: true };
@@ -709,6 +747,7 @@ test("X exposes separate reply preparation and armed submission phases", async (
     const prepared = await page.evaluate(() =>
       CreatorXPublisherAdapter.prepareReply({
         paidUrl: "https://onlyfans.com/123/creator",
+        text: "https://onlyfans.com/123/creator",
       }),
     );
     assert.equal(prepared.status, "reply-prepared");
@@ -720,6 +759,7 @@ test("X exposes separate reply preparation and armed submission phases", async (
       CreatorXPublisherAdapter.submitReply({
         resultId: "9000000000000000001",
         paidUrl: "https://onlyfans.com/123/creator",
+        text: "https://onlyfans.com/123/creator",
         async beforeCommit() {
           globalThis.__events.push("armed");
           return { armed: true };
@@ -762,6 +802,7 @@ test("X adapter fails closed when the OnlyFans preview dismissal is ambiguous", 
         CreatorXPublisherAdapter.captureResult({
           mode: "manual",
           paidUrl: "https://onlyfans.com/1/creator",
+          text: "https://onlyfans.com/1/creator",
         }),
       ),
       /preview.*ambiguous/i,
@@ -795,6 +836,7 @@ test("X recovery after a durably attempted reply captures only and cannot click 
     await page.evaluate(() =>
       CreatorXPublisherAdapter.prepareReply({
         paidUrl: "https://onlyfans.com/1/creator",
+        text: "https://onlyfans.com/1/creator",
       }),
     );
     await page.evaluate(() => {
@@ -807,6 +849,7 @@ test("X recovery after a durably attempted reply captures only and cannot click 
       captured: await CreatorXPublisherAdapter.captureResult({
         mode: "autonomous",
         paidUrl: "https://onlyfans.com/1/creator",
+        text: "https://onlyfans.com/1/creator",
         allowReplySubmit: false,
       }),
       clicks: globalThis.__replyClicks,
@@ -840,6 +883,7 @@ test("X capture-only recovery stays unresolved when the attempted reply is not v
         CreatorXPublisherAdapter.captureResult({
           mode: "autonomous",
           paidUrl: "https://onlyfans.com/1/creator",
+          text: "https://onlyfans.com/1/creator",
           allowReplySubmit: false,
         }),
       ),

@@ -352,8 +352,14 @@ the owner's X teasers, whether posted through OFEnhancer or by hand, at a random
 time 15–60 minutes after the teaser went live. Only a video post that is neither
 a reply nor a repost, bound to exactly one catalogue episode whose only OnlyFans
 link is the canonical `https://onlyfans.com/<post id>/johnny_guides`, qualifies;
-no link means no reply. The text rotates through "full vid (no ppv)", "full
-session" and "full vid :)", then a new line and `-> <link>`. It is posted live,
+no link means no reply. Both this scanner and editor-created replies use one shared
+wording policy, rotation and durable per-status ownership/attempt guard. The gear
+beside **Reply (min)** edits the shared rotation or switches to **Link only**, with
+a next-reply preview. One saved line uses the same wording every time; multiple
+lines rotate. Defaults are "full vid (no ppv)", "full session" and "full vid :)",
+then a new line and `-> <link>`. Prepared editor jobs and queued scanner replies
+retain their wording across later setting changes. The scanner skips editor-owned
+replies, preserving their selected delay and fallback URL. It is posted live,
 not scheduled, so the link card can be removed and confirmed gone first. Any
 existing owner reply skips the teaser, a reply is attempted at most once, and a
 teaser not replied to within 24 hours is given up. The setting defaults to off

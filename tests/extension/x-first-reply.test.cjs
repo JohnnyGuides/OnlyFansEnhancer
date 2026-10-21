@@ -17,6 +17,13 @@ function load() {
   const context = vm.createContext({ URL, console });
   vm.runInContext(
     fs.readFileSync(
+      path.join(repositoryRoot, "workflows/x-reply-policy.js"),
+      "utf8",
+    ),
+    context,
+  );
+  vm.runInContext(
+    fs.readFileSync(
       path.join(repositoryRoot, "workflows/x-first-reply.js"),
       "utf8",
     ),
@@ -105,6 +112,40 @@ function scheduler({
 }
 
 const state = (storage) => storage.data.creatorXFirstReplyV1;
+
+test("scanner uses configured wording and leaves editor-owned fallback replies alone", async () => {
+  const storage = memoryStorage({
+    creatorXReplyPolicyV1: { mode: "rotate", variants: ["My wording"] },
+    creatorXReplyReservationsV1: {
+      next: 0,
+      items: {
+        101: {
+          owner: "editor",
+          line: "Editor",
+          paidUrl: "https://fansly.com/other",
+          text: "Editor\n-> https://fansly.com/other",
+          attempted: false,
+        },
+      },
+    },
+  });
+  const { instance, clock, runner } = scheduler({
+    storage,
+    items: [candidate("101", T0), candidate("102", T0)],
+    random: () => 0,
+  });
+  await instance.tick();
+  assert.equal(state(storage).items["101"], undefined);
+  assert.equal(state(storage).items["102"].text, `My wording\n-> ${PAID}`);
+  storage.data.creatorXReplyPolicyV1.variants = ["Later wording"];
+  clock.now = T0 + 16 * MINUTE;
+  await instance.tick();
+  assert.equal(
+    runner.calls.filter(([action]) => action === "submit").length,
+    1,
+  );
+  assert.equal(state(storage).items["102"].text, `My wording\n-> ${PAID}`);
+});
 
 test("the reply is scheduled once 15-60 minutes after the teaser and persisted", async () => {
   for (const [unit, minutes] of [

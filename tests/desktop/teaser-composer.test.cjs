@@ -209,6 +209,99 @@ async function chooseReplyLink(frame, value) {
   await frame.locator(`.teaser-link-picker [data-choice="${value}"]`).click();
 }
 
+test("reply settings edit the shared rotation with a preview and link-only choice", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1365, height: 900 },
+  });
+  try {
+    const errors = await mount(page, true);
+    await chooseSyntheticVideo(page);
+    const frame = page
+      .frames()
+      .find((frame) => frame.url().includes("?teaserDay="));
+    await frame.evaluate(() => {
+      let config = {
+        mode: "rotate",
+        variants: ["full vid (no ppv)", "full session", "full vid :)"],
+        nextIndex: 1,
+      };
+      const original = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = (message, callback) => {
+        if (
+          !["GET_X_REPLY_POLICY", "SET_X_REPLY_POLICY"].includes(message.type)
+        )
+          return original(message, callback);
+        if (message.type === "SET_X_REPLY_POLICY")
+          config = { ...config, ...message.replyPolicy };
+        const response = { ok: true, replyPolicy: config };
+        queueMicrotask(() => callback?.(response));
+        return Promise.resolve(response);
+      };
+    });
+    await frame
+      .getByRole("button", { name: "Reply settings", exact: true })
+      .click();
+    const dialog = frame.getByRole("dialog", {
+      name: "Reply text",
+      exact: true,
+    });
+    await dialog.getByLabel("Reply lines", { exact: true }).waitFor();
+    await frame.waitForFunction(() =>
+      document
+        .querySelector(".teaser-reply-dialog pre")
+        .textContent.startsWith("full session"),
+    );
+    assert.match(
+      await dialog.getByLabel("Next reply preview").textContent(),
+      /full session\n-> https:\/\/onlyfans.com\/1\/preview/,
+    );
+    await dialog
+      .getByLabel("Reply lines", { exact: true })
+      .fill("First phrase\nSecond phrase");
+    assert.match(
+      await dialog.getByLabel("Next reply preview").textContent(),
+      /^Second phrase/,
+    );
+    const output = path.join(repositoryRoot, ".local/reply-settings-review");
+    fs.mkdirSync(output, { recursive: true });
+    await dialog.screenshot({ path: path.join(output, "desktop.png") });
+    assert.equal(await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight), true);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bounds = await dialog.boundingBox();
+    assert.ok(bounds.width <= 390);
+    await dialog.screenshot({ path: path.join(output, "phone.png") });
+    await dialog
+      .getByLabel("Reply wording", { exact: true })
+      .selectOption("link");
+    assert.equal(
+      await dialog.getByLabel("Reply lines", { exact: true }).isVisible(),
+      false,
+    );
+    assert.equal(
+      await dialog.getByLabel("Next reply preview").textContent(),
+      "https://onlyfans.com/1/preview",
+    );
+    await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await frame
+      .getByRole("button", { name: "Reply settings", exact: true })
+      .click();
+    await frame.waitForFunction(
+      () =>
+        document.querySelector(".teaser-reply-dialog select").value === "link",
+    );
+    assert.equal(
+      await dialog.getByLabel("Reply lines", { exact: true }).inputValue(),
+      "First phrase\nSecond phrase",
+    );
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 async function chooseSyntheticVideo(page) {
   const chooser = page.waitForEvent("filechooser");
   if (await page.locator(".xt-clip-add").count())

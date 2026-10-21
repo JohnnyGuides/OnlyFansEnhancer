@@ -95,6 +95,12 @@
     replyDelay.max = "1440";
     replyDelay.value = "15";
     replyLabel.append(replyDelay);
+    global.OFEnhancerTeaserReplySettings.mount({
+      label: replyLabel,
+      paidUrl: hub.paidUrl,
+      send: hub.sendMessage,
+      busy: hub.busy,
+    });
     timeLabel.after(replyLabel);
     const linkFields = get("#socialPaidLinkFields");
     linkFields.querySelector('label[for="socialPaidLink"]').textContent =

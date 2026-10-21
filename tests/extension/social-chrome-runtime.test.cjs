@@ -263,6 +263,7 @@ function loadRuntime(options = {}) {
     "workflows/social-distribution-contract.js",
     "workflows/social-distribution-session-store.js",
     "workflows/social-distribution-orchestrator.js",
+    "workflows/x-reply-policy.js",
     "workflows/social-chrome-runtime.js",
   ]) {
     const sourcePath = path.join(repositoryRoot, relative);
@@ -351,6 +352,11 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
     },
   };
   await fixture.runtime.prepare({ plan: input, caption: "Caption" });
+  const frozenLine = (await fixture.store.load(id)).jobs.x.replyLine;
+  assert.equal(frozenLine, "full vid (no ppv)");
+  await fixture.context.CreatorXReplyPolicy.forStorage(
+    fixture.context.chrome.storage.local,
+  ).save({ variants: ["New wording"] });
   await fixture.runtime.start(id);
   let job = (await fixture.store.load(id)).jobs.x;
   assert.equal(job.stage, "submit-attempted");
@@ -362,6 +368,10 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
   fixture.setNow(job.replyDueAt);
   fixture.tabs.clear();
   await fixture.restart().resume(id);
+  const replyInput = fixture.xInputs.find(
+    (input) => input.action === "prepare-reply",
+  );
+  assert.equal(replyInput.text, `full vid (no ppv)\n-> ${input.paidUrl}`);
   job = (await fixture.store.load(id)).jobs.x;
   assert.equal(job.stage, "sheet-complete");
   assert.equal(

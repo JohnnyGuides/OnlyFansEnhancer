@@ -12,11 +12,7 @@
   const SETTINGS_KEY = "creatorXFirstReplySettingsV1";
   const ALARM_NAME = "creator-x-first-reply";
   const ALARM_PERIOD_MINUTES = 5;
-  const VARIANTS = Object.freeze([
-    "full vid (no ppv)",
-    "full session",
-    "full vid :)",
-  ]);
+  const VARIANTS = globalThis.CreatorXReplyPolicy.DEFAULT_VARIANTS;
   const MINUTE = 60_000;
   const HOUR = 60 * MINUTE;
   const MIN_DELAY_MINUTES = 15;
@@ -59,7 +55,7 @@
   }
 
   function replyText(variant, paidUrl) {
-    return `${variant}\n-> ${paidUrl}`;
+    return globalThis.CreatorXReplyPolicy.format(variant, paidUrl);
   }
 
   function evidencePresent(registry) {
@@ -90,12 +86,12 @@
     return { ok: true, reason: "" };
   }
 
-  function planItem(candidate, ownerHandle, { now, random, rotation }) {
+  function planItem(candidate, ownerHandle, { now, random, rotation, line }) {
     const postedAt = Date.parse(candidate.postedUtc);
     const unit = Math.min(Math.max(Number(random()) || 0, 0), 1);
     const delayMinutes =
       MIN_DELAY_MINUTES + unit * (MAX_DELAY_MINUTES - MIN_DELAY_MINUTES);
-    const variant = VARIANTS[rotation % VARIANTS.length];
+    const variant = line ?? VARIANTS[rotation % VARIANTS.length];
     return {
       statusId: candidate.statusId,
       statusUrl: `https://x.com/${ownerHandle}/status/${candidate.statusId}`,
@@ -151,6 +147,7 @@
     // Overlapping alarm callbacks run one after another, never together.
     /** @type {Promise<unknown>} */
     let chain = Promise.resolve();
+    const replyPolicy = globalThis.CreatorXReplyPolicy.forStorage(storage);
 
     async function load() {
       const stored = (await storage.get(STORAGE_KEY))[STORAGE_KEY];
@@ -246,10 +243,14 @@
           continue;
         }
         if (!verdict.ok) continue;
+        if ((await replyPolicy.lookup(statusId))?.owner === "editor") continue;
+        const reply = await replyPolicy.reserve(statusId, candidate.paidUrl);
+        if (reply.owner === "editor") continue;
         state.items[statusId] = planItem(candidate, owner, {
           now: at,
           random,
           rotation: state.rotation,
+          line: reply.line,
         });
         state.rotation += 1;
       }
@@ -331,6 +332,18 @@
           return;
         }
         try {
+          // Both reply entry points share one durable attempt guard.
+          const reply = await replyPolicy.reserve(item.statusId, item.paidUrl, {
+            line: item.variant,
+          });
+          if (
+            reply.owner === "editor" ||
+            reply.text !== item.text ||
+            !(await replyPolicy.claim(item.statusId, item.text))
+          ) {
+            finish(state, item, "skipped-existing-reply", now());
+            return;
+          }
           const posted = await runner.submit(handle, item);
           finish(state, item, "posted", now(), {
             replyId: String(posted?.replyId || ""),

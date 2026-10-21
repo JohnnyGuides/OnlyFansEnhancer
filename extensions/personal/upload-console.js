@@ -6999,6 +6999,7 @@
       else scheduleMatch();
     });
     const calendarTeaser = globalThis.OFEnhancerTeaserUploadMode?.init({
+      sendMessage,
       chooseFrame: openFramePicker,
       file: () => socialFile,
       candidate: () => currentMatch?.candidate,

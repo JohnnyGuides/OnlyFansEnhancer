@@ -211,6 +211,7 @@
     "workflows/x-collector-relay-contract.js": "extensions/personal/workflows/x-collector-contract.js",
     "workflows/x-collector-relay.js": "extensions/personal/workflows/x-collector-relay.js",
     "workflows/x-collector-scanner.js": "extensions/personal/workflows/x-collector-scanner.js",
+    "workflows/x-reply-policy.js": "extensions/personal/workflows/x-reply-policy.js",
     "workflows/x-first-reply.js": "extensions/personal/workflows/x-first-reply.js",
     "workflows/x-publisher-adapter.js": "extensions/personal/workflows/x-publisher-adapter.js",
     "workflows/x-teaser-contract.js": "extensions/personal/workflows/x-teaser-contract.js",
@@ -223,7 +224,8 @@
     "x-teaser.js": "extensions/personal/x-teaser.js",
     "avatar-crop.js": "shared/identity-mask/avatar-crop.js",
     "runtime.js": "shared/identity-mask/runtime.js",
-    "app/teaser-link-picker.js": "shared/workspace/teaser-link-picker.js"
+    "app/teaser-link-picker.js": "shared/workspace/teaser-link-picker.js",
+    "app/teaser-reply-settings.js": "shared/workspace/teaser-reply-settings.js"
   },
   "store": {
     "background.js": "extensions/store/background.js",

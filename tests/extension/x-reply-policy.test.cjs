@@ -1,0 +1,76 @@
+"use strict";
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const { test } = require("node:test");
+const { repositoryRoot } = require("../support/paths.cjs");
+function load() {
+  const context = vm.createContext({});
+  vm.runInContext(
+    fs.readFileSync(
+      path.join(
+        repositoryRoot,
+        "extensions/personal/workflows/x-reply-policy.js",
+      ),
+      "utf8",
+    ),
+    context,
+  );
+  return context.CreatorXReplyPolicy;
+}
+function storage() {
+  const data = {};
+  return {
+    async get(key) {
+      return structuredClone({ [key]: data[key] });
+    },
+    async set(values) {
+      Object.assign(data, structuredClone(values));
+    },
+  };
+}
+test("both entry points share rotation, frozen wording and a durable one-attempt claim", async () => {
+  const disk = storage(),
+    policy = load(),
+    editor = policy.forStorage(disk),
+    scanner = policy.forStorage(disk);
+  assert.equal(editor, scanner);
+  await editor.save({ mode: "rotate", variants: ["First", "Second"] });
+  const line = await editor.allocate();
+  await editor.save({ mode: "rotate", variants: ["Changed"] });
+  const reply = await editor.reserve("101", "https://onlyfans.com/example", {
+    line,
+    owner: "editor",
+  });
+  assert.equal(reply.text, "First\n-> https://onlyfans.com/example");
+  assert.equal(
+    (await scanner.reserve("102", "https://fansly.com/example")).text,
+    "Changed\n-> https://fansly.com/example",
+  );
+  const claims = await Promise.all([
+    editor.claim("101", reply.text),
+    scanner.claim("101", reply.text),
+  ]);
+  assert.equal(claims.filter(Boolean).length, 1);
+  const restarted = load().forStorage(disk);
+  assert.equal(await restarted.claim("101", reply.text), false);
+  assert.equal((await restarted.lookup("101")).owner, "editor");
+  await assert.rejects(
+    restarted.reserve("101", "https://fansly.com/different"),
+    /link changed/,
+  );
+});
+test("link-only and single-line settings apply to every newly reserved reply", async () => {
+  const policy = load().forStorage(storage());
+  await policy.save({ mode: "link", variants: ["Kept for later"] });
+  assert.equal(
+    (await policy.reserve("201", "https://fansly.com/example")).text,
+    "https://fansly.com/example",
+  );
+  await policy.save({ variants: ["Always this line"] });
+  assert.equal(await policy.allocate(), "Always this line");
+  assert.equal(await policy.allocate(), "Always this line");
+  await assert.rejects(policy.save({ variants: ["one\ntwo"] }), /reply lines/);
+  await assert.rejects(policy.claim("201", "changed text"), /text changed/);
+});

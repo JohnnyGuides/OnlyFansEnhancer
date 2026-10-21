@@ -454,6 +454,34 @@
     return { card: unique[0], dismiss: buttons[0] };
   }
 
+  function replyPreview(root) {
+    const cards = [
+      ...root.querySelectorAll('[data-testid="card.wrapper"]'),
+    ].filter(visible);
+    if (!cards.length) return onlyFansPreview(root);
+    if (cards.length !== 1)
+      throw new Error("The reply link preview is ambiguous.");
+    const card = cards[0];
+    const buttons = [...card.parentElement.querySelectorAll("button")].filter(
+      (button) => {
+        if (!visible(button)) return false;
+        const label =
+          button.getAttribute("aria-label") ||
+          button.getAttribute("title") ||
+          button.textContent.trim();
+        return (
+          /^(remove|dismiss)( link)?( preview| card)?$/i.test(label) ||
+          (!label && !button.dataset.testid)
+        );
+      },
+    );
+    if (buttons.length !== 1)
+      throw new Error(
+        "The reply link preview dismissal is missing or ambiguous.",
+      );
+    return { card, dismiss: buttons[0] };
+  }
+
   /**
    * @param {{caption:string, attachFile:(role:string, selector:string)=>Promise<{name?:string}|void>, fileName?:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string}}} input
    */
@@ -594,23 +622,34 @@
       : null;
   }
 
-  async function prepareReply({ paidUrl }) {
+  async function prepareReply({ paidUrl, text }) {
     const main = currentMain();
     const captured = capturedReply(main);
     if (captured) return captured;
     rememberReplyBaseline(main);
     const editor = one(MAIN_COMPOSER, "The X reply composer");
-    if (
-      editor.textContent.trim() !== String(paidUrl || "").trim() ||
-      visibleOnlyFansAnchors().length > 0
-    ) {
-      fillEditor(editor, paidUrl);
-      const preview = await waitFor(onlyFansPreview, "The OnlyFans preview");
-      preview.dismiss.click();
-      await waitFor(
-        () => !preview.card.isConnected || !visible(preview.card),
-        "OnlyFans preview removal",
-      );
+    if (typeof text !== "string" || !text || !text.endsWith(paidUrl))
+      throw new Error("The approved X reply text is required.");
+    if (composerText(editor) !== text || visibleOnlyFansAnchors().length > 0) {
+      fillEditor(editor, text);
+      const root = composerRoot(editor);
+      const appeared = await waitFor(
+        () => linkCards(root).length > 0,
+        "The link card",
+        FIRST_REPLY_TIMING.cardWaitMs,
+      ).catch(() => false);
+      if (appeared) {
+        const preview = replyPreview(root);
+        preview.dismiss.click();
+        await waitFor(
+          () => !preview.card.isConnected || !visible(preview.card),
+          "Link card removal",
+        );
+      }
+      if (composerText(editor) !== text || linkCards(root).length)
+        throw new Error(
+          "The X reply text or link card changed during preparation.",
+        );
     }
     return {
       status: "reply-prepared",
@@ -619,11 +658,13 @@
     };
   }
 
-  async function submitReply({ beforeCommit, resultId, paidUrl }) {
+  async function submitReply({ beforeCommit, resultId, paidUrl, text }) {
     if (typeof resultId !== "string" || !resultId)
       throw new Error("The armed X result id is required.");
     if (typeof paidUrl !== "string")
       throw new Error("The armed X paid URL is required.");
+    if (typeof text !== "string" || !text || !text.endsWith(paidUrl))
+      throw new Error("The approved X reply text is required.");
     const main = currentMain();
     const captured = capturedReply(main);
     if (captured) return captured;
@@ -640,8 +681,8 @@
     if (currentMain().resultId !== resultId)
       throw new Error("The X status changed after the reply was armed.");
     if (
-      one(MAIN_COMPOSER, "The X reply composer").textContent.trim() !==
-      paidUrl.trim()
+      composerText(one(MAIN_COMPOSER, "The X reply composer")) !== text ||
+      linkCards(composerRoot(one(MAIN_COMPOSER, "The X reply composer"))).length
     )
       throw new Error("The X reply changed after it was armed.");
     one(REPLY_POST, "The X Reply button", enabled).click();
@@ -660,6 +701,7 @@
   async function captureResult({
     mode,
     paidUrl,
+    text,
     beforeReplyCommit,
     allowReplySubmit = true,
   }) {
@@ -672,7 +714,7 @@
       );
     }
 
-    const prepared = await prepareReply({ paidUrl });
+    const prepared = await prepareReply({ paidUrl, text });
     if (prepared.replyResultId || mode === "manual") return prepared;
     if (mode !== "autonomous")
       throw new Error("The X execution mode is invalid.");
@@ -680,6 +722,7 @@
       beforeCommit: beforeReplyCommit,
       resultId: prepared.resultId,
       paidUrl,
+      text,
     });
   }
 
@@ -791,7 +834,7 @@
       !/^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/.test(
         String(paidUrl || ""),
       ) ||
-      !text.endsWith(`\n-> ${paidUrl}`)
+      !(text === paidUrl || text.endsWith(`\n-> ${paidUrl}`))
     )
       throw new Error("mismatch: the reply does not carry the episode link.");
     if (linkCards(root).length)
@@ -863,7 +906,7 @@
     const root = composerRoot(editor);
     let failure = null;
     const removeCard = async () => {
-      const preview = onlyFansPreview(root);
+      const preview = replyPreview(root);
       preview.dismiss.click();
       await waitFor(
         () => !preview.card.isConnected || !visible(preview.card),

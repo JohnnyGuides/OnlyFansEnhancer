@@ -21,6 +21,7 @@ importScripts(
   "workflows/x-collector-forwarder.js",
   "workflows/x-collector-scanner.js",
   "workflows/social-trace-evidence.js",
+  "workflows/x-reply-policy.js",
   "workflows/x-first-reply.js",
 );
 
@@ -6198,6 +6199,19 @@ function handleExtensionMessage(message, sender, sendResponse) {
       case "GET_X_FIRST_REPLY_STATUS":
         assertExtensionPage(sender);
         return { xFirstReply: await xFirstReply().status() };
+      case "GET_X_REPLY_POLICY":
+        if (sender?.desktopUploadRuntime !== true || sender?.id !== chrome.runtime.id)
+          assertExtensionPage(sender);
+        return {
+          replyPolicy: await globalThis.CreatorXReplyPolicy.forStorage(chrome.storage.local).view(),
+        };
+      case "SET_X_REPLY_POLICY":
+        if (sender?.desktopUploadRuntime !== true || sender?.id !== chrome.runtime.id)
+          assertExtensionPage(sender);
+        await globalThis.CreatorXReplyPolicy.forStorage(chrome.storage.local).save(message.replyPolicy);
+        return {
+          replyPolicy: await globalThis.CreatorXReplyPolicy.forStorage(chrome.storage.local).view(),
+        };
       case "SET_X_FIRST_REPLY_ENABLED":
         assertExtensionPage(sender);
         return {

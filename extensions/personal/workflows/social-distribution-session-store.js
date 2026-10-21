@@ -176,6 +176,15 @@
         throw new Error("Invalid X reply due time.");
       output.replyDueAt = value.replyDueAt;
     }
+    if (Object.hasOwn(value, "replyLine")) {
+      if (
+        typeof value.replyLine !== "string" ||
+        [...value.replyLine].length > 200 ||
+        /[\r\n]/.test(value.replyLine)
+      )
+        throw new Error("Invalid X reply wording.");
+      output.replyLine = value.replyLine;
+    }
     if (Object.hasOwn(value, "resultId")) {
       const resultId = clean(value.resultId, 200);
       if (!resultId) throw new Error("Invalid distribution result identity.");
@@ -269,6 +278,14 @@
     }
     if (output.replyDueAt && jobId !== "x")
       throw new Error("Invalid reply due time for this platform.");
+    if (output.replyLine !== undefined) {
+      if (jobId !== "x") throw new Error("Only X can store reply wording.");
+      if (
+        previous.replyLine !== undefined &&
+        previous.replyLine !== output.replyLine
+      )
+        throw new Error("The prepared X reply wording cannot change.");
+    }
     if (previous.replyDueAt) {
       if (patch.replyDueAt && previous.replyDueAt !== patch.replyDueAt)
         throw new Error("The X reply due time cannot change.");

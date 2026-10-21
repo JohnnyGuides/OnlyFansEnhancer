@@ -51,12 +51,13 @@
     }
     if (args.action === "main-identity") return adapter.mainIdentity();
     if (args.action === "prepare-reply") {
-      return adapter.prepareReply({ paidUrl: args.paidUrl });
+      return adapter.prepareReply({ paidUrl: args.paidUrl, text: args.text });
     }
     if (args.action === "submit-reply") {
       return adapter.submitReply({
         resultId: args.resultId,
         paidUrl: args.paidUrl,
+        text: args.text,
         beforeCommit: async () => ({ armed: true }),
       });
     }
@@ -438,6 +439,23 @@
               paidUrl: input.paidUrl,
             });
           }
+          const replyPolicy = globalThis.CreatorXReplyPolicy.forStorage(
+            chrome.storage.local,
+          );
+          // Old sessions acquire wording once; new sessions freeze it at preparation.
+          const line =
+            session.jobs.x.replyLine ?? (await replyPolicy.allocate());
+          if (session.jobs.x.replyLine === undefined)
+            await store.checkpoint(input.plan.id, "x", { replyLine: line });
+          const reply = await replyPolicy.reserve(
+            currentUrl.split("/").pop(),
+            input.paidUrl,
+            { line, owner: "editor" },
+          );
+          if (reply.owner !== "editor")
+            throw new Error(
+              "This post already has an automatic reply queued. Review it before replying again.",
+            );
           if (input.plan.xOptions?.replyDelayMinutes) {
             const job = session.jobs.x;
             let due = job.replyDueAt;
@@ -458,6 +476,7 @@
           }
           const prepared = await execute(binding, "prepare-reply", {
             paidUrl: input.paidUrl,
+            text: reply.text,
           });
           if (prepared.replyResultId || input.mode === "manual")
             return prepared;
@@ -465,9 +484,15 @@
           if (authorization?.armed !== true) {
             throw new Error("The X first reply was not durably armed.");
           }
+          const statusId = currentUrl.split("/").pop();
+          if (!(await replyPolicy.claim(statusId, reply.text)))
+            throw new Error(
+              "A reply was already attempted for this X post. Check the post before retrying.",
+            );
           return execute(binding, "submit-reply", {
             resultId: prepared.resultId,
             paidUrl: input.paidUrl,
+            text: reply.text,
           });
         },
       };
@@ -658,6 +683,12 @@
         });
       }
       await store.create(frozen);
+      if (frozen.targets.x) {
+        const replyLine = await globalThis.CreatorXReplyPolicy.forStorage(
+          chrome.storage.local,
+        ).allocate();
+        await store.checkpoint(frozen.id, "x", { replyLine });
+      }
       const targets = {};
       if (frozen.targets.x) {
         const existing = await chrome.tabs.query({ url: X_MATCH });
