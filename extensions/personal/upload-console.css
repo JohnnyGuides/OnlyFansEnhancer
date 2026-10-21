@@ -649,6 +649,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
   margin-bottom: 8px;
 }
 .calendar-teaser .teaser-association button,
+.calendar-teaser .teaser-reply-trigger,
 .calendar-teaser
   :is(
     #saveTeaserDraft,
@@ -656,7 +657,6 @@ body.calendar-reddit-draft .upload-actions .action-status {
     #prepareCalendarReddit,
     .teaser-remove-draft,
     .teaser-link-trigger,
-    .teaser-reply-trigger,
     .teaser-reply-dialog button,
     .teaser-link-picker button
   ) {
@@ -711,7 +711,7 @@ body.calendar-reddit-draft .upload-actions .action-status {
 }
 @media (max-width: 620px) {
   .calendar-teaser .teaser-schedule-row {
-    grid-template-columns: 95px 70px minmax(0, 1fr);
+    grid-template-columns: 85px 95px minmax(0, 1fr);
     gap: 8px;
     font-size: 12px;
   }
