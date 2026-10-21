@@ -2763,3 +2763,64 @@ test("a scan log that stopped updating never shows a spinner", async () => {
     await context.close();
   }
 });
+
+test("empty-day catalogue opens before clip and destination lookups finish", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    await page.evaluate(() => {
+      const request = globalThis.__OFENHANCER_TEST_HOST__;
+      globalThis.libraryPending = true;
+      globalThis.__OFENHANCER_TEST_HOST__ = (operation, payload) =>
+        operation === "getTeaserClips"
+          ? new Promise((resolve) => {
+              globalThis.finishLibrary = () => {
+                libraryPending = false;
+                resolve({ clips: [] });
+              };
+            })
+          : request(operation, payload);
+      const store = globalThis.OFEnhancerTeaserDrafts;
+      globalThis.OFEnhancerTeaserDrafts = {
+        ...store,
+        listPosts: () =>
+          new Promise((resolve) => {
+            globalThis.finishDestinations = () => resolve([]);
+          }),
+      };
+    });
+    const opener = page.locator('.xt-tile[data-date="2026-10-02"]');
+    await opener.click();
+    const modal = page.locator(".xt-composer-dialog");
+    await modal.waitFor({ state: "visible" });
+    assert.equal(
+      await page.evaluate(() => libraryPending),
+      true,
+      "the drawer must not wait for the native clip query",
+    );
+    assert.ok(
+      (await modal.locator(".xt-episode[data-episode-key]").count()) > 0,
+      "existing catalogue is already usable",
+    );
+    await modal.locator('[data-coverage="all"]').click();
+    assert.equal(
+      await modal
+        .getByRole("button", { name: "Choose a new teaser video", exact: true })
+        .isEnabled(),
+      true,
+    );
+    await modal.getByRole("button", { name: "Close", exact: true }).click();
+    await modal.waitFor({ state: "detached" });
+    await page.evaluate(() => {
+      finishLibrary();
+      finishDestinations();
+    });
+    assert.equal(
+      await page.locator(".xt-composer-dialog").count(),
+      0,
+      "late lookup replies cannot reopen the drawer",
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});

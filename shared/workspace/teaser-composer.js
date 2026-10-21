@@ -297,6 +297,7 @@
       loading = false,
       running = false,
       postId = "";
+    let clipLibraryRequest = null;
     const handoff = global.OFEnhancerTeaserRenderHandoff?.mount({
       dialog,
       heading,
@@ -1107,8 +1108,19 @@
         }
       }
       status.textContent = catalogueView ? "" : "Loading ready clips…";
+      // The overview already contains the catalogue; don't wait for clip I/O to show it.
+      if (catalogueView && !dialog.open) {
+        dialog.showModal();
+        close.focus();
+        layoutCatalogue(catalogueView.querySelector(".xt-cards"));
+      }
       try {
-        const library = await request("getTeaserClips", {});
+        const library = await (clipLibraryRequest ||= request(
+          "getTeaserClips",
+          {},
+        ).finally(() => {
+          clipLibraryRequest = null;
+        }));
         if (
           !dialog.isConnected ||
           iframe ||
@@ -1228,7 +1240,9 @@
       }
     }
     try {
-      await refreshDestinations();
+      void refreshDestinations().catch((error) => {
+        if (dialog.isConnected) status.textContent = error.message;
+      });
       const draft = await global.OFEnhancerTeaserDrafts.get(date);
       if (draft) edit(draft.file, null, draft);
       else await choose();
@@ -1236,6 +1250,7 @@
       await choose();
       status.textContent = error.message;
     }
+    if (!dialog.isConnected) return;
     if (!dialog.open && (!iframe || context?.formReady)) {
       dialog.showModal();
       close.focus();
