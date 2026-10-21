@@ -610,10 +610,55 @@ test("Vegas handoff resumes pending drafts and refreshes same-name renders witho
     await page
       .getByRole("button", { name: "Vegas project and render", exact: true })
       .click();
-    await page.getByLabel("Vegas project", { exact: true }).waitFor();
     await page
-      .getByRole("button", { name: "Edit in Vegas", exact: true })
+      .getByRole("button", { name: "Edit TEASR.veg", exact: true })
+      .waitFor();
+    assert.equal(await page.locator(".xt-vegas-projects select").count(), 0);
+    const vegasOutput = path.join(
+      repositoryRoot,
+      ".local/vegas-actions-review",
+    );
+    fs.mkdirSync(vegasOutput, { recursive: true });
+    await page
+      .locator(".xt-render-handoff:not(.xt-composer-tools)")
+      .screenshot({
+        path: path.join(vegasOutput, "vegas-menu.png"),
+        animations: "disabled",
+      });
+    const originalViewport = page.viewportSize();
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page
+      .getByRole("button", { name: "Vegas project and render", exact: true })
       .click();
+    const vegasMenu = page.locator(
+      ".xt-render-handoff:not(.xt-composer-tools)",
+    );
+    const menuBox = await vegasMenu.boundingBox();
+    assert.ok(
+      menuBox.x >= 0 && menuBox.x + menuBox.width <= 390,
+      "Vegas actions fit a phone viewport",
+    );
+    await vegasMenu.screenshot({
+      path: path.join(vegasOutput, "vegas-menu-phone.png"),
+      animations: "disabled",
+    });
+    await page.keyboard.press("Escape");
+    await page.setViewportSize(originalViewport);
+    await page
+      .getByRole("button", { name: "Vegas project and render", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Edit TEASR.veg", exact: true })
+      .click();
+    assert.equal(
+      await page.evaluate(
+        () =>
+          editRequests.find((item) => item.op === "openTeaserProject").payload
+            .projectName,
+      ),
+      "TEASR.veg",
+    );
     await page.keyboard.press("Escape");
     await waitDraft((draft) => draft?.renderPending);
     const pending = await page.evaluate(() =>
@@ -3163,6 +3208,93 @@ test("video replacement preserves post edits and discard uses an in-app dialog",
       .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
       .waitFor({ state: "detached" });
     assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("Vegas project buttons dispatch the named project or template directly", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${origin}/host`);
+    await page.evaluate(async () => {
+      const dialog = document.createElement("dialog"),
+        heading = document.createElement("header");
+      heading.append(document.createElement("button"));
+      dialog.append(heading);
+      document.body.append(dialog);
+      dialog.showModal();
+      globalThis.projectCalls = [];
+      globalThis.projectBusy = false;
+      const meta = {
+        projectName: "teaser.veg",
+        projects: [{ name: "Untitled.veg" }, { name: "teaser.veg" }],
+        templateAvailable: true,
+      };
+      globalThis.projectHandoff = OFEnhancerTeaserRenderHandoff.mount({
+        dialog,
+        heading,
+        date: "2026-10-06",
+        getContext: () => ({}),
+        getFrame: () => null,
+        busy: () => projectBusy,
+        loadFile: async () => null,
+        status: document.createElement("p"),
+        request: async (op, payload) => {
+          projectCalls.push({ op, payload });
+          return op === "chooseTeaserProject" ? { cancelled: true } : meta;
+        },
+      });
+      await projectHandoff.setEpisode("example-episode");
+    });
+    await page
+      .getByRole("button", { name: "Vegas project and render", exact: true })
+      .click();
+    assert.deepEqual(
+      await page.locator(".xt-vegas-projects button").allTextContents(),
+      [
+        "Edit teaser.veg",
+        "Edit Untitled.veg",
+        "Create from template",
+        "Open another project…",
+      ],
+    );
+    await page
+      .getByRole("button", { name: "Edit Untitled.veg", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Create from template", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Open another project…", exact: true })
+      .click();
+    const requests = await page.evaluate(() => projectCalls.slice(1));
+    assert.deepEqual(requests, [
+      {
+        op: "openTeaserProject",
+        payload: {
+          episodeKey: "example-episode",
+          date: "2026-10-06",
+          projectName: "Untitled.veg",
+        },
+      },
+      {
+        op: "createTeaserProject",
+        payload: { episodeKey: "example-episode", date: "2026-10-06" },
+      },
+      {
+        op: "chooseTeaserProject",
+        payload: { episodeKey: "example-episode", date: "2026-10-06" },
+      },
+    ]);
+    await page.evaluate(() => {
+      projectBusy = true;
+      projectHandoff.refresh();
+    });
+    assert.equal(
+      await page.locator(".xt-vegas-projects button:enabled").count(),
+      0,
+    );
   } finally {
     await page.close();
   }

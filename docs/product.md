@@ -196,9 +196,9 @@ duration. Hovering or keyboard focus plays one muted, low-resolution six-second
 preview; other clips remain still. Posters load near the visible area and preview
 generation runs one job at a time. Touch users choose a card to open the full player.
 Re-rendered files receive fresh previews after the library indexes their changed fingerprint.
-**Edit in Vegas** remembers the episode's chosen
+**Vegas** remembers the episode's chosen
 `.veg` project, whatever its name. Other projects remain available in the project
-selector or **Choose project…**. **New from template**
+menu as **Edit filename.veg** buttons or **Open another project…**. **Create from template**
 creates an episode-local copy of the existing Vegas template.
 Opening a project reserves an unused render name in the teaser output folder;
 **Copy name** and **Copy folder** provide the two Vegas render fields.

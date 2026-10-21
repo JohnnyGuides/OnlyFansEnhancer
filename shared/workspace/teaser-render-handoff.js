@@ -29,8 +29,6 @@
       bar.style.top = `${bounds.bottom + 8}px`;
       bar.style.left = `${Math.max(12, Math.min(bounds.left, window.innerWidth - 412))}px`;
     });
-    const project = document.createElement("select");
-    project.setAttribute("aria-label", "Vegas project");
     const button = (text, run) => {
       const item = document.createElement("button");
       item.type = "button";
@@ -46,10 +44,7 @@
       );
       return item;
     };
-    const edit = button("Edit in Vegas", () =>
-      prepare(project.value ? "openTeaserProject" : "createTeaserProject"),
-    );
-    const browse = button("Choose project…", () =>
+    const browse = button("Open another project…", () =>
       prepare("chooseTeaserProject"),
     );
     const name = document.createElement("span");
@@ -68,16 +63,12 @@
       await poll();
     });
     review.hidden = true;
-    const projectLabel = document.createElement("label");
-    projectLabel.textContent = "Vegas project";
-    projectLabel.append(project);
     const projectActions = document.createElement("div");
-    projectActions.className = "xt-render-actions";
-    projectActions.append(edit, browse);
+    projectActions.className = "xt-vegas-projects";
     const output = document.createElement("div");
     output.className = "xt-render-output";
     output.append(name, copyName, folder);
-    bar.append(projectLabel, projectActions, output, state, review);
+    bar.append(projectActions, output, state, review);
     heading.after(bar);
     let meta = {},
       key = "",
@@ -96,52 +87,46 @@
         location.origin,
       );
     function render() {
-      project.replaceChildren();
+      projectActions.replaceChildren();
       const projects = [...(meta.projects || [])];
       if (
         meta.projectName &&
         !projects.some((item) => item.name === meta.projectName)
       )
         projects.unshift({ name: meta.projectName });
-      const placeholder = new Option("New from template", "");
-      project.add(placeholder);
-      for (const item of projects)
-        project.add(new Option(item.name, item.name));
-      project.value =
-        meta.projectName ||
-        (projects.length === 1 && projects[0].suggested
-          ? projects[0].name
-          : "");
-      edit.textContent = project.value
-        ? "Edit in Vegas"
-        : "Create from template";
-      edit.disabled = isBusy() || (!project.value && !meta.templateAvailable);
-      project.disabled = browse.disabled = isBusy();
+      projects.sort(
+        (left, right) =>
+          Number(right.name === meta.projectName) -
+          Number(left.name === meta.projectName),
+      );
+      for (const item of projects) {
+        const open = button(`Edit ${item.name}`, () =>
+          prepare("openTeaserProject", item.name),
+        );
+        open.disabled = isBusy() || pending;
+        projectActions.append(open);
+      }
+      const create = button("Create from template", () =>
+        prepare("createTeaserProject"),
+      );
+      create.disabled = isBusy() || pending || !meta.templateAvailable;
+      browse.disabled = isBusy() || pending;
+      projectActions.append(create, browse);
       name.textContent = meta.renderName || "";
       name.title = meta.renderPath || "";
       output.hidden = !meta.renderName;
       copyName.hidden = folder.hidden = !meta.renderName;
     }
-    project.addEventListener("change", () => {
-      edit.textContent = project.value
-        ? "Edit in Vegas"
-        : "Create from template";
-      edit.disabled = isBusy() || (!project.value && !meta.templateAvailable);
-    });
-    async function prepare(op) {
+    async function prepare(op, projectName = "") {
       if (!key || isBusy() || pending) return;
       const epoch = generation;
       pending = true;
-      edit.disabled = browse.disabled = true;
+      render();
       try {
         const result = await request(op, {
           episodeKey: key,
           date,
-          ...(project.value &&
-          project.value !== meta.projectName &&
-          op === "openTeaserProject"
-            ? { projectName: project.value }
-            : {}),
+          ...(op === "openTeaserProject" ? { projectName } : {}),
         });
         if (epoch !== generation || result.cancelled) return;
         meta = result;
@@ -152,7 +137,6 @@
         schedule();
       } finally {
         pending = false;
-        browse.disabled = false;
         render();
       }
     }

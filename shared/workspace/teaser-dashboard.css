@@ -1495,20 +1495,6 @@ html:has(.xt-picker[open]) {
   display: grid;
   gap: 12px;
 }
-.xt-render-handoff label {
-  display: grid;
-  gap: 8px;
-}
-.xt-render-handoff select {
-  width: 100%;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid #344657;
-  border-radius: 8px;
-  background: #17222e;
-  color: #edf3fc;
-  font: inherit;
-}
 .xt-render-actions {
   display: flex;
   gap: 8px;
@@ -1743,4 +1729,13 @@ html:has(.xt-picker[open]) {
   .xt-composer-dialog[data-editor] .xt-composer-heading .xt-action {
     padding: 6px 8px;
   }
+}
+
+.xt-vegas-projects {
+  display: grid;
+  gap: 6px;
+}
+.xt-vegas-projects .xt-action {
+  text-align: left;
+  overflow-wrap: anywhere;
 }
