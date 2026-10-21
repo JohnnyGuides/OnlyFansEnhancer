@@ -1020,3 +1020,12 @@ the log.
 - Built an archive of committed source as 0.20.120, preserving unrelated working-tree version edits. Normal silent installer exited 0 with its success marker. Verified all 1,333 installed manifest files, version, unchanged settings/credential hashes, extension identities and native registrations; restarted the installed desktop with a visible window.
 - Database integrity remained `ok`; `sqlite_sequence`, `x_metric_samples`, and `x_posts` changed during live runtime activity. Other table fingerprints matched. No publication or live upload acceptance was performed.
 - Installer SHA-256: `291c885c1fd282d6a3d95bfcb52bcc41f263747bbd02fcb5d661063b98d6c0f9`.
+
+
+## 2026-10-21 — 0.20.121 normal update
+
+- Adds removal of accidental saved Twitter drafts and their matching calendar plans without deleting video files or other destination drafts; upload-bound drafts remain protected. Calendar thumbnail captions are bounded to two desktop lines or one narrow-screen line, with linked episode titles preferred.
+- Focused source checks passed for draft removal/cancellation, upload-run deletion protection, preservation of Reddit drafts, and desktop/phone calendar caption bounds; existing Reddit draft separation also passed. No full-suite rerun for this update.
+- Built committed source in an isolated 0.20.121 archive, preserving unrelated working-tree edits. Normal silent installer exited 0 with the success marker. All 1,333 installed manifest files matched. Confirmed the installed 0.20.121 desktop restarted with a visible window.
+- All 15 settings/data file fingerprints and 21 database table fingerprints matched before/after; database integrity remained `ok`. Extension identities and native registrations matched. No live upload or publication acceptance was performed.
+- Installer SHA-256: `ed6fece5da4636abadd1f9992b1f1fcfbf3489b4f161befee60e922318631d9b`.
