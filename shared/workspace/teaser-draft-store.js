@@ -80,6 +80,21 @@
       read.onsuccess = () => done(read.result || null);
     });
   }
+  async function remove(date) {
+    if (!validDay(date)) throw new Error("Choose a calendar day.");
+    return transact("readwrite", (store, done, transaction) => {
+      const read = store.get(date);
+      read.onsuccess = () => {
+        if (!read.result) return done(null);
+        if (read.result.sessionId) {
+          transaction.abort();
+          return;
+        }
+        store.delete(date);
+        done({ episodeKey: read.result.episodeKey || "" });
+      };
+    });
+  }
   async function save(draft) {
     if (
       !validDay(draft?.date) ||
@@ -500,6 +515,7 @@
   global.OFEnhancerTeaserDrafts = Object.freeze({
     list,
     get,
+    remove,
     save,
     checkpoint,
     validDay,

@@ -2003,12 +2003,19 @@ test("draft store rejects impossible days and times and locks a draft after exec
         sessionId,
       );
       const lockedOverwrite = await attempt({ caption: "overwrite" });
-      return { impossibleDay, impossibleTime, lockedOverwrite };
+      let lockedRemove = false;
+      try {
+        await OFEnhancerTeaserDrafts.remove("2026-10-06");
+      } catch {
+        lockedRemove = true;
+      }
+      return { impossibleDay, impossibleTime, lockedOverwrite, lockedRemove };
     }, SESSION);
     assert.deepEqual(result, {
       impossibleDay: true,
       impossibleTime: true,
       lockedOverwrite: true,
+      lockedRemove: true,
     });
   } finally {
     await page.close();
@@ -3552,6 +3559,101 @@ test("missing-link fallbacks preserve the episode and freeze a random choice acr
         document.querySelector("#socialPaidLink")?.value === "fallback:random",
     );
     await save("https://onlyfans.com/3/preview", "random");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("an accidental Twitter draft can be removed without deleting its video or Reddit drafts", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 850 },
+  });
+  try {
+    const errors = await mount(page, true);
+    let frame = await chooseSyntheticVideo(page);
+    await frame.locator("#saveTeaserDraft").click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
+    await page.evaluate(async () => {
+      globalThis.removalCalls = [];
+      const draft = await OFEnhancerTeaserDrafts.get("2026-10-06");
+      await OFEnhancerTeaserDrafts.savePost({
+        ...draft,
+        id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        subreddit: "example_community",
+      });
+      void OFEnhancerTeaserComposer.open({
+        date: "2026-10-06",
+        request: async (op, payload) => {
+          removalCalls.push({ op, payload });
+          return op === "getTeaserPlan"
+            ? { slots: [{ date: "2026-10-06", episodeKey: "preview-test" }] }
+            : { ok: true };
+        },
+      });
+    });
+    await page.locator(".xt-composer-frame").waitFor();
+    frame = page.frames().find((frame) => frame.url().includes("?teaserDay="));
+    const remove = frame.getByRole("button", {
+      name: "Remove draft",
+      exact: true,
+    });
+    await remove.waitFor();
+    await remove.click();
+    await page.getByRole("button", { name: "Keep draft", exact: true }).click();
+    assert.ok(
+      await page.evaluate(() => OFEnhancerTeaserDrafts.get("2026-10-06")),
+    );
+    const output = path.join(repositoryRoot, ".local/draft-removal-review");
+    fs.mkdirSync(output, { recursive: true });
+    await page.screenshot({ path: path.join(output, "remove-draft.png") });
+    await frame
+      .locator(".xt-planner-post-actions")
+      .screenshot({ path: path.join(output, "draft-actions.png") });
+    await remove.click();
+    await page
+      .locator(".xt-confirm-dialog")
+      .getByRole("button", { name: "Remove draft", exact: true })
+      .click();
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
+    const result = await page.evaluate(async () => ({
+      draft: await OFEnhancerTeaserDrafts.get("2026-10-06"),
+      reddit: await OFEnhancerTeaserDrafts.getPost(
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      ),
+      calls: removalCalls,
+    }));
+    assert.equal(result.draft, null);
+    assert.equal(result.reddit.id, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          (
+            await OFEnhancerTeaserDrafts.getPost(
+              "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            )
+          ).file.name,
+      ),
+      "preview-test.mp4",
+    );
+    assert.ok(fs.existsSync(VIDEO), "the original video remains on disk");
+    assert.deepEqual(
+      result.calls
+        .filter((call) =>
+          ["getTeaserPlan", "clearTeaserPlanSlot"].includes(call.op),
+        )
+        .map((call) => call.op),
+      ["getTeaserPlan", "clearTeaserPlanSlot"],
+    );
+    assert.deepEqual(
+      result.calls.find((call) => call.op === "clearTeaserPlanSlot").payload,
+      { date: "2026-10-06" },
+    );
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

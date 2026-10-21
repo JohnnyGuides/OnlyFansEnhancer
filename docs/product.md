@@ -185,6 +185,11 @@ choice is resolved once and saved with the draft. Fallbacks change the reply URL
 the teaser's episode association. Only unlinked videos also offer a custom URL.
 Custom URLs stay with their day draft and never become defaults for another episode.
 
+Saved Twitter drafts expose **Remove draft**. Removal clears the local draft and its matching
+calendar plan, keeps video files and other destination drafts, and is blocked after an upload
+run is bound. Calendar thumbnails use the linked episode title and a short caption strip
+(two lines on desktop, one on narrow screens); full copy remains in the editor.
+
 The teaser editor keeps the video unobstructed. **Episode** changes its catalogue
 association; **Replace video** in the header selects another file while
 preserving caption, schedule and link edits. Replace video and Vegas remain directly

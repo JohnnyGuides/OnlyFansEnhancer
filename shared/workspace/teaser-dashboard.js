@@ -830,13 +830,13 @@
       const slot = slotOn(date);
       const draft = state.drafts.find((item) => item.date === date);
       const scheduled = scheduledOn(date);
-      const episode = slot ? episodeByKey(slot.episodeKey) : null;
+      const episode = episodeByKey(draft?.episodeKey || slot?.episodeKey);
       // A post already scheduled on X outlines the day; the plan's episode
       // title, else the post's own text, labels it.
       const title =
+        episode?.title ||
         draft?.caption ||
         draft?.name ||
-        episode?.title ||
         slot?.episodeKey ||
         scheduled[0]?.text ||
         (scheduled.length ? "Scheduled post" : "");
@@ -857,7 +857,9 @@
           ? `${longDayLabel(date)}: scheduled on X at ${times}, ${title}${reEdit}. Pick another episode`
           : slot
             ? `${longDayLabel(date)}: ${kind} ${title}${reEdit}. Pick another episode`
-            : `${longDayLabel(date)}: nothing planned. Pick an episode`,
+            : draft
+              ? `${longDayLabel(date)}: draft ${title}. Edit draft`
+              : `${longDayLabel(date)}: nothing planned. Pick an episode`,
       );
       tile.dataset.kind = kind;
       tile.dataset.key = `day-${date}`;

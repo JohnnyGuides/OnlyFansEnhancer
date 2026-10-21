@@ -580,7 +580,13 @@
 }
 
 .xt-tile-label {
-  padding: 8px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-width: 100%;
+  padding: 0 6px;
+  margin-block: 6px;
   font-size: 0.78rem;
   font-weight: 650;
   line-height: 1.25;
@@ -1245,7 +1251,9 @@ html:has(.xt-picker[open]) {
   z-index: 1;
   align-self: end;
   background: #0b101ae0;
-  padding: 5px;
+  padding: 3px 5px;
+  margin: 0;
+  max-height: calc(2.5em + 6px);
 }
 .xt-composer-dialog::backdrop {
   background: rgb(0 0 0 / 72%);
@@ -1738,4 +1746,13 @@ html:has(.xt-picker[open]) {
 .xt-vegas-projects .xt-action {
   text-align: left;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 620px) {
+  .xt-tile:has(.xt-draft-cover) .xt-tile-label {
+    -webkit-line-clamp: 1;
+    font-size: 0.68rem;
+    line-height: 1.2;
+    padding: 2px 4px;
+  }
 }

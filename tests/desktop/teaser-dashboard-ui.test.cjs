@@ -2831,3 +2831,73 @@ test("empty-day catalogue opens before clip and destination lookups finish", asy
     await context.close();
   }
 });
+
+test("long draft captions stay in a compact thumbnail strip and linked episodes use their title", async () => {
+  const { page, context, errors } = await openDashboard();
+  try {
+    const caption =
+      "A very long synthetic teaser caption that should never cover the thumbnail ".repeat(
+        3,
+      );
+    await page.evaluate(async (caption) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1080;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#1a7184";
+      ctx.fillRect(0, 0, 1080, 1080);
+      ctx.fillStyle = "#57b8b0";
+      ctx.fillRect(540, 0, 540, 1080);
+      const thumbnail = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/png"),
+      );
+      const file = new File(["synthetic"], "test.mp4", { type: "video/mp4" });
+      await OFEnhancerTeaserDrafts.save({
+        date: "2026-10-03",
+        file,
+        thumbnail,
+        caption,
+        episodeKey: "series-a-e1",
+      });
+      await OFEnhancerTeaserDrafts.save({
+        date: "2026-10-04",
+        file,
+        thumbnail,
+        caption,
+        episodeKey: "unknown",
+      });
+      await OFEnhancerTeaserDashboard.mount(
+        document.querySelector("#teaserDashboard"),
+      ).load();
+    }, caption);
+    const linked = page.locator('[data-key="day-2026-10-03"]');
+    const unlinked = page.locator('[data-key="day-2026-10-04"]');
+    assert.equal(
+      await linked.locator(".xt-tile-label").textContent(),
+      "Series A E1",
+    );
+    assert.equal(
+      await unlinked.locator(".xt-tile-label").textContent(),
+      caption,
+    );
+    for (const viewport of [
+      { width: 1200, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const tile = await unlinked.boundingBox(),
+        label = await unlinked.locator(".xt-tile-label").boundingBox();
+      assert.ok(
+        label.height <= tile.height * 0.45,
+        `thumbnail retains most of the tile: ${JSON.stringify({ viewport, tile, label })}`,
+      );
+      const output = path.join(repositoryRoot, ".local/draft-removal-review");
+      fs.mkdirSync(output, { recursive: true });
+      await unlinked.screenshot({
+        path: path.join(output, `calendar-${viewport.width}.png`),
+      });
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});

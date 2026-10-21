@@ -413,9 +413,11 @@
       }
       search.dispatchEvent(new Event("input"));
       destination.scrollTop = scrollTop;
-      removePost.hidden = !postId;
+      removePost.textContent = postId ? "Remove post" : "Remove draft";
+      removePost.hidden = !postId && !twitter;
       removePost.disabled = Boolean(
-        reddit.find((post) => post.id === postId)?.sessionId,
+        (postId ? reddit.find((post) => post.id === postId) : twitter)
+          ?.sessionId,
       );
     }
     async function updateBatch() {
@@ -625,19 +627,56 @@
         loading ||
         !(await global.OFEnhancerDialogDismiss.confirm({
           title: "Remove draft?",
-          message: "This Reddit draft will be removed.",
+          message: postId
+            ? "This Reddit draft will be removed."
+            : "Remove this saved draft and its calendar plan? Your video file stays.",
           acceptLabel: "Remove draft",
           cancelLabel: "Keep draft",
         }))
       )
         return;
       try {
-        await global.OFEnhancerTeaserDrafts.removePost(postId);
-        dirty = false;
-        await onSaved();
-        await switchPost("x");
+        loading = true;
+        removePost.disabled = true;
+        if (postId) {
+          await global.OFEnhancerTeaserDrafts.removePost(postId);
+          dirty = false;
+          await onSaved();
+          loading = false;
+          await switchPost("x");
+        } else {
+          const removed = await global.OFEnhancerTeaserDrafts.remove(date);
+          dirty = false;
+          let planError = null;
+          if (removed?.episodeKey) {
+            try {
+              const plan = await request("getTeaserPlan", {});
+              if (
+                plan.slots?.some(
+                  (slot) =>
+                    slot.date === date &&
+                    slot.episodeKey === removed.episodeKey,
+                )
+              )
+                await request("clearTeaserPlanSlot", { date });
+            } catch (error) {
+              planError = error;
+            }
+          }
+          await onSaved();
+          if (planError) {
+            await refreshDestinations();
+            status.textContent = `Draft removed. Calendar plan could not be cleared: ${planError.message}`;
+          } else dialog.close();
+        }
       } catch (error) {
         status.textContent = error.message;
+      } finally {
+        loading = false;
+        if (dialog.isConnected)
+          await refreshDestinations().catch((error) => {
+            status.textContent = error.message;
+          });
       }
     });
     let confirming = false;
