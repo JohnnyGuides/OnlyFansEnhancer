@@ -1136,3 +1136,31 @@ as PID 38552 and reports 0.20.127+0ff5cf5. Installer SHA-256:
 The existing Chrome extension still needs the owner's reload. A live Google
 refresh through the installed matching window and real publication/delayed-reply
 UAT have not been claimed. Prior full Chrome-process recovery limitations remain.
+
+
+## Release 0.20.128 — truthful Google authorization errors, 23 October 2026
+
+A verified Google token response with invalid_grant now reports authorization
+required; invalid_client reports rejected client setup separately. Unknown,
+malformed, or wrong-origin failures retain the generic refresh error. A rejected
+catalogue pull updates Settings to its existing Reconnect/error state rather than
+leaving the saved connection green. This preserves the credential, selected sheet,
+catalogue and row bindings; a successful retry clears the authorization error.
+The upload window gives a concise reconnect instruction for invalid authorization.
+
+The versioned candidate passed ten focused desktop cases and two synthetic Chrome
+refresh-failure cases, plus targeted lint/format checks. The full suite and real
+publishing/delayed-reply UAT were not rerun. Google rejected the existing grant
+with invalid_grant during the prior private read-only diagnostic. Human sign-in
+is still required; no credential was replaced or Google data modified here.
+
+Normal update completed with installer exit 0 and a success log. All
+1345 installed manifest files match the built stage. Data/settings
+file fingerprints and all database table fingerprints are unchanged; integrity
+is ok, and extension identities/native registration are preserved. The desktop
+restarted as PID 29028, reporting 0.20.128+72c5f0fab12e7e5fa5b8d3dc5150f1f0909895d7.
+Installer SHA-256: `b3015e02efc84beab4cd443ae733acae4d2ceae6ea63101878fb449d7015a044`.
+
+The loaded Chrome extension still requires a reload to use its new upload-window
+copy. Live Google reconnect and end-to-end upload/public reply acceptance remain
+unverified; this release does not claim those outcomes.
