@@ -238,7 +238,11 @@ item requiring review. Migration has the same no-blind-retry rule.
 
 A failed pull leaves the last verified catalogue visible with a truthful failure
 state. Expired/invalid refresh credentials require reconnection, not deletion of
-the outbox. Disconnect clears its saved refresh credential and connection selection but
+the outbox. A Google `invalid_grant` response becomes `google-authorization-required`;
+Settings then offers **Reconnect** instead of reporting a working connection.
+Reconnect preserves the chosen sheet and local catalogue. A rejected client setup
+is reported separately from an invalid user grant, and network failures do not
+mark the authorization invalid. Disconnect clears its saved refresh credential and connection selection but
 preserves catalogue rows, audit/history, and pending work. It is not data deletion.
 Do not edit the database or force a status transition as a routine repair.
 

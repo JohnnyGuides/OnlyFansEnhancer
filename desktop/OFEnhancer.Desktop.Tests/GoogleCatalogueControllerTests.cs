@@ -588,6 +588,38 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(0, harness.Session.ReadImportCalls);
     }
 
+    [DataTestMethod]
+    [DataRow("google-authorization-required", "error")]
+    [DataRow("google-client-secret-rejected", "error")]
+    [DataRow("google-network-error", "ready")]
+    public void MatchingRefreshReportsAuthorizationFailureWithoutDeletingConnection(string code, string state)
+    {
+        using ControllerHarness harness = ReadyHarness();
+        harness.Vault.Save(new("saved-refresh", DateTimeOffset.UtcNow, ClientId));
+        var credential = harness.Vault.Load();
+        var selection = harness.Store.GetGoogleCatalogueSelection();
+        var bindings = harness.Store.GetGoogleBindings(WorkbookId).ToArray();
+        string catalogue = JsonSerializer.Serialize(harness.Store.GetUploadCatalogueSnapshot());
+        harness.Session.ReadImportAction = _ => Task.FromException<GoogleCatalogueImportPreview>(
+            new GoogleCatalogueException(code));
+
+        Assert.AreEqual(code, Assert.ThrowsException<GoogleCatalogueControllerException>(
+            harness.Controller.RefreshCatalogueForMatching).Code);
+        var status = harness.Controller.getGoogleCatalogueStatus();
+        Assert.AreEqual(state, status.State);
+        Assert.AreEqual(state == "error" ? code : null, status.ErrorCode);
+        Assert.AreEqual(credential, harness.Vault.Load());
+        Assert.AreEqual(selection, harness.Store.GetGoogleCatalogueSelection());
+        CollectionAssert.AreEqual(bindings, harness.Store.GetGoogleBindings(WorkbookId).ToArray());
+        Assert.AreEqual(catalogue, JsonSerializer.Serialize(harness.Store.GetUploadCatalogueSnapshot()));
+        Assert.IsFalse(harness.Session.Disposed);
+
+        harness.Session.ReadImportAction = null;
+        harness.Controller.RefreshCatalogueForMatching();
+        Assert.AreEqual("ready", harness.Controller.getGoogleCatalogueStatus().State);
+        Assert.IsNull(harness.Controller.getGoogleCatalogueStatus().ErrorCode);
+    }
+
     [TestMethod]
     public void MissingUploadEntryRefreshesTheLocalCatalogueAndRetriesTheSameIdOnce()
     {
@@ -1430,6 +1462,29 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(0, handler.Calls);
     }
 
+    [DataTestMethod]
+    [DataRow("{\"error\":\"invalid_grant\",\"error_description\":\"private-provider-details\"}", false, "google-authorization-required")]
+    [DataRow("{\"error\":\"invalid_client\"}", false, "google-client-secret-rejected")]
+    [DataRow("{\"error\":\"temporarily_unavailable\"}", false, "google-token-refresh-failed")]
+    [DataRow("not-json", false, "google-token-refresh-failed")]
+    [DataRow("{\"error\":\"invalid_grant\"}", true, "google-token-refresh-failed")]
+    public async Task RefreshTokenClassifiesOnlyVerifiedGoogleRejections(string response, bool wrongOrigin, string code)
+    {
+        MemoryGoogleTokenVault vault = new();
+        vault.Save(new("saved-refresh", DateTimeOffset.UtcNow, ClientId));
+        var credential = vault.Load();
+        RecordingTokenHandler handler = new() { ErrorResponse = response, WrongOrigin = wrongOrigin };
+        using HttpClient http = new(handler);
+        using GoogleRefreshAccessTokenSource source = new(ClientId, http, vault);
+
+        var error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(async () =>
+            await source.GetAccessTokenAsync(false, CancellationToken.None));
+
+        Assert.AreEqual(code, error.Code);
+        Assert.IsFalse(error.ToString().Contains("private-provider-details", StringComparison.Ordinal));
+        Assert.AreEqual(credential, vault.Load());
+    }
+
     [TestMethod]
     public void Production_http_and_browser_boundaries_disable_redirects_and_use_the_system_default()
     {
@@ -1907,6 +1962,8 @@ public sealed class GoogleCatalogueControllerTests
     {
         internal int Calls { get; private set; }
         internal List<string> Bodies { get; } = [];
+        internal string? ErrorResponse { get; init; }
+        internal bool WrongOrigin { get; init; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -1915,11 +1972,11 @@ public sealed class GoogleCatalogueControllerTests
         {
             Calls++;
             Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
-            return new(HttpStatusCode.OK)
+            return new(ErrorResponse is null ? HttpStatusCode.OK : HttpStatusCode.BadRequest)
             {
-                RequestMessage = request,
+                RequestMessage = WrongOrigin ? new(HttpMethod.Post, "https://example.invalid/token") : request,
                 Content = new StringContent(
-                    $$"""{"access_token":"private-access-token-{{Calls}}","expires_in":3600,"token_type":"Bearer"}""",
+                    ErrorResponse ?? $$"""{"access_token":"private-access-token-{{Calls}}","expires_in":3600,"token_type":"Bearer"}""",
                     Encoding.UTF8,
                     "application/json"
                 ),

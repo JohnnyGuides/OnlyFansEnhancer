@@ -198,7 +198,7 @@ internal static partial class GoogleOAuthProtocol
             throw new GoogleOAuthException("google_client_configuration_check_failed");
     }
 
-    private static bool IsGoogleError(byte[] body, string expected)
+    internal static bool IsGoogleError(byte[] body, string expected)
     {
         try
         {

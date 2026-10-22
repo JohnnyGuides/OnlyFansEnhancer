@@ -441,10 +441,22 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 if (!ReferenceEquals(session, _session))
                     throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
                 _store.ImportWorkbookProjection(preview.Projection, updateGoogleBindings: false);
+                if (_connectionErrorCode is "google-authorization-required" or "google-client-secret-rejected")
+                    _connectionErrorCode = null;
                 return new(StatusLocked(), preview.CatalogueSheetTitle, preview.Projection.Items.Count, preview.Issues ?? []);
             }
         }
-        catch (Exception exception) { throw SafeException(exception); }
+        catch (Exception exception)
+        {
+            GoogleCatalogueControllerException error = SafeException(exception);
+            lock (_gate)
+            {
+                if (ReferenceEquals(session, _session)
+                    && error.Code is "google-authorization-required" or "google-client-secret-rejected")
+                    _connectionErrorCode = error.Code;
+            }
+            throw error;
+        }
         finally { ExitCatalogueOperation(); }
     }
 
@@ -1381,13 +1393,20 @@ internal sealed class GoogleRefreshAccessTokenSource : IGoogleAccessTokenSource,
                 MaximumTokenResponseBytes,
                 cancellationToken
             ).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode
-                || !string.Equals(
+            if (!string.Equals(
                     response.RequestMessage?.RequestUri?.GetLeftPart(UriPartial.Authority),
                     TokenEndpoint.GetLeftPart(UriPartial.Authority),
                     StringComparison.Ordinal
                 ))
             {
+                throw new GoogleCatalogueException("google-token-refresh-failed");
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                if (GoogleOAuthProtocol.IsGoogleError(body, "invalid_grant"))
+                    throw new GoogleCatalogueException("google-authorization-required");
+                if (GoogleOAuthProtocol.IsGoogleError(body, "invalid_client"))
+                    throw new GoogleCatalogueException("google-client-secret-rejected");
                 throw new GoogleCatalogueException("google-token-refresh-failed");
             }
 

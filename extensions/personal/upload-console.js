@@ -3443,7 +3443,10 @@
         cataloguePicker.hidden = true;
         matchStatus.textContent =
           "Couldn’t refresh the catalogue. Check Google in Settings, then retry.";
-        get("#catalogueConnectionStatus").textContent = error.message;
+        get("#catalogueConnectionStatus").textContent =
+          error.message === "google-authorization-required"
+            ? "Reconnect Google in Settings to refresh the catalogue."
+            : error.message;
       }
     }
 
