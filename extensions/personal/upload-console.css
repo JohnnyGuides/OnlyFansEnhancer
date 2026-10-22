@@ -4297,17 +4297,18 @@ body.calendar-teaser {
 .teaser-reply-list {
   max-height: 220px;
 }
-.teaser-reply-row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 6px;
-  align-items: start;
+.calendar-teaser #teaserReplyDialog .teaser-reply-list button {
+  position: relative;
+  padding-right: 30px;
 }
-.teaser-reply-number {
-  padding-top: 12px;
-  text-align: center;
+.teaser-reply-list .teaser-reply-number {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: block;
   color: #a6b4c5;
   font-size: 11px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 .teaser-reply-list small {

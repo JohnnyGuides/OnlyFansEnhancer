@@ -36,9 +36,7 @@
     function renderEntries() {
       entries.replaceChildren(
         ...variants.map((reply, index) => {
-          const row = document.createElement("div"),
-            number = document.createElement("span");
-          row.className = "teaser-reply-row";
+          const number = document.createElement("span");
           number.className = "teaser-reply-number";
           number.textContent = String(index + 1);
           number.setAttribute("aria-hidden", "true");
@@ -54,17 +52,16 @@
             `Reply ${index + 1}: ${title.textContent}`,
           );
           detail.textContent = reply.split("\n").slice(1).join("\n");
-          button.append(title, detail);
+          button.append(title, detail, number);
           button.addEventListener("click", () => {
             status.textContent = "";
             selected = index;
             lines.value = variants[selected];
             renderEntries();
             render();
-            entries.children[index]?.querySelector("button").focus();
+            entries.children[index]?.focus();
           });
-          row.append(number, button);
-          return row;
+          return button;
         }),
       );
       add.disabled = variants.length >= 20;
