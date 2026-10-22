@@ -292,14 +292,19 @@ This adds neither automatic Reddit publishing nor metrics collection nor AI titl
 Calendar teasers have separate **Post automatically** and **Reply automatically**
 choices. Both are saved with the draft and remembered for new drafts. A manually
 posted or scheduled teaser can receive an automatic delayed reply; an automatically
-posted teaser can leave the reply for manual review. Each run freezes its choices,
+posted teaser can leave the reply to the user without opening automatic reply tabs. Each run freezes its choices,
 and older saved runs retain their original coupled manual/autonomous behavior.
 X preparation applies and
 reads back the Nudity warning, then uses labelled date/time controls and verifies
 the displayed timezone and schedule summary. A final scheduling attempt is durable
 and is never repeated automatically. An ambiguous receipt stays unresolved until
-the desktop observes exactly one owner video matching the caption hash and scheduled
-time. The first reply waits for that verified live post and the chosen delay.
+the desktop observes exactly one owner video matching the recorded uploaded media,
+caption and scheduled time. The app detects the publish receipt without requiring
+the owner to open the post. Closing the editor or navigating the original tab does
+not cancel the saved follow-up. The first reply waits until the actual publication
+timestamp plus the chosen delay. Chrome must be running and connected; an overdue
+reply can catch up after reconnect within the existing 24-hour window. Unknown
+publication or reply outcomes stop for review instead of repeating a final click.
 Saved runs can be reviewed from the modal. The local thumbnail is retained for the
 calendar; the observed X video editor does not expose a custom-cover control.
 Synthetic checks and inspected live controls do not establish installed end-to-end

@@ -136,22 +136,27 @@
           resultId: result.resultId,
           resultUrl: result.resultUrl,
           updatedAt: now(),
-          error: "",
+          error: result.error || "",
         });
       }
       return store.checkpoint(session.id, jobId, {
         stage: "result-captured",
         capturedAt: now(),
+        ...(result.replyOutcome ? { replyOutcome: result.replyOutcome } : {}),
         resultId: result.resultId,
         resultUrl: result.resultUrl,
-        ...(jobId === "x"
+        ...(jobId === "x" && result.replyResultId && result.replyResultUrl
           ? {
               replyResultId: result.replyResultId,
               replyResultUrl: result.replyResultUrl,
             }
           : {}),
         updatedAt: now(),
-        error: "",
+        error: ["unconfirmed", "failed", "expired"].includes(
+          result.replyOutcome,
+        )
+          ? `Teaser posted; reply ${result.replyOutcome}. Review the X post.`
+          : "",
       });
     }
 
@@ -249,7 +254,9 @@
         googleSynced: required.every(
           (part) => job.appended?.[part] === "remote",
         ),
-        error: "",
+        error: ["unconfirmed", "failed", "expired"].includes(job.replyOutcome)
+          ? `Teaser posted; reply ${job.replyOutcome}. Review the X post.`
+          : "",
         updatedAt: now(),
       });
       return { fingerprint, session: next };
@@ -378,7 +385,11 @@
             try {
               session =
                 (await capture(session, jobId, dependencyUrl)) || session;
-            } catch {
+            } catch (error) {
+              session = await store.checkpoint(session.id, jobId, {
+                error: cleanError(error),
+                updatedAt: now(),
+              });
               return { fingerprint, session };
             }
             if (session.jobs[jobId].stage === "result-captured")
@@ -423,7 +434,11 @@
         if (session.plan.mode === "manual") {
           try {
             session = (await capture(session, jobId, dependencyUrl)) || session;
-          } catch {
+          } catch (error) {
+            session = await store.checkpoint(session.id, jobId, {
+              error: cleanError(error),
+              updatedAt: now(),
+            });
             return { fingerprint, session };
           }
           if (session.jobs[jobId].stage === "prepared") {
@@ -538,7 +553,17 @@
         let dependencyUrl = "";
         let dependencyError = "";
         try {
-          dependencyUrl = await paidDependencyUrl(session.plan);
+          dependencyUrl =
+            session.jobs.x.resolvedPaidUrl ||
+            (await paidDependencyUrl(session.plan));
+          if (
+            dependencyUrl &&
+            session.plan.paidLinkDependency &&
+            !session.jobs.x.resolvedPaidUrl
+          )
+            session = await store.checkpoint(sessionId, "x", {
+              resolvedPaidUrl: dependencyUrl,
+            });
         } catch (error) {
           dependencyError = cleanError(error);
         }

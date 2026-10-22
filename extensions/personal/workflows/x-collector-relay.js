@@ -18,6 +18,9 @@
   const domSent = new Map();
   const pendingCommands = new Map();
   let commandCounter = 0;
+  let observedOwner = null;
+  const observedPosts = new Map();
+  const conversations = new Map();
 
   function send(message) {
     try {
@@ -34,8 +37,32 @@
     const detail = event.data;
     if (!detail || typeof detail !== "object") return;
     if (detail.kind === "batch") {
+      try {
+        const batch = contract.validateBatch(detail.batch);
+        if (batch.owner.accountId) {
+          if (observedOwner?.accountId !== batch.owner.accountId) {
+            observedPosts.clear();
+            conversations.clear();
+          }
+          observedOwner = batch.owner;
+          for (const row of batch.observations)
+            observedPosts.set(row.statusId, row);
+          while (observedPosts.size > 1000)
+            observedPosts.delete(observedPosts.keys().next().value);
+        }
+      } catch {
+        return;
+      }
       networkSeen = true;
-      send({ batch: detail.batch });
+      send({ batch: detail.batch, operation: detail.operation });
+    } else if (detail.kind === "publication-attempt") {
+      send({ publicationAttempt: detail.attempt });
+    } else if (detail.kind === "conversation") {
+      if (
+        detail.ownerId === observedOwner?.accountId &&
+        /^\d{1,25}$/.test(detail.statusId)
+      )
+        conversations.set(detail.statusId, detail.complete === true);
     } else if (detail.kind === "scheduled") {
       send({ scheduled: detail.batch });
     } else if (detail.kind === "scan-reply") {
@@ -144,5 +171,39 @@
   );
   startDomFallback();
 
-  globalThis.CreatorXCollectorRelay = Object.freeze({ scanDocument });
+  globalThis.CreatorXCollectorRelay = Object.freeze({
+    scanDocument,
+    ownerId: () => observedOwner?.accountId || "",
+    // Only relation-bearing network observations are evidence of a reply.
+    repliesFor(statusId, ownerHandle) {
+      if (
+        observedOwner?.handle.toLowerCase() !==
+        String(ownerHandle).toLowerCase()
+      )
+        return null;
+      const main = observedPosts.get(statusId);
+      if (
+        !main ||
+        main.inReplyToStatusId ||
+        main.isRetweet ||
+        main.authorId !== observedOwner.accountId
+      )
+        return null;
+      const replies = [...observedPosts.values()]
+        .filter(
+          (row) =>
+            row.authorId === observedOwner.accountId &&
+            row.inReplyToStatusId === statusId &&
+            !row.isRetweet,
+        )
+        .map((row) => ({
+          resultId: row.statusId,
+          resultUrl: `https://x.com/${observedOwner.handle}/status/${row.statusId}`,
+          text: row.text,
+        }));
+      return replies.length || conversations.get(statusId) === true
+        ? replies
+        : null;
+    },
+  });
 })();

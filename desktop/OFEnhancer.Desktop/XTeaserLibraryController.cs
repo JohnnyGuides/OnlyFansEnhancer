@@ -49,6 +49,43 @@ internal sealed partial class XTeaserController
             : new { matched = true, resultId = new Uri(result.Url).Segments.Last(), resultUrl = result.Url, postedUtc = result.PostedUtc.ToString("O") };
     }
 
+    internal object PublicationContext(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        return store.GetXTeaserPublicationContext(Now)
+            ?? throw new GoogleCatalogueControllerException("x-owner-not-known");
+    }
+
+    internal object PublicationResult(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Count() != 5
+            || !payload.TryGetProperty("captionSha256", out var hash) || hash.ValueKind != JsonValueKind.String
+            || !payload.TryGetProperty("context", out var context) || context.ValueKind != JsonValueKind.Object
+            || context.EnumerateObject().Count() != 4
+            || !context.TryGetProperty("accountId", out var account) || account.ValueKind != JsonValueKind.String
+            || !context.TryGetProperty("handle", out var handle) || handle.ValueKind != JsonValueKind.String
+            || !context.TryGetProperty("preparedUtc", out var prepared) || prepared.ValueKind != JsonValueKind.String
+            || !context.TryGetProperty("latestStatusId", out var latest) || latest.ValueKind != JsonValueKind.String
+            || !payload.TryGetProperty("episodeKey", out var episode) || episode.ValueKind != JsonValueKind.String
+            || !payload.TryGetProperty("mediaIds", out var media) || media.ValueKind != JsonValueKind.Array
+            || media.GetArrayLength() > 4 || media.EnumerateArray().Any(id => id.ValueKind != JsonValueKind.String)
+            || !payload.TryGetProperty("scheduledUtc", out var time) || time.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            throw new GoogleCatalogueControllerException("invalid-teaser-request");
+        DateTimeOffset? scheduled = null;
+        if (time.ValueKind == JsonValueKind.String)
+        {
+            if (!DateTimeOffset.TryParse(time.GetString(), out var instant))
+                throw new GoogleCatalogueControllerException("invalid-teaser-request");
+            scheduled = instant;
+        }
+        var result = store.ResolveXTeaserPublication(hash.GetString()!,
+            new(account.GetString()!, handle.GetString()!, prepared.GetString()!, latest.GetString()!), Now, scheduled,
+            string.IsNullOrEmpty(episode.GetString()) ? null : episode.GetString(), media.EnumerateArray().Select(id => id.GetString()!).ToArray());
+        return result is null ? new { matched = false, resultId = "", resultUrl = "", postedUtc = "" }
+            : new { matched = true, resultId = new Uri(result.Url).Segments.Last(), resultUrl = result.Url, postedUtc = result.PostedUtc.ToString("O") };
+    }
+
     internal object Library(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object || payload.EnumerateObject().Any())

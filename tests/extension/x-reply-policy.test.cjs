@@ -30,6 +30,25 @@ function storage() {
     },
   };
 }
+test("an explicit editor reservation supersedes an unattempted scanner job but never a claimed reply", async () => {
+  const policy = load().forStorage(storage());
+  const scan = await policy.reserve("401", "https://onlyfans.com/old");
+  const editor = await policy.reserve("401", "https://fansly.com/chosen", {
+    line: "Chosen",
+    owner: "editor",
+  });
+  assert.equal(editor.owner, "editor");
+  await assert.rejects(policy.claim("401", scan.text), /text changed/);
+  assert.equal(await policy.claim("401", editor.text), true);
+  const attempted = await policy.reserve("402", "https://onlyfans.com/old");
+  assert.equal(await policy.claim("402", attempted.text), true);
+  const unchanged = await policy.reserve("402", "https://onlyfans.com/old", {
+    line: "Chosen",
+    owner: "editor",
+  });
+  assert.equal(unchanged.owner, "scanner");
+  assert.equal(unchanged.attempted, true);
+});
 test("both entry points share rotation, frozen wording and a durable one-attempt claim", async () => {
   const disk = storage(),
     policy = load(),

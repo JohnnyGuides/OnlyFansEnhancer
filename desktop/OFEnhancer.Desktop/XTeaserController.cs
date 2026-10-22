@@ -108,7 +108,7 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
     internal static readonly IReadOnlySet<string> Operations = new HashSet<string>(StringComparer.Ordinal)
     {
         "getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue", "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot",
-        "requestXScan", "getXScanActivity",
+        "requestXScan", "getXScanActivity", "getTeaserPublicationContext", "resolveTeaserPublication",
         "getTeaserClips", "getTeaserClipChunk", "getTeaserClipPreview", "openTeaserEpisodeFolder", "resolveScheduledTeaserResult",
         "getTeaserEdit", "openTeaserProject", "createTeaserProject", "chooseTeaserProject", "checkTeaserRender",
     };
@@ -134,6 +134,8 @@ internal sealed partial class XTeaserController(CatalogueStore store, WebMessage
         "getTeaserClipChunk" => await dispatcher.EnqueueAsync<object>(() => ClipChunk(payload)).ConfigureAwait(false),
         "getTeaserClipPreview" => await ClipPreviewAsync(payload).ConfigureAwait(false),
         "resolveScheduledTeaserResult" => await dispatcher.EnqueueAsync<object>(() => ScheduledResult(payload)).ConfigureAwait(false),
+        "getTeaserPublicationContext" => await dispatcher.EnqueueAsync<object>(() => PublicationContext(payload)).ConfigureAwait(false),
+        "resolveTeaserPublication" => await dispatcher.EnqueueAsync<object>(() => PublicationResult(payload)).ConfigureAwait(false),
         "openTeaserEpisodeFolder" => await dispatcher.EnqueueAsync<object>(() => OpenEpisodeFolder(payload)).ConfigureAwait(false),
         _ => throw new GoogleCatalogueControllerException("unsupported-operation"),
     };

@@ -119,6 +119,24 @@
           const current = await state();
           const existing = current.items[statusId];
           if (existing) {
+            // An explicit editor choice supersedes an unattempted discovery job.
+            // A scanner holding old wording will fail its final shared claim.
+            if (
+              frozen?.owner === "editor" &&
+              existing.owner === "scanner" &&
+              !existing.attempted
+            ) {
+              const replacement = {
+                owner: "editor",
+                line: frozen.line,
+                paidUrl,
+                text: format(frozen.line, paidUrl),
+                attempted: false,
+              };
+              current.items[statusId] = replacement;
+              await storage.set({ [STATE_KEY]: current });
+              return replacement;
+            }
             if (existing.paidUrl !== paidUrl)
               throw new Error("The reserved reply link changed.");
             return existing;

@@ -4,7 +4,6 @@
   if (globalThis.CreatorSocialChromeRuntime) return;
 
   const X_COMPOSE_URL = "https://x.com/compose/post";
-  const X_MATCH = "https://x.com/*";
   const FILE_SELECTOR = "input[data-testid='fileInput'][type='file']";
   const REDGIFS_URL = "https://studio.redgifs.com/upload";
   const REDGIFS_FILE_SELECTOR = "input[type='file'][accept='video/*']";
@@ -29,6 +28,7 @@
         caption: args.caption,
         xOptions: args.xOptions,
         fileName: args.fileName,
+        ownerHandle: args.ownerHandle,
         async attachFile(role, selector) {
           if (role !== "social" || selector !== args.fileSelector) {
             throw new Error(
@@ -46,6 +46,7 @@
       return adapter.submit({
         captionSha256: args.captionSha256,
         xOptions: args.xOptions,
+        ownerHandle: args.ownerHandle,
         beforeCommit: async () => ({ armed: true }),
       });
     }
@@ -80,6 +81,10 @@
     fileRequest,
     resolvePaidLink = null,
     resolveScheduledResult = null,
+    getPublicationContext = null,
+    resolvePublication = null,
+    refreshPublications = null,
+    replyRunner = null,
     now = Date.now,
   }) {
     if (
@@ -97,6 +102,7 @@
     }
     const bindings = new Map();
     const manualBindings = new Map();
+    let publicationObservations = Promise.resolve();
     const bindingStorage = chrome.storage?.session;
     if (!bindingStorage) {
       throw new Error("Chrome session storage is unavailable.");
@@ -116,7 +122,10 @@
 
     async function saveBinding(binding) {
       await bindingStorage.set({
-        [bindingKey(binding.id)]: { tabId: binding.tabId },
+        [bindingKey(binding.id)]: {
+          tabId: binding.tabId,
+          documentId: binding.documentId || "",
+        },
       });
     }
 
@@ -150,13 +159,14 @@
     }
 
     async function inject(tabId, includeBridge = false) {
-      await chrome.scripting.executeScript({
+      const execution = await chrome.scripting.executeScript({
         target: { tabId },
         files: [
           ...(includeBridge ? ["workflows/upload-file-bridge.js"] : []),
           "workflows/x-publisher-adapter.js",
         ],
       });
+      return execution?.[0]?.documentId || "";
     }
 
     async function installBridge(binding) {
@@ -276,6 +286,319 @@
       return result;
     }
 
+    async function capturePublishedTeaser(input) {
+      const options = input.plan.xOptions || {
+        replyDelayMinutes: 15,
+        autoReply: input.mode === "autonomous",
+      };
+      let session = await store.load(input.plan.id);
+      let job = session.jobs.x;
+      let context = job.publicationContext;
+      if (!context && job.resultUrl && getPublicationContext) {
+        const owner = await getPublicationContext();
+        if (
+          canonicalXStatus(job.resultUrl)?.split("/")[3].toLowerCase() ===
+          owner.handle.toLowerCase()
+        ) {
+          session = await store.checkpoint(session.id, "x", {
+            publicationContext: owner,
+          });
+          job = session.jobs.x;
+          context = owner;
+        }
+      }
+      if (!context)
+        throw new Error(
+          "This older draft needs review before automatic publication detection can resume.",
+        );
+      if (job.resultUrl && !job.replyDueAt && options.autoReply)
+        throw new Error(
+          "This older post has no verified reply timing. Review it before replying.",
+        );
+      const pending = () => ({
+        status: "reply-prepared",
+        resultId: job.resultId,
+        resultUrl: job.resultUrl,
+        error: job.error || "",
+      });
+      if (!job.resultUrl) {
+        const publicationDeadline =
+          Date.parse(options.scheduledUtc || context.preparedUtc) +
+          24 * 60 * 60_000;
+        if (now() > publicationDeadline) {
+          await store.checkpoint(session.id, "x", {
+            stage: "blocked",
+            error:
+              "Publication was not confirmed within 24 hours. Review the X post.",
+          });
+          throw new Error(
+            "Publication was not confirmed within 24 hours. Review the X post.",
+          );
+        }
+        // A profile caption alone cannot prove which prepared video was posted.
+        if (!job.publicationMediaIds) return null;
+        if (options.scheduledUtc && Date.parse(options.scheduledUtc) > now())
+          return null;
+        const query = {
+          context,
+          captionSha256: input.plan.caption.sha256,
+          episodeKey: input.plan.catalogue?.id || "",
+          scheduledUtc: options.scheduledUtc || null,
+          mediaIds: job.publicationMediaIds || [],
+        };
+        let found = await resolvePublication(query);
+        if (!found?.matched && refreshPublications) {
+          await refreshPublications(context);
+          found = await resolvePublication(query);
+        }
+        if (!found?.matched) return null;
+        const url = canonicalXStatus(found.resultUrl);
+        const postedAt = Date.parse(found.postedUtc);
+        if (
+          !url ||
+          url.split("/").pop() !== found.resultId ||
+          url.split("/")[3].toLowerCase() !== context.handle.toLowerCase() ||
+          !Number.isFinite(postedAt) ||
+          postedAt < Date.parse(context.preparedUtc) - 1000 ||
+          postedAt > now() + 90_000
+        )
+          throw new Error(
+            "The observed X publication does not match this run.",
+          );
+        for (const other of await store.list()) {
+          if (other.id === session.id || !other.jobs?.x) continue;
+          if (
+            other.jobs.x.resultUrl === url ||
+            (!other.jobs.x.resultUrl &&
+              !["failed", "blocked", "sheet-complete"].includes(
+                other.jobs.x.stage,
+              ) &&
+              other.jobs.x.publicationContext?.accountId ===
+                context.accountId &&
+              other.plan.caption.sha256 === query.captionSha256 &&
+              JSON.stringify(other.jobs.x.publicationMediaIds) ===
+                JSON.stringify(job.publicationMediaIds) &&
+              Date.parse(other.jobs.x.publicationContext.preparedUtc) <=
+                postedAt)
+          )
+            throw new Error(
+              "This X post matches more than one prepared run. Review the drafts before replying.",
+            );
+        }
+        session = await store.checkpoint(session.id, "x", {
+          resultId: found.resultId,
+          resultUrl: url,
+          replyDueAt: postedAt + options.replyDelayMinutes * 60_000,
+        });
+        job = session.jobs.x;
+      }
+      const policy = globalThis.CreatorXReplyPolicy.forStorage(
+        chrome.storage.local,
+      );
+      const reply = await policy.reserve(job.resultId, input.paidUrl, {
+        line: job.replyLine,
+        owner: "editor",
+      });
+      if (reply.owner !== "editor")
+        throw new Error(
+          "This post already has another automatic reply queued.",
+        );
+      if (!(options.autoReply ?? input.mode === "autonomous"))
+        return {
+          resultId: job.resultId,
+          resultUrl: job.resultUrl,
+          replyOutcome: "manual",
+        };
+      if (
+        now() >
+        job.replyDueAt - options.replyDelayMinutes * 60_000 + 24 * 60 * 60_000
+      )
+        return {
+          resultId: job.resultId,
+          resultUrl: job.resultUrl,
+          replyOutcome: "expired",
+        };
+      if (now() < job.replyDueAt) return pending();
+      if (job.replyCheckAfter > now()) return pending();
+      const item = {
+        statusId: job.resultId,
+        statusUrl: job.resultUrl,
+        ownerHandle: context.handle,
+        ownerId: context.accountId,
+        text: reply.text,
+        paidUrl: input.paidUrl,
+        linkPolicy: "approved",
+      };
+      const runner =
+        replyRunner ||
+        globalThis.CreatorXFirstReply.createChromeRunner({ chrome });
+      const tabKey = `creatorSocialReplyTabV1:${session.id}`;
+      const stale = (await bindingStorage.get(tabKey))[tabKey];
+      if (stale?.tabId)
+        await runner.closeStale?.(stale.tabId, job.resultUrl).catch(() => {});
+      let handle;
+      try {
+        handle = await runner.open(item, async (tabId) => {
+          await bindingStorage.set({ [tabKey]: { tabId } });
+        });
+        let result;
+        if (input.allowReplySubmit === false || reply.attempted) {
+          result = await runner.capture(handle, item);
+        } else {
+          const prepared = await runner.prepare(handle, item);
+          if (prepared.status === "existing-reply") {
+            // An owner reply already exists; never add another one automatically.
+            return {
+              resultId: job.resultId,
+              resultUrl: job.resultUrl,
+              replyOutcome: "existing-reply",
+              replyResultId: prepared.replyId,
+              replyResultUrl: `https://x.com/${context.handle}/status/${prepared.replyId}`,
+            };
+          }
+          if ((await input.beforeReplyCommit(job))?.armed !== true)
+            throw new Error("The X reply was not durably armed.");
+          if (!(await policy.claim(job.resultId, reply.text)))
+            throw new Error(
+              "An X reply was already attempted; review the post.",
+            );
+          result = await runner.submit(handle, item);
+        }
+        return {
+          resultId: job.resultId,
+          resultUrl: job.resultUrl,
+          replyResultId: result.replyId,
+          replyResultUrl: result.replyUrl,
+          replyOutcome: "posted",
+        };
+      } catch (error) {
+        const attempts = (job.replyCheckAttempts || 0) + 1;
+        await store.checkpoint(session.id, "x", {
+          replyCheckAttempts: attempts,
+          replyCheckAfter: now() + 5 * 60_000,
+        });
+        if (attempts >= 3)
+          return {
+            resultId: job.resultId,
+            resultUrl: job.resultUrl,
+            replyOutcome:
+              input.allowReplySubmit === false || reply.attempted
+                ? "unconfirmed"
+                : "failed",
+          };
+        throw error;
+      } finally {
+        if (handle) await runner.close(handle).catch(() => {});
+        await bindingStorage.remove(tabKey);
+      }
+    }
+
+    async function observePublication(message, sender) {
+      if (!sender?.documentId || !Number.isInteger(sender.tab?.id)) return;
+      for (const session of await store.list()) {
+        const job = session.jobs?.x;
+        if (
+          !job?.publicationContext ||
+          job.resultUrl ||
+          ["failed", "blocked", "sheet-complete"].includes(job.stage)
+        )
+          continue;
+        const binding = await savedBinding(session.id);
+        const preparedDocument =
+          binding?.tabId === sender.tab.id &&
+          binding.documentId === sender.documentId;
+        const context = job.publicationContext;
+        const expectedHash = session.plan.caption.sha256;
+        if (message.publicationAttempt) {
+          if (!preparedDocument) continue;
+          const attempt = message.publicationAttempt;
+          if (
+            attempt.accountId !== context.accountId ||
+            typeof attempt.text !== "string" ||
+            (await sha256Text(attempt.text)) !== expectedHash ||
+            (attempt.scheduledUtc &&
+              attempt.scheduledUtc !== session.plan.xOptions?.scheduledUtc)
+          )
+            continue;
+          await store.checkpoint(session.id, "x", {
+            publicationMediaIds: attempt.mediaIds,
+          });
+          return;
+        }
+        const directReceipt =
+          preparedDocument && message.operation === "CreateTweet";
+        if (!job.publicationMediaIds) continue;
+        const batch = globalThis.CreatorXCollectorContract.validateBatch(
+          message.batch,
+        );
+        const rows = [];
+        for (const row of batch.observations) {
+          if (
+            row.source !== "network" ||
+            row.authorId !== context.accountId ||
+            row.inReplyToStatusId ||
+            row.isRetweet ||
+            !row.media.some((media) => media.type === "video") ||
+            BigInt(row.statusId) <= BigInt(context.latestStatusId) ||
+            Date.parse(row.createdAt) <
+              Date.parse(context.preparedUtc) - 1000 ||
+            Date.parse(row.createdAt) > now() + 90_000 ||
+            JSON.stringify(
+              row.media
+                .filter((media) => media.type === "video")
+                .map((media) => media.mediaKey?.split("_").pop())
+                .sort(),
+            ) !== JSON.stringify(job.publicationMediaIds) ||
+            (await sha256Text(row.text)) !== expectedHash
+          )
+            continue;
+          rows.push(row);
+        }
+        if (rows.length !== 1) continue;
+        const row = rows[0];
+        if (
+          !directReceipt &&
+          (await store.list()).some(
+            (other) =>
+              other.id !== session.id &&
+              other.jobs?.x?.publicationContext?.accountId ===
+                context.accountId &&
+              !other.jobs.x.resultUrl &&
+              other.plan.caption.sha256 === expectedHash &&
+              JSON.stringify(other.jobs.x.publicationMediaIds) ===
+                JSON.stringify(job.publicationMediaIds),
+          )
+        )
+          throw new Error(
+            "More than one prepared run matches this X video. Review the drafts.",
+          );
+        const resultUrl = `https://x.com/${context.handle}/status/${row.statusId}`;
+        if (
+          (await store.list()).some(
+            (other) =>
+              other.id !== session.id && other.jobs?.x?.resultUrl === resultUrl,
+          )
+        )
+          throw new Error("Another run already owns this X publication.");
+        const paidUrl = job.resolvedPaidUrl || session.plan.paidUrl;
+        if (paidUrl)
+          await globalThis.CreatorXReplyPolicy.forStorage(
+            chrome.storage.local,
+          ).reserve(row.statusId, paidUrl, {
+            line: job.replyLine,
+            owner: "editor",
+          });
+        await store.checkpoint(session.id, "x", {
+          resultId: row.statusId,
+          resultUrl,
+          replyDueAt:
+            Date.parse(row.createdAt) +
+            (session.plan.xOptions?.replyDelayMinutes || 15) * 60_000,
+        });
+        return;
+      }
+    }
+
     function adapterFor(jobId) {
       if (jobId !== "x") {
         if (jobId !== "redgifs" && !jobId.startsWith("reddit:"))
@@ -316,6 +639,7 @@
       return {
         async prepare(input) {
           const binding = await bindingFor(input.plan.id);
+          const session = await store.load(input.plan.id);
           if (!binding.caption || !binding.token) {
             throw new Error(
               "The social teaser copy or file authorization was lost before submission.",
@@ -332,6 +656,7 @@
             caption: binding.caption,
             xOptions: input.plan.xOptions,
             fileName: input.plan.socialFile.basename,
+            ownerHandle: session.jobs.x.publicationContext?.handle,
           });
         },
         async submit(input) {
@@ -351,9 +676,11 @@
           return execute(binding, "submit", {
             captionSha256: preparedCaptionSha256,
             xOptions: input.plan.xOptions,
+            ownerHandle: session.jobs.x.publicationContext?.handle,
           });
         },
         async captureResult(input) {
+          if (resolvePublication) return capturePublishedTeaser(input);
           let scheduled = await store.load(input.plan.id);
           if (
             input.plan.xOptions?.scheduledUtc &&
@@ -683,27 +1010,45 @@
           nsfw: target.nsfw === true,
         });
       }
+      let publicationContext = null;
+      if (frozen.targets.x && getPublicationContext) {
+        try {
+          publicationContext = await getPublicationContext();
+        } catch {
+          throw new Error(
+            "Connect Chrome and scan your X profile before preparing this teaser.",
+          );
+        }
+      }
       await store.create(frozen);
       if (frozen.targets.x) {
         const replyLine = await globalThis.CreatorXReplyPolicy.forStorage(
           chrome.storage.local,
         ).allocate();
-        await store.checkpoint(frozen.id, "x", { replyLine });
+        await store.checkpoint(frozen.id, "x", {
+          replyLine,
+          ...(publicationContext ? { publicationContext } : {}),
+        });
       }
       const targets = {};
       if (frozen.targets.x) {
-        const existing = await chrome.tabs.query({ url: X_MATCH });
-        const tab =
-          existing.length === 1
-            ? await chrome.tabs.update(existing[0].id, {
-                active: true,
-                url: X_COMPOSE_URL,
-              })
-            : await chrome.tabs.create({ url: X_COMPOSE_URL, active: true });
-        await inject(tab.id, true);
+        const tab = await chrome.tabs.create({
+          url: X_COMPOSE_URL,
+          active: true,
+        });
+        for (let attempt = 0; attempt < 300; attempt++) {
+          const current = await chrome.tabs.get(tab.id);
+          if (current?.status === "complete" && current.url === X_COMPOSE_URL)
+            break;
+          if (attempt === 299)
+            throw new Error("The X composer did not finish loading.");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const documentId = await inject(tab.id, true);
         const binding = {
           id: frozen.id,
           tabId: tab.id,
+          documentId,
           caption: String(caption),
           token: randomToken(),
         };
@@ -765,6 +1110,13 @@
 
     return Object.freeze({
       prepare,
+      observePublication(message, sender) {
+        const next = publicationObservations
+          .catch(() => {})
+          .then(() => observePublication(message, sender));
+        publicationObservations = next;
+        return next;
+      },
       prepareRedditLinks,
       associateCatalogue: orchestrator.associateCatalogue,
       resume: orchestrator.resumeSocialDistribution,

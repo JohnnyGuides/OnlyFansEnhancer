@@ -362,12 +362,33 @@ review. No Vegas render automation or live-post replacement is performed.
 X plans optionally carry minute-aligned UTC time, IANA timezone, the sensitive
 warning and reply delay. The social ledger records scheduleAttempted before the
 final click; an uncertain result cannot click Schedule again. A one-minute Chrome
-alarm resumes existing authorized runs. `resolveScheduledTeaserResult` matches
-exact caption SHA-256 and publication time within 90 seconds against persisted
-owner video observations, refusing competing posts or contradictory bindings.
-Only a verified canonical live post can start the delayed reply; reply attempt
-checkpoints remain monotonic across worker restarts. Saving a calendar draft alone
-does not authorize either publication or reply.
+alarm resumes existing authorized runs independently of the editor. Preparation
+pins the known numeric owner, handle, timestamp and latest observed status ID.
+The passive collector records the prepared document's CreateTweet or
+CreateScheduledTweet request text and uploaded media IDs; a response must match
+those IDs and the authorized caption before it can bind the run. A receipt does
+not depend on clicking Post with a mouse or visiting a status URL. A lost receipt
+can be reconciled through collected owner posts with the same uploaded media IDs.
+`resolveTeaserPublication` additionally requires a unique new owner video and
+consistent episode bindings; scheduled matches retain the 90-second time window.
+Caption-only matches never authorize a reply. Publication evidence and shared
+reply ownership persist in local storage before catalogue forwarding.
+
+The reply deadline is the observed publication timestamp plus the chosen delay.
+Both reply entry points use the same guarded runner in a dedicated background
+tab. It checks the signed-in owner, exact parent post, reply wording and removed
+link card. Network parent relationships identify replies; recommendations and
+same-author DOM links cannot prove an existing or successful reply. An empty
+reply result requires complete TweetDetail evidence. The durable attempt guard
+precedes the final click; subsequent recovery only captures, never clicks again.
+Checks back off and end after three failures with the confirmed main post saved
+and a visible failed/unconfirmed reply outcome. The existing 24-hour publication
+window also applies to calendar replies. Disabled replies do not open tabs.
+Chrome cannot send while closed; a reconnect can resume a pending due reply.
+Older runs with a known result can pin the current matching owner; unidentified
+older drafts require review. Saving a calendar draft alone does not authorize
+either publication or reply. Source and synthetic checks do not establish live
+publication or an installed browser-process restart.
 
 The automatic first reply uses the agent operation `getTeaserReplyQueue` (empty
 payload; at most 50 items): the owner handle and each teaser posted in the last
@@ -387,12 +408,13 @@ only after a fresh desktop answer still lists it for the same owner and link. On
 opens the status in a new background tab (its id is recorded so a tab left by an
 interrupted run is closed on the next tick), requires X's profile link to name
 the owner account (otherwise `wrong-account`, not retried), checks it is the owner's exact teaser
-shown once with no newer owner status, pastes the text, removes a link card with
+shown once with no verified owner reply, pastes the text, removes a link card with
 the reply heuristic and re-pastes at most three times, and requires the exact text
 with no card in the composer. The record is then durably marked
 `submit-attempted`; turning the setting off before this point aborts the run. The page repeats the
 account, link and card gate in the same turn as the Reply
-click, and the reply is confirmed by a new owner status on the page. Nothing is
+click, and the reply is confirmed by a new owner network row naming that exact
+parent and matching the reply text. Nothing is
 retried after the checkpoint, including after a worker restart (`unconfirmed`);
 failures before it retry at most three times. Replies over two hours past their
 due time are marked late. The default follows

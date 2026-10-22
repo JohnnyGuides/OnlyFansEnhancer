@@ -391,12 +391,12 @@
     return [...new Map(matches.map((item) => [item.resultId, item])).values()];
   }
 
-  function replyFor(main) {
+  function replyFor(main, verified = false) {
     const baseline = replyBaselines.get(main.resultId);
     if (!baseline) return null;
-    const unique = sameAuthorStatuses(main).filter(
-      (identity) => !baseline.has(identity.resultId),
-    );
+    const unique = (
+      verified ? ownerRepliesAfter(main) : sameAuthorStatuses(main)
+    ).filter((identity) => !baseline.has(identity.resultId));
     if (unique.length > 1)
       throw new Error("The first X reply result is ambiguous.");
     return unique[0] || null;
@@ -483,12 +483,13 @@
   }
 
   /**
-   * @param {{caption:string, attachFile:(role:string, selector:string)=>Promise<{name?:string}|void>, fileName?:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string}}} input
+   * @param {{caption:string, attachFile:(role:string, selector:string)=>Promise<{name?:string}|void>, fileName?:string, ownerHandle?:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string, replyDelayMinutes?:number}}} input
    */
   async function prepare({
     caption,
     attachFile,
     fileName = "",
+    ownerHandle = "",
     xOptions = {},
   }) {
     if (
@@ -499,6 +500,10 @@
     }
     if (typeof attachFile !== "function")
       throw new Error("The social file bridge is unavailable.");
+    if (ownerHandle) {
+      await waitFor(() => signedInHandle(), "The signed-in X account");
+      requireOwnerAccount(ownerHandle);
+    }
     if (xOptions.scheduledUtc) scheduleParts(xOptions);
     const editor = one(MAIN_COMPOSER, "The X composer");
     one(FILE_INPUT, "The X media input", () => true);
@@ -547,7 +552,7 @@
     if (one(MAIN_COMPOSER, "The X composer").textContent !== preparedText) {
       throw new Error("The X caption changed while preparing the schedule.");
     }
-    if (!xOptions.scheduledUtc) {
+    if (!xOptions.scheduledUtc && !xOptions.replyDelayMinutes && !ownerHandle) {
       observePreparedPost(one(MAIN_POST, "The X Post button", enabled));
     }
     return {
@@ -569,9 +574,14 @@
   }
 
   /**
-   * @param {{beforeCommit:()=>Promise<{armed:boolean}>, captionSha256:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string}}} input
+   * @param {{beforeCommit:()=>Promise<{armed:boolean}>, captionSha256:string, ownerHandle?:string, xOptions?:{sensitive?:boolean, scheduledUtc?:string, timeZone?:string}}} input
    */
-  async function submit({ beforeCommit, captionSha256, xOptions = {} }) {
+  async function submit({
+    beforeCommit,
+    captionSha256,
+    xOptions = {},
+    ownerHandle = "",
+  }) {
     if (typeof beforeCommit !== "function")
       throw new Error("The durable submit gate is unavailable.");
     if (!/^[0-9a-f]{64}$/.test(String(captionSha256 ?? "")))
@@ -592,6 +602,7 @@
     // No await below: the text, route and button are checked and clicked in one turn.
     if (one(MAIN_COMPOSER, "The X composer").textContent !== text)
       throw new Error("The X caption changed after the post was armed.");
+    if (ownerHandle) requireOwnerAccount(ownerHandle);
     if (hash !== captionSha256)
       throw new Error("The X caption changed after the post was armed.");
     if (!onCompose())
@@ -787,9 +798,13 @@
     return handles.size === 1 ? [...handles][0] : "";
   }
 
-  function requireOwnerAccount(ownerHandle) {
+  function requireOwnerAccount(ownerHandle, ownerId) {
     const owner = String(ownerHandle || "").toLowerCase();
-    if (!owner || signedInHandle() !== owner)
+    if (
+      !owner ||
+      signedInHandle() !== owner ||
+      (ownerId && globalThis.CreatorXCollectorRelay?.ownerId() !== ownerId)
+    )
       throw new Error("wrong-account: X is not signed in as the owner.");
   }
 
@@ -807,12 +822,17 @@
     );
   }
 
-  // Owner statuses newer than the teaser are treated as replies in its
-  // conversation; any of them stops the automatic reply.
+  // Recommendations and quoted posts are never evidence of a reply.
   function ownerRepliesAfter(main) {
-    return sameAuthorStatuses(main).filter(
-      (identity) => BigInt(identity.resultId) > BigInt(main.resultId),
+    const replies = globalThis.CreatorXCollectorRelay?.repliesFor(
+      main.resultId,
+      main.handle,
     );
+    if (!replies)
+      throw new Error(
+        "conversation-unverified: X reply evidence has not loaded.",
+      );
+    return replies;
   }
 
   function composerRoot(editor) {
@@ -838,11 +858,13 @@
     ];
   }
 
-  function firstReplyGate(editor, root, text, paidUrl) {
+  function firstReplyGate(editor, root, text, paidUrl, linkPolicy) {
     if (
-      !/^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/.test(
-        String(paidUrl || ""),
-      ) ||
+      !(linkPolicy === "approved"
+        ? /^https:\/\/[^\s]+$/.test(String(paidUrl || ""))
+        : /^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/.test(
+            String(paidUrl || ""),
+          )) ||
       !replyHasLink(text, paidUrl)
     )
       throw new Error("mismatch: the reply does not carry the episode link.");
@@ -874,8 +896,10 @@
   async function prepareFirstReply({
     statusId,
     ownerHandle,
+    ownerId,
     text,
     paidUrl,
+    linkPolicy,
     timing,
   }) {
     const limits = firstReplyTiming(timing);
@@ -883,11 +907,13 @@
     if (!expected) throw new Error("mismatch: the reply text is missing.");
     const main = ownerTeaser({ statusId, ownerHandle });
     await waitFor(
-      () => signedInHandle(),
+      () =>
+        signedInHandle() &&
+        (!ownerId || globalThis.CreatorXCollectorRelay?.ownerId()),
       "The signed-in X account",
       limits.elementWaitMs,
     ).catch(() => {});
-    requireOwnerAccount(ownerHandle);
+    requireOwnerAccount(ownerHandle, ownerId);
     await waitFor(
       () => ownerArticles(main).length > 0,
       "The teaser post",
@@ -935,8 +961,8 @@
         ).catch(() => false);
         if (appeared) await removeCard();
         await pause(limits.settleMs);
-        firstReplyGate(editor, root, expected, paidUrl);
-        requireOwnerAccount(ownerHandle);
+        firstReplyGate(editor, root, expected, paidUrl, linkPolicy);
+        requireOwnerAccount(ownerHandle, ownerId);
         one(REPLY_POST, "The X Reply button", enabled);
         return {
           status: "ready",
@@ -960,8 +986,10 @@
   async function submitFirstReply({
     statusId,
     ownerHandle,
+    ownerId,
     text,
     paidUrl,
+    linkPolicy,
     timing,
   }) {
     const limits = firstReplyTiming(timing);
@@ -974,11 +1002,14 @@
     const editor = one(MAIN_COMPOSER, "The X reply composer");
     const root = composerRoot(editor);
     // No await between the final gate and the click.
-    requireOwnerAccount(ownerHandle);
-    firstReplyGate(editor, root, expected, paidUrl);
+    requireOwnerAccount(ownerHandle, ownerId);
+    firstReplyGate(editor, root, expected, paidUrl, linkPolicy);
     one(REPLY_POST, "The X Reply button", enabled).click();
     const reply = await waitFor(
-      () => replyFor(main),
+      () => {
+        const reply = replyFor(main, true);
+        return reply?.text === expected ? reply : null;
+      },
       "The posted X reply",
       limits.confirmWaitMs,
     ).catch((error) => {
@@ -1002,5 +1033,33 @@
     mainIdentity,
     prepareFirstReply,
     submitFirstReply,
+    async captureFirstReply({ statusId, ownerHandle, ownerId, text, timing }) {
+      const main = ownerTeaser({ statusId, ownerHandle });
+      const limits = firstReplyTiming(timing);
+      await waitFor(
+        () => {
+          try {
+            return ownerRepliesAfter(main).some((row) => row.text === text);
+          } catch {
+            return false;
+          }
+        },
+        "The existing owner reply",
+        limits.confirmWaitMs,
+      );
+      requireOwnerAccount(ownerHandle, ownerId);
+      const matches = ownerRepliesAfter(main).filter(
+        (row) => row.text === text,
+      );
+      if (matches.length !== 1)
+        throw new Error(
+          "unconfirmed: no unique matching owner reply was observed.",
+        );
+      return {
+        resultId: main.resultId,
+        replyId: matches[0].resultId,
+        replyUrl: matches[0].resultUrl,
+      };
+    },
   });
 })();

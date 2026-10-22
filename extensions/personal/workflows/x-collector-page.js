@@ -133,6 +133,13 @@
         },
       });
     }
+    if (operation === "TweetDetail" && detailResult)
+      announce({
+        kind: "conversation",
+        ownerId,
+        statusId: detailResult.statusId,
+        complete: contract.conversationComplete(payload, detailResult.statusId),
+      });
     return result;
   }
 
@@ -184,14 +191,74 @@
   }
 
   const nativeFetch = globalThis.fetch;
+  function observePublicationRequest(operation, body) {
+    if (
+      !["CreateTweet", "CreateScheduledTweet"].includes(operation) ||
+      typeof body !== "string" ||
+      body.length > 200_000
+    )
+      return;
+    try {
+      const variables = JSON.parse(body).variables;
+      const scheduled = operation === "CreateScheduledTweet";
+      const request = scheduled ? variables?.post_tweet_request : variables;
+      const text = scheduled ? request?.status : request?.tweet_text;
+      if (
+        typeof text !== "string" ||
+        request.reply ||
+        request.in_reply_to_status_id
+      )
+        return;
+      const mediaIds = scheduled
+        ? request.media_ids
+        : request.media?.media_entities?.map((item) => item.media_id);
+      if (
+        !Array.isArray(mediaIds) ||
+        !mediaIds.length ||
+        mediaIds.length > 4 ||
+        !mediaIds.every((id) => typeof id === "string" && /^\d{1,25}$/.test(id))
+      )
+        return;
+      const scheduledUtc =
+        scheduled && Number.isSafeInteger(variables.execute_at)
+          ? new Date(variables.execute_at * 1000).toISOString()
+          : null;
+      if (scheduled && !scheduledUtc) return;
+      announce({
+        kind: "publication-attempt",
+        attempt: { accountId: currentOwnerId(), text, mediaIds, scheduledUtc },
+      });
+    } catch {
+      /* Observation never changes X's request. */
+    }
+  }
   if (typeof nativeFetch === "function") {
     globalThis.fetch = function creatorObservedFetch(...args) {
+      let requestCopy = null;
+      try {
+        const input = args[0];
+        const operation = watchedOperation(input?.url || "");
+        if (
+          ["CreateTweet", "CreateScheduledTweet"].includes(operation) &&
+          typeof input?.clone === "function" &&
+          args[1]?.body === undefined
+        )
+          requestCopy = input.clone();
+      } catch {
+        /* An unreadable request is not publication evidence. */
+      }
       const pending = Reflect.apply(nativeFetch, this, args);
       try {
         const input = args[0];
         const operation = watchedOperation(
           typeof input === "string" ? input : input?.url || String(input || ""),
         );
+        observePublicationRequest(operation, args[1]?.body);
+        if (requestCopy)
+          void requestCopy
+            .text()
+            .then((body) => observePublicationRequest(operation, body))
+            .catch(() => {});
         if (operation && pending && typeof pending.then === "function") {
           pending.then(
             (response) => {
@@ -226,7 +293,13 @@
   const XhrPrototype = globalThis.XMLHttpRequest?.prototype;
   const nativeOpen = XhrPrototype?.open;
   const nativeSetRequestHeader = XhrPrototype?.setRequestHeader;
+  const nativeSend = XhrPrototype?.send;
   if (XhrPrototype && typeof nativeOpen === "function") {
+    if (typeof nativeSend === "function")
+      XhrPrototype.send = function creatorObservedSend(...args) {
+        observePublicationRequest(xhrOperations.get(this)?.operation, args[0]);
+        return Reflect.apply(nativeSend, this, args);
+      };
     const readXhr = (xhr, entry) => {
       const operation = entry.operation;
       if (xhr.status < 200 || xhr.status >= 300) {

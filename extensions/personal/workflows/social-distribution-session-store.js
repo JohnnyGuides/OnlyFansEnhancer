@@ -156,6 +156,66 @@
     }
     const output = {};
     if (Object.hasOwn(value, "stage")) output.stage = stage(value.stage);
+    if (Object.hasOwn(value, "resolvedPaidUrl")) {
+      const url = new URL(value.resolvedPaidUrl);
+      if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.hash ||
+        url.port
+      )
+        throw new Error("Invalid saved paid upload result.");
+      output.resolvedPaidUrl = url.href;
+    }
+    for (const field of ["replyCheckAttempts", "replyCheckAfter"]) {
+      if (Object.hasOwn(value, field)) {
+        if (!Number.isSafeInteger(value[field]) || value[field] < 0)
+          throw new Error("Invalid X reply recovery checkpoint.");
+        output[field] = value[field];
+      }
+    }
+    if (Object.hasOwn(value, "replyOutcome")) {
+      if (
+        ![
+          "posted",
+          "manual",
+          "existing-reply",
+          "expired",
+          "unconfirmed",
+          "failed",
+        ].includes(value.replyOutcome)
+      )
+        throw new Error("Invalid X reply outcome.");
+      output.replyOutcome = value.replyOutcome;
+    }
+    if (Object.hasOwn(value, "publicationMediaIds")) {
+      if (
+        !Array.isArray(value.publicationMediaIds) ||
+        !value.publicationMediaIds.length ||
+        value.publicationMediaIds.length > 4 ||
+        !value.publicationMediaIds.every(
+          (id) => typeof id === "string" && /^\d{1,25}$/.test(id),
+        )
+      )
+        throw new Error("Invalid X publication media identity.");
+      output.publicationMediaIds = [
+        ...new Set(value.publicationMediaIds),
+      ].sort();
+    }
+    if (Object.hasOwn(value, "publicationContext")) {
+      const context = value.publicationContext;
+      if (
+        !context ||
+        Object.keys(context).length !== 4 ||
+        !/^[0-9]{1,25}$/.test(context.accountId || "") ||
+        !/^[A-Za-z0-9_]{1,15}$/.test(context.handle || "") ||
+        !/^[0-9]{1,25}$/.test(context.latestStatusId || "") ||
+        !Number.isFinite(Date.parse(context.preparedUtc))
+      )
+        throw new Error("Invalid X publication context.");
+      output.publicationContext = { ...context };
+    }
     if (Object.hasOwn(value, "googleSynced"))
       output.googleSynced = value.googleSynced === true;
     if (Object.hasOwn(value, "submitAttempted")) {
@@ -267,6 +327,38 @@
 
   function mergeJob(jobId, previous, patch) {
     const output = { ...previous, ...patch };
+    if (
+      output.resolvedPaidUrl &&
+      (jobId !== "x" ||
+        (previous.resolvedPaidUrl &&
+          previous.resolvedPaidUrl !== output.resolvedPaidUrl))
+    )
+      throw new Error("The saved paid upload result cannot change.");
+    if (
+      jobId !== "x" &&
+      (output.replyOutcome ||
+        output.replyCheckAttempts ||
+        output.replyCheckAfter)
+    )
+      throw new Error("Only X has reply recovery checkpoints.");
+    if (previous.replyCheckAttempts > output.replyCheckAttempts)
+      output.replyCheckAttempts = previous.replyCheckAttempts;
+    if (
+      output.publicationMediaIds &&
+      (jobId !== "x" ||
+        (previous.publicationMediaIds &&
+          JSON.stringify(previous.publicationMediaIds) !==
+            JSON.stringify(output.publicationMediaIds)))
+    )
+      throw new Error("The attempted X media identity cannot change.");
+    if (
+      output.publicationContext &&
+      (jobId !== "x" ||
+        (previous.publicationContext &&
+          JSON.stringify(previous.publicationContext) !==
+            JSON.stringify(output.publicationContext)))
+    )
+      throw new Error("The pinned X publication context cannot change.");
     output.stage = mergeStage(previous.stage, patch.stage);
     if (previous.submitAttempted === true) output.submitAttempted = true;
     if (previous.scheduleAttempted === true) output.scheduleAttempted = true;

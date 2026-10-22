@@ -22,11 +22,34 @@ public sealed class XTeaserControllerTests
     [DataRow("getTeaserClipChunk")]
     [DataRow("openTeaserEpisodeFolder")]
     [DataRow("resolveScheduledTeaserResult")]
+    [DataRow("getTeaserPublicationContext")]
+    [DataRow("resolveTeaserPublication")]
     public void TeaserOperationsAreAllowedAgentOperations(string operation)
     {
         AgentRequest request = AgentRequest.Parse(
             $$$"""{"protocolVersion":1,"requestId":"{{{Guid.NewGuid()}}}","operation":"{{{operation}}}","payload":{}}""");
         Assert.AreEqual(operation, request.Operation);
+    }
+
+    [TestMethod]
+    public async Task PublicationOperationsPinKnownOwnerAndValidateExactTransportShape()
+    {
+        using TestDirectory temp = new();
+        using var store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
+        Assert.AreEqual("x-owner-not-known", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("getTeaserPublicationContext", JsonDocument.Parse("{}").RootElement))).Code);
+        store.RecordXObservations(new(new("123", "Owner_Handle"), [new("101", "123", "Owner_Handle", Now.ToString("O"),
+            "Benign teaser", null, "101", false, [new("video", "7_77", 1000, null)], [], null, "network")]), Now);
+        var context = (XTeaserPublicationContext)await controller.HandleAsync("getTeaserPublicationContext", JsonDocument.Parse("{}").RootElement);
+        Assert.AreEqual("123", context.AccountId);
+        Assert.AreEqual("101", context.LatestStatusId);
+        string json = JsonSerializer.Serialize(new { context, captionSha256 = new string('a', 64), scheduledUtc = (string?)null,
+            episodeKey = "", mediaIds = new[] { "77" } }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        object result = await controller.HandleAsync("resolveTeaserPublication", JsonDocument.Parse(json).RootElement);
+        Assert.IsFalse(JsonDocument.Parse(JsonSerializer.Serialize(result)).RootElement.GetProperty("matched").GetBoolean());
+        Assert.AreEqual("invalid-teaser-request", (await Assert.ThrowsExceptionAsync<GoogleCatalogueControllerException>(() =>
+            controller.HandleAsync("resolveTeaserPublication", JsonDocument.Parse("{}").RootElement))).Code);
     }
 
     [TestMethod]
@@ -138,7 +161,7 @@ public sealed class XTeaserControllerTests
         }
         using XTeaserController controller = new(store, new WebMessageDispatcher(_ => ""), () => DesktopSettings.Empty, () => Now);
         Assert.IsTrue(XTeaserController.Operations.SetEquals(["getTeaserOverview", "undoTeaserClipMove", "getTeaserReplyQueue",
-            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot", "requestXScan", "getXScanActivity",
+            "getTeaserPlan", "setTeaserPlanSlot", "clearTeaserPlanSlot", "requestXScan", "getXScanActivity", "getTeaserPublicationContext", "resolveTeaserPublication",
             "getTeaserClips", "getTeaserClipChunk", "getTeaserClipPreview", "openTeaserEpisodeFolder", "resolveScheduledTeaserResult",
             "getTeaserEdit", "openTeaserProject", "createTeaserProject", "chooseTeaserProject", "checkTeaserRender"]));
 

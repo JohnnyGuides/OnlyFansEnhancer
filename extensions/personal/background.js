@@ -155,6 +155,8 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
       "chooseTeaserProject",
       "checkTeaserRender",
       "resolveScheduledTeaserResult",
+      "getTeaserPublicationContext",
+      "resolveTeaserPublication",
       "openTeaserEpisodeFolder",
       "undoTeaserClipMove",
       "getTeaserPlan",
@@ -213,7 +215,7 @@ const xCollectorForwarder = globalThis.CreatorXCollectorForwarder?.create({
     chrome.storage.session.set({ [X_COLLECTOR_DIAGNOSTICS_KEY]: diagnostics }),
 });
 
-function acceptXCollectorMessage(message, sender) {
+async function acceptXCollectorMessage(message, sender) {
   let origin;
   try {
     origin = new URL(String(sender?.url || "")).origin;
@@ -223,6 +225,17 @@ function acceptXCollectorMessage(message, sender) {
   if (!sender?.tab?.id || sender.frameId !== 0 || origin !== "https://x.com")
     throw new Error("X observations are accepted only from an x.com page.");
   if (!xCollectorForwarder) throw new Error("X collector is unavailable.");
+  if (message.publicationAttempt || message.batch) {
+    try {
+      await getCreatorSocialRuntime().observePublication(message, sender);
+    } catch (error) {
+      console.warn(
+        "X publication evidence needs review.",
+        String(error?.message || error),
+      );
+    }
+  }
+  if (message.publicationAttempt) return { recorded: true };
   const accepted = xCollectorForwarder.accept(message);
   if (Object.hasOwn(message || {}, "scheduled"))
     xScanner().noteScheduled(sender.tab.id, accepted.scheduled);
@@ -3931,11 +3944,78 @@ function getCreatorSocialRuntime() {
     resolvePaidLink: resolveCreatorPaidUploadLink,
     resolveScheduledResult: (payload) =>
       sendDesktopRequest("resolveScheduledTeaserResult", payload),
+    getPublicationContext: () =>
+      sendDesktopRequest("getTeaserPublicationContext", {}),
+    resolvePublication: (payload) =>
+      sendDesktopRequest("resolveTeaserPublication", payload),
+    refreshPublications: refreshTeaserPublications,
   });
   return creatorSocialRuntime;
 }
 
 const SOCIAL_FOLLOW_UP_ALARM = "creator-social-follow-up";
+let socialFollowUpRunning = false;
+let publicationRefresh = null;
+async function refreshTeaserPublications(owner) {
+  if (publicationRefresh) return publicationRefresh;
+  const key = "creatorTeaserPublicationRefreshV1";
+  publicationRefresh = (async () => {
+    const previous = (await chrome.storage.local.get(key))[key];
+    const runner = globalThis.CreatorXCollectorScanner.createChromeRunner({
+      chrome,
+    });
+    if (previous?.tabId)
+      await runner.closeStale(previous.tabId, previous.marker).catch(() => {});
+    if (previous?.accountId === owner.accountId && previous.nextAt > Date.now())
+      return;
+    const marker = crypto.randomUUID().replaceAll("-", "");
+    const checks =
+      previous?.accountId === owner.accountId ? (previous.checks || 0) + 1 : 1;
+    const state = {
+      accountId: owner.accountId,
+      checks,
+      nextAt: Date.now() + Math.min(15, 2 ** Math.min(checks - 1, 4)) * 60_000,
+      marker,
+    };
+    await chrome.storage.local.set({ [key]: state });
+    let handle;
+    try {
+      handle = await runner.open(
+        owner.handle,
+        async (tabId) => {
+          await chrome.storage.local.set({ [key]: { ...state, tabId } });
+        },
+        marker,
+      );
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const status = await runner.command(handle, "status");
+        if (status.ownerId && status.ownerId !== owner.accountId)
+          throw new Error("X is signed in to another account.");
+        if (
+          ["signed-out", "http-401", "http-403", "http-429"].includes(
+            status.reason,
+          )
+        ) {
+          await chrome.storage.local.set({
+            [key]: { ...state, nextAt: Date.now() + 15 * 60_000 },
+          });
+          throw new Error(`X publication check: ${status.reason}`);
+        }
+        if (status.ok && status.ready && status.ownerId === owner.accountId) {
+          await xCollectorForwarder.flush();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      throw new Error("X publication evidence has not loaded yet.");
+    } finally {
+      if (handle) await runner.close(handle).catch(() => {});
+    }
+  })().finally(() => {
+    publicationRefresh = null;
+  });
+  return publicationRefresh;
+}
 async function ensureSocialFollowUpAlarm() {
   if (!chrome.alarms || (await chrome.alarms.get(SOCIAL_FOLLOW_UP_ALARM)))
     return;
@@ -3944,21 +4024,23 @@ async function ensureSocialFollowUpAlarm() {
 void ensureSocialFollowUpAlarm();
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name !== SOCIAL_FOLLOW_UP_ALARM) return;
+  if (socialFollowUpRunning) return;
+  socialFollowUpRunning = true;
   void (async () => {
     for (const session of await CREATOR_SOCIAL_SESSION_STORE.list()) {
       const job = session.jobs?.x;
       if (
-        !session.plan?.xOptions ||
+        !session.plan?.targets?.x ||
         !job ||
-        ["sheet-complete", "result-captured", "failed", "blocked"].includes(
-          job.stage,
-        )
+        ["sheet-complete", "failed", "blocked"].includes(job.stage)
       )
         continue;
       // Only runs already armed by Upload can survive closing the modal.
       if (
         !job.scheduleAttempted &&
         !job.replyDueAt &&
+        !job.submitAttempted &&
+        job.stage !== "result-captured" &&
         !(session.plan.mode === "manual" && job.stage === "prepared")
       )
         continue;
@@ -3968,7 +4050,9 @@ chrome.alarms?.onAlarm.addListener((alarm) => {
         /* Preserve armed checkpoints for visible recovery. */
       }
     }
-  })();
+  })().finally(() => {
+    socialFollowUpRunning = false;
+  });
 });
 
 function creatorUploadHandlePortMessage(port, message) {
@@ -6200,17 +6284,29 @@ function handleExtensionMessage(message, sender, sendResponse) {
         assertExtensionPage(sender);
         return { xFirstReply: await xFirstReply().status() };
       case "GET_X_REPLY_POLICY":
-        if (sender?.desktopUploadRuntime !== true || sender?.id !== chrome.runtime.id)
+        if (
+          sender?.desktopUploadRuntime !== true ||
+          sender?.id !== chrome.runtime.id
+        )
           assertExtensionPage(sender);
         return {
-          replyPolicy: await globalThis.CreatorXReplyPolicy.forStorage(chrome.storage.local).view(),
+          replyPolicy: await globalThis.CreatorXReplyPolicy.forStorage(
+            chrome.storage.local,
+          ).view(),
         };
       case "SET_X_REPLY_POLICY":
-        if (sender?.desktopUploadRuntime !== true || sender?.id !== chrome.runtime.id)
+        if (
+          sender?.desktopUploadRuntime !== true ||
+          sender?.id !== chrome.runtime.id
+        )
           assertExtensionPage(sender);
-        await globalThis.CreatorXReplyPolicy.forStorage(chrome.storage.local).save(message.replyPolicy);
+        await globalThis.CreatorXReplyPolicy.forStorage(
+          chrome.storage.local,
+        ).save(message.replyPolicy);
         return {
-          replyPolicy: await globalThis.CreatorXReplyPolicy.forStorage(chrome.storage.local).view(),
+          replyPolicy: await globalThis.CreatorXReplyPolicy.forStorage(
+            chrome.storage.local,
+          ).view(),
         };
       case "SET_X_FIRST_REPLY_ENABLED":
         assertExtensionPage(sender);

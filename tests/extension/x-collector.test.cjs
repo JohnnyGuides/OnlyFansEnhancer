@@ -24,6 +24,43 @@ function loadContract(extra = {}) {
   return context.CreatorXCollectorContract;
 }
 
+test("CreateTweet is observed passively and caption matching removes only media URL and decodes HTML once", () => {
+  const contract = loadContract();
+  assert.equal(contract.operationKind("CreateTweet"), "tweets");
+  const post = tweet("555", {
+    full_text: "A &amp; B &lt;3 https://t.co/user https://t.co/media",
+    entities: { urls: [], media: [{ url: "https://t.co/media" }] },
+  });
+  const result = contract.extractOwnerTweets(
+    { data: { create_tweet: { tweet_results: { result: post } } } },
+    OWNER_ID,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.tweets[0].text, "A & B <3 https://t.co/user");
+  post.legacy.full_text = "&amp;lt;3";
+  assert.equal(
+    contract.extractOwnerTweets(
+      { data: { create_tweet: { tweet_results: { result: post } } } },
+      OWNER_ID,
+    ).tweets[0].text,
+    "&lt;3",
+  );
+  post.legacy.full_text = "Full video\n-> https://t.co/paid";
+  post.legacy.entities.urls = [
+    {
+      url: "https://t.co/paid",
+      expanded_url: "https://onlyfans.com/123/example",
+    },
+  ];
+  assert.equal(
+    contract.extractOwnerTweets(
+      { data: { create_tweet: { tweet_results: { result: post } } } },
+      OWNER_ID,
+    ).tweets[0].text,
+    "Full video\n-> https://onlyfans.com/123/example",
+  );
+});
+
 // Synthetic fixtures shaped like X GraphQL; benign text and fake ids only.
 function user(id, handle, { modern = true } = {}) {
   return {
@@ -653,6 +690,98 @@ function fakeDocument() {
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test("publication attempts observe fetch(Request), XHR, and scheduled requests without observing reply attempts", async () => {
+  const document = fakeDocument();
+  const sent = [];
+  relayWorld({ document, sent });
+  class Xhr extends EventTarget {
+    open() {}
+    send(body) {
+      this.body = body;
+    }
+  }
+  const response = {
+    ok: true,
+    clone: () => ({ json: async () => ({ data: {} }) }),
+  };
+  const page = pageWorld({
+    document,
+    fetchImpl: async (input) => {
+      if (input instanceof Request) await input.text();
+      return response;
+    },
+    XMLHttpRequest: Xhr,
+  });
+  const url = "https://x.com/i/api/graphql/fixture/CreateTweet";
+  const body = JSON.stringify({
+    variables: {
+      tweet_text: "Multiline\ncaption",
+      media: { media_entities: [{ media_id: "77" }] },
+    },
+  });
+  const request = new Request(url, { method: "POST", body });
+  await page.fetch(request);
+  assert.equal(
+    request.bodyUsed,
+    true,
+    "The native fetch consumes the original request.",
+  );
+  const xhr = new page.XMLHttpRequest();
+  xhr.open("POST", url);
+  xhr.send(body);
+  assert.equal(xhr.body, body, "X receives its original body untouched.");
+  await page.fetch(url, {
+    body: JSON.stringify({
+      variables: {
+        tweet_text: "reply",
+        reply: { in_reply_to_tweet_id: "101" },
+        media: { media_entities: [{ media_id: "77" }] },
+      },
+    }),
+  });
+  await page.fetch(url.replace("CreateTweet", "CreateScheduledTweet"), {
+    body: JSON.stringify({
+      variables: {
+        post_tweet_request: { status: "Scheduled caption", media_ids: ["88"] },
+        execute_at: 1_800_000_000,
+      },
+    }),
+  });
+  await flush();
+  const attempts = sent
+    .filter((message) => message.publicationAttempt)
+    .map((message) => message.publicationAttempt);
+  assert.equal(attempts.length, 3);
+  assert.equal(
+    attempts.filter((attempt) => attempt.text === "Multiline\ncaption").length,
+    2,
+  );
+  assert.equal(
+    attempts.find((attempt) => attempt.text === "Scheduled caption")
+      .scheduledUtc,
+    new Date(1_800_000_000_000).toISOString(),
+  );
+});
+
+test("conversation completeness requires a full detail response, and counts direct replies from every author", () => {
+  const contract = loadContract();
+  const main = tweet("101", { reply_count: 1 });
+  const reply = tweet("102", {
+    authorId: OTHER_ID,
+    handle: "Someone_Else",
+    in_reply_to_status_id_str: "101",
+  });
+  assert.equal(contract.conversationComplete(userTweets([main]), "101"), false);
+  assert.equal(
+    contract.conversationComplete(userTweets([main, reply]), "101"),
+    true,
+  );
+  assert.equal(
+    contract.conversationComplete(userTweets([main, tweet("999")]), "101"),
+    false,
+  );
+});
 
 test("main-world fetch wrapper returns X's own response untouched and relays owner posts", async () => {
   const document = fakeDocument();

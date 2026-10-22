@@ -40,7 +40,8 @@ public sealed record AgentRequest(int ProtocolVersion, Guid RequestId, string Op
             or "recordXScheduledPosts" or "getXScanPlan" or "recordXScanResult" or "recordXScanActivity"
             or "getTeaserOverview" or "undoTeaserClipMove" or "getTeaserReplyQueue" or "getTeaserPlan" or "setTeaserPlanSlot" or "clearTeaserPlanSlot"
             or "getTeaserEdit" or "openTeaserProject" or "createTeaserProject" or "chooseTeaserProject" or "checkTeaserRender"
-            or "getTeaserClips" or "getTeaserClipChunk" or "openTeaserEpisodeFolder" or "resolveScheduledTeaserResult"))
+            or "getTeaserClips" or "getTeaserClipChunk" or "openTeaserEpisodeFolder" or "resolveScheduledTeaserResult"
+            or "getTeaserPublicationContext" or "resolveTeaserPublication"))
             throw new AgentProtocolException(
                 "unsupported-operation",
                 "The desktop request uses an unsupported operation."

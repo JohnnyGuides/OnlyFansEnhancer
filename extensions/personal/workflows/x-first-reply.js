@@ -467,7 +467,9 @@
         ? adapter?.prepareFirstReply
         : args.action === "submit"
           ? adapter?.submitFirstReply
-          : null;
+          : args.action === "capture"
+            ? adapter?.captureFirstReply
+            : null;
     if (!action)
       return { error: "not-owner-teaser: the X adapter is unavailable." };
     return Promise.resolve(action(args)).then(
@@ -519,8 +521,10 @@
             action,
             statusId: item.statusId,
             ownerHandle: item.ownerHandle,
+            ownerId: item.ownerId,
             text: item.text,
             paidUrl: item.paidUrl,
+            linkPolicy: item.linkPolicy,
             timing,
           },
         ],
@@ -540,7 +544,7 @@
           url: "about:blank",
           active: false,
         });
-        const handle = { tabId: tab.id };
+        const handle = { tabId: tab.id, statusUrl: item.statusUrl };
         try {
           await onTab(tab.id);
           await waitForBlank(tab.id);
@@ -558,14 +562,25 @@
       },
       prepare: (handle, item) => run(handle, item, "prepare"),
       submit: (handle, item) => run(handle, item, "submit"),
-      close: (handle) => chrome.tabs.remove(handle.tabId),
+      capture: (handle, item) => run(handle, item, "capture"),
+      async close(handle) {
+        const tab = await chrome.tabs.get(handle.tabId).catch(() => null);
+        if (
+          tab &&
+          !tab.active &&
+          tabStatusUrl(tab.url).toLowerCase() ===
+            String(handle.statusUrl).toLowerCase()
+        )
+          await chrome.tabs.remove(handle.tabId);
+      },
       // After a worker restart, close the tab a run left behind only while it
       // still shows that run's status or is still a blank background tab.
       async closeStale(tabId, statusUrl) {
         const tab = await chrome.tabs.get(tabId);
         const url = tabStatusUrl(tab.url || tab.pendingUrl);
         if (
-          url.toLowerCase() === String(statusUrl || "").toLowerCase() ||
+          (!tab.active &&
+            url.toLowerCase() === String(statusUrl || "").toLowerCase()) ||
           (tab.url === "about:blank" && !tab.active)
         )
           await chrome.tabs.remove(tabId);

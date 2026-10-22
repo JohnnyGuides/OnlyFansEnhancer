@@ -118,7 +118,9 @@ function loadRuntime(options = {}) {
       async executeScript(details) {
         if (details.files) {
           injections.push([...details.files]);
-          return [{ frameId: 0 }];
+          return [
+            { frameId: 0, documentId: `document-${details.target.tabId}` },
+          ];
         }
         if (details.func.name === "installCreatorSocialFileBridge") {
           actions.push("bridge");
@@ -146,7 +148,7 @@ function loadRuntime(options = {}) {
         xInputs.push(structuredClone(input));
         const tab = tabs.get(details.target.tabId);
         if (input.action === "prepare") {
-          editorText = input.caption;
+          editorText = options.composerText ?? input.caption;
           return [
             {
               frameId: 0,
@@ -264,6 +266,7 @@ function loadRuntime(options = {}) {
     "workflows/social-distribution-session-store.js",
     "workflows/social-distribution-orchestrator.js",
     "workflows/x-reply-policy.js",
+    "workflows/x-collector-contract.js",
     "workflows/social-chrome-runtime.js",
   ]) {
     const sourcePath = path.join(repositoryRoot, relative);
@@ -303,6 +306,10 @@ function loadRuntime(options = {}) {
       },
       now: () => clock,
       resolveScheduledResult: options.resolveScheduledResult,
+      getPublicationContext: options.getPublicationContext,
+      resolvePublication: options.resolvePublication,
+      refreshPublications: options.refreshPublications,
+      replyRunner: options.replyRunner,
     });
   }
   const runtime = createRuntime();
@@ -338,6 +345,482 @@ function loadRuntime(options = {}) {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+function publicationFixture(overrides = {}) {
+  const calls = [];
+  let found = null;
+  const preparedUtc = new Date(1_788_280_100_000).toISOString();
+  const context = {
+    accountId: "123",
+    handle: "RecordedCreator",
+    preparedUtc,
+    latestStatusId: "100",
+  };
+  const main = {
+    matched: true,
+    resultId: "9000000000000000001",
+    resultUrl: "https://x.com/RecordedCreator/status/9000000000000000001",
+    postedUtc: new Date(Date.parse(preparedUtc) + 120_000).toISOString(),
+  };
+  const replyRunner = {
+    async open(item) {
+      calls.push(["open", plain(item)]);
+      return { tabId: 800 };
+    },
+    async prepare() {
+      calls.push(["prepare"]);
+      return overrides.prepare ? overrides.prepare() : { status: "ready" };
+    },
+    async submit() {
+      calls.push(["submit"]);
+      if (overrides.submit) return overrides.submit();
+      return {
+        replyId: "9000000000000000002",
+        replyUrl: "https://x.com/RecordedCreator/status/9000000000000000002",
+      };
+    },
+    async capture() {
+      calls.push(["capture"]);
+      if (overrides.capture) return overrides.capture();
+      throw new Error("unconfirmed");
+    },
+    async close() {
+      calls.push(["close"]);
+    },
+  };
+  const fixture = loadRuntime({
+    getPublicationContext: async () => context,
+    resolvePublication: async () => found,
+    refreshPublications: async () => {
+      calls.push(["refresh"]);
+    },
+    replyRunner,
+    composerText: overrides.composerText,
+  });
+  const input = {
+    ...plan("publication-independent-0001"),
+    xOptions: {
+      sensitive: true,
+      scheduledUtc: "",
+      timeZone: "Europe/Zurich",
+      replyDelayMinutes: 15,
+      autoReply: true,
+    },
+  };
+  return {
+    ...fixture,
+    vm: fixture.context,
+    calls,
+    main,
+    context,
+    input,
+    publish(value = main) {
+      found = value;
+    },
+    async armMedia() {
+      await fixture.runtime.observePublication(
+        {
+          publicationAttempt: {
+            accountId: "123",
+            text: "Caption",
+            mediaIds: ["77"],
+          },
+        },
+        { tab: { id: 10 }, documentId: "document-10" },
+      );
+    },
+  };
+}
+
+test("manual publication is found without status navigation after complete Chrome session loss, and delay uses publication time", async () => {
+  const f = publicationFixture();
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  await f.armMedia();
+  assert.deepEqual(
+    plain((await f.store.load(f.input.id)).jobs.x.publicationContext),
+    f.context,
+  );
+  // A full browser restart loses session storage and all tab/document state.
+  f.tabs.clear();
+  for (const key of Object.keys(f.sessionValues)) delete f.sessionValues[key];
+  f.setNow(Date.parse(f.main.postedUtc) + 5 * 60_000);
+  await f.restart().resume(f.input.id);
+  assert.equal(
+    f.calls.some((row) => row[0] === "refresh"),
+    true,
+  );
+  assert.equal(
+    f.calls.some((row) => row[0] === "submit"),
+    false,
+  );
+  f.publish();
+  await f.restart().resume(f.input.id);
+  const due = Date.parse(f.main.postedUtc) + 15 * 60_000;
+  assert.equal((await f.store.load(f.input.id)).jobs.x.replyDueAt, due);
+  f.setNow(due - 1);
+  await f.restart().resume(f.input.id);
+  assert.equal(
+    f.calls.some((row) => row[0] === "open"),
+    false,
+  );
+  f.setNow(due);
+  await f.restart().resume(f.input.id);
+  await f.restart().resume(f.input.id);
+  assert.equal(f.calls.filter((row) => row[0] === "submit").length, 1);
+  assert.equal((await f.store.load(f.input.id)).jobs.x.stage, "sheet-complete");
+  assert.equal(f.actions.includes("main-identity"), false);
+  assert.equal(
+    f.actions.includes("submit"),
+    false,
+    "User owns the main Post click.",
+  );
+});
+
+test("uncertain reply is capture-only after restart, including a lost successful response", async () => {
+  let delivered = false;
+  const f = publicationFixture({
+    submit() {
+      delivered = true;
+      throw new Error("lost acknowledgement");
+    },
+    capture() {
+      assert.equal(delivered, true);
+      return {
+        replyId: "9000000000000000002",
+        replyUrl: "https://x.com/RecordedCreator/status/9000000000000000002",
+      };
+    },
+  });
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  await f.armMedia();
+  f.publish();
+  f.setNow(Date.parse(f.main.postedUtc) + 16 * 60_000);
+  await f.runtime.resume(f.input.id);
+  assert.equal(
+    (await f.store.load(f.input.id)).jobs.x.replySubmitAttempted,
+    true,
+  );
+  f.setNow(Date.parse(f.main.postedUtc) + 21 * 60_000);
+  f.tabs.clear();
+  Object.keys(f.sessionValues).forEach((key) => delete f.sessionValues[key]);
+  await f.restart().resume(f.input.id);
+  assert.equal(f.calls.filter((row) => row[0] === "submit").length, 1);
+  assert.equal(f.calls.filter((row) => row[0] === "capture").length, 1);
+  assert.equal((await f.store.load(f.input.id)).jobs.x.stage, "sheet-complete");
+});
+
+test("a manual owner reply suppresses automation; wrong account and unrelated status evidence never trigger a click", async () => {
+  const existing = publicationFixture({
+    prepare: () => ({ status: "existing-reply", replyId: "200" }),
+  });
+  await existing.runtime.prepare({ plan: existing.input, caption: "Caption" });
+  await existing.armMedia();
+  existing.publish();
+  existing.setNow(Date.parse(existing.main.postedUtc) + 16 * 60_000);
+  await existing.runtime.resume(existing.input.id);
+  assert.equal(
+    existing.calls.some((row) => row[0] === "submit"),
+    false,
+  );
+  assert.equal(
+    (await existing.store.load(existing.input.id)).jobs.x.stage,
+    "sheet-complete",
+  );
+  const wrong = publicationFixture({
+    prepare() {
+      throw new Error("wrong-account: signed in as someone else");
+    },
+  });
+  await wrong.runtime.prepare({ plan: wrong.input, caption: "Caption" });
+  await wrong.armMedia();
+  wrong.publish({
+    ...wrong.main,
+    resultUrl: wrong.main.resultUrl.replace("RecordedCreator", "SomeoneElse"),
+  });
+  wrong.setNow(Date.parse(wrong.main.postedUtc) + 16 * 60_000);
+  await wrong.runtime.resume(wrong.input.id);
+  assert.equal(
+    wrong.calls.some((row) => row[0] === "open"),
+    false,
+  );
+  wrong.publish();
+  await wrong.runtime.resume(wrong.input.id);
+  assert.equal(
+    wrong.calls.some((row) => row[0] === "submit"),
+    false,
+  );
+  assert.match(
+    (await wrong.store.load(wrong.input.id)).jobs.x.error,
+    /wrong-account/,
+  );
+});
+
+test("two prepared runs with the same caption and media cannot silently claim one publication", async () => {
+  const f = publicationFixture();
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  await f.armMedia();
+  await f.runtime.prepare({
+    plan: { ...f.input, id: "publication-independent-0002" },
+    caption: "Caption",
+  });
+  await f.runtime.observePublication(
+    {
+      publicationAttempt: {
+        accountId: "123",
+        text: "Caption",
+        mediaIds: ["77"],
+      },
+    },
+    { tab: { id: 11 }, documentId: "document-11" },
+  );
+  f.publish();
+  f.setNow(Date.parse(f.main.postedUtc) + 16 * 60_000);
+  await f.runtime.resume(f.input.id);
+  assert.equal(
+    f.calls.some((row) => row[0] === "submit"),
+    false,
+  );
+  assert.match((await f.store.load(f.input.id)).jobs.x.error, /more than one/);
+});
+
+test("publication receipts require this run's document; recovery requires the actual uploaded media identity", async () => {
+  const f = publicationFixture();
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  const row = {
+    statusId: f.main.resultId,
+    authorId: "123",
+    authorHandle: "RecordedCreator",
+    createdAt: f.main.postedUtc,
+    text: "Caption",
+    inReplyToStatusId: null,
+    conversationId: f.main.resultId,
+    isRetweet: false,
+    media: [
+      { type: "video", mediaKey: "7_77", durationMs: 1000, posterUrl: null },
+    ],
+    urls: [],
+    metrics: null,
+    source: "network",
+  };
+  const message = {
+    operation: "CreateTweet",
+    batch: {
+      owner: { accountId: "123", handle: "RecordedCreator" },
+      observations: [row],
+    },
+  };
+  f.setNow(Date.parse(f.main.postedUtc));
+  await f.runtime.observePublication(message, {
+    tab: { id: 11 },
+    documentId: "different-document",
+  });
+  assert.equal(
+    (await f.store.load(f.input.id)).jobs.x.resultUrl,
+    undefined,
+    "Another tab's same caption is insufficient.",
+  );
+  await f.armMedia();
+  const wrongMedia = structuredClone(message);
+  wrongMedia.batch.observations[0].media[0].mediaKey = "7_88";
+  await f.runtime.observePublication(wrongMedia, {
+    tab: { id: 11 },
+    documentId: "different-document",
+  });
+  assert.equal((await f.store.load(f.input.id)).jobs.x.resultUrl, undefined);
+  f.tabs.clear();
+  Object.keys(f.sessionValues).forEach((key) => delete f.sessionValues[key]);
+  await f
+    .restart()
+    .observePublication(
+      { ...message, operation: "UserTweets" },
+      { tab: { id: 800 }, documentId: "profile-after-restart" },
+    );
+  assert.equal(
+    (await f.store.load(f.input.id)).jobs.x.resultUrl,
+    f.main.resultUrl,
+  );
+  assert.equal(
+    (
+      await f.vm.CreatorXReplyPolicy.forStorage(
+        f.vm.chrome.storage.local,
+      ).lookup(f.main.resultId)
+    ).owner,
+    "editor",
+  );
+  assert.equal(
+    f.calls.some((row) => row[0] === "submit"),
+    false,
+  );
+});
+
+test("a CreateTweet receipt on the prepared document persists without visiting any status URL", async () => {
+  const f = publicationFixture();
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  f.setNow(Date.parse(f.main.postedUtc));
+  const receipt = {
+    operation: "CreateTweet",
+    batch: {
+      owner: { accountId: "123", handle: "RecordedCreator" },
+      observations: [
+        {
+          statusId: f.main.resultId,
+          authorId: "123",
+          authorHandle: "RecordedCreator",
+          createdAt: f.main.postedUtc,
+          text: "Caption",
+          inReplyToStatusId: null,
+          conversationId: f.main.resultId,
+          isRetweet: false,
+          media: [
+            {
+              type: "video",
+              mediaKey: "7_77",
+              durationMs: 1000,
+              posterUrl: null,
+            },
+          ],
+          urls: [],
+          metrics: null,
+          source: "network",
+        },
+      ],
+    },
+  };
+  const sender = { tab: { id: 10 }, documentId: "document-10" };
+  await f.runtime.observePublication(receipt, sender);
+  assert.equal(
+    (await f.store.load(f.input.id)).jobs.x.resultUrl,
+    undefined,
+    "A response cannot bind before the request media is known.",
+  );
+  await f.armMedia();
+  const mismatched = structuredClone(receipt);
+  mismatched.batch.observations[0].media[0].mediaKey = "7_88";
+  await f.runtime.observePublication(mismatched, sender);
+  assert.equal(
+    (await f.store.load(f.input.id)).jobs.x.resultUrl,
+    undefined,
+    "Even the original document must return the requested media.",
+  );
+  await f.runtime.observePublication(receipt, sender);
+  assert.equal(
+    (await f.store.load(f.input.id)).jobs.x.resultUrl,
+    f.main.resultUrl,
+  );
+  f.tabs.clear();
+  Object.keys(f.sessionValues).forEach((key) => delete f.sessionValues[key]);
+  f.setNow(Date.parse(f.main.postedUtc) + 15 * 60_000);
+  await f.restart().resume(f.input.id);
+  assert.equal(f.calls.filter((row) => row[0] === "submit").length, 1);
+});
+
+test("network matching uses the authorized multiline caption rather than flattened composer text", async () => {
+  const f = publicationFixture({ composerText: "FirstSecond" });
+  const caption = "First\nSecond";
+  f.input.caption.sha256 = nodeCrypto
+    .createHash("sha256")
+    .update(caption)
+    .digest("hex");
+  await f.runtime.prepare({ plan: f.input, caption });
+  await f.runtime.observePublication(
+    {
+      publicationAttempt: { accountId: "123", text: caption, mediaIds: ["77"] },
+    },
+    { tab: { id: 10 }, documentId: "document-10" },
+  );
+  assert.deepEqual(
+    plain((await f.store.load(f.input.id)).jobs.x.publicationMediaIds),
+    ["77"],
+  );
+});
+
+test("non-calendar X posts use the same publication and guarded reply path with a 15-minute default", async () => {
+  for (const mode of ["manual", "autonomous"]) {
+    const f = publicationFixture();
+    delete f.input.xOptions;
+    f.input.mode = mode;
+    await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+    await f.armMedia();
+    f.publish();
+    f.setNow(Date.parse(f.main.postedUtc) + 899_999);
+    await f.runtime.resume(f.input.id);
+    assert.equal(
+      f.calls.some((row) => row[0] === "submit"),
+      false,
+    );
+    f.setNow(Date.parse(f.main.postedUtc) + 900_000);
+    await f.runtime.resume(f.input.id);
+    assert.equal(
+      f.calls.filter((row) => row[0] === "submit").length,
+      mode === "autonomous" ? 1 : 0,
+    );
+    assert.equal(f.actions.includes("main-identity"), false);
+  }
+});
+
+test("disabling automatic replies completes the main result without opening a reply tab", async () => {
+  const f = publicationFixture();
+  f.input.xOptions.autoReply = false;
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  await f.armMedia();
+  f.publish();
+  f.setNow(Date.parse(f.main.postedUtc) + 16 * 60_000);
+  await f.runtime.resume(f.input.id);
+  await f.restart().resume(f.input.id);
+  assert.equal(
+    f.calls.some((row) => row[0] === "open"),
+    false,
+  );
+  assert.equal((await f.store.load(f.input.id)).jobs.x.replyOutcome, "manual");
+  assert.equal((await f.store.load(f.input.id)).jobs.x.stage, "sheet-complete");
+});
+
+test("uncertain replies stop bounded recovery and retain the confirmed main post plus an honest outcome", async () => {
+  const f = publicationFixture({
+    submit() {
+      throw new Error("lost acknowledgement");
+    },
+  });
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  await f.armMedia();
+  f.publish();
+  for (const minutes of [16, 21, 26, 31]) {
+    f.setNow(Date.parse(f.main.postedUtc) + minutes * 60_000);
+    await f.restart().resume(f.input.id);
+  }
+  const job = (await f.store.load(f.input.id)).jobs.x;
+  assert.equal(f.calls.filter((row) => row[0] === "submit").length, 1);
+  assert.equal(f.calls.filter((row) => row[0] === "capture").length, 2);
+  assert.equal(job.stage, "sheet-complete");
+  assert.equal(job.replyOutcome, "unconfirmed");
+  assert.match(job.error, /unconfirmed/);
+  assert.equal(
+    f.sheet.some((row) => row[0] === "x"),
+    true,
+  );
+});
+
+test("a late return beyond the existing 24-hour reply window records the teaser without a stale automatic reply", async () => {
+  const late = publicationFixture();
+  await late.runtime.prepare({ plan: late.input, caption: "Caption" });
+  await late.armMedia();
+  late.publish();
+  await late.store.checkpoint(late.input.id, "x", {
+    resultId: late.main.resultId,
+    resultUrl: late.main.resultUrl,
+    replyDueAt: Date.parse(late.main.postedUtc) + 15 * 60_000,
+  });
+  late.setNow(Date.parse(late.main.postedUtc) + 25 * 60 * 60_000);
+  await late.restart().resume(late.input.id);
+  assert.equal(
+    late.calls.some((row) => row[0] === "open"),
+    false,
+  );
+  assert.equal(
+    (await late.store.load(late.input.id)).jobs.x.replyOutcome,
+    "expired",
+  );
+});
 
 test("calendar post delays its reply durably and a restarted worker cannot reply early", async () => {
   const fixture = loadRuntime();

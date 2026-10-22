@@ -111,6 +111,62 @@ public sealed class XTeaserScheduledResultTests
 
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
+    [TestMethod]
+    public void PublicationSurvivesRestartAndRequiresPinnedOwnerNewUniqueVideo()
+    {
+        using TempDirectory temp = new();
+        string database = Path.Combine(temp.Path, "catalogue.db");
+        XTeaserPublicationContext context;
+        using (var store = CatalogueStore.Open(database))
+        {
+            store.RecordXObservations(new(Owner, [Post("601", Scheduled.AddMinutes(-2))]), Scheduled);
+            context = store.GetXTeaserPublicationContext(Scheduled)!;
+            Assert.AreEqual("601", context.LatestStatusId);
+            store.RecordXObservations(new(Owner, [Post("602", Scheduled.AddMinutes(5))]), Scheduled.AddMinutes(5));
+        }
+        using (var store = CatalogueStore.Open(database))
+        {
+            var result = store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled.AddMinutes(30));
+            Assert.AreEqual("https://x.com/Owner_Handle/status/602", result?.Url);
+            Assert.AreEqual(Scheduled.AddMinutes(5), result?.PostedUtc);
+            Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context with { AccountId = "2" }, Scheduled.AddMinutes(30)));
+            Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context with { Handle = "Other" }, Scheduled.AddMinutes(30)));
+            Assert.IsNull(store.ResolveXTeaserPublication(Hash("different"), context, Scheduled.AddMinutes(30)));
+            store.RecordXObservations(new(Owner, [Post("603", Scheduled.AddMinutes(6), inReplyTo: "602"),
+                Post("604", Scheduled.AddMinutes(7), retweet: true)]), Scheduled.AddMinutes(30));
+            Assert.IsNotNull(store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled.AddMinutes(30)));
+            store.RecordXObservations(new(Owner, [Post("605", Scheduled.AddMinutes(8))]), Scheduled.AddMinutes(30));
+            Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled.AddMinutes(30)), "Never guess between identical captions.");
+        }
+    }
+
+    [TestMethod]
+    public void PublicationRejectsOldFutureForeignAndScheduledMismatch()
+    {
+        using TempDirectory temp = new();
+        using var store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.RecordXObservations(new(Owner, [Post("701", Scheduled.AddMinutes(-2))]), Scheduled);
+        var context = store.GetXTeaserPublicationContext(Scheduled)!;
+        store.RecordXObservations(new(Owner, [Post("702", Scheduled.AddMinutes(-1)), Post("703", Scheduled.AddMinutes(20))]), Scheduled);
+        Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled));
+        Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled.AddMinutes(30), Scheduled.AddHours(1)));
+        Exec(store, "UPDATE x_posts SET author_id='2' WHERE status_id='703'");
+        Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled.AddMinutes(30)));
+    }
+
+    [TestMethod]
+    public void PublicationRecoveryRequiresExactUploadedMediaIds()
+    {
+        using TempDirectory temp = new();
+        using var store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.RecordXObservations(new(Owner, [Post("801", Scheduled.AddMinutes(-2), "old caption")]), Scheduled);
+        var context = store.GetXTeaserPublicationContext(Scheduled)!;
+        store.RecordXObservations(new(Owner, [Post("802", Scheduled.AddMinutes(5))]), Scheduled.AddMinutes(5));
+        Assert.IsNull(store.ResolveXTeaserPublication(Hash(Caption), context, Scheduled.AddMinutes(10), mediaIds: ["999"]));
+        Assert.AreEqual("https://x.com/Owner_Handle/status/802", store.ResolveXTeaserPublication(Hash(Caption), context,
+            Scheduled.AddMinutes(10), mediaIds: ["1900000000000000001"])?.Url);
+    }
+
     private static XObservation Post(string id, DateTimeOffset time, string text = Caption, string? inReplyTo = null,
         bool retweet = false) => new(id, OwnerId, Owner.Handle, time.ToString("O", CultureInfo.InvariantCulture),
         retweet ? string.Empty : text, inReplyTo, id, retweet, retweet ? [] : [Video], [], null, "network");

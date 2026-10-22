@@ -27,6 +27,7 @@ function fixture({
   mode = "normal",
   extra = "",
   account = "Owner_Handle",
+  existingReply = false,
 } = {}) {
   return `<!doctype html><style>[hidden]{display:none}</style>
     <nav><a id="profile" data-testid="AppTabBar_Profile_Link" href="/${account}">Profile</a></nav>
@@ -39,6 +40,7 @@ function fixture({
     </div>
     <script>
       globalThis.__events = [];
+      globalThis.__existingReply = ${JSON.stringify(existingReply)};
       const mode = ${JSON.stringify(mode)};
       const editor = document.querySelector('#reply');
       let dismissals = 0;
@@ -70,6 +72,7 @@ function fixture({
         const reply = document.createElement('article');
         reply.innerHTML = '<a href="/Owner_Handle/status/150"><time>now</time></a>';
         document.body.append(reply);
+        globalThis.__observeReply?.('150', editor.innerText);
       });
     </script>`;
 }
@@ -87,6 +90,71 @@ async function withPage(options, run) {
       }),
     );
     await page.goto(STATUS_URL);
+    await page.addScriptTag({
+      path: path.join(repositoryRoot, "workflows/x-collector-contract.js"),
+    });
+    await page.evaluate(() => {
+      globalThis.chrome = {
+        runtime: {
+          sendMessage(_message, done) {
+            done?.();
+          },
+          onMessage: { addListener() {} },
+        },
+      };
+    });
+    await page.addScriptTag({
+      path: path.join(repositoryRoot, "workflows/x-collector-relay.js"),
+    });
+    await page.evaluate(async () => {
+      const channel = new MessageChannel();
+      document.dispatchEvent(
+        new MessageEvent("creator-x-collector", {
+          data: JSON.stringify({ kind: "hello" }),
+          ports: [channel.port2],
+        }),
+      );
+      const row = (id, text, parent) => ({
+        statusId: id,
+        authorId: "123",
+        authorHandle: "Owner_Handle",
+        createdAt: "2026-10-22T10:00:00.000Z",
+        text,
+        inReplyToStatusId: parent,
+        conversationId: "101",
+        isRetweet: false,
+        media: [],
+        urls: [],
+        metrics: null,
+        source: "network",
+      });
+      globalThis.__observeReply = (id, text = "manual reply") =>
+        channel.port1.postMessage({
+          kind: "batch",
+          batch: {
+            owner: { accountId: "123", handle: "Owner_Handle" },
+            observations: [row(id, text, "101")],
+          },
+        });
+      channel.port1.postMessage({
+        kind: "batch",
+        batch: {
+          owner: { accountId: "123", handle: "Owner_Handle" },
+          observations: [
+            row("101", "main teaser", null),
+            row("999", "recommended own post", null),
+          ],
+        },
+      });
+      channel.port1.postMessage({
+        kind: "conversation",
+        ownerId: "123",
+        statusId: "101",
+        complete: true,
+      });
+      if (globalThis.__existingReply) globalThis.__observeReply("120");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
     await page.addScriptTag({ path: adapterPath });
     return await run(page);
   } finally {
@@ -225,6 +293,7 @@ test("an existing owner reply in the conversation skips without typing", async (
     {
       extra:
         '<article><a href="/Owner_Handle/status/120"><time>later</time></a>full vid</article>',
+      existingReply: true,
     },
     async (page) => {
       const prepared = await prepare(page);
@@ -336,7 +405,13 @@ test("submit refuses when an owner reply appears after preparation", async () =>
       reply.innerHTML =
         '<a href="/Owner_Handle/status/160"><time>now</time></a>';
       document.body.append(reply);
+      globalThis.__observeReply("160");
     });
+    await page.waitForFunction(() =>
+      CreatorXCollectorRelay.repliesFor("101", "Owner_Handle").some(
+        (row) => row.resultId === "160",
+      ),
+    );
     assert.match((await submit(page)).error, /^existing-reply:/);
     assert.equal((await events(page)).includes("reply-clicked"), false);
   });

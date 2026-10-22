@@ -20,6 +20,8 @@
     "TweetDetail",
     "TweetResultByRestId",
     "TweetResultsByRestIds",
+    "CreateTweet",
+    "CreateScheduledTweet",
   ]);
   const VIEWER_OPERATIONS = Object.freeze(["Viewer"]);
   // The owner's own scheduled posts (compose > unsent > scheduled).
@@ -254,7 +256,12 @@
       authorId: author.id,
       authorHandle: author.handle,
       createdAt,
-      text: capText(typeof noteText === "string" ? noteText : legacy.full_text),
+      text: capText(
+        visibleTweetText(
+          typeof noteText === "string" ? noteText : legacy.full_text,
+          legacy,
+        ),
+      ),
       inReplyToStatusId: idOrNull(legacy.in_reply_to_status_id_str),
       conversationId: idOrNull(legacy.conversation_id_str),
       isRetweet: false,
@@ -270,6 +277,36 @@
       },
       source: "network",
     };
+  }
+
+  function visibleTweetText(text, legacy) {
+    // X appends media's t.co URL to full_text and HTML-escapes visible text.
+    for (const media of legacy.entities?.media || []) {
+      if (typeof media.url === "string" && text.endsWith(media.url))
+        text = text.slice(0, -media.url.length).trimEnd();
+    }
+    for (const link of legacy.entities?.urls || []) {
+      if (
+        typeof link.url === "string" &&
+        link.url &&
+        safeUrl(link.expanded_url)
+      )
+        text = text.split(link.url).join(link.expanded_url);
+    }
+    return text.replace(
+      /&(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi,
+      (entity, key) => {
+        const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+        if (Object.hasOwn(named, key)) return named[key];
+        const code =
+          key[1]?.toLowerCase() === "x"
+            ? parseInt(key.slice(2), 16)
+            : Number(key.slice(1));
+        return Number.isInteger(code) && code > 0 && code <= 0x10ffff
+          ? String.fromCodePoint(code)
+          : entity;
+      },
+    );
   }
 
   // Collect every tweet_results.result reachable from the response, without
@@ -334,6 +371,29 @@
 
   function viewerIdentity(payload) {
     return userIdentity(payload?.data?.viewer?.user_results);
+  }
+
+  function conversationComplete(payload, statusId) {
+    try {
+      const rows = [
+        ...new Map(
+          collectTweetResults(payload.data)
+            .map(parseTweetResult)
+            .filter(Boolean)
+            .map((row) => [row.statusId, row]),
+        ).values(),
+      ];
+      const main = rows.find((row) => row.statusId === statusId);
+      return (
+        Number.isSafeInteger(main?.metrics?.replies) &&
+        main.metrics.replies ===
+          rows.filter(
+            (row) => row.inReplyToStatusId === statusId && !row.isRetweet,
+          ).length
+      );
+    } catch {
+      return false;
+    }
   }
 
   // X keeps the signed-in account id in the readable `twid` cookie (u=<id>).
@@ -885,6 +945,7 @@
     operationKind,
     parseTweetResult,
     extractOwnerTweets,
+    conversationComplete,
     viewerIdentity,
     ownerIdFromCookie,
     parseMetricLabel,
