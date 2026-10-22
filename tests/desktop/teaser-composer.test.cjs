@@ -6,7 +6,13 @@ const http = require("node:http");
 const path = require("node:path");
 const { after, before, test } = require("node:test");
 const { chromium } = require("../support/browser.cjs");
-const { repositoryRoot, personalRoot } = require("../support/paths.cjs");
+const {
+  repositoryRoot,
+  personalRoot: extensionRoot,
+} = require("../support/paths.cjs");
+const personalRoot = path.resolve(
+  process.env.OFENHANCER_TEASER_REVIEW_ROOT || extensionRoot,
+);
 
 const DAY = "2026-10-06";
 const SESSION = "a".repeat(48);
@@ -37,7 +43,11 @@ before(async () => {
     const pathname = new URL(request.url, "http://localhost").pathname;
     if (pathname === "/host") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      response.end(hostPage);
+      response.end(
+        process.env.OFENHANCER_TEASER_REVIEW_ROOT
+          ? hostPage.replaceAll("/app/", "/")
+          : hostPage,
+      );
       return;
     }
     const file = path.resolve(personalRoot, `.${decodeURIComponent(pathname)}`);
@@ -183,7 +193,15 @@ async function mount(
   );
   await page.goto(`${origin}/host`);
   await page.locator("#open-day").click();
-  await page.locator(".xt-clip-choices, .xt-composer-frame").waitFor();
+  await page
+    .locator(".xt-clip-choices, .xt-composer-frame")
+    .waitFor()
+    .catch((error) => {
+      throw new Error(
+        `${error.message}\nPage errors: ${JSON.stringify(errors)}`,
+        { cause: error },
+      );
+    });
   return errors;
 }
 
@@ -1769,6 +1787,7 @@ test("indexed clip opens editing before transfer and keeps caption edits when th
         const episode = { sourceKey: "preview-test", title: "Preview test" };
         const clip = {
           clipId: 1,
+          state: "ready",
           name: "preview-test.mp4",
           episodeKey: episode.sourceKey,
           size,
@@ -2141,6 +2160,7 @@ test("unavailable indexed teaser offers the linked episode folder", async () => 
               clips: [
                 {
                   clipId: 1,
+                  state: "ready",
                   episodeKey: "preview-test",
                   name: "missing.mp4",
                   size: 100,
@@ -3141,6 +3161,7 @@ test("clip chooser uses distinct posters and only one intent-loaded playback", a
             return {
               clips: ["far", "closer", "close"].map((name, index) => ({
                 clipId: String(index),
+                state: "ready",
                 name: `example-episode__t0${index + 1}-${name}.mp4`,
                 episodeKey: "sample",
               })),
@@ -4226,6 +4247,118 @@ test("teaser post and reply automation have independent saved controls", async (
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: path.join(output, "phone.png") });
     assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+for (const knownEmpty of [true, false]) {
+  test(`zero-ready episode opens its editable form directly (${knownEmpty ? "known count" : "failed clips only"})`, async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1200, height: 850 },
+    });
+    try {
+      const errors = await mount(page, true);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+      await page.evaluate(async (knownEmpty) => {
+        globalThis.clipReads = [];
+        const episode = {
+          sourceKey: "preview-test",
+          title: "Preview test",
+          ...(knownEmpty ? { readyClips: 0 } : {}),
+        };
+        await OFEnhancerTeaserComposer.open({
+          date: "2026-10-06",
+          episode,
+          episodes: [episode],
+          request: async (op) => {
+            clipReads.push(op);
+            if (op === "getTeaserClips")
+              return {
+                clips: [
+                  {
+                    clipId: 99,
+                    episodeKey: episode.sourceKey,
+                    name: "old.mp4",
+                    state: "failed",
+                  },
+                ],
+              };
+            return { ok: true };
+          },
+        });
+      }, knownEmpty);
+      const frame = page.frameLocator(".xt-composer-frame");
+      await frame
+        .locator("#socialCaption")
+        .fill("Ready to edit without a rendered video");
+      assert.equal(
+        await frame
+          .getByRole("button", {
+            name: "Choose or drop teaser video",
+            exact: true,
+          })
+          .isVisible(),
+        true,
+      );
+      assert.equal(await page.locator(".xt-clip-choices").count(), 0);
+      assert.equal(await page.locator(".xt-editor-error").count(), 0);
+      const calls = await page.evaluate(() => clipReads);
+      assert.equal(calls.includes("getTeaserClipChunk"), false);
+      assert.equal(calls.includes("getTeaserClips"), !knownEmpty);
+      if (knownEmpty) {
+        const output = path.join(
+          repositoryRoot,
+          ".local/editor-package-review",
+        );
+        fs.mkdirSync(output, { recursive: true });
+        await page.evaluate(() =>
+          Promise.all(
+            document
+              .getAnimations()
+              .map((animation) => animation.finished.catch(() => {})),
+          ),
+        );
+        await page
+          .locator(".xt-composer-dialog")
+          .screenshot({ path: path.join(output, "empty-episode-editor.png") });
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+test("editor initialization failure offers Retry immediately and recovers when its asset is available", async () => {
+  const page = await browser.newPage();
+  try {
+    const errors = await mount(page, true);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.locator(".xt-composer-dialog").waitFor({ state: "detached" });
+    await page.route("**/app/teaser-reply-settings.js", (route) =>
+      route.fulfill({ body: "", contentType: "text/javascript" }),
+    );
+    await page.locator("#open-day").click();
+    await page.locator(".xt-editor-error").waitFor({ timeout: 3000 });
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Retry", exact: true })
+        .isVisible(),
+      true,
+    );
+    await page.unroute("**/app/teaser-reply-settings.js");
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await page
+      .frameLocator(".xt-composer-frame")
+      .locator("#socialCaption")
+      .fill("Recovered editor");
+    assert.equal(await page.locator(".xt-editor-error").count(), 0);
+    assert.equal(
+      errors.some((error) => /mount/.test(error)),
+      true,
+    );
   } finally {
     await page.close();
   }

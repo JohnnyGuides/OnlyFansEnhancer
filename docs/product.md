@@ -157,7 +157,10 @@ dismissal before the first reply; ambiguous dismissal stops. The calendar teaser
 modal uses the clicked day, accepts a ready clip or a chosen/dropped video, previews
 it, and defaults its local thumbnail to the first frame. Catalogue matching can be
 accepted or changed; an exact episode-folder shortcut supports making a new clip.
-When the catalogue has no episodes, the modal opens the empty editor directly.
+When the catalogue has no episodes, or a selected episode has no ready clips,
+the modal opens the editable form directly. Failed clips are excluded from the
+ready-clip chooser. The desktop build checks that every local workspace script
+and stylesheet exists before packaging.
 Choosing or linking a video does not rename or relocate its source file.
 In the desktop editor, **Change episode** corrects a match before posting. The
 header's **Copy to .TWEETS** action copies the selected video into the configured

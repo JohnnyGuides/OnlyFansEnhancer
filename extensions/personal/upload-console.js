@@ -7306,5 +7306,17 @@
     titleFromFilename,
     validateDraft,
   });
-  if (typeof document !== "undefined") mount();
+  if (typeof document !== "undefined") {
+    try {
+      mount();
+    } catch (error) {
+      const date = new URLSearchParams(location.search).get("teaserDay");
+      if (date && window.parent !== window)
+        window.parent.postMessage(
+          { type: "ofenhancer:teaser-failed", date },
+          location.origin,
+        );
+      throw error;
+    }
+  }
 })();

@@ -97,7 +97,8 @@
       previewTimer = null,
       previewGeneration = 0;
     let playingPreview = null,
-      editorLoadTimer = null;
+      editorLoadTimer = null,
+      editorFailure = null;
     function stopPreview() {
       clearTimeout(previewTimer);
       previewGeneration++;
@@ -728,6 +729,11 @@
         const replace = heading.querySelector(".xt-change-clip");
         if (replace) replace.textContent = "Replace video";
       }
+      if (
+        event.data?.type === "ofenhancer:teaser-failed" &&
+        event.data.date === date
+      )
+        editorFailure?.();
       handoff?.receive(event.data || {});
       if (event.data?.type === "ofenhancer:teaser-ready")
         iframe.contentWindow.postMessage(
@@ -962,29 +968,32 @@
           posts.append(destinations);
         }
       });
+      function showEditorError() {
+        if (iframe !== frame || !dialog.isConnected) return;
+        stopEditorLoading();
+        const error = node(
+          "div",
+          "xt-editor-error",
+          "The editor could not open.",
+        );
+        error.setAttribute("role", "alert");
+        const retry = action("Retry");
+        retry.addEventListener("click", () => {
+          postActions.append(removePost);
+          heading.after(destinations);
+          destinations.hidden = true;
+          frame.style.visibility = "hidden";
+          waitForForm();
+          frame.contentWindow.location.reload();
+        });
+        error.append(retry);
+        content.prepend(error);
+        if (!dialog.open) dialog.showModal();
+      }
+      editorFailure = showEditorError;
       function waitForForm() {
         stopEditorLoading();
-        editorLoadTimer = setTimeout(() => {
-          if (iframe !== frame || !dialog.isConnected) return;
-          const error = node(
-            "div",
-            "xt-editor-error",
-            "The editor could not open.",
-          );
-          error.setAttribute("role", "alert");
-          const retry = action("Retry");
-          retry.addEventListener("click", () => {
-            postActions.append(removePost);
-            heading.after(destinations);
-            destinations.hidden = true;
-            frame.style.visibility = "hidden";
-            waitForForm();
-            frame.contentWindow.location.reload();
-          });
-          error.append(retry);
-          content.prepend(error);
-          if (!dialog.open) dialog.showModal();
-        }, 10000);
+        editorLoadTimer = setTimeout(showEditorError, 10000);
       }
       content.replaceChildren(iframe);
       waitForForm();
@@ -1049,7 +1058,7 @@
       catalogueObserver?.disconnect();
       delete dialog.dataset.editor;
       handoff?.close();
-      if (!episode && !episodes.length) {
+      if ((!episode && !episodes.length) || episode?.readyClips === 0) {
         edit();
         return;
       }
@@ -1123,7 +1132,8 @@
           const available = clips.filter(
             (clip) => clip.episodeKey === item.sourceKey,
           );
-          if (available.length === 1) void editClip(available[0], item);
+          if (!available.length && item.readyClips === 0) edit();
+          else if (available.length === 1) void editClip(available[0], item);
           else void choose();
         });
         const upload = node("li", "xt-card xt-upload-choice");
@@ -1180,7 +1190,11 @@
           ]),
         );
         clips = (library.clips || [])
-          .filter((clip) => !episode || clip.episodeKey === episode.sourceKey)
+          .filter(
+            (clip) =>
+              clip.state === "ready" &&
+              (!episode || clip.episodeKey === episode.sourceKey),
+          )
           .sort(
             (left, right) =>
               (ranked.get(left.episodeKey)?.rank || Infinity) -

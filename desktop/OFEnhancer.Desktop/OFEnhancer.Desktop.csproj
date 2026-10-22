@@ -13,7 +13,7 @@
       <Link>app\app\upload-host.js</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="..\..\shared\workspace\teaser-draft-store.js;..\..\shared\workspace\teaser-upload-mode.js;..\..\shared\workspace\teaser-ending.js">
+    <Content Include="..\..\shared\workspace\teaser-draft-store.js;..\..\shared\workspace\teaser-upload-mode.js;..\..\shared\workspace\teaser-ending.js;..\..\shared\workspace\dialog-dismiss.js;..\..\shared\workspace\teaser-reply-settings.js;..\..\shared\workspace\teaser-link-picker.js">
       <Link>app\app\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

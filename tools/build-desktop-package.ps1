@@ -102,6 +102,9 @@ dotnet publish (Join-Path $repositoryRoot "desktop\OFEnhancer.Desktop\OFEnhancer
   -c Release -r win-x64 --self-contained true -o $desktopDirectory `
   -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false
 if ($LASTEXITCODE -ne 0) { throw "The desktop publish failed." }
+
+& node (Join-Path $repositoryRoot "tools\validate-desktop-workspace.mjs") (Join-Path $desktopDirectory "app")
+if ($LASTEXITCODE -ne 0) { throw "The desktop workspace has missing assets." }
 dotnet publish (Join-Path $repositoryRoot "native-host\OFEnhancerNativeBridge\OFEnhancerNativeBridge.csproj") `
   -c Release -r win-x64 --self-contained true -o $nativeDirectory `
   -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false
