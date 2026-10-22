@@ -39,6 +39,67 @@ public sealed class GoogleCatalogueSelectionTests
     }
 
     [TestMethod]
+    public void ReconnectingToSameWorkbookPreservesProfileButRequiresReinspection()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.SaveGoogleCatalogueWorkbook("workbook-1", "Private catalogue");
+        store.SaveGoogleCatalogueProfile(
+            "workbook-1",
+            "2126708696",
+            "2026 Video Catalogue",
+            "catalogue-v1",
+            ready: true,
+            InspectedUtc
+        );
+        store.MarkGoogleCatalogueSync("workbook-1", "2126708696", SyncedUtc);
+
+        store.SaveGoogleCatalogueWorkbook("workbook-1", "Renamed catalogue");
+
+        GoogleCatalogueSelection selection = store.GetGoogleCatalogueSelection()!;
+        Assert.AreEqual("workbook-1", selection.WorkbookId);
+        Assert.AreEqual("Renamed catalogue", selection.WorkbookTitle);
+        Assert.AreEqual("2126708696", selection.SheetId);
+        Assert.AreEqual("2026 Video Catalogue", selection.SheetTitle);
+        Assert.AreEqual("catalogue-v1", selection.Profile);
+        Assert.IsFalse(selection.Ready);
+        Assert.AreEqual(InspectedUtc, selection.LastInspectedUtc);
+        Assert.AreEqual(SyncedUtc, selection.LastSuccessfulSyncUtc);
+        Assert.ThrowsException<CatalogueSettingsException>(
+            () => store.MarkGoogleCatalogueSync("workbook-1", "2126708696", SyncedUtc.AddMinutes(1))
+        );
+    }
+
+    [TestMethod]
+    public void SelectingDifferentWorkbookClearsPriorSheetProfile()
+    {
+        using TestDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        store.SaveGoogleCatalogueWorkbook("workbook-1", "Private catalogue");
+        store.SaveGoogleCatalogueProfile(
+            "workbook-1",
+            "2126708696",
+            "2026 Video Catalogue",
+            "catalogue-v1",
+            ready: true,
+            InspectedUtc
+        );
+        store.MarkGoogleCatalogueSync("workbook-1", "2126708696", SyncedUtc);
+
+        store.SaveGoogleCatalogueWorkbook("workbook-2", "Other catalogue");
+
+        GoogleCatalogueSelection selection = store.GetGoogleCatalogueSelection()!;
+        Assert.AreEqual("workbook-2", selection.WorkbookId);
+        Assert.AreEqual("Other catalogue", selection.WorkbookTitle);
+        Assert.IsNull(selection.SheetId);
+        Assert.IsNull(selection.SheetTitle);
+        Assert.IsNull(selection.Profile);
+        Assert.IsFalse(selection.Ready);
+        Assert.IsNull(selection.LastInspectedUtc);
+        Assert.IsNull(selection.LastSuccessfulSyncUtc);
+    }
+
+    [TestMethod]
     public void ClearingSelectionAtomicallyRemovesItsProfileAndBindingsButNotCatalogue()
     {
         using TestDirectory temp = new();

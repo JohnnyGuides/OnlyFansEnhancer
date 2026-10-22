@@ -86,8 +86,18 @@ internal static partial class GoogleCatalogueSettings
     {
         string id = WorkbookId(workbookId);
         string title = Title(workbookTitle, "workbookTitle");
+        GoogleCatalogueSelection? previous = null;
+        try { previous = Get(connection); }
+        catch (CatalogueSettingsException)
+        {
+            // An invalid old profile must not prevent a fresh workbook connection.
+        }
         using SqliteTransaction transaction = connection.BeginTransaction();
-        Delete(connection, transaction, Keys.Skip(2));
+        bool sameWorkbook = string.Equals(previous?.WorkbookId, id, StringComparison.Ordinal);
+        if (!sameWorkbook)
+            Delete(connection, transaction, Keys.Skip(2));
+        else if (previous!.SheetId is not null)
+            Upsert(connection, transaction, ReadyKey, "0");
         Upsert(connection, transaction, WorkbookIdKey, id);
         Upsert(connection, transaction, WorkbookTitleKey, title);
         transaction.Commit();

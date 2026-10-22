@@ -200,6 +200,10 @@ calendar plan, keeps video files and other destination drafts, and is blocked af
 run is bound. Calendar thumbnails use the linked episode title and a short caption strip
 (two lines on desktop, one on narrow screens); full copy remains in the editor.
 
+Sending a teaser does not create or edit the source episode's main-video metadata.
+The selected episode identifies the teaser's source; the selected reply link remains
+a separate destination. A captured publication records its result against that source.
+
 The teaser editor keeps the video unobstructed. **Episode** changes its catalogue
 association; **Replace video** in the header selects another file while
 preserving caption, schedule and link edits. Replace video and Vegas remain directly

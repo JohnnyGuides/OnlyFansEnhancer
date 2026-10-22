@@ -59,6 +59,74 @@ public sealed class UploadCatalogueTests
     }
 
     [TestMethod]
+    public void ReceiptResolvesMovedRowByItemIdentityAndStillRejectsChangedContent()
+    {
+        using TestStore test = new();
+        static WorkbookCatalogueItem Item(int row, string title = "Title") => new(row, "episode", title,
+            "Description", "2026-09-11", null, null, 0, 0, new Dictionary<string, string>(), null);
+
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [Item(2)]), false);
+        var before = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(before.Row, before.Fingerprint, "fansly",
+            "https://fansly.com/post/123456789", Id: before.Id);
+
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [Item(3)]), false);
+        var moved = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual(3, moved.Row);
+        Assert.AreEqual(before.ItemId, moved.ItemId);
+        Assert.AreNotEqual(before.Fingerprint, moved.Fingerprint, "the public fingerprint contract continues to include the physical row");
+        Assert.AreEqual("stale", test.Store.RecordUploadResult(request with { ItemId = "different-item" }).Status,
+            "a supplied stable item identity must still match the source key");
+        var recorded = test.Store.RecordUploadResult(request);
+        Assert.AreEqual("recorded-local", recorded.Status);
+        var afterReceipt = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("https://fansly.com/post/123456789", afterReceipt.FanslyLink);
+        Assert.AreEqual(afterReceipt.Fingerprint, recorded.Fingerprint,
+            "success returns the current fingerprint so later actions use the moved row identity");
+
+        var nextReceipt = test.Store.RecordUploadResult(request with
+        {
+            Fingerprint = recorded.Fingerprint!, Platform = "onlyfans", PostUrl = "https://onlyfans.com/500"
+        });
+        Assert.AreEqual("recorded-local", nextReceipt.Status,
+            "a sibling receipt can use the returned fingerprint with its original session row");
+
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [Item(3, "Changed title")]), false);
+        Assert.AreEqual("stale", test.Store.RecordUploadResult(request with
+        {
+            Platform = "manyvids",
+            PostUrl = "https://www.manyvids.com/Video/987654321"
+        }).Status, "content edits still invalidate a pre-publication receipt");
+    }
+
+    [TestMethod]
+    public void OnlyFansSourceHandleVariantDoesNotConflictWithRecordedIdOnlyReceipt()
+    {
+        using TestStore test = new();
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [new(2, "episode", "Title", "Description",
+            "2026-09-11", null, null, 0, 0, new Dictionary<string, string>(), null)]), false);
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("recorded-local", test.Store.RecordUploadResult(new(row.Row, row.Fingerprint, "onlyfans",
+            "https://onlyfans.com/500", Id: row.Id, ItemId: row.ItemId)).Status);
+
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [new(2, "episode", "Title", "Description",
+            "2026-09-11", null, null, 0, 0,
+            new Dictionary<string, string> { ["onlyfans"] = "https://onlyfans.com/500/johnny_guides" }, null)]), false);
+
+        var overlaid = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual("published", overlaid.PublicationState["onlyfans"]);
+        Assert.AreEqual("https://onlyfans.com/500", overlaid.OnlyfansLink);
+
+        Assert.AreEqual("recorded-local", test.Store.RecordUploadResult(new(overlaid.Row, overlaid.Fingerprint, "onlyfans",
+            "https://onlyfans.com/600", Id: overlaid.Id, RepeatUploadConfirmed: true)).Status);
+        test.Store.ImportWorkbookProjection(new("work", "1", true, [new(2, "episode", "Title", "Description",
+            "2026-09-11", null, null, 0, 0,
+            new Dictionary<string, string> { ["onlyfans"] = "https://onlyfans.com/500/another_handle" }, null)]), false);
+        Assert.AreEqual("published", test.Store.GetUploadCatalogueSnapshot().Rows.Single().PublicationState["onlyfans"],
+            "a confirmed repeat retains its canonical post identities when Google changes a URL's handle");
+    }
+
+    [TestMethod]
     public void UnresolvedIntentsDoNotHideLaterPendingLinks()
     {
         using TestStore test = new();

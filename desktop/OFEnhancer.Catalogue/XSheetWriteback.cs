@@ -22,7 +22,7 @@ public sealed partial class CatalogueStore
 
     private sealed record XSheetWritebackRecord(string StatusId, string SourceKey, string Url, string Outcome, string? Code);
 
-    // Owner video teasers bound by reply-link or owner evidence whose status
+    // Owner video teasers bound by explicit owner evidence whose status
     // link is missing from the bound row's Twitter Teaser(s) cell, oldest
     // first. Sheet-link bindings are already in the sheet; a post with a
     // recorded binding conflict is never written, even under an owner binding.
@@ -68,18 +68,47 @@ public sealed partial class CatalogueStore
         HashSet<string> conflicts = new(StringComparer.Ordinal);
         Query("SELECT status_id FROM x_binding_conflicts", reader => conflicts.Add(reader.GetString(0)));
         Dictionary<string, string> bindings = new(StringComparer.Ordinal);
-        Query("SELECT status_id, item_id FROM x_post_bindings WHERE evidence IN ('reply-link', 'owner')",
+        Query("SELECT status_id, item_id FROM x_post_bindings WHERE evidence = 'owner'",
             reader => bindings[reader.GetString(0)] = reader.GetString(1));
         if (bindings.Count == 0) return [];
         Dictionary<string, CatalogueItemSummary> items = GetItems().ToDictionary(item => item.ItemId, StringComparer.Ordinal);
+        Dictionary<string, HashSet<string>> importedXStatusIds = ReadImportedXStatusIds();
         List<XSheetWritebackCandidate> result = [];
         foreach (XPostRow teaser in ReadXPosts(null).Where(IsXTeaser))
         {
             if (!bindings.TryGetValue(teaser.StatusId, out string? itemId) || conflicts.Contains(teaser.StatusId)
                 || !items.TryGetValue(itemId, out CatalogueItemSummary? item) || item.SourceRow is null
-                || ItemUrls(item, "x").Select(XStatusIdFromUrl).Contains(teaser.StatusId, StringComparer.Ordinal))
+                || importedXStatusIds.TryGetValue(itemId, out HashSet<string>? statusIds)
+                    && statusIds.Contains(teaser.StatusId))
                 continue;
             result.Add(new(teaser.StatusId, item.ItemId, item.SourceKey, $"https://x.com/{handle}/status/{teaser.StatusId}"));
+        }
+        return result;
+    }
+
+    // GetItems overlays owner mappings and recorded upload results on top of
+    // the last imported Google snapshot. Eligibility must check only the raw
+    // imported X cell, or a local-only owner mapping will hide the pending
+    // Google write that would make that mapping durable in the sheet.
+    private Dictionary<string, HashSet<string>> ReadImportedXStatusIds()
+    {
+        Dictionary<string, HashSet<string>> result = new(StringComparer.Ordinal);
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT item_id, platform_links_json, source_link_cells_json FROM catalogue_items";
+        using SqliteDataReader reader = command.ExecuteReader();
+        JsonSerializerOptions cellJson = new() { PropertyNameCaseInsensitive = true };
+        while (reader.Read())
+        {
+            string itemId = reader.GetString(0);
+            HashSet<string> ids = [];
+            Dictionary<string, string> links = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(1)) ?? [];
+            if (links.TryGetValue("x", out string? link) && XStatusIdFromUrl(link) is { } id) ids.Add(id);
+            Dictionary<string, CatalogueSourceLinkCell> cells =
+                JsonSerializer.Deserialize<Dictionary<string, CatalogueSourceLinkCell>>(reader.GetString(2), cellJson) ?? [];
+            if (cells.TryGetValue("x", out CatalogueSourceLinkCell? cell))
+                foreach (string url in cell.Urls.Append(cell.Hyperlink ?? ""))
+                    if (XStatusIdFromUrl(url) is { } cellId) ids.Add(cellId);
+            result[itemId] = ids;
         }
         return result;
     }

@@ -122,6 +122,26 @@ test(
       let worker = await launch();
       const page = await context.newPage();
       await page.goto("https://x.com/compose/post");
+      await worker.evaluate(async () => {
+        const [tab] = await chrome.tabs.query({
+          url: "https://x.com/compose/post",
+        });
+        if (!tab) throw new Error("The prepared X composer tab is missing.");
+        const target = { tabId: tab.id };
+        const [relay] = await chrome.scripting.executeScript({
+          target,
+          func: () => Boolean(globalThis.CreatorXCollectorRelay),
+        });
+        const [observer] = await chrome.scripting.executeScript({
+          target,
+          world: "MAIN",
+          func: () => globalThis.fetch?.name === "creatorObservedFetch",
+        });
+        if (relay?.result !== true || observer?.result !== true)
+          throw new Error(
+            `X collector not ready: ${JSON.stringify({ relay: relay?.result, observer: observer?.result })}`,
+          );
+      });
       await worker.evaluate(
         async ({ id, caption, publishedAt }) => {
           const hash = [
@@ -235,9 +255,23 @@ test(
         globalThis.__restartMarker = true;
       });
       await control.send("Target.closeTarget", { targetId: target.targetId });
-      await assert.rejects(
-        worker.evaluate(() => globalThis.__restartMarker),
-        /Service worker restarted|closed/i,
+      // Closing is asynchronous; verify target destruction rather than racing
+      // a final evaluation against Chrome's shutdown acknowledgement.
+      const stopDeadline = Date.now() + 10_000;
+      let oldTargetPresent;
+      do {
+        oldTargetPresent = (
+          await control.send("Target.getTargets")
+        ).targetInfos.some(
+          (candidate) => candidate.targetId === target.targetId,
+        );
+        if (oldTargetPresent)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      } while (oldTargetPresent && Date.now() < stopDeadline);
+      assert.equal(
+        oldTargetPresent,
+        false,
+        "The previous service-worker target must actually stop.",
       );
       const wake = await context.newPage();
       await wake.goto(`chrome-extension://${extensionId}/options.html`);
@@ -252,6 +286,9 @@ test(
           target.url.endsWith("/background.js"),
       );
       assert.ok(restarted, "An actual new service-worker target started.");
+      // Chrome may reuse a CDP targetId after destroying a service-worker
+      // target. The disappearance above and cleared in-memory marker below
+      // prove that a new worker instance started.
       const { sessionId } = await control.send("Target.attachToTarget", {
         targetId: restarted.targetId,
         flatten: false,

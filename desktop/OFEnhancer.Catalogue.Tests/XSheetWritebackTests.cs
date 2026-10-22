@@ -12,7 +12,7 @@ public sealed class XSheetWritebackTests
     private static readonly XObservedMedia Video = new("video", "7_1900000000000000001", 15_000, null);
 
     [TestMethod]
-    public void OnlyReplyLinkAndOwnerBoundTeasersMissingFromTheSheetAreCandidates()
+    public void OnlyExplicitOwnerBoundTeasersMissingFromTheImportedSheetAreCandidates()
     {
         using TempDirectory temp = new();
         using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
@@ -46,9 +46,46 @@ public sealed class XSheetWritebackTests
 
         CollectionAssert.AreEqual(new[]
         {
-            "103|item-b|show-ep02|https://x.com/Owner_Handle/status/103",
             "108|item-d|show-ep04|https://x.com/Owner_Handle/status/108",
         }, candidates.Select(c => $"{c.StatusId}|{c.ItemId}|{c.SourceKey}|{c.Url}").ToArray());
+    }
+
+    [TestMethod]
+    public void ReplyDestinationIsNotUsedAsTheTeaserSourceForSheetWriteback()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "source-a", "show-ep01", onlyFans: "https://onlyfans.com/555/owner");
+        AddItem(store, "destination-b", "show-ep02", fansly: "https://fansly.com/post/777");
+        store.RecordXObservations(new(Owner, [
+            Post("103", Now.AddDays(-1)),
+            Reply("104", Now.AddDays(-1).AddMinutes(15), "103", "https://fansly.com/post/777"),
+        ]), Now);
+
+        store.RefreshXBindings(Now);
+
+        Assert.AreEqual("destination-b", Scalar(store,
+            "SELECT item_id FROM x_post_bindings WHERE status_id='103' AND evidence='reply-link'"));
+        Assert.AreEqual(0, store.GetXSheetWritebackCandidates(Now).Count,
+            "A reply points at the promoted destination B, so it is not safe source evidence for A's teaser row.");
+    }
+
+    [TestMethod]
+    public void ExplicitOwnerMappingRemainsEligibleWhenItsLinkExistsOnlyInLocalOverlay()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "item-a", "show-ep01", onlyFans: "https://onlyfans.com/555/owner");
+        store.RecordXObservations(new(Owner, [Post("103", Now.AddDays(-1))]), Now);
+        IReadOnlyList<XOwnerMapping> choices = store.MapXTeasers(
+            [new XOwnerMapping("103", "item-a", "show-ep01")], Now, apply: false).Choices;
+        store.MapXTeasers(choices, Now, apply: true);
+
+        Assert.IsTrue(store.GetItems().Single(item => item.ItemId == "item-a").PlatformLinks["x"]
+            .Contains("/status/103", StringComparison.Ordinal), "The local owner mapping overlays the imported snapshot.");
+        CollectionAssert.AreEqual(new[] { "103" },
+            store.GetXSheetWritebackCandidates(Now).Select(candidate => candidate.StatusId).ToArray(),
+            "The raw imported Google X cell is still empty, so the explicit owner mapping must remain pending for writeback.");
     }
 
     [TestMethod]
@@ -59,6 +96,7 @@ public sealed class XSheetWritebackTests
         AddItem(store, "item-b", "show-ep02", fansly: "https://fansly.com/post/777");
         store.RecordXObservations(new(Owner, [Post("103", Now.AddDays(-1)),
             Reply("104", Now.AddDays(-1).AddHours(1), "103", "https://fansly.com/post/777")]), Now);
+        MapOwner(store, "103", "item-b", "show-ep02");
         Assert.AreEqual(1, store.GetXSheetWritebackCandidates(Now).Count);
         Exec(store, "UPDATE x_owner SET handle='bad handle!'");
         Assert.AreEqual(0, store.GetXSheetWritebackCandidates(Now).Count);
@@ -77,6 +115,11 @@ public sealed class XSheetWritebackTests
             posts.Add(Reply($"30{index}", Now.AddDays(-1).AddHours(index).AddMinutes(5), $"20{index}", $"https://fansly.com/post/70{index}"));
         }
         store.RecordXObservations(new(Owner, posts), Now);
+        IReadOnlyList<XOwnerMapping> ownerChoices = store.MapXTeasers(
+            Enumerable.Range(0, 7)
+                .Select(index => new XOwnerMapping($"20{index}", $"item-{index}", $"show-ep{index:00}"))
+                .ToArray(), Now, apply: false).Choices;
+        store.MapXTeasers(ownerChoices, Now, apply: true);
 
         IReadOnlyList<XSheetWritebackCandidate> first = store.GetXSheetWritebackCandidates(Now);
         Assert.AreEqual(CatalogueStore.MaxSheetWritebacksPerRun, first.Count);
@@ -118,6 +161,7 @@ public sealed class XSheetWritebackTests
         AddItem(store, "item-b", "show-ep02", fansly: "https://fansly.com/post/777");
         store.RecordXObservations(new(Owner, [Post("103", Now.AddDays(-1)),
             Reply("104", Now.AddDays(-1).AddHours(1), "103", "https://fansly.com/post/777")]), Now);
+        MapOwner(store, "103", "item-b", "show-ep02");
         XSheetWritebackStatus status = store.GetXTeaserOverview().SheetWriteback!;
         Assert.AreEqual(1, status.Pending);
         Assert.IsNull(status.LastOutcome);
@@ -130,6 +174,13 @@ public sealed class XSheetWritebackTests
     private static XObservation Reply(string statusId, DateTimeOffset created, string teaser, string link) =>
         new(statusId, OwnerId, "Owner_Handle", created.ToString("O", CultureInfo.InvariantCulture), "full vid -> " + link, teaser,
             teaser, false, [], [link], null, "network");
+
+    private static void MapOwner(CatalogueStore store, string statusId, string itemId, string sourceKey)
+    {
+        IReadOnlyList<XOwnerMapping> choices = store.MapXTeasers(
+            [new XOwnerMapping(statusId, itemId, sourceKey)], Now, apply: false).Choices;
+        store.MapXTeasers(choices, Now, apply: true);
+    }
 
     private static void AddItem(CatalogueStore store, string itemId, string sourceKey, string? onlyFans = null,
         string? fansly = null, IReadOnlyList<string>? sheetX = null)

@@ -682,8 +682,10 @@ public sealed class GoogleCatalogueControllerTests
         CollectionAssert.AreEqual(new[] { "ep-1", "ep-2", "ep-3", "ep-4", "ep-5" },
             harness.Session.TeaserLinkRequests.Select(request => request.Split('|')[0]).ToArray());
         Assert.AreEqual("ep-2|https://x.com/Owner_Handle/status/202", harness.Session.TeaserLinkRequests[1]);
-        Assert.AreEqual(4L, Scalar(harness.Store, "SELECT COUNT(*) FROM x_post_bindings WHERE evidence='sheet-link'"),
-            "re-import turns written links into sheet-link evidence");
+        Assert.AreEqual(4, harness.Store.GetCatalogue().Items.Count(item => item.SourceLinkCells?.ContainsKey("x") == true),
+            "re-import retains the four X cells written to the sheet");
+        Assert.AreEqual(8L, Scalar(harness.Store, "SELECT COUNT(*) FROM x_post_bindings WHERE evidence='owner'"),
+            "re-import does not demote the seven explicit mappings or the deliberate conflict guard");
         Assert.AreEqual(5L, Scalar(harness.Store, "SELECT COUNT(*) FROM audit_events WHERE kind='x-sheet-writeback'"));
 
         XSheetWritebackRun second = harness.Controller.WriteBackTeaserLinks(now.AddMinutes(10));
@@ -719,8 +721,8 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual("google-reauthorization-required", harness.Store.GetXSheetWritebackStatus(now).LastCode);
     }
 
-    // Seven teasers bound by first-reply paid links (ep-1..ep-7), one owner
-    // binding contradicted by its reply link (209 -> ep-8) and one unbound (210).
+    // Seven teasers explicitly owner-mapped to ep-1..ep-7, one owner binding
+    // contradicted by its reply link (209 -> ep-8) and one unbound (210).
     private static void SeedBoundTeasers(CatalogueStore store, Dictionary<string, List<string>> sheet, DateTimeOffset now)
     {
         store.ImportWorkbookProjection(TeaserPreview(sheet).Projection, updateGoogleBindings: false);
@@ -740,6 +742,15 @@ public sealed class GoogleCatalogueControllerTests
         posts.Add(Post("309", now.AddHours(-1.9), "209", "https://fansly.com/post/702"));
         posts.Add(Post("210", now.AddHours(-1)));
         store.RecordXObservations(new(owner, posts), now);
+        IReadOnlyDictionary<string, UploadCatalogueRow> rows = store.GetUploadCatalogueSnapshot().Rows
+            .ToDictionary(row => row.Id, StringComparer.Ordinal);
+        XOwnerMapping[] mappings = [.. Enumerable.Range(1, 7).Select(index =>
+        {
+            UploadCatalogueRow row = rows[$"ep-{index}"];
+            return new XOwnerMapping($"20{index}", row.ItemId, row.Id);
+        })];
+        XOwnerMappingResult mappingPreview = store.MapXTeasers(mappings, now, apply: false);
+        store.MapXTeasers(mappingPreview.Choices, now, apply: true);
         using Microsoft.Data.Sqlite.SqliteCommand command = store.Connection.CreateCommand();
         command.CommandText = "INSERT OR REPLACE INTO x_post_bindings VALUES "
             + "('209', (SELECT item_id FROM catalogue_items WHERE source_key = 'ep-8'), 'ep-8', 'owner', 'high', 'x')";

@@ -1091,6 +1091,18 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
       runtimeReady: { x: true },
       traceEvidence: { x: hash("f") },
     });
+    await page.evaluate(() => {
+      globalThis.catalogueWrites = [];
+      const read = CreatorCatalogueClient.getCatalogueSnapshot;
+      CreatorCatalogueClient.getCatalogueSnapshot = async () => ({
+        ...(await read()),
+        source: "desktop",
+      });
+      CreatorCatalogueClient.writeUploadCatalogueEntry = async (request) => {
+        catalogueWrites.push(request);
+        throw new Error("invalid-catalogue-entry");
+      };
+    });
     await page.locator("#targetSocialX").check();
     await page.locator("#uploadSocialTeaser").setInputFiles({
       name: "social.mp4",
@@ -1150,6 +1162,9 @@ test("teaser-only can associate an exact catalogue entry without main scheduling
       ),
     );
     const messages = await page.evaluate(() => __socialUiMessages);
+    assert.deepEqual(await page.evaluate(() => catalogueWrites), []);
+    assert.equal(await page.locator("#uploadTitle").inputValue(), "");
+    assert.equal(await page.locator("#uploadError").textContent(), "");
     assert.equal(
       messages.some((message) => message.type === "PREPARE_CREATOR_UPLOAD"),
       false,

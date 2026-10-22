@@ -3333,7 +3333,16 @@
         const config = await client.loadConfig();
         if (revision !== matchRevision) return;
         if (!config.connected && !config.endpoint && !config.secret) {
-          throw new Error("Catalogue matching is not connected.");
+          currentSnapshot = null;
+          selectedCatalogueRow = null;
+          catalogueBaseline = null;
+          uploadWithoutSheet = true;
+          get("#catalogueConnectionStatus").textContent = "";
+          if (value.valid) previewWithoutSheet(value);
+          else
+            matchStatus.textContent =
+              "Complete the upload details to continue.";
+          return;
         }
         const fetched = await loadCatalogueSnapshot();
         get("#catalogueConnectionStatus").textContent = "";
@@ -4392,6 +4401,7 @@
 
     async function writeCatalogueBeforeUpload() {
       if (
+        workflowMode?.value === "teaser" ||
         currentMatch?.status === "upload-only" ||
         currentSnapshot?.source !== "desktop"
       )

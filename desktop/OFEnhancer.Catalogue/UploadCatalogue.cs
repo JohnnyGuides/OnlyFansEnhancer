@@ -98,22 +98,24 @@ public sealed partial class CatalogueStore
         if (destination is not { SheetId: not null }) destination = null;
         using SqliteTransaction transaction = connection.BeginTransaction();
         CatalogueItemSummary? item = ReadItems(false, transaction).SingleOrDefault(candidate =>
-            candidate.SourceKey == id && candidate.SourceRow == request.Row
-            && (request.ItemId is null || candidate.ItemId == request.ItemId));
+            candidate.SourceKey == id && (request.ItemId is null || candidate.ItemId == request.ItemId));
         if (item is null) return new("stale");
         UploadCatalogueRow current = ToUploadRow(item);
         string state = current.PublicationState[request.Platform];
         if (state == "review") return new("conflict", current.Fingerprint);
         var knownUrls = SourceUrls(item, platform);
-        if (knownUrls.Any(known => string.Equals(known, canonical, StringComparison.Ordinal)
-            || platform == "onlyfans" && new Uri(known).AbsolutePath.Split('/')[1] == new Uri(canonical).AbsolutePath.Split('/')[1]))
+        if (knownUrls.Any(known => SamePublicationIdentity(platform, known, canonical)))
         {
             UploadSheetWriteback? existingIntent = destination is null ? null
                 : QueueUploadSheetWriteback(destination.WorkbookId, destination.SheetId, request, canonical, item, transaction);
             transaction.Commit();
             return new("idempotent", current.Fingerprint, PostUrl: canonical, SheetWriteback: existingIntent);
         }
-        if (!string.Equals(current.Fingerprint, request.Fingerprint, StringComparison.OrdinalIgnoreCase)) return new("stale", current.Fingerprint);
+        // Match the caller's frozen row when checking its receipt, while resolving
+        // the item itself by stable source key/item identity above.
+        string receiptFingerprint = ToUploadRow(item with { SourceRow = request.Row }).Fingerprint;
+        if (!string.Equals(current.Fingerprint, request.Fingerprint, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(receiptFingerprint, request.Fingerprint, StringComparison.OrdinalIgnoreCase)) return new("stale", current.Fingerprint);
         // Each lead-in variant of a toy-sync script has its own link on the row.
         bool append=request.Action is "appendTwitterTeaser" or "appendRedditPost" || request.Platform=="script";
         if (state == "published" && !append && !request.RepeatUploadConfirmed) return new("conflict", current.Fingerprint);
@@ -161,10 +163,12 @@ public sealed partial class CatalogueStore
                 if(links.TryGetValue(platform,out string? existing)) urls.Add(existing);
                 cells.TryGetValue(platform,out CatalogueSourceLinkCell? source);
                 if(source is not null) urls.AddRange(source.Urls);
-                string[] distinct=urls.Distinct(StringComparer.Ordinal).ToArray();
+                string[] distinct=urls.DistinctBy(url=>PublicationIdentity(platform,url),StringComparer.Ordinal).ToArray();
                 bool social=platform is "x" or "reddit" or "script";
-                var confirmed=group.SelectMany(record=>record.ConfirmedExistingUrls ?? []).Concat(group.Select(record=>record.PostUrl)).ToHashSet(StringComparer.Ordinal);
-                bool confirmedRepeat=group.Any(record=>record.ConfirmedExistingUrls is {Length:>0}) && distinct.All(confirmed.Contains);
+                var confirmed=group.SelectMany(record=>record.ConfirmedExistingUrls ?? []).Concat(group.Select(record=>record.PostUrl))
+                    .Select(url=>PublicationIdentity(platform,url)).ToHashSet(StringComparer.Ordinal);
+                bool confirmedRepeat=group.Any(record=>record.ConfirmedExistingUrls is {Length:>0})
+                    && distinct.All(url=>confirmed.Contains(PublicationIdentity(platform,url)));
                 bool conflict=source?.IssueCode is not null || !social && distinct.Length>1 && !confirmedRepeat;
                 if(distinct.Length==1 && !conflict) links[platform]=distinct[0];
                 else
@@ -216,6 +220,18 @@ public sealed partial class CatalogueStore
         if (item.PlatformLinks.TryGetValue(platform,out string? primary)) urls.Add(primary);
         if (item.SourceLinkCells?.TryGetValue(platform,out CatalogueSourceLinkCell? cell) == true) urls.AddRange(cell.Urls);
         return urls.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool SamePublicationIdentity(string platform,string left,string right) =>
+        string.Equals(PublicationIdentity(platform,left),PublicationIdentity(platform,right),StringComparison.Ordinal);
+
+    private static string PublicationIdentity(string platform,string url)
+    {
+        if(platform!="onlyfans" || !Uri.TryCreate(url,UriKind.Absolute,out Uri? uri)) return url;
+        string? canonical=CatalogueSnapshotImporter.CanonicalPlatformLink(platform,uri);
+        if(canonical is null) return url;
+        string[] segments=new Uri(canonical).AbsolutePath.Split('/',StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length>0 ? $"onlyfans:{segments[0]}" : url;
     }
 
     private static string UploadFingerprint(CatalogueItemSummary item) => Convert.ToHexString(SHA256.HashData(

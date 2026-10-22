@@ -4192,6 +4192,77 @@ test("reply picker recommends related OnlyFans videos without changing the episo
   }
 });
 
+test("manual calendar post prepares an automatic 15 minute reply without editing its catalogue episode", async () => {
+  const page = await browser.newPage();
+  try {
+    const errors = await mount(page, true, false, {}, [
+      {
+        row: 3,
+        id: "other-episode",
+        itemId: "other-episode",
+        title: "Another synthetic episode",
+        fingerprint: "b".repeat(64),
+        onlyfansLink: "https://onlyfans.com/2/preview",
+        publicationState: {},
+      },
+    ]);
+    const frame = await chooseSyntheticVideo(page);
+    await frame.evaluate(() => {
+      globalThis.catalogueWrites = [];
+      globalThis.socialRequests = [];
+      const read = CreatorCatalogueClient.getCatalogueSnapshot;
+      CreatorCatalogueClient.getCatalogueSnapshot = async () => ({
+        ...(await read()),
+        source: "desktop",
+      });
+      CreatorCatalogueClient.writeUploadCatalogueEntry = async (request) => {
+        catalogueWrites.push(request);
+        throw new Error("invalid-catalogue-entry");
+      };
+      const send = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = (message, callback) => {
+        if (!/^(PREPARE|START)_CREATOR_SOCIAL_DISTRIBUTION$/.test(message.type))
+          return send(message, callback);
+        socialRequests.push(message);
+        const result = {
+          ok: true,
+          socialDistribution: { targets: {}, jobs: {} },
+        };
+        queueMicrotask(() => callback?.(result));
+        return Promise.resolve(result);
+      };
+    });
+    await frame.locator("#socialCaption").fill("A synthetic teaser caption");
+    await chooseReplyLink(frame, "fallback:video:other-episode");
+    await frame
+      .getByLabel("Reply delay in minutes", { exact: true })
+      .fill("15");
+    await frame
+      .getByRole("checkbox", { name: "Reply automatically", exact: true })
+      .check();
+    await frame
+      .getByRole("button", { name: "Send to Twitter", exact: true })
+      .click();
+    await frame.waitForFunction(() => socialRequests.length === 2);
+    const { writes, plan, caption } = await frame.evaluate(() => ({
+      writes: catalogueWrites,
+      plan: socialRequests[0].plan,
+      caption: socialRequests[0].caption,
+    }));
+    assert.deepEqual(writes, []);
+    assert.equal(caption, "A synthetic teaser caption");
+    assert.equal(plan.catalogue.id, "preview-test");
+    assert.equal(plan.paidUrl, "https://onlyfans.com/2/preview");
+    assert.equal(plan.mode, "manual");
+    assert.equal(plan.xOptions.autoReply, true);
+    assert.equal(plan.xOptions.replyDelayMinutes, 15);
+    assert.equal(await frame.locator("#uploadError").textContent(), "");
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test("teaser post and reply automation have independent saved controls", async () => {
   const page = await browser.newPage({
     viewport: { width: 1200, height: 850 },

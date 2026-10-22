@@ -162,6 +162,11 @@ workbook, tab, row count, change count, and conflicts before **Yes, update the
 workbook**. A changed proposal requires a new review. Once sync is ready, use its
 controls rather than the separate read-only import for that session.
 
+Reconnecting the same workbook preserves its selected tab and sync profile, but
+requires inspection before writes resume. Selecting a different workbook clears
+the previous tab/profile. Reconnection does not automatically backfill historical
+local results that never had a sheet destination.
+
 The migration is additive and preserves foreign cells, formulas, existing link
 history, and row identity. Its owned structures include stable row developer
 metadata `ofenhancer.item_id.v1`, the profile's grouped far-right fields, and
@@ -208,8 +213,9 @@ catalogue's `Twitter Teaser(s)` column without a review step. Like upload-result
 link writes, this applies whether or not reviewed sync is set up, and the
 **Import catalogue** step itself still never writes.
 
-- Source: owner video teasers bound to a row through the first-reply OnlyFans or
-  Fansly link or an owner choice, with no recorded binding conflict. Unbound,
+- Source: owner video teasers explicitly bound to a source row by an owner
+  choice, with no recorded binding conflict. A first-reply paid link alone
+  identifies a destination and cannot authorize a source-row write. Unbound,
   conflicted and ambiguous posts are never written. The link is
   `https://x.com/<owner handle>/status/<id>`.
 - Only that row's `Twitter Teaser(s)` cell changes. Existing links and text stay
