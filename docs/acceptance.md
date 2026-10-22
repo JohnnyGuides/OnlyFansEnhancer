@@ -1084,3 +1084,28 @@ Stage manifest SHA-256: `992807794cb5ed768c896affe60e28771fecf097789b845a16d95ed
 - The browser-process probe did **not** establish normal installed Chrome restart acceptance: command-line/CDP-loaded test extensions were temporary installations, and relaunch followed the intentional fresh-install reset path. Installation protections were preserved. Worker recovery and explicitly lost session state are separate evidence, not a substitute for that missing installed-process check. No live X post/reply or OnlyFans final publication was performed.
 - A closed editor does not own the follow-up. Chrome must be running to execute browser-driven replies; due runs can catch up after reconnect within the existing 24-hour window. Recovery backs off and stops after three failed checks, saving a confirmed main post with an explicit failed/unconfirmed reply outcome. An uncertain reply is never clicked again. Older runs without verified publication ownership require review, even when they have a previously recorded result URL.
 - The full-video upload audit confirmed that lost tab/document ownership stops automatic replay and requires draft inspection/reselection. Resume file checks remain metadata checks, not cryptographic proof of every reselected byte. Optional script contents are reselected after console loss. Read-only backend inspection of `AdultVideoPlayer/server/src/modules/sync/sync.ts` confirmed content-hash filenames and per-key replacement for an exact `/sync/scripts` retry; this establishes source idempotence for identical normalized content/keys, not live deployment or concurrent distinct requests.
+
+## Release 0.20.126 — publication-aware reply recovery, 22 October 2026
+
+Built runtime source 6d0a53c; the subsequent 8982e19 changes only test setup.
+Lint, typecheck and final formatting passed. The complete portable run covered
+1,023 cases: 1,014 passed, one awaited staging, and eight stopped in a shared
+fixture before their assertions. After correcting setup, all 31 tests in every
+consumer of that fixture passed on the final candidate. The Windows gate passed:
+669 .NET tests, 31 native tests and 16 packaging tests. After compiling Setup,
+all three stage-dependent installer/browser lifecycle checks passed without skips.
+No failing assertion was suppressed; the corrected tests retain their no-write,
+single-submit, recovery and preservation assertions. The source qualification
+limits above still apply.
+
+Installed as a silent normal update (exit 0 and successful installer record),
+then restarted from the installed desktop path. All 1345 manifest files matched;
+15 data/settings file hashes and 21 database table fingerprints were unchanged.
+Database integrity was ok; both extension identities and native registrations
+were preserved. Installed desktop reports 0.20.126+6d0a53c.
+The owner must reload the existing Chrome extension entry to activate its new
+runtime; installation does not establish live X/OnlyFans publication or a normal
+installed Chrome-process restart. No live publication was used as a test.
+
+Installer SHA-256: 5ebaab46537681d747d638ad60feab70ce780403be003cef112413d31aae6d16.
+Stage manifest SHA-256: dbd2589f902ed69c91fad8361b524d5f1a87a05c79827b80f72b93c1b5c8f8e3.
