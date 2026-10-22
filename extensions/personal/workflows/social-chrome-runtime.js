@@ -478,8 +478,9 @@
             paidUrl: input.paidUrl,
             text: reply.text,
           });
-          if (prepared.replyResultId || input.mode === "manual")
-            return prepared;
+          const autoReply =
+            input.plan.xOptions?.autoReply ?? input.mode === "autonomous";
+          if (prepared.replyResultId || !autoReply) return prepared;
           const authorization = await input.beforeReplyCommit(prepared);
           if (authorization?.armed !== true) {
             throw new Error("The X first reply was not durably armed.");

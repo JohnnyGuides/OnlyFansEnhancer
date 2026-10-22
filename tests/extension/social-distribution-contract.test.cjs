@@ -321,3 +321,39 @@ test("accepts an existing catalogue Pornhub paid link without an upload dependen
     "https://www.pornhub.com/view_video.php?viewkey=phpaid",
   );
 });
+
+test("X reply automation is an independent explicit boolean and old plans retain their legacy choice", () => {
+  const contract = loadContract();
+  const base = {
+    sensitive: true,
+    scheduledUtc: "",
+    timeZone: "Europe/Zurich",
+    replyDelayMinutes: 15,
+  };
+  for (const mode of ["manual", "autonomous"]) {
+    for (const autoReply of [true, false]) {
+      const frozen = contract.freezeDistributionPlan(
+        input({ mode, xOptions: { ...base, autoReply } }),
+      );
+      assert.equal(frozen.mode, mode);
+      assert.equal(frozen.xOptions.autoReply, autoReply);
+    }
+    assert.equal(
+      Object.hasOwn(
+        contract.freezeDistributionPlan(input({ mode, xOptions: base }))
+          .xOptions,
+        "autoReply",
+      ),
+      false,
+    );
+  }
+  for (const autoReply of [null, 1, "false"]) {
+    assert.throws(
+      () =>
+        contract.freezeDistributionPlan(
+          input({ xOptions: { ...base, autoReply } }),
+        ),
+      /automatic reply choice/,
+    );
+  }
+});

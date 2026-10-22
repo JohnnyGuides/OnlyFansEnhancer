@@ -134,6 +134,12 @@
         draft.replyDelayMinutes <= 1440
           ? draft.replyDelayMinutes
           : 15,
+      ...(typeof draft.autoReply === "boolean"
+        ? { autoReply: draft.autoReply }
+        : {}),
+      ...(typeof draft.postAutomatically === "boolean"
+        ? { postAutomatically: draft.postAutomatically }
+        : {}),
       paidUrl: String(draft.paidUrl || ""),
       linkFallback:
         /^(random|onlyfans|fansly|video:[A-Za-z0-9_-]{1,200})$/.test(

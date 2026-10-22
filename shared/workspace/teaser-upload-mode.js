@@ -144,6 +144,8 @@
           JSON.stringify({
             time: time.value,
             replyDelayMinutes: Number(replyDelay.value),
+            autoReply: autoReply.checked,
+            postAutomatically: automatic.checked,
             linkKind,
             customUrl: "",
           }),
@@ -255,9 +257,27 @@
       }
     });
     const automatic = get('input[name="socialMode"][value="autonomous"]');
-    automatic.closest("label").title =
-      "Unchecked: prepare the Twitter draft for manual posting. Checked: post or schedule, then add the first reply.";
-    get("#uploadActions").prepend(automatic.closest("label"));
+    const postLabel = automatic.closest("label");
+    postLabel.lastChild.textContent = " Post automatically";
+    postLabel.title = "Post or schedule the teaser in X automatically.";
+    const autoReply = document.createElement("input");
+    autoReply.type = "checkbox";
+    autoReply.id = "teaserAutoReply";
+    const replyAutoLabel = document.createElement("label");
+    replyAutoLabel.className = "social-auto-mode";
+    replyAutoLabel.title =
+      "Send the reply after the delay, including when you post the teaser manually.";
+    replyAutoLabel.append(autoReply, "Reply automatically");
+    const autoOptions = document.createElement("div");
+    autoOptions.className = "teaser-auto-options";
+    autoOptions.append(postLabel, replyAutoLabel);
+    get("#uploadActions").prepend(autoOptions);
+    for (const control of [automatic, autoReply]) {
+      control.addEventListener("change", () => {
+        remember();
+        notify("dirty");
+      });
+    }
     folder.addEventListener("click", async () => {
       try {
         const key = hub.candidate()?.id;
@@ -513,6 +533,8 @@
         thumbnailSelection,
         time: time.value,
         replyDelayMinutes: Number(replyDelay.value),
+        autoReply: autoReply.checked,
+        postAutomatically: automatic.checked,
         paidUrl: hub.paidUrl(),
         linkFallback: hub.linkFallback(),
       });
@@ -789,7 +811,7 @@
         linkFields.hidden = true;
         customLink.hidden = true;
         publishing.hidden = true;
-        automatic.closest("label").hidden = true;
+        autoOptions.hidden = true;
         get("#uploadButton").hidden = true;
         get("#uploadButton").disabled = true;
         save.textContent = "Save draft";
@@ -813,6 +835,12 @@
             ? preferences.replyDelayMinutes
             : 15),
       );
+      automatic.checked = context.draft
+        ? context.draft.postAutomatically === true
+        : preferences.postAutomatically === true;
+      autoReply.checked = context.draft
+        ? (context.draft.autoReply ?? automatic.checked)
+        : (preferences.autoReply ?? automatic.checked);
       if (context.file)
         previewReady = showFile(context.file, context.draft?.thumbnail);
       else {
@@ -921,6 +949,7 @@
             instant.getTime() > Date.now() ? instant.toISOString() : "",
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           replyDelayMinutes: Number(replyDelay.value),
+          autoReply: autoReply.checked,
         };
       },
     };

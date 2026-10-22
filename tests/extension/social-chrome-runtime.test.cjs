@@ -390,56 +390,59 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
   );
 });
 
-test("future calendar result must resolve against observed owner evidence before a delayed reply", async () => {
-  const scheduledUtc = new Date(
-    Math.ceil(1_788_280_160_000 / 60_000) * 60_000,
-  ).toISOString();
-  let observed = false;
-  const fixture = loadRuntime({
-    resolveScheduledResult: async () =>
-      observed
-        ? {
-            matched: true,
-            resultId: "9000000000000000001",
-            resultUrl:
-              "https://x.com/RecordedCreator/status/9000000000000000001",
-            postedUtc: scheduledUtc,
-          }
-        : { matched: false },
+for (const mode of ["manual", "autonomous"]) {
+  test(`${mode} calendar result requires owner evidence before an automatic delayed reply`, async () => {
+    const scheduledUtc = new Date(
+      Math.ceil(1_788_280_160_000 / 60_000) * 60_000,
+    ).toISOString();
+    let observed = false;
+    const fixture = loadRuntime({
+      resolveScheduledResult: async () =>
+        observed
+          ? {
+              matched: true,
+              resultId: "9000000000000000001",
+              resultUrl:
+                "https://x.com/RecordedCreator/status/9000000000000000001",
+              postedUtc: scheduledUtc,
+            }
+          : { matched: false },
+    });
+    const id = "social-calendar-scheduled-0001";
+    const input = {
+      ...plan(id, mode),
+      xOptions: {
+        sensitive: true,
+        scheduledUtc,
+        timeZone: "Europe/Zurich",
+        replyDelayMinutes: 15,
+        autoReply: true,
+      },
+    };
+    await fixture.runtime.prepare({ plan: input, caption: "Caption" });
+    await fixture.runtime.start(id);
+    fixture.setNow(Date.parse(scheduledUtc) + 60_000);
+    await fixture.restart().resume(id);
+    assert.equal((await fixture.store.load(id)).jobs.x.resultUrl, undefined);
+    assert.equal(fixture.actions.includes("prepare-reply"), false);
+    observed = true;
+    await fixture.restart().resume(id);
+    const pending = (await fixture.store.load(id)).jobs.x;
+    assert.equal(pending.replyDueAt, Date.parse(scheduledUtc) + 900_000);
+    assert.equal(fixture.actions.includes("prepare-reply"), false);
+    fixture.setNow(pending.replyDueAt);
+    await fixture.restart().resume(id);
+    assert.equal((await fixture.store.load(id)).jobs.x.stage, "sheet-complete");
+    assert.equal(
+      fixture.actions.filter((action) => action === "submit").length,
+      mode === "autonomous" ? 1 : 0,
+    );
+    assert.equal(
+      fixture.actions.filter((action) => action === "submit-reply").length,
+      1,
+    );
   });
-  const id = "social-calendar-scheduled-0001";
-  const input = {
-    ...plan(id, "autonomous"),
-    xOptions: {
-      sensitive: true,
-      scheduledUtc,
-      timeZone: "Europe/Zurich",
-      replyDelayMinutes: 15,
-    },
-  };
-  await fixture.runtime.prepare({ plan: input, caption: "Caption" });
-  await fixture.runtime.start(id);
-  fixture.setNow(Date.parse(scheduledUtc) + 60_000);
-  await fixture.restart().resume(id);
-  assert.equal((await fixture.store.load(id)).jobs.x.resultUrl, undefined);
-  assert.equal(fixture.actions.includes("prepare-reply"), false);
-  observed = true;
-  await fixture.restart().resume(id);
-  const pending = (await fixture.store.load(id)).jobs.x;
-  assert.equal(pending.replyDueAt, Date.parse(scheduledUtc) + 900_000);
-  assert.equal(fixture.actions.includes("prepare-reply"), false);
-  fixture.setNow(pending.replyDueAt);
-  await fixture.restart().resume(id);
-  assert.equal((await fixture.store.load(id)).jobs.x.stage, "sheet-complete");
-  assert.equal(
-    fixture.actions.filter((action) => action === "submit").length,
-    1,
-  );
-  assert.equal(
-    fixture.actions.filter((action) => action === "submit-reply").length,
-    1,
-  );
-});
+}
 
 function redditPlan(id, mode = "manual") {
   const value = plan(id, mode);
@@ -835,3 +838,65 @@ test("a prepared job without a persisted hash is refused before the durable arm"
   assert.notEqual(session.jobs.x.stage, "sheet-complete");
   assert.match(session.jobs.x.error, /Prepare the draft again/i);
 });
+
+for (const [mainMode, autoReply] of [
+  ["manual", true],
+  ["autonomous", false],
+]) {
+  test(`${mainMode} teaser and ${autoReply ? "automatic" : "manual"} delayed reply stay independent after restart`, async () => {
+    const fixture = loadRuntime();
+    const id = `social-split-${mainMode}-0001`;
+    await fixture.runtime.prepare({
+      plan: {
+        ...plan(id, mainMode),
+        xOptions: {
+          sensitive: true,
+          scheduledUtc: "",
+          timeZone: "Europe/Zurich",
+          replyDelayMinutes: 15,
+          autoReply,
+        },
+      },
+      caption: "Caption",
+    });
+    await fixture.runtime.start(id);
+    assert.equal(fixture.actions.includes("submit"), mainMode === "autonomous");
+    if (mainMode === "manual") {
+      const [tab] = fixture.tabs.values();
+      tab.url = "https://x.com/RecordedCreator/status/9000000000000000001";
+      fixture.setObservedMainUrl(tab.url);
+      await fixture.restart().resume(id);
+    }
+    const pending = (await fixture.store.load(id)).jobs.x;
+    assert.equal(typeof pending.replyDueAt, "number");
+    assert.equal(fixture.actions.includes("submit-reply"), false);
+    fixture.setNow(pending.replyDueAt - 1);
+    await fixture.restart().resume(id);
+    assert.equal(fixture.actions.includes("prepare-reply"), false);
+    fixture.setNow(pending.replyDueAt);
+    await fixture.restart().resume(id);
+    assert.equal(fixture.actions.includes("prepare-reply"), true);
+    assert.equal(fixture.actions.includes("submit-reply"), autoReply);
+    const job = (await fixture.store.load(id)).jobs.x;
+    assert.equal(job.replySubmitAttempted === true, autoReply);
+    if (autoReply) {
+      assert.equal(job.stage, "sheet-complete");
+      await fixture.restart().resume(id);
+      assert.equal(
+        fixture.actions.filter((a) => a === "submit-reply").length,
+        1,
+      );
+    } else {
+      fixture.setReplyLive(true);
+      await fixture.restart().resume(id);
+      assert.equal(
+        (await fixture.store.load(id)).jobs.x.stage,
+        "sheet-complete",
+      );
+    }
+    assert.equal(
+      fixture.actions.filter((a) => a === "submit").length,
+      mainMode === "autonomous" ? 1 : 0,
+    );
+  });
+}

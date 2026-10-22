@@ -190,7 +190,20 @@
         replyDelayMinutes > 1440
       )
         throw new Error("Invalid X reply delay.");
-      xOptions = { sensitive: true, scheduledUtc, timeZone, replyDelayMinutes };
+      if (
+        options.autoReply !== undefined &&
+        typeof options.autoReply !== "boolean"
+      )
+        throw new Error("Invalid X automatic reply choice.");
+      xOptions = {
+        sensitive: true,
+        scheduledUtc,
+        timeZone,
+        replyDelayMinutes,
+        ...(options.autoReply !== undefined
+          ? { autoReply: options.autoReply }
+          : {}),
+      };
     }
     const preparationOnly = value.preparationOnly === true;
     if (preparationOnly && (mode !== "manual" || !reddit.length)) {

@@ -3949,7 +3949,7 @@ body.calendar-teaser {
   margin-top: 8px;
   padding-block: 10px;
 }
-.calendar-teaser #uploadActions > .social-auto-mode {
+.calendar-teaser #uploadActions > .teaser-auto-options {
   margin-right: auto;
   font-size: 12px;
   white-space: nowrap;
@@ -4100,7 +4100,7 @@ body.calendar-teaser {
   }
   .calendar-teaser
     #uploadActions:has(.teaser-remove-draft:not([hidden]))
-    > .social-auto-mode {
+    > .teaser-auto-options {
     flex-basis: 100%;
   }
 }
@@ -4340,7 +4340,10 @@ body.calendar-teaser {
   -webkit-line-clamp: 4;
   overflow: hidden;
 }
-.calendar-teaser #teaserReplyDialog .teaser-reply-list button[aria-pressed="true"] {
+.calendar-teaser
+  #teaserReplyDialog
+  .teaser-reply-list
+  button[aria-pressed="true"] {
   background: #123345;
   border-color: #65cfff;
 }
@@ -4366,4 +4369,18 @@ body.calendar-teaser {
   .teaser-reply-list {
     max-height: 130px;
   }
+}
+
+.calendar-teaser .teaser-auto-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.calendar-teaser .teaser-auto-options .social-auto-mode {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.calendar-teaser .teaser-auto-options[hidden] {
+  display: none;
 }

@@ -396,7 +396,8 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     const scroll = await list.evaluate((element) => ({
       overflow: element.scrollHeight > element.clientHeight,
       width: getComputedStyle(element, "::-webkit-scrollbar").width,
-      color: getComputedStyle(element, "::-webkit-scrollbar-thumb").backgroundColor,
+      color: getComputedStyle(element, "::-webkit-scrollbar-thumb")
+        .backgroundColor,
     }));
     assert.equal(scroll.overflow, true);
     assert.equal(scroll.width, "8px");
@@ -4160,6 +4161,70 @@ test("reply picker recommends related OnlyFans videos without changing the episo
       false,
       "click-away dismisses the picker",
     );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("teaser post and reply automation have independent saved controls", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 850 },
+  });
+  try {
+    const errors = await mount(page, true);
+    let frame = await chooseSyntheticVideo(page);
+    const post = frame.getByRole("checkbox", {
+      name: "Post automatically",
+      exact: true,
+    });
+    const reply = frame.getByRole("checkbox", {
+      name: "Reply automatically",
+      exact: true,
+    });
+    assert.equal(await post.isChecked(), false);
+    assert.equal(await reply.isChecked(), false);
+    await reply.check();
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(
+      async () =>
+        (await OFEnhancerTeaserDrafts.get("2026-10-06"))?.autoReply === true,
+    );
+    const saved = await page.evaluate(async () => {
+      const d = await OFEnhancerTeaserDrafts.get("2026-10-06");
+      return { autoReply: d.autoReply, postAutomatically: d.postAutomatically };
+    });
+    assert.deepEqual(saved, { autoReply: true, postAutomatically: false });
+    const output = path.join(
+      repositoryRoot,
+      ".local",
+      "split-automation-review",
+    );
+    fs.mkdirSync(output, { recursive: true });
+    await page
+      .locator(".xt-composer-dialog")
+      .screenshot({ path: path.join(output, "desktop.png") });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page
+      .locator(".xt-composer-dialog:not(.xt-confirm-dialog)")
+      .waitFor({ state: "detached" });
+    await page.locator("#open-day").click();
+    frame = page.frameLocator(".xt-composer-frame");
+    await frame.locator("#teaserAutoReply").waitFor();
+    assert.equal(
+      await frame
+        .getByRole("checkbox", { name: "Post automatically", exact: true })
+        .isChecked(),
+      false,
+    );
+    assert.equal(
+      await frame
+        .getByRole("checkbox", { name: "Reply automatically", exact: true })
+        .isChecked(),
+      true,
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(output, "phone.png") });
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

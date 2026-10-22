@@ -286,7 +286,12 @@ draft inspection; this workflow does not re-create or re-upload that draft.
 Twitter checkpoints remain independent.
 This adds neither automatic Reddit publishing nor metrics collection nor AI titles.
 
-Upload uses the existing manual/autonomous mode choice. X preparation applies and
+Calendar teasers have separate **Post automatically** and **Reply automatically**
+choices. Both are saved with the draft and remembered for new drafts. A manually
+posted or scheduled teaser can receive an automatic delayed reply; an automatically
+posted teaser can leave the reply for manual review. Each run freezes its choices,
+and older saved runs retain their original coupled manual/autonomous behavior.
+X preparation applies and
 reads back the Nudity warning, then uses labelled date/time controls and verifies
 the displayed timezone and schedule summary. A final scheduling attempt is durable
 and is never repeated automatically. An ambiguous receipt stays unresolved until
