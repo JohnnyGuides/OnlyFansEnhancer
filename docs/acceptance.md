@@ -1064,3 +1064,21 @@ with database integrity ok and extension identities/native registrations preserv
 Installer SHA-256: `8dddbeeb8b9846f9d9663413b7105ac7f1db133d596bcd44caf093f0e0adab82`.
 Stage manifest SHA-256: `75934acf52585ad49271ba27d50118a531dc75374c596eeb201fcc52b55142b9`.
 Chrome extension runtime reload and live publication remain separate acceptance.
+
+
+## Packaged teaser editor recovery — installed 0.20.125, 22 October 2026
+
+Source e962d33 includes the three missing desktop editor scripts, skips the chooser
+for zero-ready episodes, excludes failed clips from ready choices, and reports
+initialization failure immediately with Retry. Six focused browser checks against
+the desktop publish output and one asset-validator fixture passed before release.
+The builder now refuses missing local HTML runtime assets.
+
+The owner requested a normal update without repeating the full test suite. The
+installer exited 0 and logged success; the restarted installed desktop reports
+0.20.125+e962d33 with a visible window. All 1345 installed manifest files
+matched, and the installed workspace asset check passed. All 15 data/settings files
+and 21 database table fingerprints were unchanged, with database integrity ok
+and extension identities/native registrations preserved. No live post was sent.
+Installer SHA-256: `540cfc8c8c5fe4c897e1f491ded6c2b3e2d4717b2e53691e57eef56153d6ab90`.
+Stage manifest SHA-256: `992807794cb5ed768c896affe60e28771fecf097789b845a16d95eda4e1eb797`.
