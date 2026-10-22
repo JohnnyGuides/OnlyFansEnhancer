@@ -246,6 +246,13 @@ mark the authorization invalid. Disconnect clears its saved refresh credential a
 preserves catalogue rows, audit/history, and pending work. It is not data deletion.
 Do not edit the database or force a status transition as a routine repair.
 
+Reauthorization selects a workbook; it does not replace the worksheet `gid` in a
+saved Sheet URL. If `catalogue-tab-not-found` follows a successful sign-in, compare
+that `gid` with the workbook's current tabs. A deleted or recreated tab can leave
+the URL stale even though the workbook and authorization are correct. Verify the
+intended catalogue tab and its headers before correcting the local URL. Do not
+silently redirect a pinned worksheet or mark another tab ready for writes.
+
 Before the first live migration, use a disposable copy: compare protected cells
 and formulas, repeat the verified setup to prove idempotency, move a bound row,
 exercise a harmless owned-field sync, and prove a conflicting or uncertain write
