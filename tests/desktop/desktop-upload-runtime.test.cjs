@@ -416,7 +416,12 @@ test("desktop Upload Hub can inspect its saved run and start a new one", async (
   }
   assert.deepEqual(
     browser.actions.map((message) => message.type),
-    ["GET_CREATOR_UPLOAD_RESUMABLE", "START_NEW_CREATOR_UPLOAD", "GET_X_REPLY_POLICY", "SET_X_REPLY_POLICY"],
+    [
+      "GET_CREATOR_UPLOAD_RESUMABLE",
+      "START_NEW_CREATOR_UPLOAD",
+      "GET_X_REPLY_POLICY",
+      "SET_X_REPLY_POLICY",
+    ],
   );
 });
 

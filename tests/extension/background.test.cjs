@@ -612,10 +612,25 @@ function send(message, sender = extensionPageSender) {
     chrome,
     handleMessage: messageListener,
   });
-  const replyPolicy = await desktopAppRuntime.execute({ kind: "message", message: { type: "SET_X_REPLY_POLICY", replyPolicy: { mode: "rotate", variants: ["Shared phrase"] } } });
+  const replyPolicy = await desktopAppRuntime.execute({
+    kind: "message",
+    message: {
+      type: "SET_X_REPLY_POLICY",
+      replyPolicy: { mode: "rotate", variants: ["Shared phrase"] },
+    },
+  });
   assert.equal(replyPolicy.replyPolicy.nextLine, "Shared phrase");
-  assert.equal((await send({ type: "GET_X_REPLY_POLICY" })).replyPolicy.variants[0], "Shared phrase");
-  await assert.rejects(send({ type: "GET_X_REPLY_POLICY" }, { id: "other-extension", desktopUploadRuntime: true }), /only on extension pages/);
+  assert.equal(
+    (await send({ type: "GET_X_REPLY_POLICY" })).replyPolicy.variants[0],
+    "Shared phrase",
+  );
+  await assert.rejects(
+    send(
+      { type: "GET_X_REPLY_POLICY" },
+      { id: "other-extension", desktopUploadRuntime: true },
+    ),
+    /only on extension pages/,
+  );
   for (const operation of [
     "getUploadCatalogueSnapshot",
     "getSubredditPresets",

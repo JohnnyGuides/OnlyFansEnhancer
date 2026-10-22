@@ -1012,7 +1012,6 @@ the log.
 - All 15 readable settings/data/credential file hashes and 21 catalogue table fingerprints are unchanged through the update/restart snapshot. SQLite integrity is ok; extension identities, native manifest and registry views are unchanged. No original media, credential change, profile reset or publication occurred. Existing Chrome extension reload and owner live acceptance remain pending.
 - Installer SHA-256: 29bfbd6f9fb6f8b37b0e73e35b1f19efa6bdf122abf54389dc652c259ffdd3cf. Package manifest SHA-256: 6cd4b6c039124a5984918ced26901e31eeedb34c001999be828bfd34036bfa49. Delivery evidence remains in the isolated workspace .local directory.
 
-
 ## 2026-10-21 — 0.20.120 normal update
 
 - Includes immediate teaser catalogue opening, badge-only ready counts, direct Vegas project actions, cross-frame popover dismissal, automatic catalogue reply links (including projected Pornhub paid links), and draft-stable missing-link fallbacks to random/selected catalogue videos or the owner's supplied OnlyFans/Fansly profiles.
@@ -1020,7 +1019,6 @@ the log.
 - Built an archive of committed source as 0.20.120, preserving unrelated working-tree version edits. Normal silent installer exited 0 with its success marker. Verified all 1,333 installed manifest files, version, unchanged settings/credential hashes, extension identities and native registrations; restarted the installed desktop with a visible window.
 - Database integrity remained `ok`; `sqlite_sequence`, `x_metric_samples`, and `x_posts` changed during live runtime activity. Other table fingerprints matched. No publication or live upload acceptance was performed.
 - Installer SHA-256: `291c885c1fd282d6a3d95bfcb52bcc41f263747bbd02fcb5d661063b98d6c0f9`.
-
 
 ## 2026-10-21 — 0.20.121 normal update
 
@@ -1030,7 +1028,6 @@ the log.
 - All 15 settings/data file fingerprints and 21 database table fingerprints matched before/after; database integrity remained `ok`. Extension identities and native registrations matched. No live upload or publication acceptance was performed.
 - Installer SHA-256: `ed6fece5da4636abadd1f9992b1f1fcfbf3489b4f161befee60e922318631d9b`.
 
-
 ## 2026-10-21 — 0.20.122 normal update
 
 - Moves draft removal into the bottom-right footer beside Save draft and Send, reusing the footer button style. Preserves the removal control and its listeners when switching embedded destination editors; narrow layouts keep all actions within bounds.
@@ -1039,7 +1036,6 @@ the log.
 - Settings/credential hashes, extension identities and native registrations matched before/after. Database integrity remained `ok`; only `sqlite_sequence`, `x_metric_samples`, and `x_posts` table fingerprints changed during runtime activity. No live upload or publication acceptance was performed.
 - Installer SHA-256: `b97268d67d6842dfe2c66d323e5af63c1f26f770dac27252c460564733153702`.
 
-
 ## 2026-10-22 — 0.20.123 normal update
 
 - Includes direct local catalogue lookup, Pornhub free-link recognition, validation after an upload attempt, metadata-ranked reply-link suggestions, consistent editor surfaces/focus, and the shared configurable X reply policy. The reply editor supports complete multiline templates with an editable {link} placeholder, text-file import/export, a clickable overview, and themed scrolling.
@@ -1047,7 +1043,6 @@ the log.
 - Built committed source 8ef96ee with a 24-file version bump in an isolated release archive, preserving unrelated working-tree edits. The normal silent installer exited 0 and logged its success marker. All 1,342 installed manifest files matched the package; the installed 0.20.123 desktop restarted with a visible window.
 - All 15 settings/data file fingerprints and 21 database table fingerprints matched before/after; database integrity remained ok. Extension identities and native registrations matched. No live upload or publication acceptance was performed.
 - Installer SHA-256: c75b069099a1de83f82a40368935e7d1e747eed40c3ef394f1c321b4638fe8c9.
-
 
 ## Separate teaser and reply automation — installed 0.20.124, 22 October 2026
 
@@ -1064,7 +1059,6 @@ with database integrity ok and extension identities/native registrations preserv
 Installer SHA-256: `8dddbeeb8b9846f9d9663413b7105ac7f1db133d596bcd44caf093f0e0adab82`.
 Stage manifest SHA-256: `75934acf52585ad49271ba27d50118a531dc75374c596eeb201fcc52b55142b9`.
 Chrome extension runtime reload and live publication remain separate acceptance.
-
 
 ## Packaged teaser editor recovery — installed 0.20.125, 22 October 2026
 
