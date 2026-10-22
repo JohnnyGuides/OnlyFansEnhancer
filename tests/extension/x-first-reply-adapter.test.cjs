@@ -142,6 +142,16 @@ const events = (page) => page.evaluate(() => globalThis.__events);
 const composer = (page) =>
   page.evaluate(() => document.querySelector("#reply").innerText);
 
+test("automatic replies accept a custom link label with wording after the URL", async () => {
+  await withPage({}, async (page) => {
+    const text = `Full video\nOnlyFans: ${PAID}\nEnjoy`;
+    const prepared = await prepare(page, { text });
+    assert.equal(prepared.result?.status, "ready", prepared.error);
+    assert.equal(await composer(page), text);
+    assert.equal((await submit(page, { text })).result?.replyId, "150");
+  });
+});
+
 test("first reply removes the link card, verifies the exact text and posts once", async () => {
   await withPage({}, async (page) => {
     const prepared = await prepare(page);

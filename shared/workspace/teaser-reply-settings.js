@@ -16,7 +16,7 @@
     dialog.id = "teaserReplyDialog";
     dialog.setAttribute("aria-labelledby", "replySettingsTitle");
     dialog.innerHTML =
-      '<header><h2 id="replySettingsTitle">Reply text</h2><button type="button" data-close aria-label="Close reply settings">×</button></header><p class="hint">Shared by all X replies.</p><div class="teaser-reply-controls"><label>Wording<select aria-label="Reply wording"><option value="rotate">Rotate saved replies</option><option value="link">Link only</option></select></label><label data-entries>Saved reply<span class="teaser-reply-variants"><select aria-label="Saved reply"></select><button type="button" data-add aria-label="Add reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" data-remove aria-label="Remove reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></svg></button></span></label></div><label data-message>Message<textarea aria-label="Reply message" rows="3" maxlength="200" placeholder="Write the complete reply. The video link is added below."></textarea></label><label>Preview<pre aria-label="Reply preview"></pre></label><p role="status"></p><footer><button type="button" data-apply>Apply</button></footer>';
+      '<header><h2 id="replySettingsTitle">Reply text</h2><button type="button" data-close aria-label="Close reply settings">×</button></header><p class="hint">Shared by all X replies.</p><div class="teaser-reply-controls"><label>Wording<select aria-label="Reply wording"><option value="rotate">Rotate saved replies</option><option value="link">Link only</option></select></label><label data-entries>Saved reply<span class="teaser-reply-variants"><select aria-label="Saved reply"></select><button type="button" data-add aria-label="Add reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" data-remove aria-label="Remove reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></svg></button></span></label></div><label data-message>Message <small>{link} = selected video URL</small><textarea aria-label="Reply message" rows="3" maxlength="200" placeholder="Use {link} where the selected video URL should appear."></textarea></label><label>Preview<pre aria-label="Reply preview"></pre></label><p role="status"></p><footer><button type="button" data-apply>Apply</button></footer>';
     document.body.append(dialog);
     const mode = dialog.querySelector("select"),
       lines = dialog.querySelector("textarea"),
@@ -49,10 +49,13 @@
       dialog.querySelector("[data-entries]").hidden = mode.value === "link";
       dialog.querySelector("[data-message]").hidden = mode.value === "link";
       const phrase = mode.value === "link" ? "" : variants[selected] || "";
-      preview.textContent = global.CreatorXReplyPolicy.format(
-        phrase,
-        paidUrl() || "[video link]",
-      );
+      preview.textContent =
+        mode.value === "link" || phrase.includes("{link}")
+          ? global.CreatorXReplyPolicy.format(
+              phrase,
+              paidUrl() || "[video link]",
+            )
+          : phrase;
     }
     trigger.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -68,7 +71,7 @@
           );
         const config = response.replyPolicy;
         mode.value = config.mode;
-        variants = [...config.variants];
+        variants = config.variants.map(global.CreatorXReplyPolicy.template);
         selected = config.nextIndex % variants.length;
         lines.value = variants[selected];
         renderEntries();
@@ -91,9 +94,9 @@
     });
     add.addEventListener("click", () => {
       if (variants.length >= 20) return;
-      variants.push("");
+      variants.push("{link}");
       selected = variants.length - 1;
-      lines.value = "";
+      lines.value = variants[selected];
       renderEntries();
       render();
       lines.focus();
@@ -113,6 +116,8 @@
       if (busy()) return;
       status.textContent = "";
       try {
+        if (variants.some((reply) => !reply.includes("{link}")))
+          throw new Error("Include {link} in each saved reply.");
         const config = global.CreatorXReplyPolicy.normalize(value());
         apply.disabled = true;
         const response = await send({

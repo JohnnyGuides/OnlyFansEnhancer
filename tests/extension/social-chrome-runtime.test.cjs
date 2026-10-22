@@ -353,10 +353,10 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
   };
   await fixture.context.CreatorXReplyPolicy.forStorage(
     fixture.context.chrome.storage.local,
-  ).save({ variants: ["First line\nSecond line"] });
+  ).save({ variants: ["First line\nOnlyFans: {link}\nLast line"] });
   await fixture.runtime.prepare({ plan: input, caption: "Caption" });
   const frozenLine = (await fixture.store.load(id)).jobs.x.replyLine;
-  assert.equal(frozenLine, "First line\nSecond line");
+  assert.equal(frozenLine, "First line\nOnlyFans: {link}\nLast line");
   await fixture.context.CreatorXReplyPolicy.forStorage(
     fixture.context.chrome.storage.local,
   ).save({ variants: ["New wording"] });
@@ -374,7 +374,10 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
   const replyInput = fixture.xInputs.find(
     (input) => input.action === "prepare-reply",
   );
-  assert.equal(replyInput.text, `First line\nSecond line\n-> ${input.paidUrl}`);
+  assert.equal(
+    replyInput.text,
+    `First line\nOnlyFans: ${input.paidUrl}\nLast line`,
+  );
   job = (await fixture.store.load(id)).jobs.x;
   assert.equal(job.stage, "sheet-complete");
   assert.equal(

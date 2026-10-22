@@ -84,3 +84,21 @@ test("link-only and single-line settings apply to every newly reserved reply", a
   );
   await assert.rejects(policy.claim("201", "changed text"), /text changed/);
 });
+
+test("editable link labels and placement use the selected URL without adding an arrow", async () => {
+  const api = load(),
+    policy = api.forStorage(storage());
+  const template = "Full video\nOnlyFans: {link}\nEnjoy";
+  await policy.save({ variants: [template] });
+  const reply = await policy.reserve("301", "https://onlyfans.com/example");
+  assert.equal(
+    reply.text,
+    "Full video\nOnlyFans: https://onlyfans.com/example\nEnjoy",
+  );
+  assert.equal(api.template("Legacy wording"), "Legacy wording\n-> {link}");
+  assert.equal(
+    api.format("{link}", "https://example.com/?x=$&"),
+    "https://example.com/?x=$&",
+  );
+  await assert.rejects(policy.save({ variants: ["{link}\n{link}"] }), /once/);
+});

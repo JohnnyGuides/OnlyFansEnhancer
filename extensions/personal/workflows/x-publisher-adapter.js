@@ -622,13 +622,22 @@
       : null;
   }
 
+  function replyHasLink(text, paidUrl) {
+    if (typeof text !== "string" || typeof paidUrl !== "string" || !paidUrl)
+      return false;
+    const urls = text.match(/https?:\/\/[^\s<>"']+/g) || [];
+    return urls.some(
+      (url) => url === paidUrl || url.replace(/[)\]}.,!?;:]+$/, "") === paidUrl,
+    );
+  }
+
   async function prepareReply({ paidUrl, text }) {
     const main = currentMain();
     const captured = capturedReply(main);
     if (captured) return captured;
     rememberReplyBaseline(main);
     const editor = one(MAIN_COMPOSER, "The X reply composer");
-    if (typeof text !== "string" || !text || !text.endsWith(paidUrl))
+    if (!replyHasLink(text, paidUrl))
       throw new Error("The approved X reply text is required.");
     if (composerText(editor) !== text || visibleOnlyFansAnchors().length > 0) {
       fillEditor(editor, text);
@@ -663,7 +672,7 @@
       throw new Error("The armed X result id is required.");
     if (typeof paidUrl !== "string")
       throw new Error("The armed X paid URL is required.");
-    if (typeof text !== "string" || !text || !text.endsWith(paidUrl))
+    if (!replyHasLink(text, paidUrl))
       throw new Error("The approved X reply text is required.");
     const main = currentMain();
     const captured = capturedReply(main);
@@ -834,7 +843,7 @@
       !/^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/.test(
         String(paidUrl || ""),
       ) ||
-      !(text === paidUrl || text.endsWith(`\n-> ${paidUrl}`))
+      !replyHasLink(text, paidUrl)
     )
       throw new Error("mismatch: the reply does not carry the episode link.");
     if (linkCards(root).length)

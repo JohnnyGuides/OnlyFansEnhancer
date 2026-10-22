@@ -356,7 +356,10 @@ no link means no reply. Both this scanner and editor-created replies use one sha
 wording policy, rotation and durable per-status ownership/attempt guard. The gear
 beside **Reply (min)** edits the shared rotation or switches to **Link only**, with
 a preview. Each saved reply is a complete message that may contain multiple lines
-and blank lines; the video link is appended below it. The saved-reply selector and
+and blank lines. Its `{link}` placeholder inserts the selected URL wherever it is
+placed, so link labels and arrows are editable too. Legacy replies without a
+placeholder retain their original appended `-> <link>` until edited; the editor
+opens them as complete templates. The saved-reply selector and
 add/remove controls edit rotation entries individually. One saved reply uses the
 same wording every time; multiple saved replies rotate. Existing one-line entries
 stay separate. Defaults are "full vid (no ppv)", "full session" and "full vid :)",

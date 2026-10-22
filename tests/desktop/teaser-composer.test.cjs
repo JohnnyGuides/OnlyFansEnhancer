@@ -257,7 +257,7 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     );
     await dialog
       .getByLabel("Reply message", { exact: true })
-      .fill("First phrase\nA unique second line");
+      .fill("First phrase\nA unique second line\nOnlyFans: {link}");
     assert.match(
       await dialog.getByLabel("Reply preview").textContent(),
       /^First phrase\nA unique second line/,
@@ -265,12 +265,12 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     await dialog.getByLabel("Saved reply", { exact: true }).selectOption("0");
     assert.equal(
       await dialog.getByLabel("Reply message").inputValue(),
-      "full vid (no ppv)",
+      "full vid (no ppv)\n-> {link}",
     );
     await dialog.getByLabel("Saved reply", { exact: true }).selectOption("1");
     assert.equal(
       await dialog.getByLabel("Reply message").inputValue(),
-      "First phrase\nA unique second line",
+      "First phrase\nA unique second line\nOnlyFans: {link}",
     );
     await dialog
       .getByRole("button", { name: "Add reply", exact: true })
@@ -297,6 +297,17 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     assert.ok(bounds.width <= 390);
     await dialog.screenshot({ path: path.join(output, "phone.png") });
     await dialog
+      .getByLabel("Reply message")
+      .fill("A reply without its link placeholder");
+    await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+    assert.equal(
+      await dialog.getByRole("status").textContent(),
+      "Include {link} in each saved reply.",
+    );
+    await dialog
+      .getByLabel("Reply message")
+      .fill("First phrase\nA unique second line\nOnlyFans: {link}");
+    await dialog
       .getByLabel("Reply wording", { exact: true })
       .selectOption("link");
     assert.equal(
@@ -318,7 +329,7 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     );
     assert.equal(
       await dialog.getByLabel("Reply message", { exact: true }).inputValue(),
-      "First phrase\nA unique second line",
+      "First phrase\nA unique second line\nOnlyFans: {link}",
     );
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });

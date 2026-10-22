@@ -25,6 +25,8 @@
       )
     )
       throw new Error("Use 1–20 saved replies, up to 200 characters each.");
+    if (variants.some((reply) => (reply.match(/\{link\}/g) || []).length > 1))
+      throw new Error("Use {link} once in each reply.");
     if (value.mode !== undefined && !["rotate", "link"].includes(value.mode))
       throw new Error("Choose rotating text or link only.");
     return {
@@ -32,8 +34,15 @@
       variants: variants.map((line) => line.trim()),
     };
   }
+  function template(line) {
+    return line?.includes("{link}")
+      ? line
+      : line
+        ? `${line}\n-> {link}`
+        : "{link}";
+  }
   function format(line, url) {
-    return line ? `${line}\n-> ${url}` : url;
+    return template(line).replaceAll("{link}", () => url);
   }
   const services = new WeakMap();
   function forStorage(storage) {
@@ -132,6 +141,7 @@
     DEFAULT_VARIANTS,
     normalize,
     format,
+    template,
     forStorage,
   });
 })();
