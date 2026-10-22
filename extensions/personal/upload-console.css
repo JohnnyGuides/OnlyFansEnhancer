@@ -4296,10 +4296,27 @@ body.calendar-teaser {
 }
 .teaser-reply-list {
   max-height: 220px;
-  scrollbar-width: thin;
-  scrollbar-color: #526073 #101821;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
   scrollbar-gutter: stable;
   padding-right: 4px;
+}
+.teaser-reply-list::-webkit-scrollbar {
+  width: 8px;
+}
+.teaser-reply-list::-webkit-scrollbar-track {
+  background: #101821;
+}
+.teaser-reply-list::-webkit-scrollbar-thumb {
+  background: #526073;
+  border: 2px solid #101821;
+  border-radius: 8px;
+}
+.teaser-reply-list::-webkit-scrollbar-thumb:hover {
+  background: #6b7f97;
+}
+.teaser-reply-list::-webkit-scrollbar-button {
+  display: none;
 }
 .calendar-teaser #teaserReplyDialog .teaser-reply-list button {
   position: relative;

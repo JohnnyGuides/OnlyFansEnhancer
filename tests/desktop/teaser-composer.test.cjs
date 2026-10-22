@@ -395,12 +395,12 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     const list = dialog.locator(".teaser-reply-list");
     const scroll = await list.evaluate((element) => ({
       overflow: element.scrollHeight > element.clientHeight,
-      width: getComputedStyle(element).scrollbarWidth,
-      color: getComputedStyle(element).scrollbarColor,
+      width: getComputedStyle(element, "::-webkit-scrollbar").width,
+      color: getComputedStyle(element, "::-webkit-scrollbar-thumb").backgroundColor,
     }));
     assert.equal(scroll.overflow, true);
-    assert.equal(scroll.width, "thin");
-    assert.equal(scroll.color, "rgb(82, 96, 115) rgb(16, 24, 33)");
+    assert.equal(scroll.width, "8px");
+    assert.equal(scroll.color, "rgb(82, 96, 115)");
     await dialog.screenshot({ path: path.join(output, "many-desktop.png") });
     await list.getByRole("button").last().click();
     assert.match(
