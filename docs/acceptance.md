@@ -1038,3 +1038,12 @@ the log.
 - Built committed source in an isolated 0.20.122 archive, preserving unrelated working-tree edits. Normal silent installer exited 0 with the success marker. All 1,333 installed manifest files matched. Confirmed the installed 0.20.122 desktop restarted with a visible window.
 - Settings/credential hashes, extension identities and native registrations matched before/after. Database integrity remained `ok`; only `sqlite_sequence`, `x_metric_samples`, and `x_posts` table fingerprints changed during runtime activity. No live upload or publication acceptance was performed.
 - Installer SHA-256: `b97268d67d6842dfe2c66d323e5af63c1f26f770dac27252c460564733153702`.
+
+
+## 2026-10-22 — 0.20.123 normal update
+
+- Includes direct local catalogue lookup, Pornhub free-link recognition, validation after an upload attempt, metadata-ranked reply-link suggestions, consistent editor surfaces/focus, and the shared configurable X reply policy. The reply editor supports complete multiline templates with an editable {link} placeholder, text-file import/export, a clickable overview, and themed scrolling.
+- Focused source/browser checks passed for both reply paths, frozen wording and duplicate-attempt ownership, editable link labels, multiline/file round trips, invalid imports, and desktop/narrow layouts including a ten-reply list. No full-suite rerun for this update.
+- Built committed source 8ef96ee with a 24-file version bump in an isolated release archive, preserving unrelated working-tree edits. The normal silent installer exited 0 and logged its success marker. All 1,342 installed manifest files matched the package; the installed 0.20.123 desktop restarted with a visible window.
+- All 15 settings/data file fingerprints and 21 database table fingerprints matched before/after; database integrity remained ok. Extension identities and native registrations matched. No live upload or publication acceptance was performed.
+- Installer SHA-256: c75b069099a1de83f82a40368935e7d1e747eed40c3ef394f1c321b4638fe8c9.
