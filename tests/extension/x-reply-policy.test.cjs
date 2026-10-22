@@ -71,6 +71,16 @@ test("link-only and single-line settings apply to every newly reserved reply", a
   await policy.save({ variants: ["Always this line"] });
   assert.equal(await policy.allocate(), "Always this line");
   assert.equal(await policy.allocate(), "Always this line");
-  await assert.rejects(policy.save({ variants: ["one\ntwo"] }), /reply lines/);
+  await policy.save({ variants: ["First line\r\nSecond line\n\nFourth line"] });
+  const reply = await policy.reserve("202", "https://fansly.com/example");
+  assert.equal(
+    reply.text,
+    "First line\nSecond line\n\nFourth line\n-> https://fansly.com/example",
+  );
+  await assert.rejects(policy.save({ variants: [" "] }), /saved replies/);
+  await assert.rejects(
+    policy.save({ variants: ["x".repeat(201)] }),
+    /200 characters/,
+  );
   await assert.rejects(policy.claim("201", "changed text"), /text changed/);
 });

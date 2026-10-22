@@ -4209,7 +4209,7 @@ body.calendar-teaser {
 }
 .calendar-teaser .teaser-reply-dialog label {
   display: block;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 .teaser-reply-dialog textarea {
   width: 100%;
@@ -4234,11 +4234,48 @@ body.calendar-teaser {
 .teaser-reply-dialog footer {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 10px;
 }
 .teaser-reply-dialog [role="status"]:empty {
   display: none;
 }
 .calendar-teaser .teaser-reply-dialog [hidden] {
   display: none;
+}
+.teaser-reply-controls {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 12px;
+}
+.teaser-reply-dialog .hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.calendar-teaser .teaser-reply-controls label {
+  min-width: 0;
+  margin-top: 0;
+}
+.teaser-reply-variants {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.teaser-reply-variants select {
+  flex: 1;
+  min-width: 0;
+}
+.calendar-teaser #teaserReplyDialog .teaser-reply-variants select {
+  margin-top: 0;
+}
+.calendar-teaser #teaserReplyDialog .teaser-reply-variants button {
+  flex: none;
+  width: 28px;
+  min-height: 36px;
+  padding: 4px;
+}
+@media (max-width: 420px) {
+  .teaser-reply-controls {
+    grid-template-columns: 1fr;
+  }
 }

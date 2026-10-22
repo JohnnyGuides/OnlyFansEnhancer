@@ -8,20 +8,23 @@
     "full vid :)",
   ]);
   function normalize(value = {}) {
-    const variants = value.variants ?? [...DEFAULT_VARIANTS];
+    const input = value.variants ?? [...DEFAULT_VARIANTS];
+    if (!Array.isArray(input))
+      throw new Error("Use 1–20 saved replies, up to 200 characters each.");
+    const variants = input.map((reply) =>
+      typeof reply === "string" ? reply.replace(/\r\n?/g, "\n").trim() : null,
+    );
     if (
-      !Array.isArray(variants) ||
       !variants.length ||
       variants.length > 20 ||
       variants.some(
         (line) =>
           typeof line !== "string" ||
           !line.trim() ||
-          [...line.trim()].length > 200 ||
-          /[\r\n]/.test(line),
+          [...line.trim()].length > 200,
       )
     )
-      throw new Error("Use 1–20 reply lines, up to 200 characters each.");
+      throw new Error("Use 1–20 saved replies, up to 200 characters each.");
     if (value.mode !== undefined && !["rotate", "link"].includes(value.mode))
       throw new Error("Choose rotating text or link only.");
     return {

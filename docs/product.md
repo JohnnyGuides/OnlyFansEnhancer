@@ -355,8 +355,11 @@ link is the canonical `https://onlyfans.com/<post id>/johnny_guides`, qualifies;
 no link means no reply. Both this scanner and editor-created replies use one shared
 wording policy, rotation and durable per-status ownership/attempt guard. The gear
 beside **Reply (min)** edits the shared rotation or switches to **Link only**, with
-a next-reply preview. One saved line uses the same wording every time; multiple
-lines rotate. Defaults are "full vid (no ppv)", "full session" and "full vid :)",
+a preview. Each saved reply is a complete message that may contain multiple lines
+and blank lines; the video link is appended below it. The saved-reply selector and
+add/remove controls edit rotation entries individually. One saved reply uses the
+same wording every time; multiple saved replies rotate. Existing one-line entries
+stay separate. Defaults are "full vid (no ppv)", "full session" and "full vid :)",
 then a new line and `-> <link>`. Prepared editor jobs and queued scanner replies
 retain their wording across later setting changes. The scanner skips editor-owned
 replies, preserving their selected delay and fallback URL. It is posted live,

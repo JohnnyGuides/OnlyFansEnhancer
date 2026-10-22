@@ -115,7 +115,10 @@ const state = (storage) => storage.data.creatorXFirstReplyV1;
 
 test("scanner uses configured wording and leaves editor-owned fallback replies alone", async () => {
   const storage = memoryStorage({
-    creatorXReplyPolicyV1: { mode: "rotate", variants: ["My wording"] },
+    creatorXReplyPolicyV1: {
+      mode: "rotate",
+      variants: ["My wording\nMy second line"],
+    },
     creatorXReplyReservationsV1: {
       next: 0,
       items: {
@@ -136,7 +139,10 @@ test("scanner uses configured wording and leaves editor-owned fallback replies a
   });
   await instance.tick();
   assert.equal(state(storage).items["101"], undefined);
-  assert.equal(state(storage).items["102"].text, `My wording\n-> ${PAID}`);
+  assert.equal(
+    state(storage).items["102"].text,
+    `My wording\nMy second line\n-> ${PAID}`,
+  );
   storage.data.creatorXReplyPolicyV1.variants = ["Later wording"];
   clock.now = T0 + 16 * MINUTE;
   await instance.tick();
@@ -144,7 +150,10 @@ test("scanner uses configured wording and leaves editor-owned fallback replies a
     runner.calls.filter(([action]) => action === "submit").length,
     1,
   );
-  assert.equal(state(storage).items["102"].text, `My wording\n-> ${PAID}`);
+  assert.equal(
+    state(storage).items["102"].text,
+    `My wording\nMy second line\n-> ${PAID}`,
+  );
 });
 
 test("the reply is scheduled once 15-60 minutes after the teaser and persisted", async () => {

@@ -351,9 +351,12 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
       replyDelayMinutes: 15,
     },
   };
+  await fixture.context.CreatorXReplyPolicy.forStorage(
+    fixture.context.chrome.storage.local,
+  ).save({ variants: ["First line\nSecond line"] });
   await fixture.runtime.prepare({ plan: input, caption: "Caption" });
   const frozenLine = (await fixture.store.load(id)).jobs.x.replyLine;
-  assert.equal(frozenLine, "full vid (no ppv)");
+  assert.equal(frozenLine, "First line\nSecond line");
   await fixture.context.CreatorXReplyPolicy.forStorage(
     fixture.context.chrome.storage.local,
   ).save({ variants: ["New wording"] });
@@ -371,7 +374,7 @@ test("calendar post delays its reply durably and a restarted worker cannot reply
   const replyInput = fixture.xInputs.find(
     (input) => input.action === "prepare-reply",
   );
-  assert.equal(replyInput.text, `full vid (no ppv)\n-> ${input.paidUrl}`);
+  assert.equal(replyInput.text, `First line\nSecond line\n-> ${input.paidUrl}`);
   job = (await fixture.store.load(id)).jobs.x;
   assert.equal(job.stage, "sheet-complete");
   assert.equal(

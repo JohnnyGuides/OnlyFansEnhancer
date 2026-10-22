@@ -180,7 +180,7 @@
       if (
         typeof value.replyLine !== "string" ||
         [...value.replyLine].length > 200 ||
-        /[\r\n]/.test(value.replyLine)
+        /\r/.test(value.replyLine)
       )
         throw new Error("Invalid X reply wording.");
       output.replyLine = value.replyLine;

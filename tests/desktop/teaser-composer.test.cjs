@@ -245,27 +245,53 @@ test("reply settings edit the shared rotation with a preview and link-only choic
       name: "Reply text",
       exact: true,
     });
-    await dialog.getByLabel("Reply lines", { exact: true }).waitFor();
+    await dialog.getByLabel("Reply message", { exact: true }).waitFor();
     await frame.waitForFunction(() =>
       document
         .querySelector(".teaser-reply-dialog pre")
         .textContent.startsWith("full session"),
     );
     assert.match(
-      await dialog.getByLabel("Next reply preview").textContent(),
+      await dialog.getByLabel("Reply preview").textContent(),
       /full session\n-> https:\/\/onlyfans.com\/1\/preview/,
     );
     await dialog
-      .getByLabel("Reply lines", { exact: true })
-      .fill("First phrase\nSecond phrase");
+      .getByLabel("Reply message", { exact: true })
+      .fill("First phrase\nA unique second line");
     assert.match(
-      await dialog.getByLabel("Next reply preview").textContent(),
-      /^Second phrase/,
+      await dialog.getByLabel("Reply preview").textContent(),
+      /^First phrase\nA unique second line/,
     );
+    await dialog.getByLabel("Saved reply", { exact: true }).selectOption("0");
+    assert.equal(
+      await dialog.getByLabel("Reply message").inputValue(),
+      "full vid (no ppv)",
+    );
+    await dialog.getByLabel("Saved reply", { exact: true }).selectOption("1");
+    assert.equal(
+      await dialog.getByLabel("Reply message").inputValue(),
+      "First phrase\nA unique second line",
+    );
+    await dialog
+      .getByRole("button", { name: "Add reply", exact: true })
+      .click();
+    await dialog.getByLabel("Reply message").fill("Temporary\nReply");
+    await dialog
+      .getByRole("button", { name: "Remove reply", exact: true })
+      .click();
+    await dialog.getByLabel("Saved reply", { exact: true }).selectOption("1");
     const output = path.join(repositoryRoot, ".local/reply-settings-review");
     fs.mkdirSync(output, { recursive: true });
     await dialog.screenshot({ path: path.join(output, "desktop.png") });
-    assert.equal(await dialog.evaluate((element) => element.scrollHeight <= element.clientHeight), true);
+    const dialogSize = await dialog.evaluate((element) => ({
+      scroll: element.scrollHeight,
+      visible: element.clientHeight,
+    }));
+    assert.equal(
+      dialogSize.scroll <= dialogSize.visible,
+      true,
+      JSON.stringify(dialogSize),
+    );
     await page.setViewportSize({ width: 390, height: 844 });
     const bounds = await dialog.boundingBox();
     assert.ok(bounds.width <= 390);
@@ -274,11 +300,11 @@ test("reply settings edit the shared rotation with a preview and link-only choic
       .getByLabel("Reply wording", { exact: true })
       .selectOption("link");
     assert.equal(
-      await dialog.getByLabel("Reply lines", { exact: true }).isVisible(),
+      await dialog.getByLabel("Reply message", { exact: true }).isVisible(),
       false,
     );
     assert.equal(
-      await dialog.getByLabel("Next reply preview").textContent(),
+      await dialog.getByLabel("Reply preview").textContent(),
       "https://onlyfans.com/1/preview",
     );
     await dialog.getByRole("button", { name: "Apply", exact: true }).click();
@@ -291,8 +317,8 @@ test("reply settings edit the shared rotation with a preview and link-only choic
         document.querySelector(".teaser-reply-dialog select").value === "link",
     );
     assert.equal(
-      await dialog.getByLabel("Reply lines", { exact: true }).inputValue(),
-      "First phrase\nSecond phrase",
+      await dialog.getByLabel("Reply message", { exact: true }).inputValue(),
+      "First phrase\nA unique second line",
     );
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
@@ -3529,7 +3555,9 @@ test("selected episodes use catalogue links despite stale custom preferences and
         );
         fs.mkdirSync(output, { recursive: true });
         await page.keyboard.press("Tab");
-        await frame.getByRole("button", { name: "Choose reply link", exact: true }).focus();
+        await frame
+          .getByRole("button", { name: "Choose reply link", exact: true })
+          .focus();
         await frame
           .locator(".teaser-schedule-row")
           .screenshot({ path: path.join(output, "link-row.png") });

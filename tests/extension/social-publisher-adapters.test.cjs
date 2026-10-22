@@ -56,7 +56,7 @@ test("shared reply wording survives preparation and non-OnlyFans preview removal
         document.querySelector('[aria-label="Remove preview"]').addEventListener('click', () => document.querySelector('#preview').remove());
       </script>`,
     );
-    const text = "My chosen wording\n-> https://fansly.com/example";
+    const text = "My chosen wording\nA unique second line\n-> https://fansly.com/example";
     await page.evaluate(
       (text) =>
         CreatorXPublisherAdapter.prepareReply({
