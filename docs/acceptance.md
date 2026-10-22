@@ -1109,3 +1109,30 @@ installed Chrome-process restart. No live publication was used as a test.
 
 Installer SHA-256: 5ebaab46537681d747d638ad60feab70ce780403be003cef112413d31aae6d16.
 Stage manifest SHA-256: dbd2589f902ed69c91fad8361b524d5f1a87a05c79827b80f72b93c1b5c8f8e3.
+
+
+## Release 0.20.127 — refresh before matching, 23 October 2026
+
+Upload catalogue reads now pull the selected Google sheet before returning rows
+to both native extension and desktop WebView matching. This uses the adaptive
+read-only importer, including while reviewed sync is ready, without replacing
+Google row bindings or performing a sheet mutation. Upload-window lookups share
+an in-flight read instead of retaining completed snapshots. A failed refresh
+keeps entered details and the stored catalogue, clears stale suggestions, and
+does not silently enable an upload without a catalogue match.
+
+The final versioned candidate passed seven focused desktop/controller cases and
+two synthetic Chrome upload-UI cases, plus targeted ESLint and formatting checks.
+The full check aggregate and unrelated lifecycle suites were not rerun for this
+owner-requested focused update. The Windows package compiled successfully.
+
+Normal update completed with installer exit 0 and its success log. All 1,345
+installed manifest files match the built stage; fingerprints of 15 data/settings
+files and all 21 database tables are unchanged, integrity is ok, and extension
+identities/native registrations are preserved. The installed desktop restarted
+as PID 38552 and reports 0.20.127+0ff5cf5. Installer SHA-256:
+`2c8b617f206f7358b0b2e53e50fa71077ea37a4b0983efc6e08b1f4a68444cb2`.
+
+The existing Chrome extension still needs the owner's reload. A live Google
+refresh through the installed matching window and real publication/delayed-reply
+UAT have not been claimed. Prior full Chrome-process recovery limitations remain.
