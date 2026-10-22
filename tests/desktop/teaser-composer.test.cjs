@@ -323,13 +323,11 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     const bounds = await dialog.boundingBox();
     assert.ok(bounds.width <= 390);
     await dialog.screenshot({ path: path.join(output, "phone.png") });
-    await dialog
-      .getByLabel("Open reply text file")
-      .setInputFiles({
-        name: "invalid.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("x".repeat(201)),
-      });
+    await dialog.getByLabel("Open reply text file").setInputFiles({
+      name: "invalid.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("x".repeat(201)),
+    });
     await frame.waitForFunction(() =>
       document
         .querySelector('.teaser-reply-dialog [role="status"]')
@@ -373,6 +371,45 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     );
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
+    await frame.evaluate(async () => {
+      await chrome.runtime.sendMessage({
+        type: "SET_X_REPLY_POLICY",
+        replyPolicy: {
+          mode: "rotate",
+          variants: Array.from(
+            { length: 10 },
+            (_, index) =>
+              `Saved reply ${index + 1}\nA different second line\nWatch here: {link}`,
+          ),
+        },
+      });
+    });
+    await page.setViewportSize({ width: 1365, height: 900 });
+    await frame
+      .getByRole("button", { name: "Reply settings", exact: true })
+      .click();
+    await frame.waitForFunction(
+      () =>
+        document.querySelectorAll(".teaser-reply-list button").length === 10,
+    );
+    const list = dialog.locator(".teaser-reply-list");
+    const scroll = await list.evaluate((element) => ({
+      overflow: element.scrollHeight > element.clientHeight,
+      width: getComputedStyle(element).scrollbarWidth,
+      color: getComputedStyle(element).scrollbarColor,
+    }));
+    assert.equal(scroll.overflow, true);
+    assert.equal(scroll.width, "thin");
+    assert.equal(scroll.color, "rgb(82, 96, 115) rgb(16, 24, 33)");
+    await dialog.screenshot({ path: path.join(output, "many-desktop.png") });
+    await list.getByRole("button").last().click();
+    assert.match(
+      await dialog.getByLabel("Reply message").inputValue(),
+      /^Saved reply 10/,
+    );
+    await dialog.screenshot({ path: path.join(output, "many-scrolled.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await dialog.screenshot({ path: path.join(output, "many-phone.png") });
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

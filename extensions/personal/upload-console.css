@@ -4296,6 +4296,10 @@ body.calendar-teaser {
 }
 .teaser-reply-list {
   max-height: 220px;
+  scrollbar-width: thin;
+  scrollbar-color: #526073 #101821;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
 }
 .calendar-teaser #teaserReplyDialog .teaser-reply-list button {
   position: relative;
