@@ -44,15 +44,14 @@
           button.type = "button";
           button.className = "teaser-link-result";
           button.setAttribute("aria-pressed", String(index === selected));
-          const title = document.createElement("span"),
-            detail = document.createElement("small");
-          title.textContent = reply.split("\n")[0] || "New reply";
+          const message = document.createElement("span");
+          message.className = "teaser-reply-copy";
+          message.textContent = reply || "New reply";
           button.setAttribute(
             "aria-label",
-            `Reply ${index + 1}: ${title.textContent}`,
+            `Reply ${index + 1}: ${reply.split("\n")[0] || "New reply"}`,
           );
-          detail.textContent = reply.split("\n").slice(1).join("\n");
-          button.append(title, detail, number);
+          button.append(message, number);
           button.addEventListener("click", () => {
             status.textContent = "";
             selected = index;

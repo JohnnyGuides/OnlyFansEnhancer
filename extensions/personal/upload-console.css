@@ -4300,6 +4300,7 @@ body.calendar-teaser {
 .calendar-teaser #teaserReplyDialog .teaser-reply-list button {
   position: relative;
   padding-right: 30px;
+  font-weight: 400;
 }
 .teaser-reply-list .teaser-reply-number {
   position: absolute;
@@ -4311,11 +4312,11 @@ body.calendar-teaser {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
-.teaser-reply-list small {
+.teaser-reply-list .teaser-reply-copy {
   white-space: pre-wrap;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   overflow: hidden;
 }
 .calendar-teaser #teaserReplyDialog .teaser-reply-list button[aria-pressed="true"] {
