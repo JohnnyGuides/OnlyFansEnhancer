@@ -64,7 +64,7 @@ function installCatalogue(page) {
 async function matched(fixture) {
   const { page } = fixture;
   await installCatalogue(page);
-  await fixture.ready();
+  await fixture.ready(undefined, { waitForReadiness: false });
   await page.locator("#uploadTitle").fill("Studio tour");
   await page.waitForFunction(
     () =>

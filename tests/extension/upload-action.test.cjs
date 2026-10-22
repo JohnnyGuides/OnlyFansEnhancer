@@ -999,7 +999,7 @@ test("a repeat revealed by the catalogue save is confirmed before preparation", 
           ),
       };
     });
-    await fixture.ready();
+    await fixture.ready(undefined, { waitForReadiness: false });
     await page.locator("#uploadTitle").fill("Studio tour");
     await page.waitForFunction(
       () =>
@@ -1084,7 +1084,7 @@ test("linked destination requires confirmation before any catalogue write", asyn
           ),
       };
     });
-    await fixture.ready();
+    await fixture.ready(undefined, { waitForReadiness: false });
     await page.locator("#uploadTitle").fill("Studio tour");
     await page.waitForFunction(
       () =>
@@ -1195,7 +1195,7 @@ test("clicking an auto-matched entry overwrites every field and binds a plain up
   try {
     const { page } = fixture;
     await installBindingCatalogue(page);
-    await fixture.ready();
+    await fixture.ready(undefined, { waitForReadiness: false });
     await page.locator("#uploadDescription").fill("");
     await page.locator("#uploadTitle").fill("Studio tour");
     // An empty description takes the matched entry's text instead of
@@ -1280,7 +1280,7 @@ test("an entry missing from the sheet clears the binding and asks for a new choi
   try {
     const { page } = fixture;
     await installBindingCatalogue(page, { missing: true });
-    await fixture.ready();
+    await fixture.ready(undefined, { waitForReadiness: false });
     await page.locator("#uploadTitle").fill("Studio tour");
     await uploadLabel(page, "Update & upload");
     await page.locator("#catalogueCards .catalogue-card").first().click();

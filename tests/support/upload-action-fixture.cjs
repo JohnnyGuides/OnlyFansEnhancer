@@ -256,7 +256,10 @@ async function createUploadFixture({ desktop = false } = {}) {
     errors,
     generatedChunks,
     context,
-    async ready(name = "benign-new-clip.mp4") {
+    async ready(
+      name = "benign-new-clip.mp4",
+      { waitForReadiness = true } = {},
+    ) {
       await page.locator("#uploadFullVideo").setInputFiles({
         name,
         mimeType: "video/mp4",
@@ -274,11 +277,13 @@ async function createUploadFixture({ desktop = false } = {}) {
       if (!(await onlyfans.isChecked())) await onlyfans.locator("..").click();
       assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
       await page.waitForFunction(
-        () =>
+        (waitForReadiness) =>
           !document.querySelector("#uploadButton").disabled &&
-          document
-            .querySelector("#matchStatus")
-            .textContent.startsWith("Ready."),
+          (!waitForReadiness ||
+            /^(?:Ready\.|Creates a catalogue entry|Saves catalogue edits)/.test(
+              document.querySelector("#matchStatus").textContent,
+            )),
+        waitForReadiness,
       );
     },
     async seedPreparation(name = "benign-new-clip.mp4") {
