@@ -274,7 +274,11 @@ async function createUploadFixture({ desktop = false } = {}) {
       if (!(await onlyfans.isChecked())) await onlyfans.locator("..").click();
       assert.equal(await page.locator("#mainPublishMode").isChecked(), false);
       await page.waitForFunction(
-        () => !document.querySelector("#uploadButton").disabled,
+        () =>
+          !document.querySelector("#uploadButton").disabled &&
+          document
+            .querySelector("#matchStatus")
+            .textContent.startsWith("Ready."),
       );
     },
     async seedPreparation(name = "benign-new-clip.mp4") {

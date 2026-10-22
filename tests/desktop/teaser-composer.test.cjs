@@ -1636,7 +1636,9 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
     );
     await frame.locator("#socialCaption").fill("A benign scheduled teaser");
     await frame.getByLabel("Posting time", { exact: true }).fill("19:20");
-    await frame.getByLabel("Reply (min)", { exact: true }).fill("23");
+    await frame
+      .getByLabel("Reply delay in minutes", { exact: true })
+      .fill("23");
     await frame.locator("#saveTeaserDraft").click();
     await page.waitForFunction(
       () =>
@@ -1752,7 +1754,9 @@ test("day chooser embeds the real Upload Hub, saves a first-frame teaser, and re
       "new day remembers the last posting time",
     );
     assert.equal(
-      await nextDay.getByLabel("Reply (min)", { exact: true }).inputValue(),
+      await nextDay
+        .getByLabel("Reply delay in minutes", { exact: true })
+        .inputValue(),
       "23",
     );
     assert.equal(
@@ -2079,7 +2083,7 @@ test("episode without a teaser opens its folder and accepts a video in the same 
       false,
     );
     const automatic = frame.getByRole("checkbox", {
-      name: "Send automatically",
+      name: "Post automatically",
       exact: true,
     });
     await automatic.check();

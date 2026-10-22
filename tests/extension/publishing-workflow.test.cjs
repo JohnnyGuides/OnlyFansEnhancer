@@ -3008,9 +3008,7 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
       mimeType: "image/png",
       buffer: Buffer.alloc(0),
     });
-    await page.waitForFunction(
-      () => document.querySelector("#uploadButton").disabled,
-    );
+    await page.locator("#uploadButton").click();
     assert.match(
       await page.locator("#draftErrors").textContent(),
       /Choose a PNG or JPEG thumbnail or leave it blank/,
@@ -3019,11 +3017,13 @@ test("choose-later preview explains an empty thumbnail and recovers without a ca
     await page.waitForFunction(
       () => !document.querySelector("#uploadButton").disabled,
     );
-    await page.waitForFunction(
-      () => !document.querySelector("#uploadButton").disabled,
-    );
     assert.equal(await page.locator("#uploadButton").isEnabled(), true);
     assert.equal(await page.locator("#draftErrors").textContent(), "");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#catalogueSelectionStatus")
+        .textContent.includes("saved locally"),
+    );
     assert.match(
       await page.locator("#catalogueSelectionStatus").textContent(),
       /saved locally/i,

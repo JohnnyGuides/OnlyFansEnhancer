@@ -293,24 +293,13 @@
       };
       let session = await store.load(input.plan.id);
       let job = session.jobs.x;
-      let context = job.publicationContext;
-      if (!context && job.resultUrl && getPublicationContext) {
-        const owner = await getPublicationContext();
-        if (
-          canonicalXStatus(job.resultUrl)?.split("/")[3].toLowerCase() ===
-          owner.handle.toLowerCase()
-        ) {
-          session = await store.checkpoint(session.id, "x", {
-            publicationContext: owner,
-          });
-          job = session.jobs.x;
-          context = owner;
-        }
+      const context = job.publicationContext;
+      if (!context) {
+        const error =
+          "This older draft needs review before automatic publication detection can resume.";
+        await store.checkpoint(session.id, "x", { stage: "blocked", error });
+        throw new Error(error);
       }
-      if (!context)
-        throw new Error(
-          "This older draft needs review before automatic publication detection can resume.",
-        );
       if (job.resultUrl && !job.replyDueAt && options.autoReply)
         throw new Error(
           "This older post has no verified reply timing. Review it before replying.",
@@ -1016,7 +1005,7 @@
           publicationContext = await getPublicationContext();
         } catch {
           throw new Error(
-            "Connect Chrome and scan your X profile before preparing this teaser.",
+            "Connect Chrome, open your X profile, then try again.",
           );
         }
       }

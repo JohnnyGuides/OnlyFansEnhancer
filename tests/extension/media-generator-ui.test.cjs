@@ -676,7 +676,9 @@ async function prepareExtraTeaserRun(fixture, { failOn = "" } = {}) {
   const fansly = page.locator("#targetFansly");
   if (!(await fansly.isChecked())) await fansly.locator("..").click();
   await page.waitForFunction(
-    () => !document.querySelector("#uploadButton").disabled,
+    () =>
+      !document.querySelector("#uploadButton").disabled &&
+      document.querySelector("#matchStatus").textContent.startsWith("Ready."),
   );
   await page.locator("#uploadButton").click();
 }

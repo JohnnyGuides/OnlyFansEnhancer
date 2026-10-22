@@ -168,7 +168,16 @@ test("relay DOM fallback reports owner articles once and stops after network dat
         kind: "batch",
         batch: {
           owner: { accountId: "1", handle: "Owner_Handle" },
-          observations: [],
+          observations: [
+            {
+              ...CreatorXCollectorContract.extractDomArticle(
+                document.querySelector("article"),
+                "Owner_Handle",
+              ),
+              source: "network",
+              authorId: "1",
+            },
+          ],
         },
       });
       for (let wait = 0; wait < 50 && !globalThis.__sent.length; wait += 1)

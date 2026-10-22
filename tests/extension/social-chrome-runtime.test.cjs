@@ -476,6 +476,26 @@ test("manual publication is found without status navigation after complete Chrom
   );
 });
 
+test("an older result URL without publication ownership evidence requires review", async () => {
+  const f = publicationFixture();
+  await f.runtime.prepare({ plan: f.input, caption: "Caption" });
+  await f.store.checkpoint(f.input.id, "x", {
+    resultId: f.main.resultId,
+    resultUrl: f.main.resultUrl,
+    replyDueAt: Date.parse(f.main.postedUtc) + 15 * 60_000,
+  });
+  delete f.values[`${f.store.KEY_PREFIX}${f.input.id}`].jobs.x
+    .publicationContext;
+  f.setNow(Date.parse(f.main.postedUtc) + 16 * 60_000);
+  await f.restart().resume(f.input.id);
+  const job = (await f.store.load(f.input.id)).jobs.x;
+  assert.match(job.error, /older draft needs review/);
+  assert.equal(job.stage, "blocked");
+  assert.equal(job.publicationContext, undefined);
+  assert.equal(f.calls.length, 0, "No discovery or reply tab may run.");
+  assert.equal(job.replySubmitAttempted, undefined);
+});
+
 test("uncertain reply is capture-only after restart, including a lost successful response", async () => {
   let delivered = false;
   const f = publicationFixture({

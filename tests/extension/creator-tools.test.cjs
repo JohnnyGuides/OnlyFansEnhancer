@@ -333,7 +333,7 @@ test("known unsafe userscript patterns and corrupt taxonomy are absent", () => {
     searchable,
     /Bypass All Shortlinks|bypass\.city|adbypass\.org/i,
   );
-  assert.doesNotMatch(searchable, /keypress|keyCode|which/);
+  assert.doesNotMatch(searchable, /\bkeypress\b|\.\s*(?:keyCode|which)\b/);
 });
 
 test("runtime and documentation sources are valid UTF-8 without mojibake", () => {

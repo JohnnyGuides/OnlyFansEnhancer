@@ -385,9 +385,9 @@ Checks back off and end after three failures with the confirmed main post saved
 and a visible failed/unconfirmed reply outcome. The existing 24-hour publication
 window also applies to calendar replies. Disabled replies do not open tabs.
 Chrome cannot send while closed; a reconnect can resume a pending due reply.
-Older runs with a known result can pin the current matching owner; unidentified
-older drafts require review. Saving a calendar draft alone does not authorize
-either publication or reply. Source and synthetic checks do not establish live
+Older runs without verified publication ownership require review, including
+those with a previously recorded result URL. Saving a calendar draft alone does
+not authorize either publication or reply. Source and synthetic checks do not establish live
 publication or an installed browser-process restart.
 
 The automatic first reply uses the agent operation `getTeaserReplyQueue` (empty

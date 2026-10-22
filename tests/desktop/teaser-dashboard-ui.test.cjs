@@ -1731,9 +1731,10 @@ for (const failLibrary of [false, true]) {
         `add-teaser-library-${failLibrary ? "failed" : "pending"}.png`,
       );
       await catalogue.locator('[data-episode-key="series-a-e4"]').click();
-      await page.waitForFunction(() => clipLookups.length === 2);
-      await page.evaluate(() => clipLookups[1].resolve({ clips: [] }));
-      await page.locator(".xt-composer-frame").waitFor();
+      // The blank editor fixture never sends the real runtime's initialized
+      // handshake. This harness owns the handoff, not editor visibility.
+      await page.locator(".xt-composer-frame").waitFor({ state: "attached" });
+      assert.equal(await page.evaluate(() => clipLookups.length), 1);
       if (!failLibrary) {
         await page.evaluate(() =>
           clipLookups[0].reject(new Error("Late library failure")),

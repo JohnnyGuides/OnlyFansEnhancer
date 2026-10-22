@@ -91,6 +91,7 @@
     replyLabel.className = "teaser-schedule-field";
     const replyDelay = document.createElement("input");
     replyDelay.type = "number";
+    replyDelay.setAttribute("aria-label", "Reply delay in minutes");
     replyDelay.min = "1";
     replyDelay.max = "1440";
     replyDelay.value = "15";

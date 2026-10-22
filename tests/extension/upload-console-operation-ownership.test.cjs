@@ -875,15 +875,25 @@ test("a teaser draft still carrying the main-mode new selection cannot start and
       .locator("#socialCustomPaidLink")
       .fill("https://onlyfans.com/1/johnny_guides");
     await page.locator("#findCatalogueEntry").click({ force: true });
+    await page.locator("#uploadButton").click();
     await page.waitForFunction(() =>
       document
-        .querySelector("#matchStatus")
+        .querySelector("#socialErrors")
         .textContent.includes("Confirm one exact catalogue episode"),
     );
-    // The pending row has no sheet row yet, so the social draft is invalid
-    // and Upload stays unavailable, exactly as before this change.
-    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
+    // A pending main-upload row cannot authorize a teaser. Validation may be
+    // invoked, but neither catalogue writes nor preparation can begin.
     assert.equal(await page.evaluate(() => catalogueWrites.length), 0);
+    assert.equal(
+      await page.evaluate(() =>
+        calls.some(
+          (call) =>
+            call.type === "PREPARE_CREATOR_UPLOAD" ||
+            call.type === "PREPARE_SOCIAL_DISTRIBUTION",
+        ),
+      ),
+      false,
+    );
     assert.deepEqual(errors, []);
   });
 });
