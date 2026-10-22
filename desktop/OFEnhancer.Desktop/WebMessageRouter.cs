@@ -240,6 +240,7 @@ public sealed partial class WebMessageRouter(
     private string GetUploadCatalogueSnapshot(WebRequest request)
     {
         DeserializePayload<EmptyPayload>(request.Payload);
+        googleCatalogue?.RefreshCatalogueForMatching();
         return Success(request.RequestId, catalogue!.GetUploadCatalogueSnapshot());
     }
 

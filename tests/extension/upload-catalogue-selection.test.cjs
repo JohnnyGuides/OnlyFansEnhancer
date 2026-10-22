@@ -82,6 +82,80 @@ const settled = (page, expected) =>
     expected,
   );
 
+test("matching rereads the catalogue and includes newly entered sheet rows", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const page = await matched(fixture);
+    await page.evaluate(() => {
+      const previous = CreatorCatalogueClient.getCatalogueSnapshot;
+      globalThis.freshCatalogueReads = 0;
+      CreatorCatalogueClient.getCatalogueSnapshot = async () => {
+        freshCatalogueReads++;
+        const snapshot = await previous();
+        return {
+          ...snapshot,
+          rows: [
+            ...snapshot.rows,
+            {
+              ...snapshot.rows[0],
+              row: 45,
+              id: "studio-next",
+              itemId: "studio-next",
+              title: "Next studio tour",
+              description: "",
+              onlyfansLink: "",
+            },
+          ],
+        };
+      };
+    });
+    await page.locator("#uploadTitle").fill("Next studio tour");
+    await page
+      .locator('#catalogueCards [data-catalogue-id="studio-next"]')
+      .waitFor();
+    assert.ok(await page.evaluate(() => freshCatalogueReads > 0));
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "Next studio tour",
+    );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("failed catalogue refresh keeps entered details and cannot silently upload without a match", async () => {
+  const fixture = await createUploadFixture();
+  try {
+    const page = await matched(fixture);
+    await page.evaluate(() => {
+      CreatorCatalogueClient.getCatalogueSnapshot = async () => {
+        throw new Error("google-network-error");
+      };
+    });
+    await page.locator("#uploadTitle").fill("Next studio tour");
+    await page
+      .getByText(
+        "Couldn’t refresh the catalogue. Check Google in Settings, then retry.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(await page.locator("#uploadButton").isDisabled(), true);
+    assert.equal(await page.locator("#cataloguePicker").isVisible(), false);
+    assert.equal(
+      await page.locator("#uploadTitle").inputValue(),
+      "Next studio tour",
+    );
+    assert.equal(
+      await page.locator("#catalogueConnectionStatus").textContent(),
+      "google-network-error",
+    );
+    assert.deepEqual(fixture.errors, []);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("explicit selection takes the sheet date; auto-match keeps the computed Friday", async () => {
   const fixture = await createUploadFixture();
   try {

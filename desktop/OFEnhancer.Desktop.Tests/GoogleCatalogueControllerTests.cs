@@ -519,6 +519,75 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual(0, harness.Session.MigrationCalls);
     }
 
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void MatchingRefreshReadsNewSheetRowsThroughBothTransportsWithoutChangingSyncBindings(bool syncReady)
+    {
+        using ControllerHarness harness = syncReady ? ReadyHarness() : ConnectedHarness();
+        WorkbookProjection original = harness.Session.Inspection.Projection;
+        harness.Store.ImportWorkbookProjection(original);
+        GoogleRowBinding[] bindings = harness.Store.GetGoogleBindings(WorkbookId).ToArray();
+        GoogleCatalogueSelection? selection = harness.Store.GetGoogleCatalogueSelection();
+        int migrationCalls = harness.Session.MigrationCalls;
+        WorkbookCatalogueItem next = new(3, "episode-2", "Next studio tour", "", null, null, null,
+            0, 0, new Dictionary<string, string>(), null);
+        harness.Session.ReadImportAction = _ => Task.FromResult(new GoogleCatalogueImportPreview(
+            original with { Items = [.. original.Items, next] }, 1, "2026 Video Catalogue", 1,
+            new Dictionary<string, int>()));
+        UploadCatalogueController native = new(harness.Store,
+            refreshCatalogue: harness.Controller.RefreshCatalogueForMatching);
+
+        Assert.IsTrue(native.GetSnapshot().Rows.Any(row => row.Id == "episode-2"));
+        WebMessageRouter web = new(_ => throw new AssertFailedException(), () => null, harness.Store,
+            googleCatalogue: harness.Controller);
+        using JsonDocument response = JsonDocument.Parse(web.Handle(JsonSerializer.Serialize(new
+        {
+            requestId = Guid.NewGuid().ToString(), operation = "getUploadCatalogueSnapshot", payload = new { },
+        })));
+        Assert.IsTrue(response.RootElement.GetProperty("ok").GetBoolean());
+        Assert.IsTrue(response.RootElement.GetProperty("result").GetProperty("rows").EnumerateArray()
+            .Any(row => row.GetProperty("id").GetString() == "episode-2"));
+        Assert.AreEqual(2, harness.Session.ReadImportCalls);
+        CollectionAssert.AreEqual(bindings, harness.Store.GetGoogleBindings(WorkbookId).ToArray());
+        Assert.AreEqual(selection, harness.Store.GetGoogleCatalogueSelection());
+        Assert.AreEqual(migrationCalls, harness.Session.MigrationCalls);
+        Assert.AreEqual(0, harness.Session.UploadEntryRequests.Count);
+        Assert.AreEqual(0, harness.Session.TeaserLinkRequests.Count);
+        if (syncReady)
+            Assert.AreEqual("google-import-sync-active", Assert.ThrowsException<GoogleCatalogueControllerException>(
+                () => harness.Controller.importGoogleCatalogue()).Code);
+    }
+
+    [TestMethod]
+    public void FailedMatchingRefreshPreservesTheCacheAndDoesNotReturnStaleSuccess()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Store.ImportWorkbookProjection(harness.Session.Inspection.Projection);
+        string before = JsonSerializer.Serialize(harness.Store.GetUploadCatalogueSnapshot());
+        harness.Session.ReadImportAction = _ => Task.FromException<GoogleCatalogueImportPreview>(
+            new GoogleCatalogueException("google-network-error"));
+        UploadCatalogueController native = new(harness.Store,
+            refreshCatalogue: harness.Controller.RefreshCatalogueForMatching);
+
+        Assert.AreEqual("google-network-error", Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => native.GetSnapshot()).Code);
+        Assert.AreEqual(before, JsonSerializer.Serialize(harness.Store.GetUploadCatalogueSnapshot()));
+        harness.Session.ReadImportAction = null;
+        Assert.AreEqual(1, native.GetSnapshot().Rows.Count);
+    }
+
+    [TestMethod]
+    public void DisconnectedMatchingRefreshDoesNotPresentCachedRowsAsFresh()
+    {
+        using ControllerHarness harness = new();
+        harness.Store.ImportWorkbookProjection(Inspection(false).Projection);
+        Assert.AreEqual("google-catalogue-disconnected", Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => harness.Controller.RefreshCatalogueForMatching()).Code);
+        Assert.AreEqual(1, harness.Store.GetItems().Count);
+        Assert.AreEqual(0, harness.Session.ReadImportCalls);
+    }
+
     [TestMethod]
     public void MissingUploadEntryRefreshesTheLocalCatalogueAndRetriesTheSameIdOnce()
     {

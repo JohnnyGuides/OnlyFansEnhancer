@@ -75,7 +75,7 @@ public partial class MainWindow : Window, IDisposable
         );
         queuedRouter = router;
         uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets,
-            googleCatalogue.WriteBackUploadResult);
+            googleCatalogue.WriteBackUploadResult, googleCatalogue.RefreshCatalogueForMatching);
         XScanActivityBoard scanActivity = new();
         xObservations = new XObservationController(catalogue, scanActivity: scanActivity,
             startedUtc: System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime());

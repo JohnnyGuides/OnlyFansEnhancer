@@ -114,6 +114,16 @@ even when Chrome is unavailable for uploads.
 
 ## Connect and import without changing the sheet
 
+Before upload and teaser matching, and again during upload preflight, OFEnhancer
+reads the selected Google catalogue into its local store. Match suggestions wait
+for that read, so a newly entered row can appear without a manual import. The upload
+window shares overlapping reads but does not reuse a completed snapshot for a new
+matching attempt. A failed refresh preserves the stored catalogue and entered form
+details, shows the error, and does not silently continue without a catalogue match.
+These refreshes do not write to Google or replace reviewed sync bindings, and work
+with both read-only import and reviewed sheet sync. The hourly worker handles
+outgoing work; it is not a periodic pull of new sheet rows.
+
 Select **Connect Google account**, choose the browser when prompted, complete
 consent, select exactly one spreadsheet, then return and select **Import catalogue**.
 Confirm the worksheet name and imported count. This operation only updates the

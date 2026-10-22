@@ -16,6 +16,7 @@ public interface IGoogleCatalogueController : IDisposable
     GoogleCatalogueStatusView cancelGoogleCatalogueConnection();
     GoogleCatalogueStatusView inspectGoogleWorkbook();
     GoogleCatalogueImportResult importGoogleCatalogue();
+    void RefreshCatalogueForMatching();
     GoogleCatalogueStatusView applyGoogleWorkbookMigration(string planHash);
     GoogleCatalogueStatusView syncGoogleCatalogue();
     GoogleCatalogueStatusView disconnectGoogleCatalogue();
@@ -417,14 +418,18 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         finally { ExitCatalogueOperation(); }
     }
 
-    public GoogleCatalogueImportResult importGoogleCatalogue()
+    public GoogleCatalogueImportResult importGoogleCatalogue() => ReadCatalogue(importOnly: true);
+
+    public void RefreshCatalogueForMatching() => ReadCatalogue(importOnly: false);
+
+    private GoogleCatalogueImportResult ReadCatalogue(bool importOnly)
     {
         IGoogleCatalogueSession session;
         lock (_gate)
         {
             ThrowIfDisposed();
             session = _session ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
-            if (_ready) throw new GoogleCatalogueControllerException("google-import-sync-active");
+            if (importOnly && _ready) throw new GoogleCatalogueControllerException("google-import-sync-active");
             EnterCatalogueOperationLocked();
         }
         try

@@ -1146,7 +1146,6 @@
     const cataloguePreviewPending = new Set();
     let manualTargets = null;
     let uploadWithoutSheet = false;
-    let catalogueFallback = false;
     let lastPrefilledCatalogueRow = null;
     let adjustedSheetDate = null;
     let catalogueBaseline = null;
@@ -2431,8 +2430,7 @@
       }
     }
 
-    async function loadCatalogueSnapshot({ refresh = false } = {}) {
-      if (refresh) snapshotPromise = null;
+    async function loadCatalogueSnapshot() {
       const client = globalThis.CreatorCatalogueClient;
       if (!client?.getCatalogueSnapshot) {
         throw new Error(
@@ -2442,9 +2440,11 @@
       if (!snapshotPromise) {
         const pending = client.getCatalogueSnapshot();
         snapshotPromise = pending;
-        void pending.catch(() => {
+        // Share an in-flight read, but never reuse a completed catalogue for new matches.
+        const clear = () => {
           if (snapshotPromise === pending) snapshotPromise = null;
-        });
+        };
+        void pending.then(clear, clear);
       }
       return snapshotPromise;
     }
@@ -2803,7 +2803,6 @@
       { explicit = false } = {},
     ) {
       uploadWithoutSheet = false;
-      catalogueFallback = false;
       currentProposal = proposal;
       const candidate = proposal.candidate;
       if (workflowMode?.value === "teaser" && candidate) {
@@ -3291,10 +3290,6 @@
 
     async function matchCatalogue(forceNew = false) {
       if (runBusy || activeSession) return;
-      if (catalogueFallback) {
-        uploadWithoutSheet = false;
-        catalogueFallback = false;
-      }
       clearTimeout(matchTimer);
       const revision = ++matchRevision;
       currentMatch = null;
@@ -3442,16 +3437,13 @@
         applyProposal(proposal, forceNew ? "new" : "matched");
       } catch (error) {
         if (revision !== matchRevision) return;
-        if (value.valid && selectedCatalogueRow === null) {
-          uploadWithoutSheet = true;
-          catalogueFallback = true;
-          currentProposal = null;
-          previewWithoutSheet(value);
-        } else {
-          currentMatch = null;
-          matchStatus.textContent =
-            "Catalogue unavailable. Check the catalogue connection in Settings and try again.";
-        }
+        currentMatch = null;
+        currentProposal = null;
+        currentSnapshot = null;
+        cataloguePicker.hidden = true;
+        matchStatus.textContent =
+          "Couldn’t refresh the catalogue. Check Google in Settings, then retry.";
+        get("#catalogueConnectionStatus").textContent = error.message;
       }
     }
 
@@ -4318,7 +4310,7 @@
         social.valid &&
         pendingTargets(draft(), currentMatch).length === 0
       ) {
-        currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        currentSnapshot = await loadCatalogueSnapshot();
         const refreshed = currentSnapshot.rows.find(
           (row) => Number(row.row) === Number(currentMatch.candidate.row),
         );
@@ -4335,7 +4327,7 @@
         return;
       }
       const previousSignature = proposalSignature(currentProposal);
-      currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+      currentSnapshot = await loadCatalogueSnapshot();
       const selectedRow =
         currentMatch.status === "new" ? "new" : currentMatch.candidate.row;
       selectedCatalogueRow = selectedRow;
@@ -4479,7 +4471,7 @@
         currentMatch = null;
         currentProposal = null;
         try {
-          currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+          currentSnapshot = await loadCatalogueSnapshot();
         } catch {
           // The guidance below still applies; the picker refreshes on retry.
         }
@@ -4491,7 +4483,7 @@
           { cause: error },
         );
       }
-      currentSnapshot = await loadCatalogueSnapshot({ refresh: true });
+      currentSnapshot = await loadCatalogueSnapshot();
       const saved = currentSnapshot.rows.find(
         (row) => row.id === written.id && row.row === written.row,
       );
@@ -6543,7 +6535,7 @@
     let associationSnapshot = null;
     get("#loadAssociationRows")?.addEventListener("click", async () => {
       try {
-        associationSnapshot = await loadCatalogueSnapshot({ refresh: true });
+        associationSnapshot = await loadCatalogueSnapshot();
         const select = get("#savedCatalogueRow");
         select.replaceChildren(new Option("Choose an entry", ""));
         for (const row of associationSnapshot.rows)
@@ -6935,7 +6927,7 @@
       const revision = matchRevision;
       matchStatus.textContent = "Refreshing the catalogue snapshot…";
       try {
-        const fetched = await loadCatalogueSnapshot({ refresh: true });
+        const fetched = await loadCatalogueSnapshot();
         if (runBusy || activeSession || revision !== matchRevision) return;
         currentSnapshot = fetched;
         renderPicker();

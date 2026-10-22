@@ -5,7 +5,7 @@ using OFEnhancer.Catalogue;
 namespace OFEnhancer.Desktop;
 
 internal sealed class UploadCatalogueController(CatalogueStore store, Func<GoogleSubredditPresetSnapshot>? readSubredditPresets=null,
-    Func<UploadResultRequest, UploadResult, UploadResult>? writeback=null)
+    Func<UploadResultRequest, UploadResult, UploadResult>? writeback=null, Action? refreshCatalogue=null)
 {
     private readonly UploadThumbnailCatalogue thumbnails = new(store);
     private static readonly JsonSerializerOptions JsonOptions=new()
@@ -15,7 +15,11 @@ internal sealed class UploadCatalogueController(CatalogueStore store, Func<Googl
         MaxDepth=8,
     };
 
-    internal UploadCatalogueSnapshot GetSnapshot() => store.GetUploadCatalogueSnapshot();
+    internal UploadCatalogueSnapshot GetSnapshot()
+    {
+        refreshCatalogue?.Invoke();
+        return store.GetUploadCatalogueSnapshot();
+    }
     internal GoogleSubredditPresetSnapshot GetSubredditPresets() => readSubredditPresets?.Invoke()
         ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
     internal UploadResult RecordResult(JsonElement payload)
