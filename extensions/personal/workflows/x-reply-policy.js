@@ -44,6 +44,25 @@
   function format(line, url) {
     return template(line).replaceAll("{link}", () => url);
   }
+  function toText(variants) {
+    const replies = normalize({
+      variants: normalize({ variants }).variants.map(template),
+    }).variants;
+    if (replies.some((reply) => /^[ \t]*---[ \t]*$/m.test(reply)))
+      throw new Error(
+        "A line containing --- separates replies. Remove it from the message before saving a text file.",
+      );
+    return `${replies.join("\n\n---\n\n")}\n`;
+  }
+  function fromText(text) {
+    const variants = normalize({
+      variants: text
+        .replace(/^\uFEFF/, "")
+        .replace(/\r\n?/g, "\n")
+        .split(/^[ \t]*---[ \t]*$/m),
+    }).variants;
+    return normalize({ variants: variants.map(template) }).variants;
+  }
   const services = new WeakMap();
   function forStorage(storage) {
     if (services.has(storage)) return services.get(storage);
@@ -142,6 +161,8 @@
     normalize,
     format,
     template,
+    toText,
+    fromText,
     forStorage,
   });
 })();

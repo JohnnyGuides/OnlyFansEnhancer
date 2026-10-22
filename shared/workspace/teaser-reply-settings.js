@@ -16,16 +16,17 @@
     dialog.id = "teaserReplyDialog";
     dialog.setAttribute("aria-labelledby", "replySettingsTitle");
     dialog.innerHTML =
-      '<header><h2 id="replySettingsTitle">Reply text</h2><button type="button" data-close aria-label="Close reply settings">×</button></header><p class="hint">Shared by all X replies.</p><div class="teaser-reply-controls"><label>Wording<select aria-label="Reply wording"><option value="rotate">Rotate saved replies</option><option value="link">Link only</option></select></label><label data-entries>Saved reply<span class="teaser-reply-variants"><select aria-label="Saved reply"></select><button type="button" data-add aria-label="Add reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button type="button" data-remove aria-label="Remove reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></svg></button></span></label></div><label data-message>Message <small>{link} = selected video URL</small><textarea aria-label="Reply message" rows="3" maxlength="200" placeholder="Use {link} where the selected video URL should appear."></textarea></label><label>Preview<pre aria-label="Reply preview"></pre></label><p role="status"></p><footer><button type="button" data-apply>Apply</button></footer>';
+      '<header><h2 id="replySettingsTitle">Reply text</h2><button type="button" data-close aria-label="Close reply settings">×</button></header><div class="teaser-reply-toolbar"><label>Wording<select aria-label="Reply wording"><option value="rotate">Rotate saved replies</option><option value="link">Link only</option></select></label><button type="button" data-open>Open .txt</button><button type="button" data-save>Save .txt</button><input type="file" accept=".txt,text/plain" aria-label="Open reply text file" hidden></div><div class="teaser-reply-workspace" data-entries><section><div class="teaser-reply-section-heading"><strong>Saved replies</strong><button type="button" data-add aria-label="Add reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div><nav class="teaser-link-results teaser-reply-list" aria-label="Saved replies"></nav></section><section class="teaser-reply-editor"><label class="teaser-reply-section-heading">Message <small>{link} = video URL</small><button type="button" data-remove aria-label="Remove reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></svg></button></label><textarea aria-label="Reply message" rows="3" maxlength="200" placeholder="Use {link} where the selected video URL should appear."></textarea><label>Preview<pre aria-label="Reply preview"></pre></label></section></div><p role="status"></p><footer><small>Shared by all X replies.</small><button type="button" data-apply>Apply</button></footer>';
     document.body.append(dialog);
     const mode = dialog.querySelector("select"),
       lines = dialog.querySelector("textarea"),
       preview = dialog.querySelector("pre"),
       status = dialog.querySelector('[role="status"]'),
       apply = dialog.querySelector("[data-apply]");
-    const entries = dialog.querySelector('[aria-label="Saved reply"]'),
+    const entries = dialog.querySelector('[aria-label="Saved replies"]'),
       add = dialog.querySelector("[data-add]"),
       remove = dialog.querySelector("[data-remove]");
+    const fileInput = dialog.querySelector('input[type="file"]');
     let variants = [],
       selected = 0;
     const value = () => ({
@@ -35,19 +36,31 @@
     function renderEntries() {
       entries.replaceChildren(
         ...variants.map((reply, index) => {
-          const option = document.createElement("option");
-          option.value = String(index);
-          option.textContent = `${index + 1} · ${reply.split("\n")[0].slice(0, 48) || "New reply"}`;
-          return option;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "teaser-link-result";
+          button.setAttribute("aria-pressed", String(index === selected));
+          const title = document.createElement("span"),
+            detail = document.createElement("small");
+          title.textContent = `${index + 1} · ${reply.split("\n")[0] || "New reply"}`;
+          detail.textContent = reply.split("\n").slice(1).join("\n");
+          button.append(title, detail);
+          button.addEventListener("click", () => {
+            status.textContent = "";
+            selected = index;
+            lines.value = variants[selected];
+            renderEntries();
+            render();
+            entries.children[index]?.focus();
+          });
+          return button;
         }),
       );
-      entries.value = String(selected);
       add.disabled = variants.length >= 20;
       remove.disabled = variants.length <= 1;
     }
     function render() {
-      dialog.querySelector("[data-entries]").hidden = mode.value === "link";
-      dialog.querySelector("[data-message]").hidden = mode.value === "link";
+      dialog.classList.toggle("reply-link-only", mode.value === "link");
       const phrase = mode.value === "link" ? "" : variants[selected] || "";
       preview.textContent =
         mode.value === "link" || phrase.includes("{link}")
@@ -83,13 +96,9 @@
     });
     mode.addEventListener("change", render);
     lines.addEventListener("input", () => {
+      status.textContent = "";
       variants[selected] = lines.value;
       renderEntries();
-      render();
-    });
-    entries.addEventListener("change", () => {
-      selected = Number(entries.value);
-      lines.value = variants[selected];
       render();
     });
     add.addEventListener("click", () => {
@@ -108,6 +117,48 @@
       lines.value = variants[selected];
       renderEntries();
       render();
+    });
+    dialog
+      .querySelector("[data-open]")
+      .addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files?.[0];
+      if (!file || busy()) return;
+      status.textContent = "";
+      try {
+        if (file.size > 64 * 1024)
+          throw new Error("Choose a text file smaller than 64 KB.");
+        const imported = global.CreatorXReplyPolicy.fromText(await file.text());
+        variants = imported;
+        selected = 0;
+        mode.value = "rotate";
+        lines.value = variants[0];
+        renderEntries();
+        render();
+        status.textContent = "Replies loaded. Apply to use them.";
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        fileInput.value = "";
+      }
+    });
+    dialog.querySelector("[data-save]").addEventListener("click", () => {
+      status.textContent = "";
+      try {
+        const text = global.CreatorXReplyPolicy.toText(variants);
+        const url = URL.createObjectURL(
+          new Blob([text], { type: "text/plain;charset=utf-8" }),
+        );
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "x-replies.txt";
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        status.textContent = error.message;
+      }
     });
     dialog
       .querySelector("[data-close]")

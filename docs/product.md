@@ -359,8 +359,12 @@ a preview. Each saved reply is a complete message that may contain multiple line
 and blank lines. Its `{link}` placeholder inserts the selected URL wherever it is
 placed, so link labels and arrows are editable too. Legacy replies without a
 placeholder retain their original appended `-> <link>` until edited; the editor
-opens them as complete templates. The saved-reply selector and
-add/remove controls edit rotation entries individually. One saved reply uses the
+opens them as complete templates. A scrollable overview shows saved replies beside
+the message editor, with add/remove controls. **Save .txt** exports the current
+messages for editing outside the app; **Open .txt** loads a validated file into the
+editor without updating the live rotation until **Apply**. A line containing only
+`---` separates replies; other line breaks and blank lines remain inside each
+message. Imported legacy wording gains the default `{link}` line. One saved reply uses the
 same wording every time; multiple saved replies rotate. Existing one-line entries
 stay separate. Defaults are "full vid (no ppv)", "full session" and "full vid :)",
 then a new line and `-> <link>`. Prepared editor jobs and queued scanner replies

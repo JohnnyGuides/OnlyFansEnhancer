@@ -262,12 +262,12 @@ test("reply settings edit the shared rotation with a preview and link-only choic
       await dialog.getByLabel("Reply preview").textContent(),
       /^First phrase\nA unique second line/,
     );
-    await dialog.getByLabel("Saved reply", { exact: true }).selectOption("0");
+    await dialog.locator(".teaser-reply-list button").nth(0).click();
     assert.equal(
       await dialog.getByLabel("Reply message").inputValue(),
       "full vid (no ppv)\n-> {link}",
     );
-    await dialog.getByLabel("Saved reply", { exact: true }).selectOption("1");
+    await dialog.locator(".teaser-reply-list button").nth(1).click();
     assert.equal(
       await dialog.getByLabel("Reply message").inputValue(),
       "First phrase\nA unique second line\nOnlyFans: {link}",
@@ -279,9 +279,36 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     await dialog
       .getByRole("button", { name: "Remove reply", exact: true })
       .click();
-    await dialog.getByLabel("Saved reply", { exact: true }).selectOption("1");
+    await dialog.locator(".teaser-reply-list button").nth(1).click();
     const output = path.join(repositoryRoot, ".local/reply-settings-review");
     fs.mkdirSync(output, { recursive: true });
+    const downloadReady = page.waitForEvent("download");
+    await dialog
+      .getByRole("button", { name: "Save .txt", exact: true })
+      .click();
+    const download = await downloadReady;
+    assert.equal(download.suggestedFilename(), "x-replies.txt");
+    const textFile = fs.readFileSync(await download.path(), "utf8");
+    assert.match(textFile, /\n\n---\n\n/);
+    assert.match(textFile, /A unique second line\nOnlyFans: \{link\}/);
+    await dialog.getByLabel("Open reply text file").setInputFiles({
+      name: "edited-replies.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from(
+        textFile.replace("full vid (no ppv)", "Updated first reply"),
+      ),
+    });
+    await frame.waitForFunction(() =>
+      document
+        .querySelector('.teaser-reply-dialog [role="status"]')
+        .textContent.startsWith("Replies loaded"),
+    );
+    assert.equal(await dialog.locator(".teaser-reply-list button").count(), 3);
+    assert.match(
+      await dialog.locator(".teaser-reply-list button").first().textContent(),
+      /Updated first reply/,
+    );
+    await dialog.locator(".teaser-reply-list button").nth(1).click();
     await dialog.screenshot({ path: path.join(output, "desktop.png") });
     const dialogSize = await dialog.evaluate((element) => ({
       scroll: element.scrollHeight,
@@ -296,6 +323,19 @@ test("reply settings edit the shared rotation with a preview and link-only choic
     const bounds = await dialog.boundingBox();
     assert.ok(bounds.width <= 390);
     await dialog.screenshot({ path: path.join(output, "phone.png") });
+    await dialog
+      .getByLabel("Open reply text file")
+      .setInputFiles({
+        name: "invalid.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("x".repeat(201)),
+      });
+    await frame.waitForFunction(() =>
+      document
+        .querySelector('.teaser-reply-dialog [role="status"]')
+        .textContent.includes("200 characters"),
+    );
+    assert.equal(await dialog.locator(".teaser-reply-list button").count(), 3);
     await dialog
       .getByLabel("Reply message")
       .fill("A reply without its link placeholder");

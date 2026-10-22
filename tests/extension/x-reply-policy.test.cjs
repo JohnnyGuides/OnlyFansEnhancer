@@ -102,3 +102,26 @@ test("editable link labels and placement use the selected URL without adding an 
   );
   await assert.rejects(policy.save({ variants: ["{link}\n{link}"] }), /once/);
 });
+
+test("reply text files round-trip multiline messages, blank lines and placeholders", () => {
+  const api = load(),
+    variants = [
+      "First line\n\nSecond line\nOnlyFans: {link}",
+      "Watch here: {link}",
+    ];
+  const text = api.toText(variants);
+  assert.deepEqual(
+    Array.from(api.fromText(`\uFEFF${text.replaceAll("\n", "\r\n")}`)),
+    variants,
+  );
+  assert.equal(variants.length, 2);
+  assert.deepEqual(Array.from(api.fromText("Old wording")), [
+    "Old wording\n-> {link}",
+  ]);
+  assert.throws(() => api.fromText("Valid {link}\n---\n"), /saved replies/);
+  assert.throws(() => api.fromText("x".repeat(201)), /200 characters/);
+  assert.throws(
+    () => api.toText(["One\n---\nTwo\n{link}"]),
+    /separates replies/,
+  );
+});
