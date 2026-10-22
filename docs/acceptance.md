@@ -1047,3 +1047,20 @@ the log.
 - Built committed source 8ef96ee with a 24-file version bump in an isolated release archive, preserving unrelated working-tree edits. The normal silent installer exited 0 and logged its success marker. All 1,342 installed manifest files matched the package; the installed 0.20.123 desktop restarted with a visible window.
 - All 15 settings/data file fingerprints and 21 database table fingerprints matched before/after; database integrity remained ok. Extension identities and native registrations matched. No live upload or publication acceptance was performed.
 - Installer SHA-256: c75b069099a1de83f82a40368935e7d1e747eed40c3ef394f1c321b4638fe8c9.
+
+
+## Separate teaser and reply automation — installed 0.20.124, 22 October 2026
+
+The owner reviewed the rendered controls and requested the normal update.
+Post automatically and Reply automatically are independent saved choices; manual
+teaser posting can retain an automatic delayed reply. Source commit fa5f09b passed
+31 focused runtime/contract checks, one browser control persistence/layout check,
+and focused lint. No live post or reply was sent during verification.
+
+The installer exited 0 and logged success. The restarted installed desktop reports
+0.20.124+fa5f09b with a visible window. All 1342 installed manifest files
+matched. All 15 data/settings file and 21 database table fingerprints were unchanged,
+with database integrity ok and extension identities/native registrations preserved.
+Installer SHA-256: `8dddbeeb8b9846f9d9663413b7105ac7f1db133d596bcd44caf093f0e0adab82`.
+Stage manifest SHA-256: `75934acf52585ad49271ba27d50118a531dc75374c596eeb201fcc52b55142b9`.
+Chrome extension runtime reload and live publication remain separate acceptance.
