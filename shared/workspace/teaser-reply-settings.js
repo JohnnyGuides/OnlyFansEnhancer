@@ -36,13 +36,23 @@
     function renderEntries() {
       entries.replaceChildren(
         ...variants.map((reply, index) => {
+          const row = document.createElement("div"),
+            number = document.createElement("span");
+          row.className = "teaser-reply-row";
+          number.className = "teaser-reply-number";
+          number.textContent = String(index + 1);
+          number.setAttribute("aria-hidden", "true");
           const button = document.createElement("button");
           button.type = "button";
           button.className = "teaser-link-result";
           button.setAttribute("aria-pressed", String(index === selected));
           const title = document.createElement("span"),
             detail = document.createElement("small");
-          title.textContent = `${index + 1} · ${reply.split("\n")[0] || "New reply"}`;
+          title.textContent = reply.split("\n")[0] || "New reply";
+          button.setAttribute(
+            "aria-label",
+            `Reply ${index + 1}: ${title.textContent}`,
+          );
           detail.textContent = reply.split("\n").slice(1).join("\n");
           button.append(title, detail);
           button.addEventListener("click", () => {
@@ -51,9 +61,10 @@
             lines.value = variants[selected];
             renderEntries();
             render();
-            entries.children[index]?.focus();
+            entries.children[index]?.querySelector("button").focus();
           });
-          return button;
+          row.append(number, button);
+          return row;
         }),
       );
       add.disabled = variants.length >= 20;

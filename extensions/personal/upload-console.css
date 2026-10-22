@@ -4297,6 +4297,19 @@ body.calendar-teaser {
 .teaser-reply-list {
   max-height: 220px;
 }
+.teaser-reply-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+.teaser-reply-number {
+  padding-top: 12px;
+  text-align: center;
+  color: #a6b4c5;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .teaser-reply-list small {
   white-space: pre-wrap;
   display: -webkit-box;
