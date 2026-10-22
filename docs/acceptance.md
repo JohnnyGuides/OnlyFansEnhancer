@@ -1164,3 +1164,50 @@ Installer SHA-256: `b3015e02efc84beab4cd443ae733acae4d2ceae6ea63101878fb449d7015
 The loaded Chrome extension still requires a reload to use its new upload-window
 copy. Live Google reconnect and end-to-end upload/public reply acceptance remain
 unverified; this release does not claim those outcomes.
+
+
+## Release 0.20.129 — teaser send and catalogue identity, 23 October 2026
+
+The calendar/teaser-only Send action skips the main-video catalogue metadata
+writer. Hidden empty main title/date fields therefore cannot cause
+invalid-catalogue-entry or edit the source episode. The actual calendar fixture
+prepares source A with destination B, manual main posting, and a 15-minute
+automatic reply without any metadata write. Catalogue/fingerprint rechecks remain.
+An explicitly unconfigured catalogue allows the existing local-results workflow;
+failed Google authentication/network refresh still blocks stale matching.
+
+Receipts resolve immutable catalogue identity across physical row moves while
+preserving the public fingerprint contract and rejecting changed content. Sibling
+receipts accept the returned current fingerprint. OnlyFans URL shape/handle
+variants use the same post identity, including confirmed-repeat history.
+Same-workbook reconnection keeps its tab/profile and requires reinspection before
+writes resume; changing workbook still clears them. Discovered X links require
+explicit owner source evidence for Google writeback, and local publication
+overlays no longer masquerade as already-imported Google links. Reply-link-only
+inference cannot authorize an automatic source-row write.
+
+Final candidate verification passed 138 catalogue tests, 67 Google controller
+tests, 25 uploader/refresh cases, 101 reply/recovery cases, six calendar cases,
+and one controlled Chromium worker-restart/session-loss case (338 total).
+The browser test verifies collector readiness, actual old-target disappearance
+and lost worker memory, then exactly one delayed reply. It does not infer a
+restart from an evaluation error or assume Chrome cannot reuse a target ID.
+Targeted lint/format checks passed. The full repository suite was not rerun.
+Claude Opus 5.5 independently reviewed the scoped source patch and found no
+blocking defect; its canonical repeat-URL note was addressed and tested.
+
+The normal update exited 0 with an installation success log. All
+1345 installed manifest files match the built stage. All 15
+settings/data file fingerprints and 21 database table fingerprints are unchanged;
+integrity is ok, and extension identities/native registrations are preserved.
+The installed desktop restarted as PID 25788, reporting
+0.20.129+80af40ce20133d2eb2893743547b11e71f869798.
+Installer SHA-256: `58cd397cef8dbed847d579a60eab19139f58eb47ad893564e5520602acca0601`.
+
+The owner still needs to reload the existing Chrome extension entry. No public
+post, real delayed reply or Google mutation was performed in these checks.
+Live-account end-to-end acceptance remains pending. This release addresses the
+current send failure and the bounded catalogue fixes above; it does not resolve
+all findings in [the foundation audit](audits/2026-10-23-catalogue-foundation.md),
+including manual OnlyFans/Fansly receipt identity, historical writeback backfill,
+complete source/promotion views, and the missing cross-platform lifecycle features.
