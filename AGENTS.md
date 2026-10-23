@@ -60,3 +60,12 @@ Concurrent work must not mutate the same Chrome profile state, extension identit
 ## Stop conditions
 
 Stop the affected operation and preserve evidence when browser connection, extension identity, upload ownership, OAuth credential state, publication authority, or installed-release identity is uncertain.
+
+## Creator suite
+
+This program is part of the owner's content-creator suite. The map of the suite (where every file lives, which program
+hands what to which, the contracts between them) is `F:\WORK\Creations\CreatorSuite\SUITE.md`; this program's page is
+`F:\WORK\Creations\CreatorSuite\programs\ofenhancer.md`.
+
+Before changing anything another program reads (files, formats, APIs, paths, settings), read the suite map and the
+contract it names, and update that contract in the same piece of work.
