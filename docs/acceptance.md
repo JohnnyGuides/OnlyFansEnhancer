@@ -1208,3 +1208,62 @@ current send failure and the bounded catalogue fixes above; it does not resolve
 all findings in [the foundation audit](audits/2026-10-23-catalogue-foundation.md),
 including manual OnlyFans/Fansly receipt identity, historical writeback backfill,
 complete source/promotion views, and the missing cross-platform lifecycle features.
+
+## Release 0.20.130 — catalogue workflow recovery, 23 October 2026
+
+Uploads and social runs now keep durable central source, asset, per-platform,
+script and reply records. A teaser's source and its promoted destination are
+separate relationships. Known script links/status and source/incoming promotion
+history are visible in Catalogue. Legacy runs without workbook proof stay local
+until fingerprint-checked owner association; frozen destinations cannot be
+redirected by selecting another workbook.
+
+Successful provider/script siblings survive partial failure and restart. Sent
+script keys are persisted before catalogue writeback. A Google-only retry never
+resends the script or changes provider success into partial failure. Failed
+destinations resume independently once their required file/identity evidence is
+available. OnlyFans manual publication uses explicit owner-confirmed link recovery
+until a media-identity-backed automatic response contract is qualified; unsupported
+receipt inference remains closed. Fansly requires its exact media alias.
+
+Google row creation journals one stable operation and atomically writes content,
+item ID and developer metadata. Unknown acknowledgements are readback-only, even
+after row moves. Per-link writes and the additive _Workflows ledger preserve the
+original workbook and expose conflicts instead of silently redirecting results.
+History has a separate scoped read, row/byte capacity limits and fair readback
+budgets, so it cannot exhaust the core catalogue import/inspection response.
+Periodic history I/O stays outside the editor request queue. Native association
+revisions advance the browser's durable floor across worker restart.
+
+Verification passed 172 catalogue tests and 587 desktop tests (the 3 GB fixture
+ran separately on F: because C: initially lacked space). The final 586-test desktop
+run used the real narrow-response fixture after the parser fix. JavaScript unit
+501, focused browser 72, native 31, structure 11, extension package 14 and serial
+post-stage Windows/Chromium lifecycle 19 checks passed. Lint, typecheck and full
+maintained-text formatting passed. The broad browser/portable aggregate was not
+rerun. The package's duplicate GUI probe deferred to the already-running desktop
+authority; actual installed startup was verified below. Initial test-fixture and
+temporary artifact-layout failures were corrected without removing assertions.
+
+Claude Opus 5.5 independently reviewed the repair. Its response-capacity,
+association-revision, provider-status and narrow-field parsing findings were
+repaired and covered by regression tests. This static review is not live-site
+acceptance.
+
+The normal update exited 0 and logged installation success. All 1348
+installed manifest files match the stage. Before startup, all 15
+settings/data files and 21 database table fingerprints were unchanged;
+extension identities and native registrations were preserved. Installed startup
+as PID 41412, with a visible OFEnhancer window, reports
+0.20.130+51b64d608b08fa7b4353a426d0530c2480788ac5. Schema 10 adds creator_workflows, keeps every existing
+table fingerprint unchanged and creates a version-9 database backup. Integrity is
+ok and private settings/credential file fingerprints remain unchanged.
+Installer SHA-256: `a17ab04c172a37a1bc51ef7ca17c4d2c38e39fd0b562e04dca57baea048657eb`.
+Manifest SHA-256: `b5a3144d8e129fcba780195e1132aa46295c7714fa9a528d9be3e1d47672a14a`.
+
+The owner must reload the existing Chrome extension entry before UAT. No real
+provider publication, delayed public reply or Google write was used as acceptance
+evidence. Live-account end-to-end acceptance remains pending. The foundation
+repairs cover the supported workflows; universal later platform edit/deletion
+collection, general cross-platform metrics and a complete versioned filesystem
+media engine remain unsupported, as stated in the foundation audit.
