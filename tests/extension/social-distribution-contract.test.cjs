@@ -38,6 +38,7 @@ function input(overrides = {}) {
       id: "resident-evil-ashley",
       title: "gooning to Ashley",
       fingerprint: "1234abcd",
+      destination: { workbookId: "workbook-a", sheetId: "0" },
     },
     socialFile: {
       basename: "ashley-social-teaser.mp4",
@@ -87,6 +88,10 @@ test("X calendar intent freezes warning, posting zone and delayed reply without 
   };
   const frozen = contract.freezeDistributionPlan(input({ xOptions }));
   assert.deepEqual(plain(frozen.xOptions), xOptions);
+  assert.deepEqual(plain(frozen.catalogue.destination), {
+    workbookId: "workbook-a",
+    sheetId: "0",
+  });
   assert.equal(Object.isFrozen(frozen.xOptions), true);
   for (const override of [
     { sensitive: false },
@@ -113,6 +118,29 @@ test("explicit deferred catalogue preserves publication proof validation", () =>
   assert.throws(
     () => contract.freezeDistributionPlan(input({ catalogue: undefined })),
     /catalogue row/,
+  );
+  const legacy = contract.freezeDistributionPlan(
+    input({
+      catalogue: {
+        row: 125,
+        id: "legacy",
+        title: "Legacy",
+        fingerprint: "1234abcd",
+      },
+    }),
+  );
+  assert.equal(Object.hasOwn(legacy.catalogue, "destination"), false);
+  assert.throws(
+    () =>
+      contract.freezeDistributionPlan(
+        input({
+          catalogue: {
+            ...input().catalogue,
+            destination: { workbookId: "bad/id" },
+          },
+        }),
+      ),
+    /destination/,
   );
   assert.throws(
     () =>

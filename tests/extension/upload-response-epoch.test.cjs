@@ -247,6 +247,7 @@ test("Fansly manual watch forwards media identity only from its armed request", 
     sessionId: "media-session-123456",
     platform: "fansly",
     watchId: "a".repeat(32),
+    expectedMediaIds: ["956574905413943296"],
   });
   stale.complete(fanslyPayload());
   await Promise.resolve();

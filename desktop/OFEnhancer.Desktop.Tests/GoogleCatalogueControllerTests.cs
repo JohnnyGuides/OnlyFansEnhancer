@@ -19,7 +19,8 @@ public sealed class GoogleCatalogueControllerTests
         harness.Store.ImportWorkbookProjection(new(WorkbookId, "17", true,
             [new(2, "episode-1", "Episode 1", "", null, null, null, 0, 0, new Dictionary<string,string>(), null)]), false);
         var row = harness.Store.GetUploadCatalogueSnapshot().Rows.Single();
-        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/500", Id: row.Id);
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/500",
+            Id: row.Id, Destination: new(WorkbookId, "17"));
         var local = harness.Store.RecordUploadResult(request);
         int calls = 0;
         harness.Session.WriteUploadLinkAction = (intent, beforeWrite) =>
@@ -52,6 +53,270 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public void WorkbookBoundNullableSheetIntentWritesAdaptivelyAndReturnsDurableOutcome()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Store.ImportWorkbookProjection(new(WorkbookId, "17", true,
+            [new(2, "episode-1", "Episode 1", "Description", null, null, null, 0, 0,
+                new Dictionary<string, string>(), null)]), false);
+        var row = harness.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "script",
+            "https://johnnyguides.com/sync/scripts/episode-1.funscript", Id: row.Id);
+        UploadSheetWriteback intent = harness.Store.QueueUploadSheetWriteback(WorkbookId, null, request, request.PostUrl);
+        UploadResult local = new("recorded-local", row.Fingerprint, PostUrl: request.PostUrl, SheetWriteback: intent);
+        WorkbookProjection writtenProjection = new(WorkbookId, "17", true,
+            [new(2, row.Id, row.Title, row.Description, null, null, null, 0, 0,
+                new Dictionary<string, string> { ["script"] = request.PostUrl }, null)]);
+        GoogleCatalogueImportPreview preview = new(writtenProjection, 17, "Catalogue", 1,
+            new Dictionary<string, int> { ["sourceKey"] = 1, ["title"] = 2, ["description"] = 3, ["script"] = 25 });
+        harness.Session.WriteUploadLinkAction = (queued, beforeWrite) =>
+        {
+            Assert.IsNull(queued.SheetId, "the adaptive intent has no reviewed sheet affinity yet");
+            beforeWrite(17);
+            UploadSheetWriteback attempted = harness.Store.GetUploadSheetWritebacks(WorkbookId).Single();
+            Assert.AreEqual("attempted", attempted.State);
+            Assert.AreEqual("17", attempted.SheetId);
+            return Task.FromResult(new GoogleTeaserLinkResult("appended", preview));
+        };
+
+        UploadResult result = harness.Controller.WriteBackUploadResult(request, local);
+
+        Assert.IsTrue(result.GoogleSynced);
+        Assert.AreEqual("updated", result.Status);
+        Assert.AreEqual(0, harness.Store.GetUploadSheetWritebacks(WorkbookId).Count);
+        Assert.IsNull(harness.Store.GetGoogleCatalogueSelection()!.SheetId,
+            "adaptive result writeback does not create or save a reviewed sheet profile");
+        Assert.AreEqual(0, harness.Session.MigrationCalls, "adaptive result writeback never migrates the workbook");
+    }
+
+    [TestMethod]
+    public void GoogleStatusReportsWorkbookBoundUploadWritebackBacklogIncludingConflicts()
+    {
+        using ControllerHarness harness = ConnectedHarness();
+        harness.Store.RecordUploadSheetWriteback(new("pending-key", WorkbookId, null, "episode-a", "fansly",
+            "https://fansly.com/post/500", "Episode A", ""));
+        harness.Store.RecordUploadSheetWriteback(new("conflict-key", WorkbookId, null, "episode-b", "fansly",
+            "https://fansly.com/post/501", "Episode B", "", "conflict", "catalogue-entry-changed"));
+        harness.Store.RecordUploadSheetWriteback(new("attempted-key", WorkbookId, "17", "episode-c", "fansly",
+            "https://fansly.com/post/502", "Episode C", "", "attempted"));
+        harness.Store.RecordUploadSheetWriteback(new("unresolved-key", WorkbookId, "17", "episode-d", "fansly",
+            "https://fansly.com/post/503", "Episode D", "", "unresolved"));
+
+        GoogleCatalogueStatusView status = harness.Controller.getGoogleCatalogueStatus();
+
+        Assert.AreEqual(1, status.UploadWritebackPendingCount);
+        Assert.AreEqual(1, status.UploadWritebackConflictCount);
+        Assert.AreEqual(1, status.UploadWritebackAttemptedCount);
+        Assert.AreEqual(1, status.UploadWritebackUnresolvedCount);
+    }
+
+    [TestMethod]
+    public void RetryUploadWritebacksRunsThroughThePerIntentGateAndReturnsCurrentStatus()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleCatalogueSelection selection = harness.Store.GetGoogleCatalogueSelection()!;
+        WorkbookProjection projection = harness.Session.Inspection.Projection;
+        WorkbookCatalogueItem row = projection.Items.Single();
+        harness.Store.RecordUploadSheetWriteback(new("retry-key", WorkbookId, selection.SheetId,
+            row.SourceKey, "fansly", "https://fansly.com/post/501", row.Title, row.Description));
+        WorkbookProjection written = projection with
+        {
+            Items = [new WorkbookCatalogueItem(row.SourceRow, row.SourceKey, row.Title, row.Description,
+                row.PlannedDate, row.Series, row.Episode, row.XTeasers, row.RedditTeasers,
+                new Dictionary<string, string> { ["fansly"] = "https://fansly.com/post/501" },
+                row.MetadataId, row.SourceLinkCells, row.Category)],
+        };
+        GoogleCatalogueImportPreview preview = new(written, int.Parse(selection.SheetId!),
+            selection.SheetTitle!, 1,
+            new Dictionary<string, int> { ["sourceKey"] = 1, ["title"] = 2, ["description"] = 3, ["fansly"] = 4 });
+        harness.Session.WriteUploadLinkAction = (intent, beforeWrite) =>
+        {
+            beforeWrite(int.Parse(selection.SheetId!));
+            return Task.FromResult(new GoogleTeaserLinkResult("appended", preview));
+        };
+
+        GoogleCatalogueStatusView status = harness.Controller.retryUploadWritebacks();
+
+        Assert.AreEqual("ready", status.State);
+        Assert.AreEqual(0, status.UploadWritebackPendingCount);
+        Assert.AreEqual(0, status.UploadWritebackAttemptedCount);
+        Assert.AreEqual(0, harness.Store.GetUploadSheetWritebacks(WorkbookId).Count);
+    }
+
+    [TestMethod]
+    public void CreatorWorkflowLedgerWritebackFreezesWorkbookAndReconcilesWithoutRedispatch()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleCatalogueSelection selection = harness.Store.GetGoogleCatalogueSelection()!;
+        CreatorWorkflowSnapshot snapshot = new("ledger-success", "social", 1, null, [], [],
+            Destination: new(WorkbookId, selection.SheetId));
+        Assert.AreEqual("recorded", harness.Store.RecordCreatorWorkflow(snapshot).Status);
+        int writeCallbacks = 0;
+        harness.Session.WriteWorkflowLedgerAction = (intent, beforeWrite) =>
+        {
+            Assert.AreEqual(WorkbookId, intent.WorkbookId);
+            beforeWrite(int.Parse(selection.SheetId!));
+            writeCallbacks++;
+            return Task.FromResult(new GoogleWorkflowLedgerResult("completed"));
+        };
+
+        harness.Controller.WriteBackCreatorWorkflows();
+
+        Assert.AreEqual(1, writeCallbacks);
+        Assert.AreEqual(0, harness.Store.GetCreatorWorkflowProjectionCounts(WorkbookId).Pending);
+
+        CreatorWorkflowSnapshot unresolvedSnapshot = snapshot with { RunId = "ledger-reconcile" };
+        Assert.AreEqual("recorded", harness.Store.RecordCreatorWorkflow(unresolvedSnapshot).Status);
+        CreatorWorkflowProjectionIntent unresolved = harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId)
+            .Single(intent => intent.RunId == "ledger-reconcile");
+        unresolved = harness.Store.RecordCreatorWorkflowProjection(unresolved with
+            { State = "attempted", LedgerSheetId = int.Parse(selection.SheetId!) });
+        int retryCallbacks = 0;
+        harness.Session.WriteWorkflowLedgerAction = (intent, beforeWrite) =>
+        {
+            Assert.AreEqual("attempted", intent.State);
+            retryCallbacks++;
+            return Task.FromResult(new GoogleWorkflowLedgerResult("unresolved", "google-row-write-unresolved"));
+        };
+
+        harness.Controller.WriteBackCreatorWorkflows();
+
+        Assert.AreEqual(1, retryCallbacks);
+        Assert.AreEqual(0, harness.Store.GetCreatorWorkflowProjectionCounts(WorkbookId).Attempted);
+        Assert.AreEqual(1, harness.Store.GetCreatorWorkflowProjectionCounts(WorkbookId).Unresolved);
+
+        using ControllerHarness wrongWorkbook = ReadyHarness();
+        GoogleCatalogueSelection wrongSelection = wrongWorkbook.Store.GetGoogleCatalogueSelection()!;
+        Assert.AreEqual("recorded", wrongWorkbook.Store.RecordCreatorWorkflow(snapshot with
+        {
+            RunId = "ledger-wrong-workbook",
+            Destination = new(WorkbookId, wrongSelection.SheetId),
+        }).Status);
+        wrongWorkbook.Store.SaveGoogleCatalogueWorkbook("foreign-workbook", "Foreign workbook");
+        wrongWorkbook.Session.WriteWorkflowLedgerAction = (_, _) =>
+            throw new AssertFailedException("A workflow ledger must not write to a different active workbook.");
+        wrongWorkbook.Controller.WriteBackCreatorWorkflows();
+        Assert.AreEqual(1, wrongWorkbook.Store.GetCreatorWorkflowProjectionCounts(WorkbookId).Pending);
+    }
+
+    [TestMethod]
+    public async Task AsyncCreatorWorkflowFlushLeavesDispatcherResponsiveAndPersistsAttemptBeforeProviderCompletes()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleCatalogueSelection selection = harness.Store.GetGoogleCatalogueSelection()!;
+        CreatorWorkflowSnapshot snapshot = new("ledger-async", "social", 1, null, [], [],
+            Destination: new(WorkbookId, selection.SheetId));
+        Assert.AreEqual("recorded", harness.Store.RecordCreatorWorkflow(snapshot).Status);
+
+        WebMessageDispatcher dispatcher = new(_ => "{}");
+        TaskCompletionSource enteredProviderWait = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<GoogleWorkflowLedgerResult> providerCompletion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Session.WriteWorkflowLedgerAction = (intent, beforeWrite) =>
+        {
+            beforeWrite(int.Parse(selection.SheetId!));
+            enteredProviderWait.TrySetResult();
+            return providerCompletion.Task;
+        };
+
+        Task flush = harness.Controller.WriteBackCreatorWorkflowsAsync(dispatcher);
+        await enteredProviderWait.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        string state = await dispatcher.EnqueueAsync(() =>
+            harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId).Single().State)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        string unrelatedResponse = await dispatcher.EnqueueAsync(() => "getTeaserEdit-completed")
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual("attempted", state,
+            "the journal intent must be durable before the provider write is allowed to continue");
+        Assert.AreEqual("getTeaserEdit-completed", unrelatedResponse,
+            "a slow provider request must not hold up unrelated serial-dispatcher work");
+
+        providerCompletion.SetResult(new GoogleWorkflowLedgerResult("completed"));
+        await flush.WaitAsync(TimeSpan.FromSeconds(5));
+        string finalState = await dispatcher.EnqueueAsync(() => Convert.ToString(Scalar(harness.Store,
+            "SELECT json_extract(details_json,'$.State') FROM audit_events WHERE kind='creator-workflow-projection' ORDER BY event_id DESC LIMIT 1"))!)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual("completed", finalState);
+        await dispatcher.DrainAsync();
+    }
+
+    [TestMethod]
+    public void UnresolvedWorkflowReadbacksCannotStarveNewPendingSnapshots()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleCatalogueSelection selection = harness.Store.GetGoogleCatalogueSelection()!;
+        for (int index = 0; index < 10; index++)
+        {
+            CreatorWorkflowSnapshot snapshot = new($"readback-{index:00}", "social", 1, null, [], [],
+                Destination: new(WorkbookId, selection.SheetId));
+            Assert.AreEqual("recorded", harness.Store.RecordCreatorWorkflow(snapshot).Status);
+            CreatorWorkflowProjectionIntent intent = harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId)
+                .Single(value => value.RunId == snapshot.RunId);
+            intent = harness.Store.RecordCreatorWorkflowProjection(intent with
+                { State = "attempted", LedgerSheetId = int.Parse(selection.SheetId!) });
+            harness.Store.RecordCreatorWorkflowProjection(intent with { State = "unresolved", ErrorCode = "google-workflow-ledger-readback-missing" });
+        }
+        CreatorWorkflowSnapshot pending = new("zz-pending", "social", 1, null, [], [],
+            Destination: new(WorkbookId, selection.SheetId));
+        Assert.AreEqual("recorded", harness.Store.RecordCreatorWorkflow(pending).Status);
+        List<string> dispatched = [];
+        List<string> readbackRuns = [];
+        harness.Session.WriteWorkflowLedgerAction = (intent, beforeWrite) =>
+        {
+            dispatched.Add(intent.State);
+            if (intent.State == "pending")
+            {
+                beforeWrite(int.Parse(selection.SheetId!));
+                return Task.FromResult(new GoogleWorkflowLedgerResult("completed"));
+            }
+            readbackRuns.Add(intent.RunId);
+            return Task.FromResult(new GoogleWorkflowLedgerResult("unresolved", "google-workflow-ledger-readback-missing"));
+        };
+
+        harness.Controller.WriteBackCreatorWorkflows();
+
+        Assert.AreEqual("pending", dispatched[0], "new durable work gets its own budget before historical readbacks");
+        Assert.AreEqual(2, dispatched.Count(value => value == "unresolved"), "readbacks are bounded per pass");
+        Assert.AreEqual(0, harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId)
+            .Count(value => value.RunId == "zz-pending"));
+        harness.Controller.WriteBackCreatorWorkflows();
+        Assert.AreEqual(4, readbackRuns.Distinct(StringComparer.Ordinal).Count(),
+            "later unresolved entries must get readback time even when the first entries never resolve");
+    }
+
+    [TestMethod]
+    public void OnlyExplicitRetryReopensNeverAttemptedLedgerCapacityConflict()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleCatalogueSelection selection = harness.Store.GetGoogleCatalogueSelection()!;
+        CreatorWorkflowSnapshot snapshot = new("ledger-capacity-review", "social", 1, null, [], [],
+            Destination: new(WorkbookId, selection.SheetId));
+        Assert.AreEqual("recorded", harness.Store.RecordCreatorWorkflow(snapshot).Status);
+        CreatorWorkflowProjectionIntent intent = harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId).Single();
+        harness.Store.RecordCreatorWorkflowProjection(intent with
+        { State = "conflict", ErrorCode = "google-workflow-ledger-full" });
+        int writes = 0;
+        harness.Session.WriteWorkflowLedgerAction = (pending, beforeWrite) =>
+        {
+            Assert.AreEqual("pending", pending.State);
+            beforeWrite(int.Parse(selection.SheetId!));
+            writes++;
+            return Task.FromResult(new GoogleWorkflowLedgerResult("completed"));
+        };
+
+        harness.Controller.WriteBackCreatorWorkflows();
+
+        Assert.AreEqual(0, writes, "automatic flush never resets capacity conflicts");
+        Assert.AreEqual("conflict", harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId).Single().State);
+
+        harness.Controller.WriteBackCreatorWorkflows(reconcileConflicts: true);
+
+        Assert.AreEqual(1, writes, "explicit retry reopens only the pre-attempt capacity conflict");
+        Assert.AreEqual(0, harness.Store.GetCreatorWorkflowProjectionIntents(WorkbookId).Count);
+    }
+
+    [TestMethod]
     public void UnreadySelectionKeepsTheIntentWithoutMutatingGoogle()
     {
         using ControllerHarness harness = ConnectedHarness();
@@ -59,7 +324,8 @@ public sealed class GoogleCatalogueControllerTests
         harness.Store.ImportWorkbookProjection(new(WorkbookId, "17", true,
             [new(2, "episode-1", "Episode 1", "", null, null, null, 0, 0, new Dictionary<string, string>(), null)]), false);
         var row = harness.Store.GetUploadCatalogueSnapshot().Rows.Single();
-        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/500", Id: row.Id);
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/500",
+            Id: row.Id, Destination: new(WorkbookId, "17"));
         var local = harness.Store.RecordUploadResult(request);
         Assert.AreEqual("17", local.SheetWriteback!.SheetId);
         harness.Session.WriteUploadLinkAction = (_, _) => throw new AssertFailedException("Unready destination must not write.");
@@ -657,6 +923,126 @@ public sealed class GoogleCatalogueControllerTests
     }
 
     [TestMethod]
+    public void NewUploadEntryUsesTheReadyReviewedWorkbookAndPreservesExistingBindings()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        GoogleCatalogueSelection selection = harness.Store.GetGoogleCatalogueSelection()!;
+        WorkbookProjection before = harness.Session.Inspection.Projection;
+        string existingStableItemId = harness.Session.Inspection.Bindings.Single().ItemId;
+        string stableItemId = GoogleUploadEntryWriter.DerivedItemId(WorkbookId, 1, "new-id");
+        WorkbookCatalogueItem created = new(3, "new-id", "New video", "Preview", "2026-09-25",
+            "Setaria", null, 0, 0, new Dictionary<string, string>(), stableItemId);
+        GoogleCatalogueImportPreview preview = new(before with { Items = [.. before.Items, created] },
+            17, "2026 Video Catalogue", 1,
+            new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["sourceKey"] = 1, ["plannedDate"] = 2, ["title"] = 3, ["description"] = 4,
+                ["series"] = 5, ["category"] = 6,
+            });
+        harness.Session.WriteUploadEntryAction = request => Task.FromResult(
+            new GoogleUploadEntryResult("new-id", 3, "created", preview));
+        GoogleRowBinding[] verifiedBindings = harness.Session.Inspection.Projection.Items.Select(item =>
+            new GoogleRowBinding(WorkbookId, "1", item.MetadataId!, item.MetadataId!, item.SourceRow,
+                new('0', 64), DateTimeOffset.UtcNow)).Append(
+            new GoogleRowBinding(WorkbookId, "1", stableItemId, stableItemId, 3,
+                new('3', 64), DateTimeOffset.UtcNow)).ToArray();
+        WorkbookInspection verified = harness.Session.Inspection with
+        {
+            Projection = before with { Items = [.. before.Items, created] },
+            AlreadyMigrated = true,
+            MigrationPlan = harness.Session.Inspection.MigrationPlan with { Operations = [] },
+            Bindings = verifiedBindings,
+        };
+        harness.Session.Inspection = verified;
+
+        object written = harness.Controller.WriteUploadEntry(NewUploadEntryPayload());
+
+        StringAssert.Contains(JsonSerializer.Serialize(written), "\"status\":\"created\"");
+        Assert.AreEqual(int.Parse(selection.SheetId!), harness.Session.LastUploadEntrySheetId,
+            "the write is pinned to the stable tab selected by the reviewed profile");
+        Assert.AreEqual(selection, harness.Store.GetGoogleCatalogueSelection(),
+            "adding an entry must preserve the reviewed profile and workbook selection");
+        GoogleRowBinding[] afterBindings = harness.Store.GetGoogleBindings(WorkbookId).ToArray();
+        Assert.AreEqual(verified.Bindings.Count, afterBindings.Length);
+        Assert.AreEqual(existingStableItemId, afterBindings.Single(binding => binding.LastObservedRow == 2).ItemId,
+            "the existing row keeps its reviewed stable identity");
+        Assert.AreEqual(stableItemId, afterBindings.Single(binding => binding.LastObservedRow == 3).ItemId,
+            "the new row is bound to its durable Google-authored ID");
+        Assert.IsTrue(harness.Store.GetItems().Any(item => item.SourceKey == "new-id"));
+    }
+
+    [TestMethod]
+    public void NewUploadEntryRefusesAnUnreviewedOrChangedWorkbookProfile()
+    {
+        using ControllerHarness unreviewed = ConnectedHarness();
+        GoogleCatalogueControllerException notReady = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => unreviewed.Controller.WriteUploadEntry(NewUploadEntryPayload()));
+        Assert.AreEqual("google-sync-new-row-unavailable", notReady.Code);
+        Assert.AreEqual(0, unreviewed.Session.UploadEntryRequests.Count);
+
+        using ControllerHarness changed = ReadyHarness();
+        changed.Store.SaveGoogleCatalogueWorkbook("foreign-workbook", "Foreign workbook");
+        GoogleCatalogueControllerException foreign = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => changed.Controller.WriteUploadEntry(NewUploadEntryPayload()));
+        Assert.AreEqual("google-sync-new-row-unavailable", foreign.Code);
+        Assert.AreEqual(0, changed.Session.UploadEntryRequests.Count,
+            "the saved profile must still match the active session's workbook before any write");
+    }
+
+    [TestMethod]
+    public void NewUploadEntryInspectionFailureMovesReviewedProfileToPending()
+    {
+        using ControllerHarness harness = ReadyHarness();
+        WorkbookProjection before = harness.Session.Inspection.Projection;
+        WorkbookCatalogueItem created = new(3, "new-id", "New video", "Preview", "2026-09-25",
+            "Setaria", null, 0, 0, new Dictionary<string, string>(), null);
+        GoogleCatalogueImportPreview preview = new(before with { Items = [.. before.Items, created] },
+            1, "2026 Video Catalogue", 1,
+            new Dictionary<string, int> { ["sourceKey"] = 1, ["plannedDate"] = 2,
+                ["title"] = 3, ["description"] = 4, ["series"] = 5 });
+        harness.Session.WriteUploadEntryAction = _ => Task.FromResult(
+            new GoogleUploadEntryResult("new-id", 3, "created", preview));
+        harness.Session.InspectAction = _ => Task.FromException<WorkbookInspection>(
+            new GoogleCatalogueException("invalid-google-response"));
+
+        GoogleCatalogueControllerException error = Assert.ThrowsException<GoogleCatalogueControllerException>(
+            () => harness.Controller.WriteUploadEntry(NewUploadEntryPayload()));
+
+        Assert.AreEqual("google-row-identity-unresolved", error.Code);
+        Assert.IsFalse(harness.Store.GetGoogleCatalogueSelection()!.Ready,
+            "a row awaiting identity reconciliation cannot leave catalogue links operating against stale bindings");
+        Assert.IsFalse(harness.Store.GetItems().Any(item => item.SourceKey == "new-id"));
+
+        string stableItemId = GoogleUploadEntryWriter.DerivedItemId(WorkbookId, 1, "new-id");
+        WorkbookCatalogueItem reconciled = new(5, created.SourceKey, created.Title,
+            created.Description, created.PlannedDate, created.Series, created.Episode, created.XTeasers,
+            created.RedditTeasers, created.PlatformLinks, stableItemId, created.SourceLinkCells, created.Category);
+        GoogleRowBinding[] bindings = harness.Session.Inspection.Projection.Items.Select(item =>
+            new GoogleRowBinding(WorkbookId, "1", item.MetadataId!, item.MetadataId!, item.SourceRow,
+                new('0', 64), DateTimeOffset.UtcNow)).Append(
+            new GoogleRowBinding(WorkbookId, "1", stableItemId, stableItemId, 5,
+                new('3', 64), DateTimeOffset.UtcNow)).ToArray();
+        harness.Session.InspectAction = _ => Task.FromResult(harness.Session.Inspection with
+        {
+            Projection = before with { Items = [.. before.Items, reconciled] },
+            AlreadyMigrated = true,
+            MigrationPlan = harness.Session.Inspection.MigrationPlan with { Operations = [] },
+            Bindings = bindings,
+        });
+        object recovered = harness.Controller.WriteUploadEntry(NewUploadEntryPayload());
+
+        StringAssert.Contains(JsonSerializer.Serialize(recovered), "\"status\":\"reconciled\"");
+        Assert.AreEqual(1, harness.Session.BeforeWriteCalls,
+            "the retry reconciles the durable target without issuing a second row-write attempt");
+        Assert.AreEqual(1, harness.Session.ReconcileUploadEntryCalls);
+        Assert.AreEqual("completed", harness.Store.GetUploadCatalogueEntryIntent(
+            "8f02f51a-0e7b-4ec8-915e-7de45b7aa210")!.State);
+        Assert.AreEqual(5, harness.Store.GetUploadCatalogueEntryIntent(
+            "8f02f51a-0e7b-4ec8-915e-7de45b7aa210")!.Row,
+            "a stable row identity follows a moved physical row during read-only reconciliation");
+    }
+
+    [TestMethod]
     public void TeaserLinkWritebackRecordsOutcomesReimportsAndStaysWithinTheRunLimit()
     {
         using ControllerHarness harness = ConnectedHarness();
@@ -721,10 +1107,13 @@ public sealed class GoogleCatalogueControllerTests
         Assert.AreEqual("google-reauthorization-required", harness.Store.GetXSheetWritebackStatus(now).LastCode);
     }
 
-    // Seven teasers explicitly owner-mapped to ep-1..ep-7, one owner binding
-    // contradicted by its reply link (209 -> ep-8) and one unbound (210).
+    // Seven teasers explicitly owner-mapped to ep-1..ep-7, one real source
+    // conflict (sheet ep-2 vs owner ep-8 for 209), and one unbound (210).
     private static void SeedBoundTeasers(CatalogueStore store, Dictionary<string, List<string>> sheet, DateTimeOffset now)
     {
+        // A promoted reply URL is a separate relationship and cannot create a
+        // source conflict. Use contradictory source-sheet evidence for this guard.
+        sheet["ep-2"]=["https://x.com/Owner_Handle/status/209"];
         store.ImportWorkbookProjection(TeaserPreview(sheet).Projection, updateGoogleBindings: false);
         XOwnerIdentity owner = new("1000000000000000001", "Owner_Handle");
         List<XObservation> posts = [];
@@ -778,6 +1167,14 @@ public sealed class GoogleCatalogueControllerTests
     {
         mode = "update", title = "Episode 2", description = "", releaseDate = "2026-09-18",
         id, expectedTitle = "Episode 2", expectedDescription = "",
+    });
+
+    private static JsonElement NewUploadEntryPayload() => JsonSerializer.SerializeToElement(new
+    {
+        operationId = "8f02f51a-0e7b-4ec8-915e-7de45b7aa210",
+        mode = "new", title = "New video", description = "Preview", releaseDate = "2026-09-25",
+        fileName = "new-video.mp4", fileSize = 1234, fileLastModified = 1727280000000L,
+        category = "GameSync", seasonArc = "Setaria",
     });
 
     [TestMethod]
@@ -1784,6 +2181,10 @@ public sealed class GoogleCatalogueControllerTests
         internal Func<UploadSheetWriteback, Action<int>, Task<GoogleTeaserLinkResult>>? WriteUploadLinkAction { get; set; }
         public Task<GoogleTeaserLinkResult> WriteUploadLinkAsync(UploadSheetWriteback intent, Action<int> beforeWrite,
             CancellationToken cancellationToken) => WriteUploadLinkAction!(intent, beforeWrite);
+        internal Func<CreatorWorkflowProjectionIntent, Action<int>, Task<GoogleWorkflowLedgerResult>>? WriteWorkflowLedgerAction { get; set; }
+        public Task<GoogleWorkflowLedgerResult> WriteWorkflowLedgerAsync(CreatorWorkflowProjectionIntent intent,
+            Action<int> beforeWrite, CancellationToken cancellationToken) =>
+            WriteWorkflowLedgerAction!(intent, beforeWrite);
         internal WorkbookInspection Inspection { get; set; } =
             GoogleCatalogueControllerTests.Inspection(alreadyMigrated: false);
         internal WorkbookMigrationResult Migration { get; set; } =
@@ -1812,13 +2213,42 @@ public sealed class GoogleCatalogueControllerTests
 
         internal Func<GoogleUploadEntryRequest, Task<GoogleUploadEntryResult>>? WriteUploadEntryAction { get; set; }
         internal List<GoogleUploadEntryRequest> UploadEntryRequests { get; } = [];
+        internal int? LastUploadEntrySheetId { get; private set; }
         internal int ReadImportCalls { get; private set; }
+        internal int BeforeWriteCalls { get; private set; }
+        internal int ReconcileUploadEntryCalls { get; private set; }
 
         public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
             CancellationToken cancellationToken)
         {
             UploadEntryRequests.Add(request);
             return WriteUploadEntryAction!(request);
+        }
+
+        public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+            int? preferredSheetId, CancellationToken cancellationToken)
+        {
+            LastUploadEntrySheetId = preferredSheetId;
+            return WriteUploadEntryAsync(request, cancellationToken);
+        }
+
+        public async Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+            int? preferredSheetId, GoogleUploadEntryExecution? execution, CancellationToken cancellationToken)
+        {
+            LastUploadEntrySheetId = preferredSheetId;
+            UploadEntryRequests.Add(request);
+            if (execution?.ReconcileOnly == true) ReconcileUploadEntryCalls++;
+            GoogleUploadEntryResult result = await WriteUploadEntryAction!(request);
+            if (execution?.ReconcileOnly == true && request.Mode == "new")
+                result = result with { Row = 5, Status = "reconciled" };
+            if (execution?.BeforeWrite is not null)
+            {
+                BeforeWriteCalls++;
+                string? itemId = result.Preview.Projection.Items.Single(item => item.SourceKey == result.Id).MetadataId;
+                itemId ??= GoogleUploadEntryWriter.DerivedItemId(WorkbookId, preferredSheetId ?? 1, result.Id);
+                execution.BeforeWrite(result.Id, itemId, result.Row);
+            }
+            return result;
         }
 
         internal Func<string, string, Task<GoogleTeaserLinkResult>>? AppendTeaserLinkAction { get; set; }

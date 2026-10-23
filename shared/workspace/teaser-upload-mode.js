@@ -414,15 +414,32 @@
       }
     });
     let endingControls = [];
+    const endingSourceIdentity = new WeakMap();
     const ending = global.OFEnhancerTeaserEnding.mount({
       preview,
       getFile: () => hub.file(),
-      useFile: (file) =>
-        acceptFile(file, {
-          clipId: context?.clipId,
-          renderHash: context?.renderHash,
-          preserve: true,
-        }),
+      useFile: (file, change = {}) => {
+        if (change.restore) {
+          const identity = endingSourceIdentity.get(file) || {};
+          acceptFile(file, {
+            clipId: identity.clipId || null,
+            renderHash: identity.renderHash || "",
+            renderPending: identity.renderPending === true,
+            preserve: true,
+          });
+          return;
+        }
+        const source = hub.file();
+        if (source && source !== file && !endingSourceIdentity.has(source))
+          endingSourceIdentity.set(source, {
+            clipId: context?.clipId || null,
+            renderHash: context?.renderHash || "",
+            renderPending: context?.renderPending === true,
+          });
+        // An in-memory ending export is a different asset from the indexed
+        // source clip. It stays linked to the episode but carries no clip ID.
+        acceptFile(file, { clipId: null, renderHash: "", preserve: true });
+      },
       locked: () =>
         Boolean(context?.draft?.sessionId || context?.platform === "reddit"),
       busy: () => hub.busy(),
@@ -613,7 +630,9 @@
       if (context && render) {
         context.clipId = render.clipId;
         context.renderHash = render.renderHash;
-        if (!render.preserve) context.renderPending = true;
+        if (Object.hasOwn(render, "renderPending"))
+          context.renderPending = render.renderPending === true;
+        else if (!render.preserve) context.renderPending = true;
       } else if (context) {
         context.renderPending = false;
         context.renderHash = "";
@@ -951,6 +970,10 @@
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           replyDelayMinutes: Number(replyDelay.value),
           autoReply: autoReply.checked,
+          ...(Number.isSafeInteger(Number(context?.clipId)) &&
+          Number(context.clipId) > 0
+            ? { clipId: Number(context.clipId) }
+            : {}),
         };
       },
     };

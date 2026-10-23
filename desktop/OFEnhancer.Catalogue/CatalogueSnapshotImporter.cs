@@ -74,12 +74,18 @@ internal static class CatalogueSnapshotImporter
         string? previousFingerprint = ReadSetting(connection, SnapshotHashSetting);
         if (string.Equals(previousFingerprint, fingerprint, StringComparison.Ordinal))
         {
+            using (SqliteTransaction provenanceTransaction = connection.BeginTransaction())
+            {
+                CatalogueProjectionProvenance.Clear(connection, provenanceTransaction);
+                provenanceTransaction.Commit();
+            }
             (int active, int archived) = ReadCounts(connection);
             return new CatalogueImportSummary(active, archived, Unchanged: true);
         }
 
         string now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         using SqliteTransaction transaction = connection.BeginTransaction();
+        CatalogueProjectionProvenance.Clear(connection, transaction);
         CatalogueSql.Execute(connection, transaction, "UPDATE catalogue_items SET archived = 1, updated_utc = $now", ("$now", now));
 
         foreach (ValidatedSnapshotItem item in items)

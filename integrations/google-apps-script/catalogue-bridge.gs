@@ -144,8 +144,12 @@ function creatorUploadCanonicalUrl(platform, value) {
   var match;
   if (platform === "pornhub") {
     // Exact authority, route and one literal parameter; Apps Script has no URL API.
-    match = raw.match(/^https:\/\/www\.pornhub\.com(?::443)?\/(?:view_video\.php|video\/show)\?viewkey=([A-Za-z0-9_-]{1,100})$/);
-    return match ? "https://www.pornhub.com/view_video.php?viewkey=" + match[1] : null;
+    match = raw.match(
+      /^https:\/\/www\.pornhub\.com(?::443)?\/(?:view_video\.php|video\/show)\?viewkey=([A-Za-z0-9_-]{1,100})$/,
+    );
+    return match
+      ? "https://www.pornhub.com/view_video.php?viewkey=" + match[1]
+      : null;
   }
   if (platform === "fansly") {
     match = raw.match(/^(?:https:\/\/fansly\.com\/post\/)?(\d+)\/?$/);
@@ -165,18 +169,27 @@ function creatorUploadCanonicalUrl(platform, value) {
 }
 
 function creatorUploadCanonicalTwitterStatus(value) {
-  var raw = creatorUploadClean(value);
+  var raw = creatorUploadClean(value).replace(/[),.;!?]+$/, "");
   var match = raw.match(
-    /^https:\/\/x\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})$/,
+    /^https:\/\/(?:www\.|mobile\.)?(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,30})(?:[/?#].*)?$/i,
   );
   return match && match[1].toLowerCase() !== "i"
-    ? "https://x.com/" + match[1] + "/status/" + match[2]
+    ? "https://x.com/" + match[1].toLowerCase() + "/status/" + match[2]
     : null;
 }
 
 function creatorUploadCanonicalRedditPost(value) {
-  var match = creatorUploadClean(value).match(/^https:\/\/www\.reddit\.com(?::443)?\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})\/([A-Za-z0-9_-]+)\/?$/i);
-  return match ? "https://www.reddit.com/r/" + match[1] + "/comments/" + match[2].toLowerCase() + "/" + match[3] : null;
+  var match = creatorUploadClean(value).match(
+    /^https:\/\/www\.reddit\.com(?::443)?\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})\/([A-Za-z0-9_-]+)\/?$/i,
+  );
+  return match
+    ? "https://www.reddit.com/r/" +
+        match[1] +
+        "/comments/" +
+        match[2].toLowerCase() +
+        "/" +
+        match[3]
+    : null;
 }
 
 function creatorUploadCanonicalRedgifsWatch(value) {
@@ -330,8 +343,15 @@ function creatorUploadPlanTwitterAppend(row, request) {
   var statusUrl = creatorUploadCanonicalTwitterStatus(request.statusUrl);
   if (!statusUrl) throw new Error("Invalid Twitter teaser status link.");
   var current = creatorUploadClean(row.twitterTeasers);
-  var links = current.split(/\s+/).map(creatorUploadClean).filter(Boolean);
-  if (links.indexOf(statusUrl) !== -1) {
+  var links = current
+    .split(/[\s,;]+/)
+    .map(creatorUploadClean)
+    .filter(Boolean);
+  if (
+    links.some(function (link) {
+      return creatorUploadCanonicalTwitterStatus(link) === statusUrl;
+    })
+  ) {
     return {
       status: "idempotent",
       row: row,
@@ -481,6 +501,8 @@ function creatorUploadReadRows(sheet) {
   var maxRow = Math.min(5000, Math.max(2, sheet.getMaxRows()));
   var endRow = Math.min(maxRow, Math.max(2, sheet.getLastRow() + 1));
   var values = sheet.getRange(2, 1, endRow - 1, 20).getValues();
+  var formulaRange = sheet.getRange(2, 1, endRow - 1, 20);
+  var formulas = formulaRange.getFormulas ? formulaRange.getFormulas() : [];
   return values.map(function (cells, index) {
     return {
       row: index + 2,
@@ -497,7 +519,9 @@ function creatorUploadReadRows(sheet) {
       twitterTeasers: creatorUploadClean(cells[14]),
       redditPostCount: Number(cells[18]) || 0,
       redditPosts: creatorUploadClean(cells[19]),
-      empty: !cells.slice(0, 12).some(creatorUploadClean),
+      empty:
+        !cells.some(creatorUploadClean) &&
+        !(formulas[index] || []).some(creatorUploadClean),
     };
   });
 }
@@ -615,8 +639,18 @@ function creatorUploadLedgerSheet(book) {
 
 function creatorUploadHandle(action, payload) {
   var workbookId = creatorUploadSpreadsheetId();
-  var source = { backend: "apps-script", workbookId: workbookId, sheetName: CREATOR_UPLOAD_SHEET_NAME };
-  if (payload && payload.expectedSource && (payload.expectedSource.backend !== source.backend || payload.expectedSource.workbookId !== source.workbookId || payload.expectedSource.sheetName !== source.sheetName))
+  var source = {
+    backend: "apps-script",
+    workbookId: workbookId,
+    sheetName: CREATOR_UPLOAD_SHEET_NAME,
+  };
+  if (
+    payload &&
+    payload.expectedSource &&
+    (payload.expectedSource.backend !== source.backend ||
+      payload.expectedSource.workbookId !== source.workbookId ||
+      payload.expectedSource.sheetName !== source.sheetName)
+  )
     throw new Error("The approved Sheet source changed.");
   var book = SpreadsheetApp.openById(workbookId);
   if (action === "getSubredditPresetSnapshot") {
@@ -686,7 +720,9 @@ function creatorUploadHandle(action, payload) {
   }
   var sheet = creatorUploadSheet(book);
   if (action === "getCatalogueSnapshot") {
-    return Object.assign(creatorUploadSnapshot(creatorUploadReadRows(sheet)), { source: source });
+    return Object.assign(creatorUploadSnapshot(creatorUploadReadRows(sheet)), {
+      source: source,
+    });
   }
   if (action === "matchCatalogue") {
     return creatorUploadMatchRows(
@@ -719,11 +755,18 @@ function creatorUploadHandle(action, payload) {
           ? creatorUploadPlanRedditAppend(current, payload)
           : creatorUploadPlanCommit(current, payload);
     function remoteCommit(row) {
-      return { backend: source.backend, workbookId: source.workbookId, sheetName: source.sheetName,
-        row: row.row, itemId: row.id, statusUrl: creatorUploadCanonicalTwitterStatus(payload.statusUrl) };
+      return {
+        backend: source.backend,
+        workbookId: source.workbookId,
+        sheetName: source.sheetName,
+        row: row.row,
+        itemId: row.id,
+        statusUrl: creatorUploadCanonicalTwitterStatus(payload.statusUrl),
+      };
     }
     if (plan.status !== "updated") {
-      if (action === "appendTwitterTeaser" && plan.status === "idempotent") plan.remoteCommit = remoteCommit(current);
+      if (action === "appendTwitterTeaser" && plan.status === "idempotent")
+        plan.remoteCommit = remoteCommit(current);
       return plan;
     }
     if (action === "appendTwitterTeaser") {
@@ -737,8 +780,10 @@ function creatorUploadHandle(action, payload) {
       );
       var verifiedTwitterLinks = twitterVerified
         ? creatorUploadClean(twitterVerified.twitterTeasers)
-            .split(/\s+/)
+            .split(/[\s,;]+/)
             .map(creatorUploadClean)
+            .filter(Boolean)
+            .map(creatorUploadCanonicalTwitterStatus)
             .filter(Boolean)
         : [];
       if (

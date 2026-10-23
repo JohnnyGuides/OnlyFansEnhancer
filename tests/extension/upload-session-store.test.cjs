@@ -77,6 +77,82 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test("script receipts survive restart and later checkpoints without persisting bytes or private fields", async () => {
+  const first = loadStore();
+  const id = "script-recovery-session-001";
+  const url = "https://johnnyguides.com/sync/scripts/neutral.funscript";
+  await first.store.save({
+    id,
+    catalogue: {
+      source: "desktop",
+      id: "episode-ashley",
+      itemId: "item-123",
+      row: 50,
+      fingerprint: "a".repeat(64),
+      destination: { workbookId: "workbook-a", sheetId: "0" },
+    },
+    platforms: {
+      onlyfans: { status: "failed" },
+      fansly: { status: "uploaded", postUrl: "https://fansly.com/post/500" },
+    },
+    scriptState: {
+      status: "partial",
+      filename: "neutral.funscript",
+      sha256: "a".repeat(64),
+      urls: [url, "https://evil.example/private.funscript"],
+      sentKeys: ["fansly_500"],
+      sheetPending: true,
+      writebackState: "pending",
+      results: [
+        {
+          url,
+          keys: ["fansly_500"],
+          sheetPending: true,
+          writebackState: "pending",
+          sheetError: "google-network",
+        },
+      ],
+      errorCode: "script-catalogue-pending",
+      data: "private-script-bytes",
+      accessToken: "private-token",
+    },
+  });
+  const restarted = loadStore();
+  Object.assign(restarted.values, structuredClone(first.values));
+  const saved = await restarted.store.load(id);
+  assert.equal(saved.scriptState.status, "partial");
+  assert.equal(saved.scriptState.sheetPending, true);
+  assert.equal(saved.scriptState.writebackState, "pending");
+  assert.deepEqual(plain(saved.catalogue.destination), {
+    workbookId: "workbook-a",
+    sheetId: "0",
+  });
+  assert.deepEqual(plain(saved.scriptState.sentKeys), ["fansly_500"]);
+  assert.deepEqual(plain(saved.scriptState.urls), [url]);
+  assert.equal(saved.scriptState.results[0].sheetError, "google-network");
+  assert.equal(saved.platforms.fansly.postUrl, "https://fansly.com/post/500");
+  const serialized = JSON.stringify(restarted.values);
+  assert.ok(!serialized.includes("private-script-bytes"));
+  assert.ok(!serialized.includes("private-token"));
+  await restarted.store.save({
+    ...saved,
+    scriptState: { status: "pending", urls: [], sentKeys: [] },
+  });
+  const checkpoint = await restarted.store.load(id);
+  assert.deepEqual(plain(checkpoint.scriptState.sentKeys), ["fansly_500"]);
+  assert.deepEqual(plain(checkpoint.scriptState.urls), [url]);
+});
+
+test("legacy upload associations stay without a workbook destination", async () => {
+  const { store } = loadStore();
+  const saved = await store.save({
+    id: "legacy-workbook-session-01",
+    catalogue: { source: "desktop", id: "episode-ashley", row: 50 },
+    platforms: {},
+  });
+  assert.equal(Object.hasOwn(saved.catalogue, "destination"), false);
+});
+
 test("Fansly media identity survives session loss and cannot be replaced by a stale checkpoint", async () => {
   const { store, values } = loadStore();
   const record = {
@@ -876,4 +952,72 @@ test("saved draft keeps extra video teaser proofs and drops them for images", as
   assert.equal(restored.draft.fileProof.media2Teaser.name, "two (teaser).mp4");
   assert.equal(restored.draft.fileProof.script.name, "episode.funscript");
   assert.equal(restored.draft.scriptLeadInMs, 1023);
+});
+
+test("verified canonical publication receipt permits only an explicitly authorized repeat", async () => {
+  const { store, values } = loadStore();
+  const record = {
+    id: "verified-repeat-session",
+    launcher: "desktop",
+    draft: { fullFilename: "neutral.mp4", title: "Neutral" },
+    platforms: { onlyfans: { submitAttempted: true } },
+  };
+  await store.save(record);
+  await assert.rejects(
+    store.assertAvailable({ ...record, id: "before-receipt" }, ["onlyfans"]),
+    /unresolved publication/i,
+  );
+  const receipt = "https://onlyfans.com/123456789/johnny_guides";
+  assert.equal(
+    await store.recordPublicationReceipt(record.id, "onlyfans", receipt),
+    receipt,
+  );
+  assert.equal(
+    await store.recordPublicationReceipt(record.id, "onlyfans", receipt),
+    receipt,
+  );
+  const history = plain(values.creatorUploadPublicationHistoryV1);
+  assert.equal(history.length, 1);
+  assert.equal(history[0].receiptVerified, true);
+  assert.equal(history[0].postUrl, receipt);
+  assert.deepEqual(plain(values.creatorUploadActionsV1), []);
+  await assert.rejects(
+    store.assertAvailable(
+      { ...record, id: "unauthorized-repeat", launcher: "desktop" },
+      ["onlyfans"],
+    ),
+    /unresolved publication/i,
+  );
+  await store.assertAvailable(
+    {
+      ...record,
+      id: "authorized-repeat",
+      catalogue: { source: "desktop", repeatPlatforms: ["onlyfans"] },
+    },
+    ["onlyfans"],
+  );
+});
+
+test("verified receipt archival prevents the active recovery journal from exhausting at 200", async () => {
+  const { store, values } = loadStore();
+  for (let index = 0; index < 205; index++) {
+    const id = `verified-cap-${index}`;
+    await store.save({
+      id,
+      draft: { title: `Synthetic ${index}` },
+      platforms: { onlyfans: { submitAttempted: true } },
+    });
+    await store.recordPublicationReceipt(
+      id,
+      "onlyfans",
+      `https://onlyfans.com/${123450000 + index}/johnny_guides`,
+    );
+  }
+  assert.equal(values.creatorUploadActionsV1.length, 0);
+  assert.equal(values.creatorUploadPublicationHistoryV1.length, 205);
+  await store.save({
+    id: "after-verified-cap",
+    platforms: { onlyfans: { submitAttempted: true } },
+  });
+  assert.equal(values.creatorUploadActionsV1.length, 1);
 });

@@ -205,6 +205,7 @@ public sealed class GoogleWorkspaceClientTests
             values = new[] { new { formattedValue = id }, new { formattedValue = "2026-09-25" },
                 new { formattedValue = "New video" }, new { formattedValue = "Preview text" } }
         }));
+        AddStableIdentity(after, 3, id);
         RecordingHandler handler = new();
         foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(), before.ToJsonString(), "{}",
             WorkbookMetadataJson, discovery.ToJsonString(), after.ToJsonString() })
@@ -219,12 +220,104 @@ public sealed class GoogleWorkspaceClientTests
 
         Assert.AreEqual(3, result.Row);
         RecordedRequest mutation = handler.Requests.Single(request => request.Method == HttpMethod.Post);
-        StringAssert.Contains(mutation.Uri.AbsolutePath, "values:batchUpdate");
+        StringAssert.Contains(mutation.Uri.AbsolutePath, ":batchUpdate");
         using JsonDocument body = JsonDocument.Parse(mutation.Body);
-        string[] ranges = body.RootElement.GetProperty("data").EnumerateArray()
-            .Select(update => update.GetProperty("range").GetString()!).ToArray();
-        CollectionAssert.AreEquivalent(new[] { "'2026 Video Catalogue'!A3", "'2026 Video Catalogue'!C3",
-            "'2026 Video Catalogue'!D3" }, ranges);
+        JsonElement requests = body.RootElement.GetProperty("requests");
+        Assert.IsTrue(requests.EnumerateArray().Any(request => request.TryGetProperty("createDeveloperMetadata", out _)));
+        CollectionAssert.AreEquivalent(new[] { 0, 2, 3, 20 }, requests.EnumerateArray()
+            .Where(request => request.TryGetProperty("updateCells", out _))
+            .Select(request => request.GetProperty("updateCells").GetProperty("start").GetProperty("columnIndex").GetInt32())
+            .ToArray());
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterPreservesReviewedProfileFieldsOnTheNewStableSourceRow()
+    {
+        (string metadata, string discovery, string before) = SeasonCategoryWorkbook("Old video");
+        JsonObject after = JsonNode.Parse(before)!.AsObject();
+        after["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray().Add(JsonSerializer.SerializeToNode(new
+        {
+            values = new[]
+            {
+                new { formattedValue = "setaria-new-video" }, new { formattedValue = "2026-09-25" },
+                new { formattedValue = "New video" }, new { formattedValue = "Preview text" },
+                new { formattedValue = "GameSync" }, new { formattedValue = "Setaria" },
+            },
+        }));
+        AddStableIdentity(after, 3, "setaria-new-video");
+        GoogleWorkbookSnapshot fixture = GoogleWorkbookSnapshot.Parse(Encoding.UTF8.GetBytes(after.ToJsonString()));
+        WorkbookCatalogueItem parsed = GoogleCatalogueImportReader.Read(fixture, 2126708696)
+            .Projection.Items.Single(item => item.SourceKey == "setaria-new-video");
+        Assert.AreEqual("2026-09-25", parsed.PlannedDate);
+        Assert.AreEqual("Setaria", parsed.Series);
+        RecordingHandler handler = new();
+        foreach (string response in new[] { metadata, discovery, before, "{}", metadata, discovery,
+            after.ToJsonString(), """{"range":"'Videos'!E3","values":[["GameSync"]]}""" })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleUploadEntryResult result = await writer.WriteAsync(
+            new("new", "New video", "Preview text", "2026-09-25", "clip.mp4", 5, 123,
+                Category: "GameSync", SeasonArc: "Setaria"), CancellationToken.None);
+
+        Assert.AreEqual("setaria-new-video", result.Id);
+        Assert.AreEqual("GameSync", result.Preview.Projection.Items.Single(item => item.SourceKey == result.Id).Category);
+        Assert.AreEqual("Setaria", result.Preview.Projection.Items.Single(item => item.SourceKey == result.Id).Series);
+        RecordedRequest mutation = handler.Requests.Single(request => request.Method == HttpMethod.Post);
+        StringAssert.Contains(mutation.Uri.AbsolutePath, ":batchUpdate");
+        using JsonDocument body = JsonDocument.Parse(mutation.Body);
+        JsonElement[] cells = body.RootElement.GetProperty("requests").EnumerateArray()
+            .Where(request => request.TryGetProperty("updateCells", out _)).ToArray();
+        string[] values = cells.Select(cell => cell.GetProperty("updateCells").GetProperty("rows")[0]
+            .GetProperty("values")[0].GetProperty("userEnteredValue").GetProperty("stringValue").GetString()!).ToArray();
+        CollectionAssert.AreEqual(new[] { "setaria-new-video", "2026-09-25", "New video", "Preview text", "GameSync", "Setaria",
+            GoogleUploadEntryWriter.DerivedItemId("workbook-one", 2126708696, "setaria-new-video") }, values);
+        Assert.IsTrue(body.RootElement.GetProperty("requests").EnumerateArray()
+            .Any(request => request.TryGetProperty("createDeveloperMetadata", out _)));
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterRejectsAWorkbookIdentityMismatchBeforeMutation()
+    {
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, WorkbookMetadataJson.Replace("workbook-one", "foreign-workbook", StringComparison.Ordinal));
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            writer.WriteAsync(new("new", "New video", "Preview", "2026-09-25", "clip.mp4", 5, 123),
+                CancellationToken.None));
+
+        Assert.AreEqual("invalid-google-response", error.Code);
+        Assert.AreEqual(0, handler.Requests.Count(request => request.Method == HttpMethod.Post),
+            "a selected workbook mismatch is rejected before appending any row");
+    }
+
+    [TestMethod]
+    public async Task UploadEntryWriterDoesNotReportNewRowUntilStableCellAndMetadataReadBack()
+    {
+        JsonObject discovery = UploadWorkbookResponse(null, includeNotes: true);
+        JsonObject after = UploadWorkbookResponse("new-video");
+        after["developerMetadata"] = new JsonArray();
+        RecordingHandler handler = new();
+        foreach (string response in new[] { WorkbookMetadataJson, discovery.ToJsonString(),
+            UploadWorkbookResponse(null).ToJsonString(), "{}", WorkbookMetadataJson,
+            discovery.ToJsonString(), after.ToJsonString() })
+            handler.EnqueueJson(HttpStatusCode.OK, response);
+        using HttpClient http = new(handler);
+        GoogleUploadEntryWriter writer = new("workbook-one", 2126708696,
+            new GoogleWorkspaceClient(http, new FakeTokenSource("access")));
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            writer.WriteAsync(new("new", "New video", "Preview text", "2026-09-25", "clip.mp4", 5, 123),
+                CancellationToken.None));
+
+        Assert.AreEqual("google-row-identity-unresolved", error.Code);
+        Assert.AreEqual(1, handler.Requests.Count(request => request.Method == HttpMethod.Post),
+            "the row remains for inspection rather than being retried or reported complete");
     }
 
     [TestMethod]
@@ -335,8 +428,8 @@ public sealed class GoogleWorkspaceClientTests
     {
         JsonObject before = UploadWorkbookResponse(null);
         JsonArray rows = before["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
-        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Category" }));
-        rows[1]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "GameSync" }));
+        rows[0]!["values"]!.AsArray().Insert(4, JsonSerializer.SerializeToNode(new { formattedValue = "Category" }));
+        rows[1]!["values"]!.AsArray().Insert(4, JsonSerializer.SerializeToNode(new { formattedValue = "GameSync" }));
         JsonObject discovery = JsonNode.Parse(before.ToJsonString())!.AsObject();
         discovery["sheets"]!.AsArray().Add(UploadWorkbookResponse(null, includeNotes: true)["sheets"]![1]!.DeepClone());
         RecordingHandler handler = new();
@@ -428,11 +521,13 @@ public sealed class GoogleWorkspaceClientTests
     {
         JsonObject catalogue = UploadWorkbookResponse(null);
         JsonArray rows = catalogue["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
-        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Category" }));
-        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Season" }));
+        rows[0]!["values"]!.AsArray().Insert(4, JsonSerializer.SerializeToNode(new { formattedValue = "Category" }));
+        rows[0]!["values"]!.AsArray().Insert(5, JsonSerializer.SerializeToNode(new { formattedValue = "Season" }));
         rows[1]!["values"]![2]!["formattedValue"] = title;
-        rows[1]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "GameSync" }));
-        rows[1]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "Setaria" }));
+        rows[1]!["values"]!.AsArray().Insert(4, JsonSerializer.SerializeToNode(new { formattedValue = "GameSync" }));
+        rows[1]!["values"]!.AsArray().Insert(5, JsonSerializer.SerializeToNode(new { formattedValue = "Setaria" }));
+        rows[0]!["values"]!.AsArray().RemoveAt(22);
+        rows[0]!["values"]!.AsArray().Insert(20, JsonSerializer.SerializeToNode(new { formattedValue = "OFEnhancer ID" }));
         JsonObject discovery = JsonNode.Parse(catalogue.ToJsonString())!.AsObject();
         discovery["sheets"]!.AsArray().Add(UploadWorkbookResponse(null, includeNotes: true)["sheets"]![1]!.DeepClone());
         static string Rename(string json) => json.Replace("2026 Video Catalogue", "Videos", StringComparison.Ordinal);
@@ -444,16 +539,41 @@ public sealed class GoogleWorkspaceClientTests
         JsonObject response = ImportWorkbookResponse(["ID", "Release", "Title", "Description"],
             includeNotes ? ["Notes"] : null);
         JsonArray rows = response["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
+        while (rows[0]!["values"]!.AsArray().Count < 20)
+            rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "" }));
+        rows[0]!["values"]!.AsArray().Add(JsonSerializer.SerializeToNode(new { formattedValue = "OFEnhancer ID" }));
         rows.Add(JsonSerializer.SerializeToNode(new { values = new[] {
             new { formattedValue = "old-video" }, new { formattedValue = "2026-09-18" },
             new { formattedValue = "Old video" }, new { formattedValue = "Old description" },
         } }));
         if (addedId is not null)
+        {
             rows.Add(JsonSerializer.SerializeToNode(new { values = new[] {
                 new { formattedValue = addedId }, new { formattedValue = "2026-09-25" },
                 new { formattedValue = "New video" }, new { formattedValue = "Preview text" },
             } }));
+            AddStableIdentity(response, 3, addedId);
+        }
         return response;
+    }
+
+    private static void AddStableIdentity(JsonObject response, int rowNumber, string sourceKey)
+    {
+        string itemId = GoogleUploadEntryWriter.DerivedItemId("workbook-one", 2126708696, sourceKey);
+        JsonArray rows = response["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
+        JsonArray values = rows[rowNumber - 1]!["values"]!.AsArray();
+        while (values.Count < 21)
+            values.Add(JsonSerializer.SerializeToNode(new { formattedValue = "" }));
+        values[20] = JsonSerializer.SerializeToNode(new { formattedValue = itemId });
+        response["developerMetadata"]!.AsArray().Add(JsonSerializer.SerializeToNode(new
+        {
+            metadataId = rowNumber,
+            metadataKey = "ofenhancer.item_id.v1",
+            metadataValue = itemId,
+            visibility = "DOCUMENT",
+            location = new { dimensionRange = new { sheetId = 2126708696, dimension = "ROWS",
+                startIndex = rowNumber - 1, endIndex = rowNumber } },
+        }));
     }
 
     [TestMethod]
@@ -522,9 +642,9 @@ public sealed class GoogleWorkspaceClientTests
             ParseQuery(handler.Requests[1].Uri)["ranges"].ToArray());
         CollectionAssert.AreEqual(new[] { "'2026 Video Catalogue'!A1:X5002" },
             ParseQuery(handler.Requests[2].Uri)["ranges"].ToArray());
-        Assert.AreEqual("spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(formattedValue))))",
+        Assert.AreEqual("spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(formattedValue)))),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))",
             ParseQuery(handler.Requests[1].Uri)["fields"].Single());
-        Assert.AreEqual("spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(effectiveValue,formattedValue,hyperlink,effectiveFormat(numberFormat(type))))))",
+        Assert.AreEqual("spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(effectiveValue,formattedValue,hyperlink,effectiveFormat(numberFormat(type)))))),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))",
             ParseQuery(handler.Requests[2].Uri)["fields"].Single());
         Assert.AreEqual(2, snapshot.Sheets.Count);
         Assert.AreEqual(0, snapshot.Sheets.Single(sheet => sheet.SheetId == 44).Rows.Count);
@@ -689,7 +809,8 @@ public sealed class GoogleWorkspaceClientTests
 
     private static JsonObject WideUploadWorkbook(string fourteenthHeader, string? reservedFourteenth, bool withNewRow, bool includeNotes = false)
     {
-        string[] header = ["ID", "Release", "Title", "Description", "", "", "", "", "", "", "", "", "", fourteenthHeader];
+        string[] header = ["ID", "Release", "Title", "Description", "", "", "", "", "", "", "", "", "", fourteenthHeader,
+            "", "", "", "", "", "", "OFEnhancer ID"];
         JsonObject response = ImportWorkbookResponse(header, includeNotes ? ["Notes"] : null);
         JsonArray rows = response["sheets"]![0]!["data"]![0]!["rowData"]!.AsArray();
         rows.Add(JsonSerializer.SerializeToNode(new { values = new[] {
@@ -706,6 +827,7 @@ public sealed class GoogleWorkspaceClientTests
             rows.Add(JsonSerializer.SerializeToNode(new { values = new[] {
                 new { formattedValue = "new-video" }, new { formattedValue = "2026-09-25" },
                 new { formattedValue = "New video" }, new { formattedValue = "Preview text" } } }));
+        if (withNewRow) AddStableIdentity(response, rows.Count, "new-video");
         return response;
     }
 
@@ -729,8 +851,11 @@ public sealed class GoogleWorkspaceClientTests
 
         RecordedRequest[] mutations = handler.Requests.Where(request => request.Method == HttpMethod.Post).ToArray();
         Assert.AreEqual(1, mutations.Length);
-        StringAssert.EndsWith(Uri.UnescapeDataString(mutations[0].Uri.AbsolutePath), ":append");
-        Assert.IsFalse(mutations.Any(request => request.Uri.AbsolutePath.Contains("values:batchUpdate", StringComparison.Ordinal)));
+        StringAssert.EndsWith(Uri.UnescapeDataString(mutations[0].Uri.AbsolutePath), ":batchUpdate");
+        Assert.AreEqual(4, result.Row, "the occupied reserved row remains untouched");
+        using JsonDocument batch = JsonDocument.Parse(mutations[0].Body);
+        Assert.IsTrue(batch.RootElement.GetProperty("requests").EnumerateArray()
+            .Any(request => request.TryGetProperty("createDeveloperMetadata", out _)));
         Assert.AreEqual("created", result.Status);
     }
 
@@ -1226,6 +1351,70 @@ public sealed class GoogleWorkspaceClientTests
             query["fields"].Single(),
             "location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex))"
         );
+    }
+
+    [TestMethod]
+    public async Task WorkflowLedgerReadsStaySeparateFromGeneralWorkbookReads()
+    {
+        const string metadata = """{"spreadsheetId":"workbook-one","properties":{"title":"Workbook"},"sheets":[{"properties":{"sheetId":7,"title":"Catalogue","gridProperties":{"rowCount":2,"columnCount":2}}},{"properties":{"sheetId":8,"title":"_Workflows","gridProperties":{"rowCount":5002,"columnCount":14}}}]}""";
+        const string data = """{"spreadsheetId":"workbook-one","properties":{"title":"Workbook"},"sheets":[{"properties":{"sheetId":7,"title":"Catalogue","gridProperties":{"rowCount":2,"columnCount":2}},"data":[{"rowData":[{"values":[{"userEnteredValue":{"stringValue":"ID"}},{"userEnteredValue":{"stringValue":"Title"}}]}]}]},{"properties":{"sheetId":8,"title":"_Workflows","gridProperties":{"rowCount":5002,"columnCount":14}},"data":[{"rowData":[{"values":[{"userEnteredValue":{"stringValue":"History"}}]}]}]}]}""";
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, metadata);
+        handler.EnqueueJson(HttpStatusCode.OK, data);
+        handler.EnqueueJson(HttpStatusCode.OK, metadata);
+        handler.EnqueueJson(HttpStatusCode.OK, data);
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+
+        GoogleWorkbookSnapshot general = await client.ReadWorkbookAsync("workbook-one", CancellationToken.None);
+        Assert.AreEqual(0, general.Sheets.Single(sheet => sheet.SheetId == 8).Rows.Count);
+        CollectionAssert.AreEqual(new[] { "'Catalogue'!A1:B2" }, ParseQuery(handler.Requests[1].Uri)["ranges"]);
+
+        GoogleWorkflowLedgerRead ledger = await client.ReadWorkflowLedgerAsync("workbook-one", CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { "'_Workflows'!A1:N5002" }, ParseQuery(handler.Requests[3].Uri)["ranges"]);
+        string fields = ParseQuery(handler.Requests[3].Uri)["fields"].Single();
+        Assert.IsFalse(fields.Contains("effectiveValue", StringComparison.Ordinal));
+        Assert.IsFalse(fields.Contains("formattedValue", StringComparison.Ordinal));
+        Assert.AreEqual(1, ledger.Workbook.Sheets.Single(sheet => sheet.SheetId == 8).Rows.Count);
+        Assert.AreEqual("History", ledger.Workbook.Sheets.Single(sheet => sheet.SheetId == 8).Rows.Single().Cells.Single().Value,
+            "the real narrow response must retain entered values, not merely row counts");
+        Assert.IsTrue(ledger.ResponseBytes > 0);
+    }
+
+    [TestMethod]
+    public async Task LedgerOnlyWorkbookNeverFallsBackToAnUnboundedGeneralGridReadOrCatalogueImport()
+    {
+        const string metadata = """{"spreadsheetId":"workbook-one","properties":{"title":"Workbook"},"sheets":[{"properties":{"sheetId":8,"title":"_Workflows","gridProperties":{"rowCount":5002,"columnCount":14}}}]}""";
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, metadata);
+        handler.EnqueueJson(HttpStatusCode.OK, metadata);
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+        GoogleWorkbookSnapshot general = await client.ReadWorkbookAsync("workbook-one", CancellationToken.None);
+        Assert.AreEqual(1, handler.Requests.Count);
+        Assert.AreEqual(0, general.Sheets.Single().Rows.Count);
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.ReadImportWorkbookAsync("workbook-one", CancellationToken.None, 8));
+        Assert.AreEqual("catalogue-tab-not-found", error.Code);
+        Assert.AreEqual(2, handler.Requests.Count);
+    }
+
+    [TestMethod]
+    public async Task OversizedLedgerReadReportsCapacityInsteadOfAnInvisibleRetry()
+    {
+        RecordingHandler handler = new();
+        handler.EnqueueJson(HttpStatusCode.OK, """{"spreadsheetId":"workbook-one","properties":{"title":"Workbook"},"sheets":[{"properties":{"sheetId":8,"title":"_Workflows","gridProperties":{"rowCount":1000,"columnCount":14}}}]}""");
+        handler.Enqueue(request =>
+        {
+            ByteArrayContent content = new([]);
+            content.Headers.ContentLength = GoogleWorkspaceClient.MaximumWorkflowLedgerResponseBytes + 1L;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = content });
+        });
+        using HttpClient http = new(handler);
+        GoogleWorkspaceClient client = new(http, new FakeTokenSource("access"));
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            client.ReadWorkflowLedgerAsync("workbook-one", CancellationToken.None));
+        Assert.AreEqual("google-workflow-ledger-full", error.Code);
     }
 
     [TestMethod]

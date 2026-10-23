@@ -15,6 +15,8 @@ public sealed record XClipFingerprint(string RelPath, long SizeBytes, string Mti
 
 public sealed record XClipScanResult(int Present, int Added, int Moved, int Missing, int Paired);
 
+public sealed record XTeaserClipPublicationResult(long ClipId, string StatusId, string EpisodeKey, bool AlreadyRecorded);
+
 // A clip's hash taken just before a move. Failure is a refusal outcome
 // (`locked`, `error`, `fingerprint-mismatch`, `unsafe-path`) or NotRead.
 public sealed record XClipFreshFingerprint(string RelPath, long SizeBytes, string MtimeUtc, string? Sha256, string? Failure)
@@ -200,8 +202,10 @@ public sealed partial class CatalogueStore
             string? episodeKey = XTeaserFolder.EpisodeKeyFromName(Path.GetFileName(file.RelPath));
             if (assigned.TryGetValue(file, out long id))
                 ExecuteX(transaction, """
-                    UPDATE x_local_clips SET rel_path = $path, size_bytes = $size, mtime_utc = $mtime, episode_key = $key,
-                        state = $state, last_seen_utc = $now, missing = 0 WHERE clip_id = $id
+                    UPDATE x_local_clips SET rel_path = $path, size_bytes = $size, mtime_utc = $mtime,
+                        episode_key = CASE WHEN pairing_evidence = 'owner' THEN episode_key ELSE $key END,
+                        state = CASE WHEN pairing_evidence = 'owner' THEN 'posted' ELSE $state END,
+                        last_seen_utc = $now, missing = 0 WHERE clip_id = $id
                     """, ("$path", file.RelPath), ("$size", file.SizeBytes), ("$mtime", file.MtimeUtc), ("$key", episodeKey),
                     ("$state", state), ("$now", nowText), ("$id", id));
             else
@@ -219,6 +223,122 @@ public sealed partial class CatalogueStore
         int paired = PairXClipsByTimeWindow(transaction);
         transaction.Commit();
         return new(present, added, moved, missing, paired);
+    }
+
+    // Binds an exact indexed clip to a publication receipt explicitly verified
+    // by the caller. The local media file stays in place.
+    public XTeaserClipPublicationResult RecordPublishedTeaserClip(
+        long clipId, string sha256, string episodeKey, string statusUrl)
+    {
+        if (clipId <= 0 || sha256 is null || !Regex.IsMatch(sha256, "^[A-Fa-f0-9]{64}$", RegexOptions.CultureInvariant))
+            throw new XTeaserException("x-clip-invalid-identity");
+        string normalizedHash = sha256.ToLowerInvariant();
+        string normalizedEpisode = episodeKey?.Trim().ToLowerInvariant() ?? "";
+        if (normalizedEpisode.Length is 0 or > 200
+            || XTeaserFolder.EpisodeKeyFromName(normalizedEpisode + "__t1.mp4") != normalizedEpisode)
+            throw new XTeaserException("x-clip-episode-mismatch");
+
+        if (statusUrl is null || statusUrl.Length > 2048
+            || !Uri.TryCreate(statusUrl, UriKind.Absolute, out Uri? statusUri)
+            || statusUri.Scheme != Uri.UriSchemeHttps || !statusUri.IsDefaultPort || !string.IsNullOrEmpty(statusUri.UserInfo)
+            || CatalogueSnapshotImporter.CanonicalPlatformLink("x", statusUri) is not { } canonicalStatus)
+            throw new XTeaserException("x-clip-invalid-status");
+        Match statusMatch = Regex.Match(canonicalStatus,
+            @"^https://x\.com/(?<handle>[A-Za-z0-9_]{1,15})/status/(?<id>[0-9]{1,30})$",
+            RegexOptions.CultureInvariant);
+        if (!statusMatch.Success || !XId.IsMatch(statusMatch.Groups["id"].Value))
+            throw new XTeaserException("x-clip-invalid-status");
+        string statusId = statusMatch.Groups["id"].Value;
+
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        XStoredOwner? owner;
+        using (SqliteCommand readOwner = connection.CreateCommand())
+        {
+            readOwner.Transaction = transaction;
+            readOwner.CommandText = "SELECT account_id, handle FROM x_owner WHERE singleton = 1";
+            using SqliteDataReader reader = readOwner.ExecuteReader();
+            owner = reader.Read()
+                ? new(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetString(1))
+                : null;
+        }
+        if (owner is null || !string.Equals(owner.Handle, statusMatch.Groups["handle"].Value, StringComparison.OrdinalIgnoreCase))
+            throw new XTeaserException("x-clip-status-not-owned");
+        string relPath, storedHash, storedEpisode, state, evidence;
+        string? storedStatus;
+        bool missing;
+        using (SqliteCommand read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT rel_path, sha256, episode_key, state, status_id, pairing_evidence, missing FROM x_local_clips WHERE clip_id = $id";
+            read.Parameters.AddWithValue("$id", clipId);
+            using SqliteDataReader reader = read.ExecuteReader();
+            if (!reader.Read()) throw new XTeaserException("x-clip-not-found");
+            relPath = reader.GetString(0);
+            storedHash = reader.GetString(1);
+            storedEpisode = reader.IsDBNull(2) ? "" : reader.GetString(2);
+            state = reader.GetString(3);
+            storedStatus = reader.IsDBNull(4) ? null : reader.GetString(4);
+            evidence = reader.IsDBNull(5) ? "" : reader.GetString(5);
+            missing = reader.GetInt64(6) != 0;
+        }
+        if (missing) throw new XTeaserException("x-clip-not-present");
+        if (!string.Equals(storedHash, normalizedHash, StringComparison.OrdinalIgnoreCase))
+            throw new XTeaserException("x-clip-fingerprint-mismatch");
+        if (!string.Equals(storedEpisode, normalizedEpisode, StringComparison.OrdinalIgnoreCase))
+            throw new XTeaserException("x-clip-episode-mismatch");
+
+        if (storedStatus is not null)
+        {
+            if (storedStatus == statusId && evidence == "owner" && state == "posted")
+            {
+                transaction.Commit();
+                return new(clipId, statusId, normalizedEpisode, AlreadyRecorded: true);
+            }
+            throw new XTeaserException("x-clip-already-paired");
+        }
+        if (!string.Equals(XTeaserFolder.EpisodeKeyFromName(Path.GetFileName(relPath)), normalizedEpisode, StringComparison.OrdinalIgnoreCase))
+            throw new XTeaserException("x-clip-episode-mismatch");
+
+        using (SqliteCommand ownerPost = connection.CreateCommand())
+        {
+            ownerPost.Transaction = transaction;
+            ownerPost.CommandText = "SELECT author_id FROM x_posts WHERE status_id = $status";
+            ownerPost.Parameters.AddWithValue("$status", statusId);
+            using SqliteDataReader reader = ownerPost.ExecuteReader();
+            if (reader.Read() && (owner.AccountId is null || reader.IsDBNull(0)
+                || !string.Equals(reader.GetString(0), owner.AccountId, StringComparison.Ordinal)))
+                throw new XTeaserException("x-clip-status-not-owned");
+        }
+        using (SqliteCommand conflict = connection.CreateCommand())
+        {
+            conflict.Transaction = transaction;
+            conflict.CommandText = """
+                SELECT EXISTS(SELECT 1 FROM x_binding_conflicts WHERE status_id = $status),
+                       (SELECT source_key FROM x_post_bindings WHERE status_id = $status LIMIT 1),
+                       EXISTS(SELECT 1 FROM x_local_clips WHERE status_id = $status)
+                """;
+            conflict.Parameters.AddWithValue("$status", statusId);
+            using SqliteDataReader reader = conflict.ExecuteReader();
+            reader.Read();
+            if (reader.GetInt64(0) != 0) throw new XTeaserException("x-clip-status-conflict");
+            if (!reader.IsDBNull(1) && !string.Equals(reader.GetString(1), normalizedEpisode, StringComparison.OrdinalIgnoreCase))
+                throw new XTeaserException("x-clip-status-episode-conflict");
+            if (reader.GetInt64(2) != 0) throw new XTeaserException("x-clip-status-conflict");
+        }
+        using SqliteCommand update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = """
+            UPDATE x_local_clips SET status_id = $status, pairing_evidence = 'owner', state = 'posted'
+            WHERE clip_id = $clip AND missing = 0 AND status_id IS NULL AND sha256 = $sha AND episode_key = $episode
+            """;
+        update.Parameters.AddWithValue("$status", statusId);
+        update.Parameters.AddWithValue("$clip", clipId);
+        update.Parameters.AddWithValue("$sha", normalizedHash);
+        update.Parameters.AddWithValue("$episode", normalizedEpisode);
+        int changed = update.ExecuteNonQuery();
+        if (changed != 1) throw new XTeaserException("x-clip-status-conflict");
+        transaction.Commit();
+        return new(clipId, statusId, normalizedEpisode, AlreadyRecorded: false);
     }
 
     // A posted clip pairs with a teaser only when exactly one teaser bound to

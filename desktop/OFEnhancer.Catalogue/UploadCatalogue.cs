@@ -9,12 +9,15 @@ namespace OFEnhancer.Catalogue;
 public sealed record UploadCatalogueRow(int Row, string Id, string ItemId, string ReleaseDate, string Title,
     string Description, string SeasonArc, string Episode, string PornhubLink, string OnlyfansLink,
     string FanslyLink, string ManyvidsLink, string TwitterTeasers, string RedditPosts, int RedditPostCount,
-    string Fingerprint, IReadOnlyDictionary<string,string> PublicationState, string Category = "", string PornhubPaidLink = "");
+    string Fingerprint, IReadOnlyDictionary<string,string> PublicationState, string Category = "", string PornhubPaidLink = "",
+    string? ScriptStatus = null, UploadCatalogueDestination? Destination = null);
 public sealed record UploadCatalogueSnapshot(string Status, string Source, IReadOnlyList<UploadCatalogueRow> Rows, object? EmptyRow = null, IReadOnlyDictionary<string,string>? SeasonAliases = null);
 public sealed record UploadResultMetadata(string Id, string? ReleaseDate = null, string? Title = null, string? Description = null);
+public sealed record UploadCatalogueDestination(string WorkbookId, string? SheetId);
 public sealed record UploadResultRequest(int Row, string Fingerprint, string Platform, string PostUrl,
     UploadResultMetadata? Metadata = null, string? ItemId = null, string? Id = null, string? Action=null,
-    string? StatusUrl=null,string? RedditUrl=null,bool RepeatUploadConfirmed=false);
+    string? StatusUrl=null,string? RedditUrl=null,bool RepeatUploadConfirmed=false,
+    UploadCatalogueDestination? Destination = null);
 public sealed record UploadResult(string Status, string? Fingerprint = null, bool GoogleSynced = false, string? PostUrl = null,
     string? GoogleError = null,
     [property: System.Text.Json.Serialization.JsonIgnore] UploadSheetWriteback? SheetWriteback = null);
@@ -26,8 +29,35 @@ public sealed partial class CatalogueStore
 {
     private static readonly string[] UploadPlatforms = ["pornhub", "onlyfans", "fansly", "manyvids", "x", "reddit", "redgifs", "clips4sale", "script"];
 
-    public UploadCatalogueSnapshot GetUploadCatalogueSnapshot() => new("snapshot", "desktop",
-        GetItems().Select(ToUploadRow).ToArray(), SeasonAliases: GetUploadSeasonAliases());
+    public UploadCatalogueSnapshot GetUploadCatalogueSnapshot()
+    {
+        var scriptStatuses=GetCreatorScriptStatuses();
+        UploadCatalogueDestination? destination = GetTrustedUploadCatalogueDestination();
+        return new("snapshot", "desktop", GetItems().Select(item=>ToUploadRow(item) with
+        { ScriptStatus=scriptStatuses.GetValueOrDefault(item.SourceKey), Destination=destination }).ToArray(), SeasonAliases:GetUploadSeasonAliases());
+    }
+
+    private UploadCatalogueDestination? GetTrustedUploadCatalogueDestination()
+    {
+        GoogleCatalogueSelection? selection = GetGoogleCatalogueSelection();
+        UploadCatalogueDestination? provenance = CatalogueProjectionProvenance.Read(connection);
+        if (selection is null || provenance is null || selection.WorkbookId != provenance.WorkbookId
+            || selection.SheetId is not null && selection.SheetId != provenance.SheetId)
+            return null;
+        return provenance;
+    }
+
+    private static UploadCatalogueDestination? ValidateUploadCatalogueDestination(UploadCatalogueDestination? destination)
+    {
+        if (destination is null) return null;
+        if (destination.WorkbookId is not { Length: > 0 and <= 256 }
+            || !Regex.IsMatch(destination.WorkbookId, "^[A-Za-z0-9_-]+$", RegexOptions.CultureInvariant)
+            || destination.SheetId is { } sheetId
+                && (sheetId.Length is 0 or > 64 || !Regex.IsMatch(sheetId, "^[0-9]+$", RegexOptions.CultureInvariant)
+                    || !int.TryParse(sheetId, NumberStyles.None, CultureInfo.InvariantCulture, out int parsed) || parsed < 0))
+            throw new WorkbookProjectionException("invalid-upload-destination", "The frozen Google catalogue destination is invalid.");
+        return destination;
+    }
 
     public UploadResult RecordDistributionLedger(DistributionLedgerRequest request)
     {
@@ -93,9 +123,9 @@ public sealed partial class CatalogueStore
         string? canonical = CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri);
         if (canonical is null) throw new WorkbookProjectionException("invalid-upload-result", "The upload result URL is invalid.");
 
-        GoogleCatalogueSelection? destination = request.Platform is "onlyfans" or "fansly" or "manyvids" or "x" or "script"
-            ? GetGoogleCatalogueSelection() : null;
-        if (destination is not { SheetId: not null }) destination = null;
+        UploadCatalogueDestination? frozenDestination = ValidateUploadCatalogueDestination(request.Destination);
+        UploadCatalogueDestination? destination = UploadPlatforms.Contains(request.Platform, StringComparer.Ordinal)
+            ? frozenDestination : null;
         using SqliteTransaction transaction = connection.BeginTransaction();
         CatalogueItemSummary? item = ReadItems(false, transaction).SingleOrDefault(candidate =>
             candidate.SourceKey == id && (request.ItemId is null || candidate.ItemId == request.ItemId));
@@ -109,7 +139,10 @@ public sealed partial class CatalogueStore
             UploadSheetWriteback? existingIntent = destination is null ? null
                 : QueueUploadSheetWriteback(destination.WorkbookId, destination.SheetId, request, canonical, item, transaction);
             transaction.Commit();
-            return new("idempotent", current.Fingerprint, PostUrl: canonical, SheetWriteback: existingIntent);
+            return new("idempotent", current.Fingerprint, PostUrl: canonical,
+                GoogleError: destination is null && UploadPlatforms.Contains(request.Platform, StringComparer.Ordinal)
+                    ? "google-catalogue-association-required" : null,
+                SheetWriteback: existingIntent);
         }
         // Match the caller's frozen row when checking its receipt, while resolving
         // the item itself by stable source key/item identity above.
@@ -128,12 +161,17 @@ public sealed partial class CatalogueStore
         command.Parameters.AddWithValue("$id", item.ItemId);
         command.ExecuteNonQuery();
         command.CommandText="INSERT INTO audit_events(occurred_utc,kind,item_id,details_json) VALUES ($utc,'upload-result',$id,$details)";
-        command.Parameters.AddWithValue("$details",JsonSerializer.Serialize(new RecordedPublication(platform,canonical,request.RepeatUploadConfirmed ? knownUrls.ToArray() : null)));
+        command.Parameters.AddWithValue("$details",JsonSerializer.Serialize(new RecordedPublication(platform,canonical,
+            request.RepeatUploadConfirmed ? knownUrls.ToArray() : null, destination?.WorkbookId, destination?.SheetId, item.SourceKey)));
         command.ExecuteNonQuery();
         UploadSheetWriteback? intent = destination is null ? null
             : QueueUploadSheetWriteback(destination.WorkbookId, destination.SheetId, request, canonical, item, transaction);
         transaction.Commit();
-        return new("recorded-local", ToUploadRow(GetItems().Single(value=>value.ItemId==item.ItemId)).Fingerprint, PostUrl: canonical, SheetWriteback: intent);
+        return new("recorded-local", ToUploadRow(GetItems().Single(value=>value.ItemId==item.ItemId)).Fingerprint,
+            PostUrl: canonical,
+            GoogleError: destination is null && UploadPlatforms.Contains(request.Platform, StringComparer.Ordinal)
+                ? "google-catalogue-association-required" : null,
+            SheetWriteback: intent);
     }
 
     private IReadOnlyList<CatalogueItemSummary> WithRecordedPublications(List<CatalogueItemSummary> items,SqliteTransaction? transaction)
@@ -185,7 +223,8 @@ public sealed partial class CatalogueStore
         }).ToArray();
     }
 
-    private sealed record RecordedPublication(string Platform,string PostUrl,string[]? ConfirmedExistingUrls=null);
+    private sealed record RecordedPublication(string Platform,string PostUrl,string[]? ConfirmedExistingUrls=null,
+        string? WorkbookId=null,string? SheetId=null,string? SourceKey=null);
 
     private static UploadCatalogueRow ToUploadRow(CatalogueItemSummary item)
     {

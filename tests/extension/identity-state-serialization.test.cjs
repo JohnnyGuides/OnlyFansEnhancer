@@ -48,6 +48,13 @@ function loadBackground(root) {
       if (property === "storage") {
         return {
           onChanged: { addListener() {} },
+          session: {
+            async get() {
+              return {};
+            },
+            async set() {},
+            async remove() {},
+          },
           local: {
             async get(key) {
               const value = structuredClone(
@@ -68,6 +75,10 @@ function loadBackground(root) {
               log.push(Object.keys(values)[0]);
               Object.assign(storage, structuredClone(values));
             },
+            async remove(keys) {
+              for (const key of Array.isArray(keys) ? keys : [keys])
+                delete storage[key];
+            },
           },
         };
       }
@@ -84,6 +95,13 @@ function loadBackground(root) {
           },
           onInstalled: { addListener() {} },
           onStartup: { addListener() {} },
+          sendNativeMessage(_host, request, callback) {
+            callback({
+              ok: true,
+              requestId: request.requestId,
+              result: { status: "recorded" },
+            });
+          },
         };
       }
       return Reflect.get(target, property);

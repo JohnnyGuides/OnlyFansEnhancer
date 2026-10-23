@@ -87,6 +87,7 @@
   const applyGoogleMigration = document.querySelector("#applyGoogleMigration");
 
   const platformNames = Object.freeze({
+    script: "Script",
     onlyfans: "OnlyFans",
     fansly: "Fansly",
     manyvids: "ManyVids",
@@ -109,6 +110,21 @@
   let googlePollTimer = null;
   let googleStatusRequests = 0;
   let googleStatusRendered = 0;
+  let unassignedWorkflowPage = null;
+  let unassignedWorkflowPageIndex = 0;
+  let unassignedWorkflowLoad = null;
+  let unassignedWorkflowAttempted = false;
+  let uploadCatalogueSnapshot = null;
+  let uploadCatalogueSnapshotLoad = null;
+  let uploadWritebackDetails = null;
+  let uploadWritebackLoad = null;
+  let workflowWritebackDetails = null;
+  let workflowWritebackLoad = null;
+  let uploadWritebackWorkbookName = null;
+  let teaserOverviewPromise = null;
+  let teaserOverviewSnapshot = null;
+  const creatorWorkflowCache = new Map();
+  const creatorWorkflowRequests = new Map();
   let matchDialogSerial = 0;
   const matchPendingAssets = new Set();
   let frozenMigration = null;
@@ -482,9 +498,365 @@
     return image;
   }
 
+  function scriptStatusFor(item) {
+    const allowed = new Set(["uploaded", "partial", "pending", "failed"]);
+    if (allowed.has(item.scriptStatus)) return item.scriptStatus;
+    const scriptCell = item.sourceLinkCells?.script;
+    return item.platformLinks?.script ||
+      scriptCell?.hyperlink ||
+      scriptCell?.urls?.length
+      ? "uploaded"
+      : null;
+  }
+
+  function formatWorkflowBytes(value) {
+    if (!Number.isFinite(value) || value < 0) return "";
+    if (value < 1024) return `${value} B`;
+    const units = ["KB", "MB", "GB"];
+    let size = value / 1024;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit += 1;
+    }
+    return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(size)} ${units[unit]}`;
+  }
+
+  function workflowDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? ""
+      : new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(date);
+  }
+
+  function safeExternalLink(value, label, className = "workflow-link") {
+    if (typeof value !== "string") return null;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:") return null;
+      const link = element("a", className, label);
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      return link;
+    } catch {
+      return null;
+    }
+  }
+
+  function creatorWorkflowPostUrls(target) {
+    return [
+      target?.postUrl,
+      ...(Array.isArray(target?.postUrls) ? target.postUrls : []),
+    ]
+      .filter((url) => typeof url === "string")
+      .slice(0, 100)
+      .filter((url, index, all) => all.indexOf(url) === index);
+  }
+
+  function loadCreatorWorkflows(sourceKey) {
+    if (creatorWorkflowCache.has(sourceKey))
+      return Promise.resolve(creatorWorkflowCache.get(sourceKey));
+    if (creatorWorkflowRequests.has(sourceKey))
+      return creatorWorkflowRequests.get(sourceKey);
+    const request = global.OFEnhancerHost.request("getCreatorWorkflows", {
+      sourceKey,
+    })
+      .then((value) => {
+        if (!Array.isArray(value)) throw new Error("invalid-workflow-result");
+        creatorWorkflowCache.set(sourceKey, value);
+        return value;
+      })
+      .finally(() => creatorWorkflowRequests.delete(sourceKey));
+    creatorWorkflowRequests.set(sourceKey, request);
+    return request;
+  }
+
+  function loadTeaserOverview() {
+    if (teaserOverviewSnapshot) return Promise.resolve(teaserOverviewSnapshot);
+    if (teaserOverviewPromise) return teaserOverviewPromise;
+    teaserOverviewPromise = global.OFEnhancerHost.request(
+      "getTeaserOverview",
+      {},
+    )
+      .then((value) => {
+        if (!value || typeof value !== "object")
+          throw new Error("invalid-teaser-overview");
+        teaserOverviewSnapshot = value;
+        return value;
+      })
+      .catch((error) => {
+        teaserOverviewPromise = null;
+        throw error;
+      });
+    return teaserOverviewPromise;
+  }
+
+  function renderWorkflowSnapshots(content, snapshots) {
+    const workflowList = element("div", "workflow-list");
+    if (snapshots.length === 0) {
+      workflowList.append(
+        element(
+          "p",
+          "workflow-empty",
+          "No workflow runs recorded for this video.",
+        ),
+      );
+      content.append(workflowList);
+      return;
+    }
+    const visible = snapshots.slice(0, 3);
+    if (snapshots.length > visible.length)
+      workflowList.append(
+        element(
+          "p",
+          "workflow-note",
+          `Showing the latest ${visible.length} of ${snapshots.length} runs.`,
+        ),
+      );
+    for (const run of visible) {
+      const section = element("section", "workflow-run");
+      section.append(
+        element(
+          "h4",
+          "workflow-heading",
+          `${run.kind === "social" ? "Social post" : "Upload"}${Number.isInteger(run.revision) ? ` · update ${run.revision}` : ""}`,
+        ),
+      );
+      for (const target of run.targets || []) {
+        const targetRow = element("div", "workflow-target");
+        const state = element("div", "workflow-target-state");
+        state.append(
+          element(
+            "strong",
+            "",
+            `${platformNames[target.platform] || target.platform}: ${target.status || "unknown"}`,
+          ),
+        );
+        if (target.submitted)
+          state.append(element("span", "workflow-note", "Submitted"));
+        targetRow.append(state);
+        for (const postUrl of creatorWorkflowPostUrls(target)) {
+          const link = safeExternalLink(postUrl, "View post");
+          if (link) targetRow.append(link);
+        }
+        if (target.error)
+          targetRow.append(
+            element("p", "workflow-error", `Local: ${target.error}`),
+          );
+        targetRow.append(
+          element(
+            "p",
+            target.googleError ? "workflow-error" : "workflow-note",
+            target.googleError
+              ? `Google: ${target.googleError}`
+              : "Google: no error recorded",
+          ),
+        );
+        section.append(targetRow);
+      }
+      for (const asset of run.assets || []) {
+        section.append(
+          element(
+            "p",
+            "workflow-asset",
+            `${asset.role || "File"}: ${asset.name || "Unnamed file"}${formatWorkflowBytes(asset.size) ? ` · ${formatWorkflowBytes(asset.size)}` : ""}`,
+          ),
+        );
+      }
+      if (run.script) {
+        const script = element("div", "workflow-subsection");
+        const writebackState =
+          run.script.writebackState ||
+          (run.destination?.workbookId ? "synced" : "not-associated");
+        script.append(
+          element("strong", "", `Script: ${run.script.status || "unknown"}`),
+        );
+        script.append(
+          element("p", "workflow-note", `Catalogue link: ${writebackState}`),
+        );
+        if (run.script.filename)
+          script.append(element("span", "", ` · ${run.script.filename}`));
+        if (run.script.error)
+          script.append(element("p", "workflow-error", run.script.error));
+        for (const value of run.script.links || []) {
+          const link = safeExternalLink(value, value);
+          if (link) script.append(link);
+        }
+        section.append(script);
+      }
+      if (run.reply) {
+        const reply = element("div", "workflow-subsection");
+        reply.append(
+          element(
+            "strong",
+            "",
+            run.reply.autoReply ? "First reply enabled" : "First reply manual",
+          ),
+        );
+        reply.append(
+          element(
+            "p",
+            "workflow-note",
+            `Reply destination: ${run.reply.paidUrl || "Not set"}${Number.isFinite(run.reply.replyDelayMinutes) ? ` · ${run.reply.replyDelayMinutes} min delay` : ""}`,
+          ),
+        );
+        if (run.reply.wordingTemplate)
+          reply.append(
+            element("p", "workflow-wording", run.reply.wordingTemplate),
+          );
+        if (run.reply.mainStatusUrl) {
+          const link = safeExternalLink(run.reply.mainStatusUrl, "Main post");
+          if (link) reply.append(link);
+        }
+        if (run.reply.replyStatusUrl) {
+          const link = safeExternalLink(run.reply.replyStatusUrl, "Reply");
+          if (link) reply.append(link);
+        }
+        if (run.reply.dueAt)
+          reply.append(
+            element(
+              "p",
+              "workflow-note",
+              `${run.reply.attempted ? "Attempted" : "Due"}${workflowDate(run.reply.dueAt) ? ` · ${workflowDate(run.reply.dueAt)}` : ""}`,
+            ),
+          );
+        section.append(reply);
+      }
+      if (run.clip) {
+        const details = [
+          run.clip.clipId && `Clip ${run.clip.clipId}`,
+          run.clip.episodeKey && `Episode ${run.clip.episodeKey}`,
+          run.clip.sha256 && `File ${run.clip.sha256.slice(0, 12)}`,
+        ].filter(Boolean);
+        if (details.length)
+          section.append(element("p", "workflow-note", details.join(" · ")));
+      }
+      workflowList.append(section);
+    }
+    content.append(workflowList);
+  }
+
+  function renderTeaserLinks(content, overview, item) {
+    const episode = (overview.episodes || []).find(
+      (value) =>
+        value.itemId === item.itemId || value.sourceKey === item.sourceKey,
+    );
+    const section = element("section", "workflow-subsection teaser-links");
+    section.append(element("h4", "workflow-heading", "X post relationships"));
+    const own = (overview.posts || []).filter(
+      (post) =>
+        post.itemId === item.itemId || post.sourceKey === item.sourceKey,
+    );
+    const ownBlock = element("div", "teaser-link-group");
+    ownBlock.append(element("strong", "", "Own source posts"));
+    if (own.length === 0)
+      ownBlock.append(
+        element(
+          "p",
+          "workflow-empty",
+          "No source-linked X posts in the recent overview.",
+        ),
+      );
+    for (const post of own) {
+      const row = element("p", "teaser-link-row");
+      const status = safeExternalLink(
+        `https://x.com/i/status/${encodeURIComponent(post.statusId)}`,
+        `X post ${post.statusId}`,
+      );
+      if (status) row.append(status);
+      if (post.firstReply) {
+        row.append(element("span", "", ` · ${post.firstReply.kind} reply`));
+        const destination =
+          post.firstReply.promotedTitle || post.firstReply.link;
+        const link = safeExternalLink(post.firstReply.link, destination);
+        if (link) row.append(link);
+      }
+      ownBlock.append(row);
+    }
+    section.append(ownBlock);
+
+    const incomingBlock = element("div", "teaser-link-group");
+    incomingBlock.append(element("strong", "", "Incoming promotions"));
+    const incoming = episode?.incomingOwnerTeasers || [];
+    if (incoming.length === 0)
+      incomingBlock.append(
+        element(
+          "p",
+          "workflow-empty",
+          "No incoming promotions in the recent overview.",
+        ),
+      );
+    for (const post of incoming) {
+      const row = element("p", "teaser-link-row");
+      const status = safeExternalLink(
+        `https://x.com/i/status/${encodeURIComponent(post.statusId)}`,
+        `X post ${post.statusId}`,
+      );
+      if (status) row.append(status);
+      row.append(
+        element(
+          "span",
+          "",
+          ` · from ${post.sourceTitle || "source not identified"}`,
+        ),
+      );
+      const reply = safeExternalLink(
+        post.replyLink,
+        `${post.replyLinkKind} destination`,
+      );
+      if (reply) row.append(reply);
+      incomingBlock.append(row);
+    }
+    section.append(incomingBlock);
+    content.append(section);
+  }
+
+  function loadCatalogueRowDetails(sourceKey, item, details, content) {
+    content.replaceChildren(
+      element("p", "workflow-loading", "Loading workflow details…"),
+    );
+    const workflowRequest = loadCreatorWorkflows(sourceKey);
+    const overviewRequest = loadTeaserOverview();
+    Promise.allSettled([workflowRequest, overviewRequest]).then((results) => {
+      if (!details.isConnected || !details.open) return;
+      content.replaceChildren();
+      const [workflows, overview] = results;
+      if (workflows.status === "fulfilled")
+        renderWorkflowSnapshots(content, workflows.value);
+      else {
+        content.append(
+          element(
+            "p",
+            "workflow-error",
+            "Workflow details couldn’t load. Try again.",
+          ),
+        );
+      }
+      if (overview.status === "fulfilled")
+        renderTeaserLinks(content, overview.value, item);
+      else
+        content.append(
+          element("p", "workflow-error", "X post relationships couldn’t load."),
+        );
+      if (workflows.status === "rejected" || overview.status === "rejected") {
+        const retry = element("button", "secondary-button", "Try again");
+        retry.type = "button";
+        retry.addEventListener("click", () =>
+          loadCatalogueRowDetails(sourceKey, item, details, content),
+        );
+        content.append(retry);
+      }
+    });
+  }
+
   function renderCatalogueRow(item) {
     const row = element("li", "catalogue-row");
     row.dataset.catalogueRow = "";
+    row.dataset.sourceKey = item.sourceKey;
     row.append(
       makeThumbnail(
         item.thumbnailAssetId,
@@ -507,6 +879,22 @@
             : "Needs thumbnail",
       ),
     );
+    const scriptStatus = scriptStatusFor(item);
+    if (scriptStatus) {
+      const labels = {
+        uploaded: "Script uploaded",
+        partial: "Script partial",
+        pending: "Script pending",
+        failed: "Script failed",
+      };
+      titleLine.append(
+        element(
+          "span",
+          `script-status is-${scriptStatus}`,
+          labels[scriptStatus],
+        ),
+      );
+    }
     main.append(titleLine);
     const context = [item.series, item.episode && `Episode ${item.episode}`]
       .filter(Boolean)
@@ -578,6 +966,20 @@
       }
       main.append(details);
     }
+    const workflowDetails = element("details", "catalogue-workflow-details");
+    workflowDetails.append(element("summary", "", "Workflow"));
+    const workflowContent = element("div", "catalogue-workflow-content");
+    workflowDetails.append(workflowContent);
+    workflowDetails.addEventListener("toggle", () => {
+      if (workflowDetails.open)
+        loadCatalogueRowDetails(
+          item.sourceKey,
+          item,
+          workflowDetails,
+          workflowContent,
+        );
+    });
+    main.append(workflowDetails);
     row.append(main);
 
     const counts = element("div", "social-counts");
@@ -661,8 +1063,652 @@
     const items = visibleItems();
     for (const item of items.slice(0, renderLimit))
       catalogueList.append(renderCatalogueRow(item));
+    renderUnassignedCreatorWorkflows();
+    if (!unassignedWorkflowAttempted && !unassignedWorkflowLoad)
+      loadUnassignedCreatorWorkflows();
     loadMoreCatalogue.hidden = items.length <= renderLimit;
     catalogueNoMatches.hidden = total === 0 || items.length !== 0;
+  }
+
+  function ensureUnassignedWorkflowPanel() {
+    let panel = document.querySelector("#unassignedCreatorWorkflows");
+    if (panel) return panel;
+    panel = element("details", "catalogue-recovery-panel");
+    panel.id = "unassignedCreatorWorkflows";
+    const summary = element("summary", "", "Unassigned uploads (…)");
+    panel.append(summary);
+    const body = element("div", "catalogue-recovery-content");
+    body.dataset.recoveryContent = "";
+    panel.append(body);
+    catalogueList.before(panel);
+    panel.addEventListener("toggle", () => {
+      if (panel.open) {
+        if (unassignedWorkflowPage) renderUnassignedCreatorWorkflows();
+        else loadUnassignedCreatorWorkflows();
+      }
+    });
+    return panel;
+  }
+
+  function renderUnassignedCreatorWorkflows() {
+    const panel = ensureUnassignedWorkflowPanel();
+    const page = unassignedWorkflowPage;
+    const count = Number.isInteger(page?.totalCount) ? page.totalCount : 0;
+    panel.querySelector("summary").textContent =
+      `Unassigned uploads (${count})`;
+    panel.hidden = page !== null && count === 0;
+    const body = panel.querySelector("[data-recovery-content]");
+    if (!panel.open) return;
+    body.replaceChildren();
+    if (unassignedWorkflowLoad) {
+      body.append(
+        element("p", "workflow-note", "Loading saved upload results…"),
+      );
+      return;
+    }
+    if (!page) {
+      body.append(
+        element(
+          "p",
+          "workflow-error",
+          "Saved upload results couldn’t load. Try again.",
+        ),
+      );
+      const retry = element("button", "secondary-button", "Try again");
+      retry.type = "button";
+      retry.addEventListener("click", () =>
+        loadUnassignedCreatorWorkflows(true),
+      );
+      body.append(retry);
+      return;
+    }
+    if (count === 0) {
+      body.append(
+        element(
+          "p",
+          "workflow-note",
+          "No saved upload results need an episode link.",
+        ),
+      );
+      return;
+    }
+    const fingerprintBySource = new Map(
+      (uploadCatalogueSnapshot?.rows || []).map((item) => [
+        item.id,
+        item.fingerprint,
+      ]),
+    );
+    for (const run of page.items || []) {
+      const section = element("section", "unassigned-workflow-run");
+      const heading = `${run.kind === "social" ? "Social post" : "Upload"} · ${run.runId}`;
+      section.append(element("strong", "", heading));
+      for (const target of run.targets || []) {
+        const row = element(
+          "p",
+          "workflow-note",
+          `${platformNames[target.platform] || target.platform}: ${target.status || "unknown"}${target.submitted ? " · submitted" : ""}`,
+        );
+        for (const postUrl of creatorWorkflowPostUrls(target)) {
+          const link = safeExternalLink(postUrl, postUrl);
+          if (link) row.append(" ", link);
+        }
+        section.append(row);
+      }
+      if (run.script) {
+        const writebackState =
+          run.script.writebackState ||
+          (run.destination?.workbookId ? "synced" : "not-associated");
+        section.append(
+          element(
+            "p",
+            "workflow-note",
+            `Script: ${run.script.status || "unknown"} · catalogue link: ${writebackState}`,
+          ),
+        );
+        for (const url of run.script.links || []) {
+          const link = safeExternalLink(url, url);
+          if (link) section.append(link);
+        }
+      }
+      const controls = element("div", "workflow-association-controls");
+      const label = element("label", "", "Link to episode");
+      const select = element("select", "secondary-select");
+      select.setAttribute("aria-label", `Link ${heading} to episode`);
+      const blank = element("option", "", "Choose an episode");
+      blank.value = "";
+      select.append(blank);
+      for (const item of catalogue?.items || []) {
+        const option = element("option", "", item.title);
+        option.value = item.sourceKey;
+        option.dataset.fingerprint =
+          fingerprintBySource.get(item.sourceKey) || "";
+        select.append(option);
+      }
+      label.append(select);
+      controls.append(label);
+      const bind = element("button", "secondary-button", "Link workflow");
+      bind.type = "button";
+      bind.disabled = true;
+      const confirm = element("div", "workflow-association-confirm");
+      confirm.hidden = true;
+      const preview = element("p", "workflow-note");
+      const confirmButton = element("button", "action-button", "Confirm link");
+      confirmButton.type = "button";
+      const cancelButton = element("button", "quiet-button", "Cancel");
+      cancelButton.type = "button";
+      select.addEventListener("change", () => {
+        bind.disabled = !select.value;
+        confirm.hidden = true;
+      });
+      bind.addEventListener("click", () => {
+        const target = (catalogue?.items || []).find(
+          (item) => item.sourceKey === select.value,
+        );
+        if (!target) return;
+        preview.textContent = `Record this saved run on “${target.title}”. Captured results above will be linked; this won’t submit another upload.`;
+        confirm.hidden = false;
+        confirmButton.dataset.sourceKey = target.sourceKey;
+        confirmButton.dataset.fingerprint =
+          fingerprintBySource.get(target.sourceKey) || "";
+      });
+      confirmButton.addEventListener("click", async () => {
+        const sourceKey = confirmButton.dataset.sourceKey;
+        const expectedFingerprint = confirmButton.dataset.fingerprint;
+        if (!sourceKey || !expectedFingerprint) {
+          preview.textContent =
+            "Refresh the catalogue before linking this run.";
+          return;
+        }
+        setBusy(confirmButton, true);
+        try {
+          const result = await global.OFEnhancerHost.request(
+            "associateCreatorWorkflow",
+            {
+              runId: run.runId,
+              sourceKey,
+              expectedFingerprint,
+              confirmSource: true,
+            },
+          );
+          if (result?.status === "stale" || result?.status === "conflict") {
+            preview.textContent = `This workflow wasn’t linked. ${result.code || "The catalogue changed; refresh and review the episode again."}`;
+            return;
+          }
+          const outcomes = (result?.results || [])
+            .map(
+              (entry) =>
+                `${platformNames[entry.platform] || entry.platform}: ${entry.result?.status || entry.status || "recorded"}`,
+            )
+            .join(" · ");
+          catalogueStatus.textContent = outcomes
+            ? `Saved results linked. ${outcomes}`
+            : "Saved workflow linked to the catalogue.";
+          for (const key of [sourceKey]) creatorWorkflowCache.delete(key);
+          await loadCatalogue(true);
+          await loadUnassignedCreatorWorkflows(true);
+        } catch (error) {
+          preview.textContent = `Couldn’t link this workflow: ${friendlyCatalogueError(error)}`;
+        } finally {
+          setBusy(confirmButton, false);
+        }
+      });
+      cancelButton.addEventListener("click", () => (confirm.hidden = true));
+      confirm.append(preview, confirmButton, cancelButton);
+      controls.append(bind, confirm);
+      section.append(controls);
+      body.append(section);
+    }
+    const paging = element("div", "workflow-paging");
+    const start = page.offset || 0;
+    paging.append(
+      element(
+        "span",
+        "workflow-note",
+        `${count ? start + 1 : 0}–${Math.min(start + (page.limit || 25), count)} of ${count}`,
+      ),
+    );
+    const previous = element("button", "quiet-button", "Previous");
+    previous.type = "button";
+    previous.disabled = start <= 0;
+    previous.addEventListener("click", () => {
+      unassignedWorkflowPageIndex = Math.max(
+        0,
+        unassignedWorkflowPageIndex - 1,
+      );
+      loadUnassignedCreatorWorkflows(true);
+    });
+    const next = element("button", "quiet-button", "Next");
+    next.type = "button";
+    next.disabled = start + (page.limit || 25) >= count;
+    next.addEventListener("click", () => {
+      unassignedWorkflowPageIndex += 1;
+      loadUnassignedCreatorWorkflows(true);
+    });
+    paging.append(previous, next);
+    body.append(paging);
+  }
+
+  async function loadUnassignedCreatorWorkflows(force = false) {
+    if (unassignedWorkflowLoad && !force) return unassignedWorkflowLoad;
+    ensureUnassignedWorkflowPanel();
+    if (unassignedWorkflowAttempted && !force) return;
+    unassignedWorkflowAttempted = true;
+    const offset = unassignedWorkflowPageIndex * 25;
+    unassignedWorkflowLoad = Promise.all([
+      global.OFEnhancerHost.request("getCreatorWorkflows", {
+        unboundOnly: true,
+        offset,
+        limit: 25,
+      }),
+      uploadCatalogueSnapshotLoad ||
+        (uploadCatalogueSnapshotLoad = global.OFEnhancerHost.request(
+          "getUploadCatalogueSnapshot",
+        )
+          .then((value) => {
+            if (!value || !Array.isArray(value.rows))
+              throw new Error("invalid-upload-catalogue-snapshot");
+            uploadCatalogueSnapshot = value;
+            return value;
+          })
+          .finally(() => {
+            uploadCatalogueSnapshotLoad = null;
+          })),
+    ])
+      .then(([page]) => {
+        if (!page || !Array.isArray(page.items))
+          throw new Error("invalid-workflow-page");
+        unassignedWorkflowPage = page;
+        return page;
+      })
+      .catch(() => {
+        unassignedWorkflowPage = null;
+        return null;
+      })
+      .finally(() => {
+        unassignedWorkflowLoad = null;
+        renderUnassignedCreatorWorkflows();
+      });
+    renderUnassignedCreatorWorkflows();
+    return unassignedWorkflowLoad;
+  }
+
+  function ensureUploadWritebackPanel() {
+    let panel = document.querySelector("#googleUploadWritebacks");
+    if (panel) return panel;
+    panel = element("details", "google-writeback-details");
+    panel.id = "googleUploadWritebacks";
+    panel.hidden = true;
+    panel.append(element("summary", "", "Upload link recovery"));
+    const content = element("div", "google-writeback-content");
+    content.dataset.writebackContent = "";
+    panel.append(content);
+    googleCatalogue.after(panel);
+    panel.addEventListener("toggle", () => {
+      if (panel.open) {
+        loadUploadWritebackDetails();
+        loadWorkflowWritebackDetails();
+      }
+    });
+    return panel;
+  }
+
+  function renderUploadWritebacks() {
+    const panel = ensureUploadWritebackPanel();
+    const content = panel.querySelector("[data-writeback-content]");
+    const entries = Array.isArray(uploadWritebackDetails)
+      ? uploadWritebackDetails
+      : null;
+    const summary = panel.querySelector("summary");
+    const count = entries?.length || 0;
+    const workflowCount = Array.isArray(workflowWritebackDetails)
+      ? workflowWritebackDetails.length
+      : 0;
+    summary.textContent = `Writeback recovery (uploads ${count} · workflows ${workflowCount})`;
+    const hasStatusCounts = [
+      googleStatusView?.uploadWritebackPendingCount,
+      googleStatusView?.uploadWritebackConflictCount,
+      googleStatusView?.uploadWritebackAttemptedCount,
+      googleStatusView?.uploadWritebackUnresolvedCount,
+    ].some((value) => Number.isInteger(value) && value > 0);
+    const hasWorkflowStatusCounts = [
+      googleStatusView?.workflowPendingCount,
+      googleStatusView?.workflowConflictCount,
+      googleStatusView?.workflowAttemptedCount,
+      googleStatusView?.workflowUnresolvedCount,
+    ].some((value) => Number.isInteger(value) && value > 0);
+    panel.hidden =
+      !googleStatusView ||
+      ![
+        "needsInspection",
+        "migrationReady",
+        "ready",
+        "syncing",
+        "conflict",
+      ].includes(googleStatusView.state) ||
+      (!hasStatusCounts &&
+        !hasWorkflowStatusCounts &&
+        count === 0 &&
+        workflowCount === 0);
+    if (panel.hidden || !panel.open) return;
+    content.replaceChildren();
+    renderWorkflowWritebackHistory(content);
+    if (uploadWritebackLoad) {
+      content.append(
+        element("p", "workflow-note", "Loading upload link details…"),
+      );
+      return;
+    }
+    if (!entries) {
+      content.append(
+        element("p", "workflow-error", "Upload link details couldn’t load."),
+      );
+      return;
+    }
+    if (!entries.length) {
+      if (!workflowWritebackDetails?.length)
+        content.append(
+          element("p", "workflow-note", "No writebacks need recovery."),
+        );
+      return;
+    }
+    const catalogueBySource = new Map(
+      (catalogue?.items || []).map((item) => [item.sourceKey, item]),
+    );
+    for (const detail of entries) {
+      const intent = detail.intent || {};
+      const item = catalogueBySource.get(intent.sourceKey);
+      const row = element("section", "google-writeback-row");
+      row.append(
+        element(
+          "strong",
+          "",
+          `${platformNames[intent.platform] || intent.platform || "Upload"} · ${intent.state || "unknown"}`,
+        ),
+      );
+      row.append(
+        element(
+          "p",
+          "workflow-note",
+          `Episode: ${item?.title || intent.title || intent.sourceKey || "Unknown source"}`,
+        ),
+      );
+      const url = safeExternalLink(intent.url, intent.url);
+      if (url) row.append(url);
+      if (intent.errorCode)
+        row.append(element("p", "workflow-error", `Code: ${intent.errorCode}`));
+      if (intent.errorCode === "google-workflow-ledger-full")
+        row.append(
+          element(
+            "p",
+            "workflow-note",
+            "Archive older workflow rows to make room, then retry. Saved history stays local until synced.",
+          ),
+        );
+      const metadataConflict =
+        intent.state === "conflict" &&
+        intent.errorCode === "catalogue-entry-changed";
+      const layoutConflict =
+        intent.state === "conflict" &&
+        intent.errorCode === "catalogue-layout-changed";
+      if (metadataConflict || layoutConflict) {
+        const currentTitle = item?.title || "Current episode unavailable";
+        const currentDescription = item?.description || "";
+        if (metadataConflict) {
+          row.append(
+            element(
+              "p",
+              "workflow-note",
+              `Sheet details: ${intent.title || "(no title)"}${intent.description ? ` · ${intent.description}` : ""}`,
+            ),
+          );
+          row.append(
+            element(
+              "p",
+              "workflow-note",
+              `Current details: ${currentTitle}${currentDescription ? ` · ${currentDescription}` : ""}`,
+            ),
+          );
+        } else {
+          row.append(
+            element(
+              "p",
+              "workflow-note",
+              "Check the destination column in your sheet before retrying.",
+            ),
+          );
+        }
+        const review = element("label", "writeback-review-check");
+        const checked = element("input");
+        checked.type = "checkbox";
+        review.append(
+          checked,
+          document.createTextNode(
+            layoutConflict
+              ? " I checked the destination column"
+              : " I reviewed the current details",
+          ),
+        );
+        row.append(review);
+        const rebase = element(
+          "button",
+          "secondary-button",
+          layoutConflict
+            ? "Retry after checking the sheet"
+            : "Use current details and retry",
+        );
+        rebase.type = "button";
+        rebase.disabled = true;
+        checked.addEventListener("change", () => {
+          rebase.disabled = !checked.checked || !detail.currentFingerprint;
+        });
+        rebase.addEventListener("click", async () => {
+          if (!checked.checked || !detail.currentFingerprint) return;
+          setBusy(rebase, true);
+          try {
+            await global.OFEnhancerHost.request("rebaseUploadWriteback", {
+              key: intent.key,
+              expectedFingerprint: detail.currentFingerprint,
+              confirmCurrentDetails: true,
+            });
+            await retryUploadWritebacks();
+          } catch (error) {
+            row.append(
+              element(
+                "p",
+                "workflow-error",
+                `Couldn’t update this link: ${friendlyCatalogueError(error)}`,
+              ),
+            );
+          } finally {
+            setBusy(rebase, false);
+          }
+        });
+        row.append(rebase);
+      }
+      content.append(row);
+    }
+    if (
+      entries.some(({ intent }) =>
+        ["pending", "attempted", "unresolved"].includes(intent?.state),
+      )
+    ) {
+      const retry = element(
+        "button",
+        "secondary-button",
+        "Retry pending links",
+      );
+      retry.type = "button";
+      retry.addEventListener("click", () => retryUploadWritebacks());
+      content.append(retry);
+    }
+  }
+
+  function renderWorkflowWritebackHistory(content) {
+    const section = element("section", "workflow-history-recovery");
+    section.append(element("h3", "", "Workflow history"));
+    if (workflowWritebackLoad) {
+      section.append(
+        element("p", "workflow-note", "Loading workflow history…"),
+      );
+      content.append(section);
+      return;
+    }
+    if (!Array.isArray(workflowWritebackDetails)) {
+      section.append(
+        element("p", "workflow-error", "Workflow history couldn’t load."),
+      );
+      content.append(section);
+      return;
+    }
+    if (!workflowWritebackDetails.length) {
+      section.append(
+        element("p", "workflow-note", "No workflow history needs recovery."),
+      );
+      content.append(section);
+      return;
+    }
+    for (const intent of workflowWritebackDetails) {
+      const snapshot = intent.snapshot || {};
+      const row = element(
+        "article",
+        "google-writeback-row workflow-history-row",
+      );
+      row.append(
+        element("strong", "", `Workflow · ${intent.state || "unknown"}`),
+      );
+      row.append(
+        element(
+          "p",
+          "workflow-note",
+          `Source: ${intent.sourceTitle || snapshot.sourceKey || "Not linked"}`,
+        ),
+      );
+      row.append(
+        element(
+          "p",
+          "workflow-note",
+          `Run ${intent.runId || snapshot.runId || "unknown"} · revision ${Number.isInteger(intent.revision) ? intent.revision : snapshot.revision || "unknown"}`,
+        ),
+      );
+      if (intent.errorCode)
+        row.append(element("p", "workflow-error", `Code: ${intent.errorCode}`));
+      for (const target of Array.isArray(snapshot.targets)
+        ? snapshot.targets
+        : []) {
+        for (const postUrl of creatorWorkflowPostUrls(target)) {
+          const label = `${platformNames[target.platform] || target.platform || "Post"}: ${postUrl}`;
+          const link = safeExternalLink(postUrl, label);
+          if (link) row.append(link);
+        }
+      }
+      const promotedDestination = snapshot.reply?.paidUrl;
+      const paidLink = safeExternalLink(
+        promotedDestination,
+        promotedDestination
+          ? `Promoted destination: ${promotedDestination}`
+          : "",
+      );
+      if (paidLink) row.append(paidLink);
+      content.append(row);
+    }
+  }
+
+  async function loadUploadWritebackDetails(force = false) {
+    if (uploadWritebackLoad && !force) return uploadWritebackLoad;
+    if (uploadWritebackDetails !== null && !force) {
+      renderUploadWritebacks();
+      return uploadWritebackDetails;
+    }
+    if (
+      !googleStatusView ||
+      ![
+        "needsInspection",
+        "migrationReady",
+        "ready",
+        "syncing",
+        "conflict",
+      ].includes(googleStatusView.state)
+    ) {
+      uploadWritebackDetails = [];
+      renderUploadWritebacks();
+      return;
+    }
+    uploadWritebackLoad = global.OFEnhancerHost.request(
+      "getUploadWritebacks",
+      {},
+    )
+      .then((value) => {
+        if (!Array.isArray(value)) throw new Error("invalid-upload-writebacks");
+        uploadWritebackDetails = value;
+        return value;
+      })
+      .catch(() => {
+        uploadWritebackDetails = null;
+      })
+      .finally(() => {
+        uploadWritebackLoad = null;
+        renderUploadWritebacks();
+      });
+    renderUploadWritebacks();
+    return uploadWritebackLoad;
+  }
+
+  async function loadWorkflowWritebackDetails(force = false) {
+    const panel = ensureUploadWritebackPanel();
+    if (!panel.open) return;
+    if (workflowWritebackLoad && !force) return workflowWritebackLoad;
+    if (workflowWritebackDetails !== null && !force) {
+      renderUploadWritebacks();
+      return workflowWritebackDetails;
+    }
+    if (
+      !googleStatusView ||
+      ![
+        "needsInspection",
+        "migrationReady",
+        "ready",
+        "syncing",
+        "conflict",
+      ].includes(googleStatusView.state)
+    ) {
+      workflowWritebackDetails = [];
+      renderUploadWritebacks();
+      return workflowWritebackDetails;
+    }
+    workflowWritebackLoad = global.OFEnhancerHost.request(
+      "getCreatorWorkflowWritebacks",
+      {},
+    )
+      .then((value) => {
+        if (!Array.isArray(value))
+          throw new Error("invalid-creator-workflow-writebacks");
+        workflowWritebackDetails = value;
+        return value;
+      })
+      .catch(() => {
+        workflowWritebackDetails = null;
+      })
+      .finally(() => {
+        workflowWritebackLoad = null;
+        renderUploadWritebacks();
+      });
+    renderUploadWritebacks();
+    return workflowWritebackLoad;
+  }
+
+  async function retryUploadWritebacks() {
+    try {
+      const status = await global.OFEnhancerHost.request(
+        "retryUploadWritebacks",
+        {},
+      );
+      googleStatusRendered = ++googleStatusRequests;
+      renderGoogleCatalogue(status);
+      await loadUploadWritebackDetails(true);
+      await loadWorkflowWritebackDetails(true);
+    } catch (error) {
+      googleCatalogueStatus.textContent = `Couldn’t retry upload links: ${friendlyCatalogueError(error)}`;
+    }
   }
 
   function announceCatalogueResults() {
@@ -1186,6 +2232,38 @@
       conflictCount: Number.isInteger(view?.conflictCount)
         ? view.conflictCount
         : 0,
+      uploadWritebackPendingCount: Number.isInteger(
+        view?.uploadWritebackPendingCount,
+      )
+        ? view.uploadWritebackPendingCount
+        : 0,
+      uploadWritebackConflictCount: Number.isInteger(
+        view?.uploadWritebackConflictCount,
+      )
+        ? view.uploadWritebackConflictCount
+        : 0,
+      uploadWritebackAttemptedCount: Number.isInteger(
+        view?.uploadWritebackAttemptedCount,
+      )
+        ? view.uploadWritebackAttemptedCount
+        : 0,
+      uploadWritebackUnresolvedCount: Number.isInteger(
+        view?.uploadWritebackUnresolvedCount,
+      )
+        ? view.uploadWritebackUnresolvedCount
+        : 0,
+      workflowPendingCount: Number.isInteger(view?.workflowPendingCount)
+        ? view.workflowPendingCount
+        : 0,
+      workflowConflictCount: Number.isInteger(view?.workflowConflictCount)
+        ? view.workflowConflictCount
+        : 0,
+      workflowAttemptedCount: Number.isInteger(view?.workflowAttemptedCount)
+        ? view.workflowAttemptedCount
+        : 0,
+      workflowUnresolvedCount: Number.isInteger(view?.workflowUnresolvedCount)
+        ? view.workflowUnresolvedCount
+        : 0,
       lastVerifiedSync: view?.lastVerifiedSync || null,
       errorCode: typeof view?.errorCode === "string" ? view.errorCode : "",
       preferredSheetUrl:
@@ -1193,6 +2271,18 @@
           ? view.preferredSheetUrl
           : "",
     };
+    const expectedWritebackCount =
+      googleStatusView.uploadWritebackPendingCount +
+      googleStatusView.uploadWritebackConflictCount +
+      googleStatusView.uploadWritebackAttemptedCount +
+      googleStatusView.uploadWritebackUnresolvedCount;
+    if (
+      uploadWritebackWorkbookName !== googleStatusView.workbookName ||
+      (uploadWritebackDetails !== null &&
+        uploadWritebackDetails.length !== expectedWritebackCount)
+    )
+      uploadWritebackDetails = null;
+    uploadWritebackWorkbookName = googleStatusView.workbookName;
     if (
       googleStatusView.preferredSheetUrl &&
       document.activeElement !== googleSheetUrl
@@ -1287,6 +2377,26 @@
     } else {
       googleCatalogueStatus.textContent = errorPresentation.message;
     }
+    const writebackCounts = [
+      [googleStatusView.uploadWritebackPendingCount, "pending"],
+      [googleStatusView.uploadWritebackConflictCount, "conflict"],
+      [googleStatusView.uploadWritebackAttemptedCount, "attempted"],
+      [googleStatusView.uploadWritebackUnresolvedCount, "unresolved"],
+    ].filter(([count]) => count > 0);
+    if (writebackCounts.length) {
+      const detail = writebackCounts
+        .map(([count, label]) => `${count} ${label}`)
+        .join(" · ");
+      googleCatalogueStatus.textContent += ` Upload links: ${detail}.`;
+    }
+    const workflowCounts = [
+      [googleStatusView.workflowPendingCount, "pending"],
+      [googleStatusView.workflowConflictCount, "conflict"],
+      [googleStatusView.workflowAttemptedCount, "attempted"],
+      [googleStatusView.workflowUnresolvedCount, "unresolved"],
+    ].filter(([count]) => count > 0);
+    if (workflowCounts.length)
+      googleCatalogueStatus.textContent += ` Workflow history: ${workflowCounts.map(([count, label]) => `${count} ${label}`).join(" · ")}.`;
 
     if (codePresentation) {
       setGooglePrimaryAction(
@@ -1344,6 +2454,8 @@
     }
 
     renderGoogleSettings();
+    renderUploadWritebacks();
+    loadUploadWritebackDetails();
     scheduleGooglePolling(state);
   }
 
@@ -1696,6 +2808,8 @@
         await loadCatalogue(true);
       } else renderGoogleCatalogue(result);
       if (action === "inspect") await loadCatalogue(true);
+      if (action === "sync" || action === "inspect" || action === "import")
+        await loadUploadWritebackDetails(true);
     } catch (error) {
       googleStatusRendered = ++googleStatusRequests;
       renderGoogleCatalogue({

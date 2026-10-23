@@ -40,7 +40,7 @@ public sealed class XScansTests
             Assert.AreEqual(8, oldStore.SchemaVersion);
         }
         using CatalogueStore store = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(9, store.SchemaVersion);
+        Assert.AreEqual(10, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v8-*.sqlite").Length);
         Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_posts"));
         Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_scheduled_posts"));

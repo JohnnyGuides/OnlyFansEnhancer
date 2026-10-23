@@ -576,13 +576,25 @@
       const existing = previous.catalogueAssociation || previous.plan.catalogue;
       if (
         existing &&
-        JSON.stringify(existing) !== JSON.stringify(association)
+        (existing.id !== association.id || existing.row !== association.row)
       ) {
         throw new Error(
           "The catalogue association is already fixed for this run.",
         );
       }
-      if (existing) return previous;
+      if (
+        existing?.destination &&
+        (existing.destination.workbookId !==
+          association.destination?.workbookId ||
+          (existing.destination.sheetId || null) !==
+            (association.destination?.sheetId || null))
+      ) {
+        throw new Error(
+          "The catalogue association is already fixed to another workbook.",
+        );
+      }
+      if (existing && JSON.stringify(existing) === JSON.stringify(association))
+        return previous;
       const next = { ...previous, catalogueAssociation: association };
       await storage.set({ [key(id)]: next });
       return next;

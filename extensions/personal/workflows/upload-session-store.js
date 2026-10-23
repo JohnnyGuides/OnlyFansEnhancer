@@ -10,6 +10,7 @@
   const writeChains = new Map();
   const RECOVERY_KEY = "creatorUploadRecoveryV1";
   const ACTION_KEY = "creatorUploadActionsV1";
+  const PUBLICATION_HISTORY_KEY = "creatorUploadPublicationHistoryV1";
   const RUNTIME_VERSION_KEY = "creatorUploadRuntimeVersionV1";
   const VERSION = /^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/;
 
@@ -51,8 +52,7 @@
     );
   }
 
-  async function actionRecords() {
-    const stored = (await chrome.storage.local.get(ACTION_KEY))[ACTION_KEY];
+  function normalizeActionRecords(stored, label) {
     if (stored === undefined) return [];
     if (
       !Array.isArray(stored) ||
@@ -63,11 +63,17 @@
           !PLATFORMS.has(item.platform) ||
           !/^[a-f0-9]{64}$/.test(item.work || "") ||
           !/^[a-f0-9]{64}$/.test(item.plan || "") ||
-          item.submitAttempted !== true,
+          item.submitAttempted !== true ||
+          (item.receiptVerified === true &&
+            (!item.postUrl ||
+              globalThis.CreatorCatalogueContract?.canonicalPostUrl(
+                item.platform,
+                item.postUrl,
+              ) !== item.postUrl)),
       )
     )
       throw new Error(
-        "Publication recovery journal is invalid; reconcile existing attempts before continuing.",
+        `Publication ${label} is invalid; reconcile existing attempts before continuing.`,
       );
     return stored.map((item) => ({
       schemaVersion: 1,
@@ -83,6 +89,7 @@
         : {}),
       commitArmed: true,
       submitAttempted: true,
+      ...(item.receiptVerified === true ? { receiptVerified: true } : {}),
       ...(globalThis.CreatorCatalogueContract?.canonicalPostUrl(
         item.platform,
         item.postUrl,
@@ -93,8 +100,60 @@
     }));
   }
 
+  async function actionRecords() {
+    return normalizeActionRecords(
+      (await chrome.storage.local.get(ACTION_KEY))[ACTION_KEY],
+      "recovery journal",
+    );
+  }
+
+  async function publicationHistory() {
+    return normalizeActionRecords(
+      (await chrome.storage.local.get(PUBLICATION_HISTORY_KEY))[
+        PUBLICATION_HISTORY_KEY
+      ],
+      "history",
+    );
+  }
+
+  async function archiveVerifiedActions() {
+    const records = await actionRecords();
+    const completed = records.filter((item) => item.receiptVerified === true);
+    if (!completed.length) return records;
+    const history = await publicationHistory();
+    for (const item of completed) {
+      const prior = history.find(
+        (entry) => entry.id === item.id && entry.platform === item.platform,
+      );
+      if (prior) {
+        if (prior.plan !== item.plan || prior.postUrl !== item.postUrl)
+          throw new Error(
+            "Verified publication history changed; preserve the existing receipt.",
+          );
+      } else {
+        history.push(item);
+      }
+    }
+    const active = records.filter((item) => item.receiptVerified !== true);
+    await chrome.storage.local.set({
+      [ACTION_KEY]: active,
+      [PUBLICATION_HISTORY_KEY]: history,
+    });
+    const readback = await actionRecords();
+    const historyReadback = await publicationHistory();
+    if (
+      JSON.stringify(readback) !== JSON.stringify(active) ||
+      JSON.stringify(historyReadback) !== JSON.stringify(history)
+    )
+      throw new Error(
+        "Verified publication history checkpoint was not durable.",
+      );
+    return active;
+  }
+
   async function assertAvailable(record, platforms) {
     await migrateFinalActions();
+    await archiveVerifiedActions();
     const work = await workIdentity(record);
     const legacyWork = await workIdentity(record, true);
     // Final attempts were historically written with missing launcher metadata.
@@ -107,20 +166,51 @@
       ]),
     );
     const signature = await digest(sanitizeDraft(record.draft));
-    if (
-      (await listRecovery()).some(
-        (item) =>
-          !item.supersededAt &&
-          item.steps.some(
-            (step) =>
-              (step.work === work ||
-                step.work === legacyWork ||
-                (!step.work && step.signature === signature) ||
-                item.id === record.id) &&
-              platforms.includes(step.platform),
-          ),
-      )
-    )
+    const authorizedRepeats = new Set(
+      record.catalogue?.source === "desktop" &&
+        Array.isArray(record.catalogue.repeatPlatforms)
+        ? record.catalogue.repeatPlatforms.filter((platform) =>
+            platforms.includes(platform),
+          )
+        : [],
+    );
+    const history = await publicationHistory();
+    const matchingRecovery = (await listRecovery()).filter(
+      (item) =>
+        !item.supersededAt &&
+        item.steps.some(
+          (step) =>
+            (step.work === work ||
+              step.work === legacyWork ||
+              (!step.work && step.signature === signature) ||
+              item.id === record.id) &&
+            platforms.includes(step.platform),
+        ),
+    );
+    const unresolvedRecovery = matchingRecovery.some((item) =>
+      item.steps.some((step) => {
+        if (
+          !platforms.includes(step.platform) ||
+          !(
+            step.work === work ||
+            step.work === legacyWork ||
+            (!step.work && step.signature === signature) ||
+            item.id === record.id
+          )
+        )
+          return false;
+        return !(
+          authorizedRepeats.has(step.platform) &&
+          history.some(
+            (receipt) =>
+              receipt.receiptVerified === true &&
+              receipt.platform === step.platform &&
+              finalWorks.has(receipt.work),
+          )
+        );
+      }),
+    );
+    if (unresolvedRecovery)
       throw Object.assign(
         new Error(
           "An existing prepared or uncertain draft exists for this work item. Reconcile the existing draft before starting another session.",
@@ -130,11 +220,19 @@
           recoveryRequired: true,
         },
       );
+    const priorPublications = [
+      ...(await actionRecords()),
+      ...(await publicationHistory()),
+    ];
     if (
-      (await actionRecords()).some(
+      priorPublications.some(
         (item) =>
           (item.id === record.id || finalWorks.has(item.work)) &&
-          platforms.includes(item.platform),
+          platforms.includes(item.platform) &&
+          !(
+            item.receiptVerified === true &&
+            authorizedRepeats.has(item.platform)
+          ),
       )
     )
       throw Object.assign(
@@ -153,9 +251,29 @@
       ([, target]) => target.commitArmed || target.submitAttempted,
     );
     if (!targets.length) return;
+    await archiveVerifiedActions();
     await enqueueWrite(ACTION_KEY, async () => {
       const records = await actionRecords();
+      const history = await publicationHistory();
       for (const [platform, target] of targets) {
+        const archived = history.find(
+          (item) => item.id === record.id && item.platform === platform,
+        );
+        const archivedPostUrl =
+          globalThis.CreatorCatalogueContract?.canonicalPostUrl(
+            platform,
+            target.postUrl,
+          ) || "";
+        if (archived) {
+          if (
+            archived.plan !== (await digest(record.draft || {})) ||
+            (archivedPostUrl && archived.postUrl !== archivedPostUrl)
+          )
+            throw new Error(
+              "Verified publication history changed; preserve the existing receipt.",
+            );
+          continue;
+        }
         const previous = records.find(
           (item) => item.id === record.id && item.platform === platform,
         );
@@ -220,6 +338,60 @@
       if (JSON.stringify(readback) !== JSON.stringify(records))
         throw new Error("Publication recovery checkpoint was not durable.");
     });
+  }
+
+  async function recordPublicationReceipt(id, platform, postUrl) {
+    const normalizedId = clean(id, 64);
+    if (!PLATFORMS.has(platform))
+      throw new Error("Invalid publication platform.");
+    const canonicalPostUrl =
+      globalThis.CreatorCatalogueContract?.canonicalPostUrl(platform, postUrl);
+    if (!canonicalPostUrl || canonicalPostUrl !== postUrl)
+      throw new Error("A canonical verified publication receipt is required.");
+    await enqueueWrite(ACTION_KEY, async () => {
+      const archived = (await publicationHistory()).find(
+        (item) => item.id === normalizedId && item.platform === platform,
+      );
+      if (archived) {
+        if (
+          archived.receiptVerified !== true ||
+          archived.postUrl !== canonicalPostUrl
+        )
+          throw new Error(
+            "Publication result identity changed; preserve the existing receipt.",
+          );
+        return;
+      }
+      const records = await actionRecords();
+      const receipt = records.find(
+        (item) => item.id === normalizedId && item.platform === platform,
+      );
+      if (!receipt)
+        throw new Error(
+          "Publication receipt has no durable submission intent.",
+        );
+      if (receipt.postUrl && receipt.postUrl !== canonicalPostUrl)
+        throw new Error(
+          "Publication result identity changed; preserve the existing receipt.",
+        );
+      receipt.postUrl = canonicalPostUrl;
+      receipt.receiptVerified = true;
+      await chrome.storage.local.set({ [ACTION_KEY]: records });
+      const readback = await actionRecords();
+      const verified = readback.find(
+        (item) => item.id === normalizedId && item.platform === platform,
+      );
+      if (
+        !verified ||
+        verified.postUrl !== canonicalPostUrl ||
+        verified.receiptVerified !== true
+      )
+        throw new Error(
+          `Verified publication receipt checkpoint was not durable: ${JSON.stringify(verified || null)} expected ${canonicalPostUrl}`,
+        );
+    });
+    await archiveVerifiedActions();
+    return canonicalPostUrl;
   }
   async function migrateFinalActions() {
     const stored = await chrome.storage.session.get(null);
@@ -726,6 +898,16 @@
       if (Object.hasOwn(value, field))
         output[field] = clean(value[field], maximum);
     }
+    if (value.destination && typeof value.destination === "object") {
+      const workbookId = clean(value.destination.workbookId, 256);
+      const sheetId = clean(value.destination.sheetId, 64);
+      if (
+        !/^[A-Za-z0-9_-]+$/.test(workbookId) ||
+        (sheetId && !/^\d+$/.test(sheetId))
+      )
+        throw new Error("Invalid saved catalogue destination.");
+      output.destination = { workbookId, ...(sheetId ? { sheetId } : {}) };
+    }
     if (output.source === "desktop" && Array.isArray(value.repeatPlatforms))
       output.repeatPlatforms = [...new Set(value.repeatPlatforms)].filter(
         (platform) => PLATFORMS.has(platform),
@@ -772,6 +954,22 @@
     for (const field of ["commitArmed", "submitAttempted"]) {
       if (Object.hasOwn(value, field)) output[field] = value[field] === true;
     }
+    if (value.receiptEvidence && typeof value.receiptEvidence === "object") {
+      const kind = clean(value.receiptEvidence.kind, 40);
+      if (
+        ["owner-confirmed", "media-identity", "browser-verified"].includes(kind)
+      )
+        output.receiptEvidence = {
+          kind,
+          expectedMediaIds: [
+            ...new Set(
+              (value.receiptEvidence.expectedMediaIds || []).filter(
+                (id) => typeof id === "string" && /^\d{1,30}$/.test(id),
+              ),
+            ),
+          ].slice(0, 20),
+        };
+    }
     if (name === "manyvids" && value.editorHandoff) {
       const handoff = value.editorHandoff;
       const expected =
@@ -797,6 +995,97 @@
     return output;
   }
 
+  function sanitizeScriptState(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return undefined;
+    const statuses = new Set([
+      "selected",
+      "pending",
+      "uploading",
+      "uploaded",
+      "partial",
+      "failed",
+      "skipped",
+    ]);
+    if (!statuses.has(value.status))
+      throw new Error("Invalid saved script status.");
+    const scriptUrl = (raw) => {
+      try {
+        const url = new URL(raw);
+        return url.protocol === "https:" &&
+          ["johnnyguides.com", "www.johnnyguides.com"].includes(url.hostname) &&
+          !url.username &&
+          !url.password &&
+          !url.port &&
+          !url.search &&
+          !url.hash &&
+          /^\/sync\/scripts\/[A-Za-z0-9._-]{1,200}\.funscript$/.test(
+            url.pathname,
+          )
+          ? url.href
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const keys = (values) =>
+      [
+        ...new Set(
+          (Array.isArray(values) ? values : []).filter(
+            (item) =>
+              typeof item === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(item),
+          ),
+        ),
+      ].slice(0, 100);
+    const filename = clean(value.filename, 255);
+    const hasControlCharacter = (text) =>
+      Array.from(text).some((character) => {
+        const codePoint = character.codePointAt(0);
+        return codePoint !== undefined && codePoint < 0x20;
+      });
+    /** @type {{ status: string, filename?: string, sha256?: string, urls: string[], sentKeys: string[], sheetPending: boolean, writebackState?: "not-associated" | "pending" | "synced", error: string, errorCode: string, results?: Array<{ url: string, keys: string[], sheetPending: boolean, writebackState?: "not-associated" | "pending" | "synced", sheetError: string }> }} */
+    const output = {
+      status: value.status,
+      ...(filename && !/[\\/]/.test(filename) && !hasControlCharacter(filename)
+        ? { filename }
+        : {}),
+      ...(/^[a-f0-9]{64}$/i.test(value.sha256 || "")
+        ? { sha256: value.sha256.toLowerCase() }
+        : {}),
+      urls: [
+        ...new Set(
+          (Array.isArray(value.urls) ? value.urls : [])
+            .map(scriptUrl)
+            .filter(Boolean),
+        ),
+      ].slice(0, 100),
+      sentKeys: keys(value.sentKeys),
+      sheetPending: value.sheetPending === true,
+      ...(new Set(["not-associated", "pending", "synced"]).has(
+        value.writebackState,
+      )
+        ? { writebackState: value.writebackState }
+        : {}),
+      error: clean(value.error, 500),
+      errorCode: clean(value.errorCode, 64),
+    };
+    output.results = (Array.isArray(value.results) ? value.results : [])
+      .slice(0, 100)
+      .filter((item) => scriptUrl(item?.url))
+      .map((item) => ({
+        url: scriptUrl(item.url),
+        keys: keys(item.keys),
+        sheetPending: item.sheetPending === true,
+        ...(new Set(["not-associated", "pending", "synced"]).has(
+          item.writebackState,
+        )
+          ? { writebackState: item.writebackState }
+          : {}),
+        sheetError: clean(item.sheetError, 500),
+      }));
+    return output;
+  }
+
   function sanitize(record) {
     if (!record || typeof record !== "object" || Array.isArray(record)) {
       throw new Error("Invalid creator upload session record.");
@@ -812,6 +1101,8 @@
     }
     if (Object.hasOwn(record, "draft"))
       output.draft = sanitizeDraft(record.draft);
+    if (record.scriptState)
+      output.scriptState = sanitizeScriptState(record.scriptState);
     if (record.catalogue === null) output.catalogue = null;
     else if (Object.hasOwn(record, "catalogue")) {
       output.catalogue = sanitizeCatalogue(record.catalogue);
@@ -850,6 +1141,24 @@
     if (next.draft) output.draft = { ...(previous.draft || {}), ...next.draft };
     if (next.catalogue && previous.catalogue) {
       output.catalogue = { ...previous.catalogue, ...next.catalogue };
+    }
+    if (next.scriptState && previous.scriptState) {
+      output.scriptState = {
+        ...previous.scriptState,
+        ...next.scriptState,
+        urls: [
+          ...new Set([
+            ...(previous.scriptState.urls || []),
+            ...(next.scriptState.urls || []),
+          ]),
+        ],
+        sentKeys: [
+          ...new Set([
+            ...(previous.scriptState.sentKeys || []),
+            ...(next.scriptState.sentKeys || []),
+          ]),
+        ],
+      };
     }
     if (next.platforms) {
       output.platforms = { ...(previous.platforms || {}) };
@@ -957,10 +1266,11 @@
     ensureRuntimeVersion,
     assertAvailable,
     ACTION_KEY,
+    recordPublicationReceipt,
     workIdentity,
     async listPublication() {
       await migrateFinalActions();
-      return actionRecords();
+      return [...(await actionRecords()), ...(await publicationHistory())];
     },
   });
 })();

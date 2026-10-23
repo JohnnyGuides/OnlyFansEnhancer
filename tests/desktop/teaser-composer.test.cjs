@@ -1129,6 +1129,54 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
       const video = document.querySelector(".teaser-video-preview");
       return video.poster && video.poster !== previous;
     }, previousPoster);
+    const sourceHash = require("node:crypto")
+      .createHash("sha256")
+      .update(fs.readFileSync(square))
+      .digest("hex");
+    await frame.evaluate((sha256) => {
+      globalThis.OFEnhancerDesktopUpload = {
+        async copyTeaser(file) {
+          return {
+            name: "preview-test__t01.mp4",
+            clip: { clipId: 45, lastModified: file.lastModified, sha256 },
+          };
+        },
+      };
+    }, sourceHash);
+    const copy = page.locator(".teaser-copy-file");
+    const linkEpisode = page.getByRole("button", {
+      name: /^(Link episode|Change linked episode)$/,
+    });
+    await linkEpisode.click();
+    await frame.locator('#catalogueCards [data-row="2"]').click();
+    await page.waitForFunction(
+      () => !document.querySelector(".teaser-copy-file")?.disabled,
+    );
+    if (
+      await page
+        .getByRole("button", { name: "File actions", exact: true })
+        .isVisible()
+    )
+      await page
+        .getByRole("button", { name: "File actions", exact: true })
+        .click();
+    await copy.click();
+    await page
+      .locator(".xt-composer-status")
+      .filter({ hasText: "Copied as preview-test__t01.mp4" })
+      .waitFor();
+    const managedIdentity = await page.evaluate(() =>
+      OFEnhancerTeaserDrafts.get("2026-10-06").then(
+        ({ clipId, renderHash }) => ({
+          clipId,
+          renderHash,
+        }),
+      ),
+    );
+    assert.deepEqual(managedIdentity, {
+      clipId: 45,
+      renderHash: sourceHash,
+    });
     await frame.locator(".teaser-video-preview").evaluate(async (video) => {
       video.muted = true;
       await video.play();
@@ -1306,13 +1354,16 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     const exported = await download;
     assert.match(
       await frame.locator("#socialFileSummary").textContent(),
-      /square-test/,
+      /preview-test__t01/,
     );
     assert.doesNotMatch(
       await frame.locator("#socialFileSummary").textContent(),
       /suction/,
     );
-    assert.equal(exported.suggestedFilename(), "square-test (suction).mp4");
+    assert.equal(
+      exported.suggestedFilename(),
+      "preview-test__t01 (suction).mp4",
+    );
     await exported.saveAs(path.join(work, "export.mp4"));
     if (process.env.OFENHANCER_SUCTION_REVIEW_DIR) {
       const captures = process.env.OFENHANCER_SUCTION_REVIEW_DIR;
@@ -1373,7 +1424,21 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
       async (day) => (await OFEnhancerTeaserDrafts.get(day)).file.name,
       DAY,
     );
-    assert.equal(name, "square-test (suction).mp4");
+    assert.equal(name, "preview-test__t01 (suction).mp4");
+    const transformedIdentity = await page.evaluate(() =>
+      OFEnhancerTeaserDrafts.get("2026-10-06").then(
+        ({ clipId, renderHash, episodeKey }) => ({
+          clipId,
+          renderHash,
+          episodeKey,
+        }),
+      ),
+    );
+    assert.deepEqual(transformedIdentity, {
+      clipId: null,
+      renderHash: "",
+      episodeKey: "preview-test",
+    });
     await editor
       .getByRole("checkbox", { name: "Suction ending", exact: true })
       .uncheck();
@@ -1385,8 +1450,26 @@ test("square teaser previews its Like-directed ending before MP4 export and draf
     );
     assert.match(
       await frame.locator("#socialFileSummary").textContent(),
-      /square-test/,
+      /preview-test__t01/,
     );
+    await frame.locator("#saveTeaserDraft").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".xt-composer-status")
+        .textContent.includes("Draft saved"),
+    );
+    const restoredIdentity = await page.evaluate(() =>
+      OFEnhancerTeaserDrafts.get("2026-10-06").then(
+        ({ clipId, renderHash }) => ({
+          clipId,
+          renderHash,
+        }),
+      ),
+    );
+    assert.deepEqual(restoredIdentity, {
+      clipId: 45,
+      renderHash: sourceHash,
+    });
     let extraDownloads = 0;
     page.on("download", () => extraDownloads++);
     await editor

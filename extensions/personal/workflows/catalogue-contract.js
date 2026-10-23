@@ -50,6 +50,22 @@
       : Number.NaN;
   }
 
+  function catalogueDestination(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return null;
+    const workbookId = String(value.workbookId || "")
+      .trim()
+      .slice(0, 256);
+    const sheetId = String(value.sheetId || "")
+      .trim()
+      .slice(0, 64);
+    if (!/^[A-Za-z0-9_-]+$/.test(workbookId))
+      throw new Error("Invalid catalogue destination.");
+    if (sheetId && !/^\d+$/.test(sheetId))
+      throw new Error("Invalid catalogue destination.");
+    return { workbookId, ...(sheetId ? { sheetId } : {}) };
+  }
+
   function scoreRow(draft, row) {
     const titleScore = Math.max(
       similarity(draft.title, row.title),
@@ -111,7 +127,14 @@
     ) {
       throw new Error("Choose one explicit catalogue row.");
     }
-    return { row, id, title, fingerprint };
+    const destination = catalogueDestination(value.destination);
+    return {
+      row,
+      id,
+      title,
+      fingerprint,
+      ...(destination ? { destination } : {}),
+    };
   }
 
   function canonicalPostUrl(platform, value) {
@@ -245,6 +268,7 @@
 
   globalThis.CreatorCatalogueContract = Object.freeze({
     catalogueRow,
+    catalogueDestination,
     canonicalPostUrl,
     canonicalRedditPostUrl,
     canonicalXStatusUrl,

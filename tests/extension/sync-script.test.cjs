@@ -142,6 +142,38 @@ test("each platform link yields the website's video key", () => {
     assert.equal(sync.scriptKey(platform, url), "", url);
 });
 
+test("script dispatch readiness isolates destinations and keeps unsent later keys eligible", () => {
+  const first = sync.scriptDispatchReadiness(
+    [links[0], { platform: "fansly", postUrl: "" }, links[2]],
+    ["123456"],
+  );
+  assert.deepEqual(plain(first), {
+    ready: [
+      {
+        platform: "pornhub",
+        postUrl: links[2].postUrl,
+        key: "ph634de69359881",
+        status: "ready",
+      },
+    ],
+    alreadySent: [
+      {
+        platform: "onlyfans",
+        postUrl: links[0].postUrl,
+        key: "123456",
+        status: "already-sent",
+      },
+    ],
+    pending: [{ platform: "fansly", postUrl: "", key: "", status: "pending" }],
+  });
+  const later = sync.scriptDispatchReadiness(
+    [{ platform: "fansly", postUrl: links[1].postUrl }],
+    ["123456", "ph634de69359881"],
+  );
+  assert.deepEqual(plain(later.ready.map(({ key }) => key)), ["987654321"]);
+  assert.deepEqual(plain(later.alreadySent), []);
+});
+
 test("actions shift by the measured lead-in only for platforms that got it", () => {
   assert.deepEqual(plain(sync.shiftFunscript(script, 1023)).actions, [
     { at: 1023, pos: 10 },
@@ -270,11 +302,15 @@ for (const fanslyLeadIn of [1023, 2010]) {
         options,
       );
     const results = await run(links, "invalid");
-    assert.match(
-      results.find((result) => result.error).error,
-      /Fansly.*not sent/,
-    );
-    const sentKeys = results.flatMap((result) => result.keys);
+    const failed = results.find((result) => result.status === "upload-failed");
+    assert.match(failed.error, /Fansly.*not sent/);
+    assert.equal(failed.stage, "identity");
+    assert.deepEqual(plain(failed.keys), ["987654321"]);
+    const sentKeys = results
+      .filter((result) =>
+        ["complete", "uploaded-sheet-pending"].includes(result.status),
+      )
+      .flatMap((result) => result.keys);
     assert.deepEqual(
       [...sentKeys].sort(),
       ["123456", "5550123", "ph634de69359881"].sort(),
@@ -430,7 +466,7 @@ test("one refused upload or sheet failure does not stop the other script uploads
         settings: { origin: "https://johnnyguides.com", token: "token-1234" },
         title: "Episode",
         uploads: [
-          { keys: ["111"], funscript: script },
+          { keys: ["111", "112"], funscript: script },
           { keys: ["222"], funscript: script },
           { keys: ["333"], funscript: script },
         ],
@@ -438,36 +474,51 @@ test("one refused upload or sheet failure does not stop the other script uploads
       {
         fetchImpl: async (_url, init) => {
           const [key] = JSON.parse(init.body).keys;
-          posted.push(key);
+          posted.push(JSON.parse(init.body).keys);
           return key === "111"
             ? response(401, {})
             : response(200, {
                 url: `https://johnnyguides.com/sync/scripts/${key}.funscript`,
               });
         },
-        commit: async (url) => {
-          committed.push(url);
+        commit: async (url, metadata) => {
+          committed.push({ url, metadata });
           if (url.includes("222")) throw new Error("catalogue offline");
           return "";
         },
       },
     ),
   );
-  assert.deepEqual(posted, ["111", "222", "333"]);
-  assert.deepEqual(committed, [
-    "https://johnnyguides.com/sync/scripts/222.funscript",
-    "https://johnnyguides.com/sync/scripts/333.funscript",
+  assert.deepEqual(plain(posted), [["111", "112"], ["222"], ["333"]]);
+  assert.deepEqual(plain(committed), [
+    {
+      url: "https://johnnyguides.com/sync/scripts/222.funscript",
+      metadata: { keys: ["222"] },
+    },
+    {
+      url: "https://johnnyguides.com/sync/scripts/333.funscript",
+      metadata: { keys: ["333"] },
+    },
   ]);
   assert.deepEqual(scripts, [
-    { keys: [], error: "The website rejected the upload token." },
+    {
+      keys: ["111", "112"],
+      status: "upload-failed",
+      stage: "provider",
+      error: "The website rejected the upload token.",
+    },
     {
       url: "https://johnnyguides.com/sync/scripts/222.funscript",
       keys: ["222"],
+      status: "uploaded-sheet-pending",
+      stage: "sheet",
       sheetError: "Script link not written to the sheet (catalogue offline).",
     },
     {
       url: "https://johnnyguides.com/sync/scripts/333.funscript",
       keys: ["333"],
+      status: "complete",
+      stage: "complete",
       sheetError: "",
     },
   ]);

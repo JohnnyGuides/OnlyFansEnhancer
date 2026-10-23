@@ -184,18 +184,26 @@ blocks the mutation instead of overwriting another system's work.
 
 ## Upload result links the app writes
 
-Confirmed OnlyFans, Fansly, ManyVids and X upload results associated with a
-catalogue row are saved locally first. With a ready Google selection they also
-queue a narrow link write to that exact workbook and tab. Connected writes run immediately;
-pending work is checked on the hourly background run. No old local publication
-history is automatically enqueued.
+Confirmed publication results for the supported catalogue platforms are saved
+locally first. A complete Google import supplies workbook/tab provenance, which
+is frozen into the chosen row and run. Results queue narrow writes to that frozen
+destination, including before reviewed profile setup. Selecting another workbook
+does not redirect them. A stored reviewed profile awaiting inspection blocks
+mutation until revalidated; adaptive workbook-only writes still check the exact
+imported tab. Missing legacy destination proof keeps results local until explicit,
+fingerprint-checked association. Old unknown-workbook history is not guessed.
+Connected upload-link writes run immediately and retry hourly or through explicit
+recovery. A minute timer retries workflow history while the app is running. This is outbound retry, not a general
+periodic inbound catalogue pull.
 
 The writer resolves the row by its catalogue ID and detected column mapping,
 checks title/description, then rereads the row ID, destination cell, header and
 metadata immediately before writing. It refuses formulas, conflicting links,
 foreign linked text and a link already assigned to another row. Video links fill
-empty platform cells; X links append to `Twitter Teaser(s)` without changing its
-count column. Existing matching posts are idempotent, including an OnlyFans URL
+empty platform cells; Pornhub targets the free-link field and preserves paid links.
+X, Reddit, and Script links append without changing count columns. Script requires
+an existing mapped `Script` header; unproven columns are never repurposed.
+Existing matching posts are idempotent, including an OnlyFans URL
 with a different handle suffix. Reimport happens only after verified readback.
 
 Intent, destination and the attempt checkpoint persist in the local audit log.
@@ -205,6 +213,29 @@ mutation blindly. A disconnected or failed Google write preserves the local
 post link and reports that the sheet update is pending. Conflicting intents stop
 for review; automatic work does not overwrite an existing platform link even
 when a repeat upload was confirmed locally.
+
+The Catalogue view exposes unassigned runs, script status, per-platform results,
+and writeback conflicts. An explicit review may rebase a never-attempted metadata
+or layout conflict against the current fingerprint; attempted mutations remain
+readback-only. Fix a missing mapped column before using that retry.
+
+New workflow snapshots also queue an immutable `_Workflows` v1 ledger row for the
+run/revision. It records source item/key, target results, promoted paid URL, reply
+intent/result, script status/links and asset fingerprints. The ledger is additive:
+foreign headers, formulas, conflicting identities and changed payloads are refused.
+No media bytes, absolute media paths or credentials are exported. The current
+bounded reader covers 5,002 worksheet rows. A full ledger stops visibly rather than
+dropping history. History uses its own scoped read, so it cannot exhaust the
+general catalogue import/inspection response. Appends also stop before a 12 MiB
+estimated response budget, below the separate 16 MiB reader limit. Archive older
+rows to make room, then use explicit retry: only a
+capacity conflict with no historical attempt may reopen; uncertain writes remain
+readback-only. Unchanged Chrome checkpoints do not create new revisions.
+
+New catalogue-row creation freezes a canonical operation ID, request and workbook
+before dispatch. Row content, U-column item identity and row developer metadata are
+one atomic mutation. Any uncertain attempt is reconciled read-only by stable identity
+and exact content, including after a physical row move; a changed request is refused.
 
 ## Discovered teaser links the app writes
 

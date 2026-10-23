@@ -21,7 +21,15 @@ function bridge(options = {}) {
     getMaxRows: () => 3,
     getRange(row, column) {
       if (row === 2 && column === 1)
-        return { getValues: () => structuredClone(rows) };
+        return {
+          getValues: () => structuredClone(rows),
+          getFormulas: () =>
+            rows.map((cells) =>
+              cells.map((cell) =>
+                typeof cell === "string" && cell.startsWith("=") ? cell : "",
+              ),
+            ),
+        };
       return {
         setValue(value) {
           writes.push([row, column]);
@@ -139,6 +147,75 @@ test("Apps Script without URL globals commits supported URLs under its lock", ()
   assert.equal(value.locks(), 0);
 });
 
+test("teaser append recognizes canonical status IDs across X hosts and delimiters", () => {
+  const value = bridge();
+  value.rows[0][14] =
+    "https://mobile.twitter.com/Fixture/status/123; https://x.com/other/status/456";
+  const row = value.current();
+  const payload = {
+    row: 2,
+    id: row.id,
+    fingerprint: value.context.creatorUploadFingerprint(row),
+    statusUrl: "https://www.x.com/fixture/status/123?ref=profile",
+    expectedSource: {
+      backend: "apps-script",
+      workbookId: "fixture-workbook",
+      sheetName: "2026 Video Catalogue",
+    },
+  };
+  const writesBefore = value.writes.length;
+  assert.equal(
+    value.context.creatorUploadHandle("appendTwitterTeaser", payload).status,
+    "idempotent",
+  );
+  assert.equal(value.writes.length, writesBefore);
+});
+
+test("catalogue rows with any consumed value or formula are never treated as empty", () => {
+  const value = bridge();
+  value.rows[1][19] = "https://www.reddit.com/r/fixture/comments/abc/title";
+  const range = {
+    getValues: () => structuredClone(value.rows),
+    getFormulas: () =>
+      value.rows.map((cells) =>
+        cells.map((cell) =>
+          typeof cell === "string" && cell.startsWith("=") ? cell : "",
+        ),
+      ),
+  };
+  const rows = value.context.creatorUploadReadRows({
+    getMaxRows: () => 3,
+    getLastRow: () => 2,
+    getRange: () => range,
+  });
+  assert.equal(rows[1].empty, false);
+  assert.throws(
+    () =>
+      value.context.creatorUploadMatchRows(
+        { title: "New item", forceNew: true },
+        rows,
+      ),
+    /No empty catalogue row/,
+  );
+});
+
+test("catalogue formulas in consumed columns also prevent empty-row reuse", () => {
+  const value = bridge();
+  const rows = value.rows.map((cells) => cells.slice());
+  rows[1][19] = "";
+  const formulas = rows.map((cells) => cells.map(() => ""));
+  formulas[1][19] = "=COUNTA(T3)";
+  const parsed = value.context.creatorUploadReadRows({
+    getMaxRows: () => 3,
+    getLastRow: () => 2,
+    getRange: () => ({
+      getValues: () => structuredClone(rows),
+      getFormulas: () => structuredClone(formulas),
+    }),
+  });
+  assert.equal(parsed[1].empty, false);
+});
+
 function commitRequest(value, row, metadata, platform = "onlyfans") {
   return {
     row,
@@ -146,7 +223,15 @@ function commitRequest(value, row, metadata, platform = "onlyfans") {
       value.context.creatorUploadReadRows({
         getMaxRows: () => 3,
         getLastRow: () => 2,
-        getRange: () => ({ getValues: () => structuredClone(value.rows) }),
+        getRange: () => ({
+          getValues: () => structuredClone(value.rows),
+          getFormulas: () =>
+            value.rows.map((cells) =>
+              cells.map((cell) =>
+                typeof cell === "string" && cell.startsWith("=") ? cell : "",
+              ),
+            ),
+        }),
       })[row - 2],
     ),
     platform,

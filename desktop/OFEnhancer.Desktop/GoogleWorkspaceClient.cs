@@ -25,6 +25,8 @@ internal sealed class GoogleWorkspaceClient
     private const int MaximumValuesRequestBytes = 1024 * 1024;
     internal const int MaximumStructuralRequestBytes = 4 * 1024 * 1024;
     internal const int MaximumStructuralRequestCount = 5_016;
+    internal const int MaximumWorkflowLedgerReadableRows = 5_002;
+    internal const int MaximumWorkflowLedgerResponseBytes = 16 * 1024 * 1024;
     private const int MaximumSheets = 100;
     private static readonly Uri DriveOrigin = new("https://www.googleapis.com");
     private static readonly Uri SheetsOrigin = new("https://sheets.googleapis.com");
@@ -103,7 +105,9 @@ internal sealed class GoogleWorkspaceClient
         ).ConfigureAwait(false);
 
         // A sheet without a grid (a chart sheet) has no cell range to read.
-        GoogleSheetSnapshot[] gridSheets = metadata.Sheets.Where(sheet => sheet.RowCount > 0 && sheet.ColumnCount > 0).ToArray();
+        GoogleSheetSnapshot[] gridSheets = metadata.Sheets.Where(sheet => sheet.Title != "_Workflows"
+            && sheet.RowCount > 0 && sheet.ColumnCount > 0).ToArray();
+        if (gridSheets.Length == 0) return metadata;
         List<(string Name, string Value)> query =
         [
             ("includeGridData", "true"),
@@ -130,8 +134,65 @@ internal sealed class GoogleWorkspaceClient
         return snapshot with
         {
             Sheets = metadata.Sheets.Select(original =>
-                snapshot.Sheets.SingleOrDefault(sheet => sheet.SheetId == original.SheetId) ?? original).ToArray(),
+                gridSheets.Any(sheet => sheet.SheetId == original.SheetId)
+                    ? snapshot.Sheets.SingleOrDefault(sheet => sheet.SheetId == original.SheetId) ?? original
+                    : original).ToArray(),
         };
+    }
+
+    // The workflow ledger is intentionally read in a separate bounded request.
+    // It must not consume the workbook-wide response budget used by catalogue
+    // discovery, identity binding, and row creation.
+    internal async Task<GoogleWorkflowLedgerRead> ReadWorkflowLedgerAsync(string fileId,
+        CancellationToken cancellationToken)
+    {
+        string workbookId = Required(fileId, 256, "fileId");
+        GoogleWorkbookSnapshot metadata = await ReadWorkbookMetadataAsync(workbookId, cancellationToken)
+            .ConfigureAwait(false);
+        GoogleSheetSnapshot[] candidates = [.. metadata.Sheets.Where(sheet => sheet.Title == "_Workflows")];
+        if (candidates.Length > 1)
+            throw new GoogleCatalogueException("google-workflow-ledger-ambiguous");
+        if (candidates.Length == 0)
+            return new(metadata, 0, false);
+
+        GoogleSheetSnapshot ledgerMetadata = candidates[0];
+        if (ledgerMetadata.RowCount <= 0 || ledgerMetadata.ColumnCount <= 0)
+            return new(metadata, 0, ledgerMetadata.RowCount > MaximumWorkflowLedgerReadableRows);
+
+        int lastRow = Math.Min(ledgerMetadata.RowCount, MaximumWorkflowLedgerReadableRows);
+        string range = $"'{ledgerMetadata.Title.Replace("'", "''", StringComparison.Ordinal)}'!A1:N{lastRow}";
+        const string fields =
+            "spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(userEnteredValue,hyperlink))))";
+        Uri endpoint = BuildUri(
+            $"{SheetsOrigin.AbsoluteUri.TrimEnd('/')}/v4/spreadsheets/{EscapePath(workbookId)}",
+            [("includeGridData", "true"), ("ranges", range), ("fields", fields)]);
+        byte[] body;
+        try
+        {
+            body = await SendReadAsync(token => CreateJsonRequest(HttpMethod.Get, endpoint, token),
+                SheetsOrigin, MaximumWorkflowLedgerResponseBytes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (GoogleCatalogueException error) when (error.Code == "google-response-too-large")
+        {
+            throw new GoogleCatalogueException("google-workflow-ledger-full");
+        }
+
+        GoogleWorkbookSnapshot data = GoogleWorkbookSnapshot.Parse(body);
+        if (!string.Equals(data.WorkbookId, workbookId, StringComparison.Ordinal)
+            || data.Sheets.DistinctBy(sheet => sheet.SheetId).Count() != data.Sheets.Count
+            || data.Sheets.Any(sheet => !metadata.Sheets.Any(original => original.SheetId == sheet.SheetId
+                && string.Equals(original.Title, sheet.Title, StringComparison.Ordinal)))
+            || data.Sheets.Count(sheet => sheet.SheetId == ledgerMetadata.SheetId
+                && string.Equals(sheet.Title, ledgerMetadata.Title, StringComparison.Ordinal)) != 1)
+            throw new GoogleCatalogueException("google-workflow-ledger-changed");
+
+        GoogleSheetSnapshot readLedger = data.Sheets.Single(sheet => sheet.SheetId == ledgerMetadata.SheetId);
+        GoogleWorkbookSnapshot combined = metadata with
+        {
+            Sheets = metadata.Sheets.Select(sheet => sheet.SheetId == ledgerMetadata.SheetId
+                ? readLedger : sheet).ToArray(),
+        };
+        return new(combined, body.Length, ledgerMetadata.RowCount > MaximumWorkflowLedgerReadableRows);
     }
 
     internal async Task<GoogleWorkbookSnapshot> ReadImportWorkbookAsync(string fileId, CancellationToken cancellationToken, int? preferredSheetId = null)
@@ -139,7 +200,7 @@ internal sealed class GoogleWorkspaceClient
         string workbookId = Required(fileId, 256, "fileId");
         GoogleWorkbookSnapshot metadata = await ReadWorkbookMetadataAsync(workbookId, cancellationToken).ConfigureAwait(false);
         GoogleSheetSnapshot[] visible = metadata.Sheets.Where(sheet =>
-            !sheet.Hidden && sheet.RowCount > 0 && sheet.ColumnCount > 0
+            !sheet.Hidden && sheet.Title != "_Workflows" && sheet.RowCount > 0 && sheet.ColumnCount > 0
             && (preferredSheetId is null || sheet.SheetId == preferredSheetId)).ToArray();
         if (visible.Length == 0)
             throw new GoogleCatalogueException("catalogue-tab-not-found");
@@ -161,7 +222,7 @@ internal sealed class GoogleWorkspaceClient
     {
         string workbookId=Required(fileId,256,"fileId");
         GoogleWorkbookSnapshot metadata=await ReadWorkbookMetadataAsync(workbookId,cancellationToken).ConfigureAwait(false);
-        GoogleSheetSnapshot[] visible=metadata.Sheets.Where(sheet=>!sheet.Hidden && sheet.RowCount>0 && sheet.ColumnCount>0 && (preferredSheetId is null || sheet.SheetId==preferredSheetId)).ToArray();
+        GoogleSheetSnapshot[] visible=metadata.Sheets.Where(sheet=>!sheet.Hidden && sheet.Title!="_Workflows" && sheet.RowCount>0 && sheet.ColumnCount>0 && (preferredSheetId is null || sheet.SheetId==preferredSheetId)).ToArray();
         if(visible.Length==0) throw new GoogleCatalogueException("catalogue-tab-not-found");
         GoogleWorkbookSnapshot headers=await ReadImportRangesAsync(metadata,visible,true,cancellationToken).ConfigureAwait(false);
         GoogleCatalogueImportPreview detected=GoogleCatalogueImportReader.Detect(headers,preferredSheetId);
@@ -183,7 +244,7 @@ internal sealed class GoogleWorkspaceClient
         bool headerDiscovery, CancellationToken cancellationToken)
     {
         string cells = headerDiscovery ? "formattedValue" : "effectiveValue,formattedValue,hyperlink,effectiveFormat(numberFormat(type))";
-        string fields = $"spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values({cells}))))";
+        string fields = $"spreadsheetId,properties(title),sheets(properties(sheetId,title,hidden,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values({cells})))),developerMetadata(metadataId,metadataKey,metadataValue,visibility,location(spreadsheet,sheetId,dimensionRange(sheetId,dimension,startIndex,endIndex)))";
         List<(string Name, string Value)> query = [("fields", fields)];
         foreach (GoogleSheetSnapshot sheet in requestedSheets)
         {
@@ -205,6 +266,7 @@ internal sealed class GoogleWorkspaceClient
         {
             Sheets = metadata.Sheets.Select(original => requestedSheets.Any(requested => requested.SheetId == original.SheetId)
                 ? snapshot.Sheets.Single(sheet => sheet.SheetId == original.SheetId) : original).ToArray(),
+            DeveloperMetadata = snapshot.DeveloperMetadata,
         };
     }
 
@@ -537,6 +599,92 @@ internal sealed class GoogleWorkspaceClient
             updates.Add(new($"'{escapedSheet}'!{(char)('A' + column - 1)}{row}", value));
         }
         return UpdateValuesBatchAsync(new(workbookId, updates), cancellationToken, raw: true);
+    }
+
+    // New rows on a reviewed workbook become catalogue identities only when their stable U
+    // value and row-scoped metadata are committed with the row content in the same batch.
+    internal Task WriteCatalogueRowWithIdentityAsync(string workbookId, int sheetId, string sheetTitle,
+        IReadOnlyDictionary<string, int> columns, int row, string id, string? releaseDate,
+        string title, string description, string category, string seasonArc, string itemId,
+        CancellationToken cancellationToken)
+    {
+        string boundedWorkbook = Required(workbookId, 256, "workbookId");
+        string boundedSheet = Required(sheetTitle, 200, "sheetTitle");
+        string canonicalItemId = CanonicalItemGuid(itemId);
+        if (sheetId <= 0 || row is < 2 or > 5002 || columns is null
+            || !columns.TryGetValue("sourceKey", out _)
+            || !columns.TryGetValue("title", out _)
+            || !columns.TryGetValue("plannedDate", out _)
+            || !columns.TryGetValue("description", out _)
+            || columns.Values.Any(column => column is < 1 or > 25))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+
+        List<JsonElement> requests = [];
+        void AddCell(string field, string value, int? fixedColumn = null)
+        {
+            if (fixedColumn is int fixedIndex)
+            {
+                requests.Add(UpdateOneCell(sheetId, row - 1, fixedIndex, value));
+                return;
+            }
+            if (!columns.TryGetValue(field, out int column))
+            {
+                if (value.Length == 0 && field is "category" or "series") return;
+                throw new GoogleCatalogueException("catalogue-layout-changed");
+            }
+            requests.Add(UpdateOneCell(sheetId, row - 1, column - 1, value));
+        }
+
+        AddCell("sourceKey", Required(id, 200, "id"));
+        if (releaseDate is not null)
+            AddCell("plannedDate", Required(releaseDate, 10, "releaseDate"));
+        AddCell("title", Required(title, 300, "title"));
+        AddCell("description", Required(description, 10_000, "description", allowEmpty: true, allowLineBreaks: true));
+        AddCell("category", Required(category, 200, "category", allowEmpty: true));
+        AddCell("series", Required(seasonArc, 200, "seasonArc", allowEmpty: true));
+        AddCell("ofenhancerId", canonicalItemId, fixedColumn: 20);
+        requests.Add(JsonSerializer.SerializeToElement(new
+        {
+            createDeveloperMetadata = new
+            {
+                developerMetadata = new
+                {
+                    metadataKey = ItemMetadataKey,
+                    metadataValue = canonicalItemId,
+                    visibility = "DOCUMENT",
+                    location = new
+                    {
+                        dimensionRange = new
+                        {
+                            sheetId,
+                            dimension = "ROWS",
+                            startIndex = row - 1,
+                            endIndex = row,
+                        },
+                    },
+                },
+            },
+        }));
+        return ApplyStructuralBatchAsync(new(boundedWorkbook, requests), cancellationToken);
+    }
+
+    private static JsonElement UpdateOneCell(int sheetId, int rowIndex, int columnIndex, string value) =>
+        JsonSerializer.SerializeToElement(new
+        {
+            updateCells = new
+            {
+                start = new { sheetId, rowIndex, columnIndex },
+                rows = new[] { new { values = new[] { new { userEnteredValue = new { stringValue = value } } } } },
+                fields = "userEnteredValue",
+            },
+        });
+
+    private static string CanonicalItemGuid(string value)
+    {
+        if (!Guid.TryParseExact(value, "D", out Guid parsed)
+            || !string.Equals(parsed.ToString("D"), value, StringComparison.Ordinal))
+            throw new GoogleCatalogueException("invalid-catalogue-entry");
+        return value;
     }
 
     internal Task UpdateMetadataCellAsync(string workbookId, int metadataId, int column, string value, CancellationToken cancellationToken)
@@ -1069,7 +1217,8 @@ internal sealed record GoogleWorkbookSnapshot(
         string? value = null;
         if (cell.TryGetProperty("formattedValue", out JsonElement formatted))
             value = CellValue(formatted, 10_000, allowTextWhitespace: true);
-        else if (cell.TryGetProperty("effectiveValue", out JsonElement effective))
+        else if (cell.TryGetProperty("effectiveValue", out JsonElement effective)
+            || cell.TryGetProperty("userEnteredValue", out effective))
         {
             if (effective.ValueKind != JsonValueKind.Object || effective.EnumerateObject().Count() > 1)
                 throw Invalid();
@@ -1079,6 +1228,9 @@ internal sealed record GoogleWorkbookSnapshot(
                 "stringValue" => CellValue(property.Value, 10_000, allowTextWhitespace: true),
                 "numberValue" => CellValue(property.Value, 10_000),
                 "boolValue" => CellValue(property.Value, 10_000),
+                // A narrow ledger read deliberately omits calculated values.
+                // Keep formula evidence separate so the writer rejects it.
+                "formulaValue" when !cell.TryGetProperty("effectiveValue", out _) => null,
                 "" => null,
                 _ => throw Invalid(),
             };
@@ -1142,6 +1294,12 @@ internal sealed record GoogleSheetSnapshot(
     IReadOnlyList<GoogleWorkbookRowSnapshot> Rows,
     IReadOnlySet<int>? HiddenColumnIndexes = null,
     IReadOnlyList<GoogleDimensionGroupSnapshot>? ColumnGroups = null
+);
+
+internal sealed record GoogleWorkflowLedgerRead(
+    GoogleWorkbookSnapshot Workbook,
+    int ResponseBytes,
+    bool RowsBeyondReadLimit
 );
 
 internal sealed record GoogleDimensionGroupSnapshot(

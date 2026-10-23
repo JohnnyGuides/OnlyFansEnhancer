@@ -3,14 +3,36 @@ namespace OFEnhancer.Catalogue.Tests;
 [TestClass]
 public sealed class UploadCatalogueTests
 {
+    [DataTestMethod]
+    [DataRow("pornhub", "https://www.pornhub.com/view_video.php?viewkey=phfree")]
+    [DataRow("reddit", "https://www.reddit.com/r/example/comments/abc123/episode-title")]
+    [DataRow("redgifs", "https://www.redgifs.com/watch/example-clip")]
+    [DataRow("clips4sale", "https://www.clips4sale.com/studio/123/456/episode")]
+    public void SupportedPlatformResultsQueueToTheirFrozenWorkbook(string platform, string url)
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
+        UploadCatalogueRow row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+
+        UploadResult result = test.Store.RecordUploadResult(new(row.Row, row.Fingerprint, platform, url,
+            Id: row.Id, Destination: row.Destination));
+
+        Assert.AreEqual("recorded-local", result.Status);
+        Assert.IsNotNull(result.SheetWriteback, "every supported platform result should have a durable writeback intent");
+        Assert.AreEqual("work", result.SheetWriteback.WorkbookId);
+        Assert.AreEqual(platform, result.SheetWriteback.Platform);
+    }
+
     [TestMethod]
     public void UploadSheetIntentAndAttemptSurviveRestartWithoutLosingDestinationOrLocalLink()
     {
         using TestStore test = new();
-        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
-        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/123456789", Id: row.Id);
         test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
         test.Store.SaveGoogleCatalogueProfile("work", "1", "Videos", "catalogue-v1", true, DateTimeOffset.UtcNow);
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual(new UploadCatalogueDestination("work", "1"), row.Destination);
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly", "https://fansly.com/post/123456789",
+            Id: row.Id, Destination: row.Destination);
         var local = test.Store.RecordUploadResult(request);
         Assert.AreEqual(local.PostUrl, test.Store.GetUploadSheetWritebacks("work").Single().Url);
         var intent = test.Store.QueueUploadSheetWriteback("work", "1", request, local.PostUrl!);
@@ -23,6 +45,126 @@ public sealed class UploadCatalogueTests
         reopened.RecordUploadSheetWriteback(intent with { State = "completed" });
         Assert.AreEqual(0, reopened.GetUploadSheetWritebacks("work").Count);
     }
+
+    [TestMethod]
+    public void FrozenUploadDestinationSurvivesWorkbookSwitchAndNeverFollowsNewSelection()
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Original workbook");
+        UploadCatalogueRow fromOriginal = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.AreEqual(new UploadCatalogueDestination("work", "1"), fromOriginal.Destination,
+            "a complete imported workbook supplies provenance even before profile review");
+
+        test.Store.SaveGoogleCatalogueWorkbook("other-work", "Other workbook");
+        UploadCatalogueRow current = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.IsNull(current.Destination, "a selection with different workbook provenance cannot be used as a destination");
+        UploadResult frozenReceipt = test.Store.RecordUploadResult(new(current.Row, current.Fingerprint, "fansly",
+            "https://fansly.com/post/888888888", Id: current.Id, ItemId: current.ItemId,
+            Destination: fromOriginal.Destination));
+        Assert.AreEqual("recorded-local", frozenReceipt.Status);
+        Assert.AreEqual("work", frozenReceipt.SheetWriteback!.WorkbookId);
+        Assert.AreEqual(1, test.Store.GetUploadSheetWritebacks("work").Count);
+        Assert.AreEqual(0, test.Store.GetUploadSheetWritebacks("other-work").Count);
+
+        UploadResult unboundLegacy = test.Store.RecordUploadResult(new(current.Row, frozenReceipt.Fingerprint!, "script",
+            "https://johnnyguides.com/sync/scripts/unbound.funscript", Id: current.Id, ItemId: current.ItemId));
+        Assert.AreEqual("google-catalogue-association-required", unboundLegacy.GoogleError);
+        Assert.IsNull(unboundLegacy.SheetWriteback);
+        Assert.AreEqual(0, test.Store.GetUploadSheetWritebacks("other-work").Count);
+    }
+
+    [TestMethod]
+    public void PartialOrNonGoogleProjectionClearsDestinationProvenance()
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Workbook");
+        Assert.AreEqual(new UploadCatalogueDestination("work", "1"),
+            test.Store.GetUploadCatalogueSnapshot().Rows.Single().Destination);
+
+        test.Store.ImportWorkbookProjection(new("work", "1", false,
+        [new(2, "episode", "Title", "Description", "2026-09-11", null, null, 0, 0,
+            new Dictionary<string, string>(), null)]), updateGoogleBindings: false);
+        Assert.IsNull(test.Store.GetUploadCatalogueSnapshot().Rows.Single().Destination,
+            "partial projections cannot establish complete-workbook affinity");
+
+        test.Store.ImportWorkbookProjection(new("work", "1", true,
+        [new(2, "episode", "Title", "Description", "2026-09-11", null, null, 0, 0,
+            new Dictionary<string, string>(), null)]), updateGoogleBindings: false);
+        test.Store.ImportSnapshot("""{"version":1,"items":[{"sourceKey":"episode","sourceRow":2,"title":"Title","description":"Description","xTeasers":0,"redditTeasers":0,"platformLinks":{}}]}""");
+        Assert.IsNull(test.Store.GetUploadCatalogueSnapshot().Rows.Single().Destination,
+            "a non-Google snapshot import clears Google provenance");
+    }
+
+    [TestMethod]
+    public void WorkbookBoundAdaptiveIntentWithNoSheetIsListedAndItsStateIsVisible()
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
+        var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        var request = new UploadResultRequest(row.Row, row.Fingerprint, "fansly",
+            "https://fansly.com/post/123456789", Id: row.Id);
+
+        UploadSheetWriteback intent = test.Store.QueueUploadSheetWriteback("work", null, request, request.PostUrl);
+        Assert.IsNull(intent.SheetId);
+        Assert.AreEqual(intent, test.Store.GetUploadSheetWritebacks("work").Single());
+        Assert.AreEqual(new UploadSheetWritebackCounts(1, 0, 0, 0), test.Store.GetUploadSheetWritebackCounts("work"));
+
+        test.Store.RecordUploadSheetWriteback(intent with { State = "conflict", ErrorCode = "catalogue-entry-changed" });
+        Assert.AreEqual("conflict", test.Store.GetUploadSheetWritebackDetails("work").Single().Intent.State);
+        Assert.AreEqual(new UploadSheetWritebackCounts(0, 1, 0, 0), test.Store.GetUploadSheetWritebackCounts("work"));
+        Assert.AreEqual(new UploadSheetWritebackCounts(0, 0, 0, 0), test.Store.GetUploadSheetWritebackCounts("other-workbook"));
+    }
+
+    [DataTestMethod]
+    [DataRow("catalogue-entry-changed")]
+    [DataRow("catalogue-layout-changed")]
+    public void NeverAttemptedCatalogueConflictCanBeRebasedOnlyAfterFingerprintReview(string code)
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
+        test.Store.SaveGoogleCatalogueProfile("work", "1", "Videos", "catalogue-v1", true, DateTimeOffset.UtcNow);
+        UploadCatalogueRow before = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        UploadResult recorded = test.Store.RecordUploadResult(new(before.Row, before.Fingerprint, "fansly",
+            "https://fansly.com/post/123456789", Id: before.Id, Destination: before.Destination));
+        UploadSheetWriteback intent = recorded.SheetWriteback!;
+        test.Store.RecordUploadSheetWriteback(intent with { State = "conflict", ErrorCode = code });
+        test.Store.ImportWorkbookProjection(new("work", "1", true,
+        [new(2, "episode", "Reviewed title", "Reviewed description", "2026-09-11", null, null, 0, 0,
+            new Dictionary<string, string>(), null)]), updateGoogleBindings: false);
+        UploadCatalogueRow current = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        Assert.ThrowsException<WorkbookProjectionException>(() => test.Store.RebaseUploadSheetWriteback(intent.Key, before.Fingerprint));
+
+        UploadSheetWritebackDetail detail = test.Store.GetUploadSheetWritebackDetails("work").Single();
+        Assert.AreEqual(current.Fingerprint, detail.CurrentFingerprint);
+        UploadSheetWriteback rebased = test.Store.RebaseUploadSheetWriteback(intent.Key, current.Fingerprint);
+        Assert.AreEqual("pending", rebased.State);
+        Assert.IsNull(rebased.ErrorCode);
+        Assert.AreEqual(intent.Key, rebased.Key);
+        Assert.AreEqual(intent.WorkbookId, rebased.WorkbookId);
+        Assert.AreEqual(intent.SheetId, rebased.SheetId);
+        Assert.AreEqual(intent.Url, rebased.Url);
+        Assert.AreEqual("Reviewed title", rebased.Title);
+        Assert.AreEqual("Reviewed description", rebased.Description);
+    }
+
+    [TestMethod]
+    public void AttemptedWritebackCannotBeRebasedAndReviewDetailsIncludeItsCurrentFingerprint()
+    {
+        using TestStore test = new();
+        test.Store.SaveGoogleCatalogueWorkbook("work", "Test workbook");
+        UploadCatalogueRow row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
+        UploadSheetWriteback intent = new("attempted-key", "work", null, row.Id, "fansly",
+            "https://fansly.com/post/123456789", row.Title, row.Description);
+        test.Store.RecordUploadSheetWriteback(intent with { State = "attempted" });
+        test.Store.RecordUploadSheetWriteback(intent with { State = "conflict", ErrorCode = "catalogue-entry-changed" });
+
+        UploadSheetWritebackDetail detail = test.Store.GetUploadSheetWritebackDetails("work").Single();
+        Assert.AreEqual(row.Fingerprint, detail.CurrentFingerprint);
+        WorkbookProjectionException error = Assert.ThrowsException<WorkbookProjectionException>(
+            () => test.Store.RebaseUploadSheetWriteback(intent.Key, row.Fingerprint));
+        Assert.AreEqual("upload-sheet-writeback-rebase-not-allowed", error.Code);
+        Assert.AreEqual("conflict", test.Store.GetUploadSheetWritebackDetails("work").Single().Intent.State);
+    }
     [TestMethod]
     public void ScriptLinksQueueSheetWritesAndASecondVariantIsNotAConflict()
     {
@@ -31,10 +173,10 @@ public sealed class UploadCatalogueTests
         test.Store.SaveGoogleCatalogueProfile("work", "1", "Videos", "catalogue-v1", true, DateTimeOffset.UtcNow);
         var row = test.Store.GetUploadCatalogueSnapshot().Rows.Single();
         var first = test.Store.RecordUploadResult(new(row.Row, row.Fingerprint, "script",
-            "https://johnnyguides.com/sync/scripts/episode.funscript", Id: row.Id));
+            "https://johnnyguides.com/sync/scripts/episode.funscript", Id: row.Id, Destination: row.Destination));
         Assert.AreEqual("recorded-local", first.Status);
         var second = test.Store.RecordUploadResult(new(row.Row, first.Fingerprint!, "script",
-            "https://www.johnnyguides.com/sync/scripts/episode-1.funscript", Id: row.Id));
+            "https://www.johnnyguides.com/sync/scripts/episode-1.funscript", Id: row.Id, Destination: row.Destination));
         Assert.AreEqual("recorded-local", second.Status);
         CollectionAssert.AreEquivalent(new[] {
             "https://johnnyguides.com/sync/scripts/episode.funscript",
@@ -214,6 +356,7 @@ public sealed class UploadCatalogueTests
         var result = test.Store.RecordUploadResult(request);
         Assert.AreEqual("recorded-local", result.Status);
         Assert.IsFalse(result.GoogleSynced);
+        Assert.AreEqual("google-catalogue-association-required", result.GoogleError);
         Assert.AreEqual("https://fansly.com/post/123456789", test.Store.GetItems().Single().PlatformLinks["fansly"]);
         Assert.AreNotEqual(row.Fingerprint, result.Fingerprint);
         Assert.AreEqual("idempotent", test.Store.RecordUploadResult(request).Status);

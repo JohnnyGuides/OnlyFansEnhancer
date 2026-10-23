@@ -107,7 +107,19 @@ operator procedures are maintained only in [Google catalogue](google-catalogue.m
 Verified upload results also queue a destination-bound `upload-sheet-writeback`
 audit intent. The adaptive link writer shares the teaser cell protections,
 checkpoints before dispatch, and verifies readback. The existing hourly sheet
-worker processes pending intents and reconciles attempted ones read-only.
+worker processes pending intents and reconciles attempted ones read-only. A separate
+minute timer retries workflow history with provider I/O outside the serial dispatcher.
+
+Migration 10 adds `creator_workflows`. Chrome checkpoints mirror bounded metadata,
+asset fingerprints, destination-specific results, script receipts, and frozen X reply
+intent through a durable local outbox. It does not own publication clicks. A complete
+Google import records workbook/sheet provenance; catalogue selections freeze that
+destination into upload and social plans. Receipts never substitute the workbook
+selected later. Legacy runs lacking that proof stay local until explicit association.
+New revisions with a frozen destination enqueue an immutable workbook-bound ledger
+intent in the same transaction. The `_Workflows` v1 sheet preserves source and promoted
+URLs separately, alongside script, reply, and asset metadata. Every remote attempt is
+durable before dispatch; uncertain attempts use readback rather than another append.
 
 The separate X host uses a basename plus identity proof within configured roots,
 not a caller-provided arbitrary path. Representative frames come from the selected
@@ -257,16 +269,17 @@ Catalogue migration 7 adds the teaser manager tables. After each
 `x_first_replies` (per teaser — an owner post with video that is neither a reply
 nor a repost — the earliest owner reply in its conversation carrying an
 OnlyFans or Fansly post link) and `x_post_bindings`: a status linked from exactly
-one row's `Twitter Teaser(s)` cell binds as `sheet-link`; otherwise a first-reply
-link matching exactly one row's OnlyFans/Fansly link binds as `reply-link`;
-`owner` bindings are never replaced. Disagreements and ambiguous matches are
+one row's `Twitter Teaser(s)` cell binds as `sheet-link`; explicit `owner` bindings
+are never replaced. A first-reply link identifies the promoted destination, not
+the video's source. The overview exposes incoming promotions separately from an
+episode's own teasers. Disagreements and ambiguous source matches are
 recorded in `x_binding_conflicts`, and an ambiguous match binds nothing; titles
 are never compared.
 
 While Google is connected, the hourly `XTeaserController` tick (independent of
 `xTeaserRoot`) asks `GoogleCatalogueController` to write discovered teaser links
 back to the sheet on the serial request dispatcher. It refreshes the bindings,
-then takes at most five owner video teasers bound by `reply-link` or `owner`
+then takes at most five owner video teasers bound by explicit `owner`
 evidence, with no recorded conflict, whose status is missing from the bound
 row's `Twitter Teaser(s)` cell, oldest first. `GoogleTeaserLinkWriter` appends
 `https://x.com/<owner handle>/status/<id>` to that one cell (see

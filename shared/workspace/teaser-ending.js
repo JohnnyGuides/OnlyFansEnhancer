@@ -457,7 +457,7 @@
       else if (appliedFile && getFile() === appliedFile) {
         const source = originalFile;
         appliedFile = originalFile = null;
-        useFile(source);
+        useFile(source, { restore: true });
       }
     });
     button("close").addEventListener("click", () => dialog.close());
@@ -477,7 +477,7 @@
       const generated = output;
       if (getFile() !== appliedFile) originalFile = getFile();
       appliedFile = generated;
-      useFile(generated);
+      useFile(generated, { derived: true });
     }
     async function run() {
       if (controller || busy() || locked() || !getFile()) return;

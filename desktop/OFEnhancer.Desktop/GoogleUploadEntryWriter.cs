@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using OFEnhancer.Catalogue;
@@ -10,22 +11,35 @@ internal sealed record GoogleUploadEntryRequest(
     string? FileName = null, long? FileSize = null, long? FileLastModified = null,
     string? Id = null, string? ExpectedTitle = null, string? ExpectedDescription = null,
     string Category = "", string SeasonArc = "",
-    string? ExpectedCategory = null, string? ExpectedSeasonArc = null);
+    string? ExpectedCategory = null, string? ExpectedSeasonArc = null,
+    string? OperationId = null);
+
+internal sealed record GoogleUploadEntryExecution(
+    string? ExpectedSourceKey = null,
+    string? ExpectedItemId = null,
+    bool ReconcileOnly = false,
+    Action<string, string, int>? BeforeWrite = null);
 
 internal sealed record GoogleUploadEntryResult(string Id, int Row, string Status,
     GoogleCatalogueImportPreview Preview);
 
 internal sealed class GoogleUploadEntryWriter(
-    string workbookId, int? preferredSheetId, GoogleWorkspaceClient workspace)
+    string workbookId, int? preferredSheetId, GoogleWorkspaceClient workspace,
+    IReadOnlyList<CatalogueItemSummary>? localItems = null)
 {
     internal async Task<GoogleUploadEntryResult> WriteAsync(
-        GoogleUploadEntryRequest request, CancellationToken cancellationToken)
+        GoogleUploadEntryRequest request, CancellationToken cancellationToken,
+        GoogleUploadEntryExecution? execution = null)
     {
         Validate(request);
         GoogleWorkbookSnapshot workbook = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken, preferredSheetId)
             .ConfigureAwait(false);
         GoogleCatalogueImportPreview before = GoogleCatalogueImportReader.Read(workbook, preferredSheetId);
-        string id = request.Mode == "new" ? NewId(request, before.Projection.Items) : request.Id!;
+        string id = request.Mode == "new" ? execution?.ExpectedSourceKey ?? NewId(request, before.Projection.Items) : request.Id!;
+        string? newItemId = request.Mode == "new"
+            ? execution?.ExpectedItemId ?? localItems?.SingleOrDefault(item => item.SourceKey == id)?.ItemId
+                ?? DerivedItemId(workbook.WorkbookId, before.CatalogueSheetId, id) : null;
+        int? newRow = null;
         WorkbookCatalogueItem? existing = before.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
         // In update mode Season/Arc and Category change only when the user moved them off the
         // selection baseline; an untouched or unknown baseline never blanks a sheet value.
@@ -36,27 +50,41 @@ internal sealed class GoogleUploadEntryWriter(
                 ? request.Category.Length > 0 : request.Category != request.ExpectedCategory;
         if (request.Mode == "new")
         {
+            if (execution?.ReconcileOnly == true)
+            {
+                if (execution.ExpectedSourceKey is null || execution.ExpectedItemId is null
+                    || existing is null || !ExactNew(existing, request))
+                    throw new GoogleCatalogueException("catalogue-entry-operation-unresolved");
+                if (!HasStableIdentity(workbook, before.CatalogueSheetId, existing.SourceRow, execution.ExpectedItemId))
+                    throw new GoogleCatalogueException("catalogue-entry-operation-unresolved");
+                return new(id, existing.SourceRow, "reconciled", before);
+            }
             if (!before.Columns.ContainsKey("plannedDate") || !before.Columns.ContainsKey("description"))
                 throw new GoogleCatalogueException("catalogue-layout-changed");
             if (!string.IsNullOrEmpty(request.Category) && !before.Columns.ContainsKey("category")
                 || !string.IsNullOrEmpty(request.SeasonArc) && !before.Columns.ContainsKey("series"))
                 throw new GoogleCatalogueException("catalogue-layout-changed");
             if (existing is not null)
-                return ExactNew(existing, request)
-                    ? new(id, existing.SourceRow, "already-created", before)
-                    : throw new GoogleCatalogueException("catalogue-new-entry-conflict");
+            {
+                if (!ExactNew(existing, request))
+                    throw new GoogleCatalogueException("catalogue-new-entry-conflict");
+                string? existingItemId = ReadStableIdentity(workbook, before.CatalogueSheetId, existing.SourceRow);
+                if (existingItemId is null || localItems?.SingleOrDefault(item => item.SourceKey == id) is { } local
+                    && local.ItemId != existingItemId)
+                    throw new GoogleCatalogueException("google-row-identity-unresolved");
+                return new(id, existing.SourceRow, "already-created", before);
+            }
+            RequireStableIdHeader(workbook, before);
             try
             {
                 int? reservedRow = FindReservedDateRow(workbook, before, request.ReleaseDate);
-                if (reservedRow is int row)
-                    await workspace.WriteCatalogueRowAtAsync(workbookId, before.CatalogueSheetTitle,
-                        before.Columns, row, id, request.Title, request.Description,
-                        request.Category, request.SeasonArc, cancellationToken).ConfigureAwait(false);
-                else
-                    await workspace.AppendCatalogueRowAsync(workbookId, before.CatalogueSheetTitle,
-                        before.HeaderRow, before.Columns, id, request.ReleaseDate,
-                        request.Title, request.Description, request.Category, request.SeasonArc,
-                        cancellationToken).ConfigureAwait(false);
+                newRow = reservedRow ?? FindAppendRow(workbook, before);
+                execution?.BeforeWrite?.Invoke(id, newItemId!, newRow.Value);
+                await workspace.WriteCatalogueRowWithIdentityAsync(workbookId, before.CatalogueSheetId,
+                    before.CatalogueSheetTitle, before.Columns, newRow.Value, id,
+                    reservedRow is null ? request.ReleaseDate : null,
+                    request.Title, request.Description, request.Category, request.SeasonArc,
+                    newItemId!, cancellationToken).ConfigureAwait(false);
             }
             catch (GoogleMutationUncertainException)
             {
@@ -100,13 +128,19 @@ internal sealed class GoogleUploadEntryWriter(
                 // A readback decides whether the one attempted write completed.
             }
         }
-        GoogleCatalogueImportPreview after = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        GoogleWorkbookSnapshot afterWorkbook = await workspace.ReadImportWorkbookAsync(workbookId,
+            cancellationToken, preferredSheetId).ConfigureAwait(false);
+        GoogleCatalogueImportPreview after = GoogleCatalogueImportReader.Read(afterWorkbook, preferredSheetId);
         if (!before.HasSameMapping(after)) throw new GoogleCatalogueException("catalogue-layout-changed");
         WorkbookCatalogueItem? written = after.Projection.Items.SingleOrDefault(item => item.SourceKey == id);
-        if (written is null || written.Title != request.Title || written.Description != request.Description
+        if (written is null || request.Mode == "new" && written.SourceRow != newRow
+            || written.Title != request.Title || written.Description != request.Description
             || seriesRequested && written.Series != (string.IsNullOrEmpty(request.SeasonArc) ? null : request.SeasonArc)
             || request.Mode == "new" && written.PlannedDate != request.ReleaseDate)
             throw new GoogleCatalogueException("google-row-write-unresolved");
+        if (request.Mode == "new" && !HasStableIdentity(afterWorkbook, after.CatalogueSheetId,
+            written.SourceRow, newItemId!))
+            throw new GoogleCatalogueException("google-row-identity-unresolved");
         if (categoryRequested
             && await ReadFieldAsync(after, written, "category", cancellationToken).ConfigureAwait(false) != request.Category)
             throw new GoogleCatalogueException("google-row-write-unresolved");
@@ -152,11 +186,29 @@ internal sealed class GoogleUploadEntryWriter(
         return source == sheetTitle && returned[(separator + 1)..] == requested[(requested.LastIndexOf('!') + 1)..];
     }
 
-    private async Task<GoogleCatalogueImportPreview> ReadAsync(CancellationToken cancellationToken)
+    private static void RequireStableIdHeader(GoogleWorkbookSnapshot workbook, GoogleCatalogueImportPreview preview)
     {
-        GoogleWorkbookSnapshot snapshot = await workspace.ReadImportWorkbookAsync(workbookId, cancellationToken, preferredSheetId)
-            .ConfigureAwait(false);
-        return GoogleCatalogueImportReader.Read(snapshot, preferredSheetId);
+        GoogleSheetSnapshot sheet = workbook.Sheets.Single(candidate => candidate.SheetId == preview.CatalogueSheetId);
+        GoogleWorkbookRowSnapshot? header = sheet.Rows.SingleOrDefault(candidate => candidate.RowNumber == preview.HeaderRow);
+        if (header?.Cells.ElementAtOrDefault(20)?.Value?.Trim() != "OFEnhancer ID")
+            throw new GoogleCatalogueException("google-sync-new-row-unavailable");
+    }
+
+    private static int FindAppendRow(GoogleWorkbookSnapshot workbook, GoogleCatalogueImportPreview preview)
+    {
+        GoogleSheetSnapshot sheet = workbook.Sheets.Single(candidate => candidate.SheetId == preview.CatalogueSheetId);
+        int lastUsedRow = sheet.Rows.Where(row => row.RowNumber > preview.HeaderRow && row.Cells.Take(25)
+            .Any(cell => !string.IsNullOrWhiteSpace(cell.Value) || cell.Formula is not null
+                || !string.IsNullOrWhiteSpace(cell.Hyperlink)))
+            .Select(row => row.RowNumber).DefaultIfEmpty(preview.HeaderRow).Max();
+        int row = lastUsedRow + 1;
+        if (row > 5002 || row > sheet.RowCount || HasAnyRowMetadataAtRow(workbook, preview.CatalogueSheetId, row))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        GoogleWorkbookRowSnapshot? candidate = sheet.Rows.SingleOrDefault(item => item.RowNumber == row);
+        if (candidate is not null && candidate.Cells.Take(25).Any(cell => !string.IsNullOrWhiteSpace(cell.Value)
+            || cell.Formula is not null || !string.IsNullOrWhiteSpace(cell.Hyperlink)))
+            throw new GoogleCatalogueException("catalogue-layout-changed");
+        return row;
     }
 
     private static int? FindReservedDateRow(GoogleWorkbookSnapshot workbook,
@@ -167,7 +219,7 @@ internal sealed class GoogleUploadEntryWriter(
         GoogleSheetSnapshot sheet = workbook.Sheets.Single(s => s.SheetId == preview.CatalogueSheetId);
         int? selected = null;
         // Columns A-L plus every column of the detected mapping, which includes those the writer fills.
-        int[] inspectedColumns = [.. Enumerable.Range(0, 12).Union(preview.Columns.Values.Select(column => column - 1))];
+        int[] inspectedColumns = [.. Enumerable.Range(0, 25)];
         foreach (GoogleWorkbookRowSnapshot row in sheet.Rows.Where(r => r.RowNumber > preview.HeaderRow))
         {
             string? date = row.Cells.ElementAtOrDefault(dateColumn - 1)?.Value;
@@ -175,9 +227,12 @@ internal sealed class GoogleUploadEntryWriter(
             // A date alone reserves a slot; any other content means it belongs to another entry.
             bool occupied = inspectedColumns
                 .Where(index => index != dateColumn - 1)
-                .Any(index => !string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(index)?.Value));
+                .Any(index => !string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(index)?.Value)
+                    || row.Cells.ElementAtOrDefault(index)?.Formula is not null
+                    || !string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(index)?.Hyperlink));
             if (occupied) continue;
             if (!string.IsNullOrWhiteSpace(row.Cells.ElementAtOrDefault(idColumn - 1)?.Value)) continue;
+            if (HasAnyRowMetadataAtRow(workbook, preview.CatalogueSheetId, row.RowNumber)) continue;
             selected ??= row.RowNumber;
         }
         return selected;
@@ -186,6 +241,40 @@ internal sealed class GoogleUploadEntryWriter(
     private static bool ExactNew(WorkbookCatalogueItem item, GoogleUploadEntryRequest request) =>
         item.Title == request.Title && item.Description == request.Description
         && item.PlannedDate == request.ReleaseDate && (item.Series ?? "") == request.SeasonArc;
+
+    internal static string DerivedItemId(string workbookId, int sheetId, string sourceKey)
+    {
+        byte[] input = Encoding.UTF8.GetBytes(
+            $"ofenhancer.workbook-provisional-item.v1\0{workbookId}\0{sheetId.ToString(CultureInfo.InvariantCulture)}\0{sourceKey}");
+        byte[] bytes = SHA256.HashData(input)[..16];
+        bytes[7] = (byte)((bytes[7] & 0x0f) | 0x50);
+        bytes[8] = (byte)((bytes[8] & 0x3f) | 0x80);
+        return new Guid(bytes).ToString("D");
+    }
+
+    private static bool HasStableIdentity(GoogleWorkbookSnapshot workbook, int sheetId, int row, string itemId) =>
+        string.Equals(ReadStableIdentity(workbook, sheetId, row), itemId, StringComparison.Ordinal);
+
+    private static string? ReadStableIdentity(GoogleWorkbookSnapshot workbook, int sheetId, int row)
+    {
+        GoogleSheetSnapshot sheet = workbook.Sheets.Single(candidate => candidate.SheetId == sheetId);
+        GoogleWorkbookRowSnapshot? data = sheet.Rows.SingleOrDefault(candidate => candidate.RowNumber == row);
+        string? cellId = data?.Cells.ElementAtOrDefault(20)?.Value?.Trim();
+        GoogleDeveloperMetadataSnapshot[] metadata = workbook.DeveloperMetadata.Where(candidate =>
+            candidate.Key == "ofenhancer.item_id.v1" && candidate.SheetId == sheetId
+            && candidate.Dimension == "ROWS" && candidate.StartRowIndex == row - 1
+            && candidate.EndRowIndex == row).ToArray();
+        if (!Guid.TryParseExact(cellId, "D", out Guid parsed)
+            || !string.Equals(parsed.ToString("D"), cellId, StringComparison.Ordinal)
+            || metadata.Length != 1 || metadata[0].Visibility != "DOCUMENT"
+            || metadata[0].Value != cellId) return null;
+        return cellId;
+    }
+
+    private static bool HasAnyRowMetadataAtRow(GoogleWorkbookSnapshot workbook, int sheetId, int row) =>
+        workbook.DeveloperMetadata.Any(candidate => candidate.LocationKind == GoogleDeveloperMetadataLocationKind.DimensionRange
+            && candidate.SheetId == sheetId && candidate.Dimension == "ROWS"
+            && candidate.StartRowIndex == row - 1);
 
     internal static string NewId(GoogleUploadEntryRequest request, IReadOnlyList<WorkbookCatalogueItem> items)
     {
@@ -315,7 +404,7 @@ internal sealed class GoogleUploadEntryWriter(
         return episodes.Count >= 2 ? prefix!.ToLowerInvariant() : null;
     }
 
-    private static void Validate(GoogleUploadEntryRequest request)
+    internal static void Validate(GoogleUploadEntryRequest request)
     {
         if (request.Mode is not ("new" or "update")
             || request.Title is not { Length: > 0 and <= 300 }

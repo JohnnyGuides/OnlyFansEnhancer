@@ -30,6 +30,8 @@ async function withConsole(run) {
       globalThis.calls = [];
       globalThis.ports = [];
       globalThis.scriptReplies = [];
+      globalThis.scriptCatalogueReplies = [];
+      globalThis.reconcileCalls = [];
       globalThis.chrome = {
         storage: {
           local: {
@@ -44,6 +46,12 @@ async function withConsole(run) {
             },
             set(data, callback) {
               Object.assign(values, data);
+              queueMicrotask(() => callback?.());
+              return Promise.resolve();
+            },
+            remove(keys, callback) {
+              for (const key of Array.isArray(keys) ? keys : [keys])
+                delete values[key];
               queueMicrotask(() => callback?.());
               return Promise.resolve();
             },
@@ -103,6 +111,28 @@ async function withConsole(run) {
               return callback(
                 scriptReplies.shift() || { ok: false, error: "unexpected" },
               );
+            if (message.type === "RETRY_CREATOR_SCRIPT_CATALOGUE")
+              return callback({
+                ok: true,
+                scriptState: scriptCatalogueReplies.shift() || {
+                  status: "uploaded",
+                  urls: [],
+                  sentKeys: [],
+                  sheetPending: false,
+                },
+              });
+            if (message.type === "RECONCILE_CREATOR_UPLOAD_RESULT") {
+              reconcileCalls.push(message);
+              return callback({
+                ok: true,
+                accepted: true,
+                result: {
+                  platform: message.platform,
+                  status: "catalogue-updated",
+                  postUrl: message.postUrl,
+                },
+              });
+            }
             if (message.type === "LOAD_DEVELOPMENT_TEMPLATE")
               return callback({
                 ok: true,
@@ -176,6 +206,10 @@ async function withConsole(run) {
                   releaseDate: "2026-01-02",
                   fingerprint: "b".repeat(64),
                   publicationState: {},
+                  destination: {
+                    workbookId: "workbook-test",
+                    sheetId: "0",
+                  },
                 },
               ]
             : [],
@@ -221,6 +255,34 @@ async function draftOnlyFansClip(page, { fansly = false } = {}) {
       document.querySelector("#uploadButton").textContent ===
         "Create & upload" && !document.querySelector("#uploadButton").disabled,
   );
+}
+
+async function waitForStartedUpload(page) {
+  try {
+    await page.waitForFunction(() =>
+      calls.some((call) => call.type === "START_CREATOR_UPLOAD"),
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => {
+      const read = (selector) =>
+        document.querySelector(selector)?.textContent?.trim() || "";
+      return {
+        matchStatus: read("#matchStatus"),
+        catalogueStatus: read("#catalogueSelectionStatus"),
+        uploadError: read("#uploadError"),
+        availabilityStatus: read("#availabilityStatus"),
+        selectedCatalogueRow: document.querySelector("#catalogueRow")?.value,
+        uploadButton: {
+          text: read("#uploadButton"),
+          disabled: document.querySelector("#uploadButton")?.disabled,
+        },
+        messageTypes: calls.map((call) => call.type),
+        visibleStatus: document.body.innerText.slice(-1800),
+      };
+    });
+    console.error("START_CREATOR_UPLOAD readiness diagnostic", state);
+    throw error;
+  }
 }
 
 // Reassembles each committed script from its relayed parts, as the worker does.
@@ -520,6 +582,118 @@ for (const { linksReady, legacyFrame } of [
   });
 }
 
+test("resumed script state keeps prior success keys and uploads only missing destinations", async () => {
+  await withConsole(async (page) => {
+    await chooseScript(page, "episode.funscript", JSON.stringify(script));
+    const saved = await page.evaluate(() => {
+      const file = document.querySelector("#uploadScript").files[0];
+      const url = "https://johnnyguides.com/sync/scripts/episode.funscript";
+      return {
+        id: "upload-script-state-resume",
+        draft: {
+          title: "Neutral episode",
+          description: "A benign description.",
+          scriptLeadInMs: 0,
+          fileProof: {
+            script: {
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              lastModified: file.lastModified,
+            },
+          },
+        },
+        platforms: [
+          {
+            platform: "onlyfans",
+            status: "catalogue-updated",
+            postUrl: "https://onlyfans.com/123456/johnny_guides",
+          },
+          {
+            platform: "fansly",
+            status: "catalogue-updated",
+            postUrl: "https://fansly.com/post/987654321",
+          },
+        ],
+        scriptState: {
+          status: "partial",
+          urls: [url],
+          sentKeys: ["123456"],
+          results: [{ url, keys: ["123456"], sheetPending: false }],
+          sheetPending: false,
+        },
+      };
+    });
+    await page.addInitScript((saved) => {
+      globalThis.savedResume = saved;
+    }, saved);
+    await page.reload();
+    await page.evaluate((text) => {
+      const proof = savedResume.draft.fileProof.script;
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File([text], proof.name, {
+          type: proof.type,
+          lastModified: proof.lastModified,
+        }),
+      );
+      const input = document.querySelector("#uploadScript");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      scriptReplies.push({
+        ok: true,
+        scripts: [
+          {
+            url: "https://johnnyguides.com/sync/scripts/episode.funscript",
+            keys: ["987654321"],
+            sheetError: "",
+          },
+        ],
+        scriptState: {
+          status: "uploaded",
+          writebackState: "not-associated",
+          urls: ["https://johnnyguides.com/sync/scripts/episode.funscript"],
+          sentKeys: ["987654321"],
+          sheetPending: false,
+        },
+      });
+    }, JSON.stringify(script));
+    await page.locator("#resumeUpload").click();
+    await page.locator("#resumePrompt").waitFor({ state: "hidden" });
+    await page.waitForFunction(
+      () =>
+        calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 1,
+    );
+    const [sent] = await sentScripts(page);
+    assert.deepEqual(sent.uploads[0].keys, ["987654321"]);
+    assert.equal(
+      (await sentScripts(page))
+        .flatMap((commit) => commit.uploads.flatMap((upload) => upload.keys))
+        .includes("123456"),
+      false,
+      "the persisted sent key is never posted again after resume",
+    );
+    await scriptCard(page)
+      .getByRole("button", { name: "Link to catalogue" })
+      .click();
+    assert.equal(
+      await page.locator("#savedCatalogueAssociation").isVisible(),
+      true,
+    );
+    assert.equal(
+      await scriptCard(page)
+        .getByRole("button", { name: "Retry catalogue sync" })
+        .count(),
+      0,
+    );
+    assert.equal(
+      (await sentScripts(page)).length,
+      1,
+      "linking an unassociated script does not resend it to the provider",
+    );
+  });
+});
+
 test("Script card validates, sends after the links exist and fails on its own", async () => {
   await withConsole(async (page) => {
     const jg = page.locator("#targetJohnnyGuides");
@@ -567,9 +741,7 @@ test("Script card validates, sends after the links exist and fails on its own", 
 
     await draftOnlyFansClip(page);
     await page.locator("#uploadButton").click();
-    await page.waitForFunction(() =>
-      calls.some((call) => call.type === "START_CREATOR_UPLOAD"),
-    );
+    await waitForStartedUpload(page);
     assert.equal(await jg.isDisabled(), true, "locked run");
     assert.equal(await page.locator("#uploadScript").isDisabled(), true);
     const savedDraft = await page.evaluate(
@@ -590,9 +762,14 @@ test("Script card validates, sends after the links exist and fails on its own", 
 
     await page.evaluate(() => {
       scriptReplies.push({
-        ok: false,
-        error:
-          "Add the JohnnyGuides site and upload token in the toolkit settings, then retry the script.",
+        ok: true,
+        scripts: [
+          {
+            keys: ["123456"],
+            error:
+              "Add the JohnnyGuides site and upload token in the toolkit settings, then retry the script.",
+          },
+        ],
       });
       deliverResult("onlyfans", {
         status: "catalogue-updated",
@@ -638,7 +815,7 @@ test("Script card validates, sends after the links exist and fails on its own", 
       .getByRole("button", { name: "Retry script" })
       .click();
     await scriptCard(page)
-      .getByRole("button", { name: "Retry script" })
+      .getByRole("button", { name: "Retry catalogue sync" })
       .waitFor();
     assert.match(
       await scriptCard(page).textContent(),
@@ -646,32 +823,44 @@ test("Script card validates, sends after the links exist and fails on its own", 
     );
     assert.equal(await scriptCard(page).locator("a").count(), 1);
     await page.evaluate(() =>
-      scriptReplies.push({
-        ok: true,
-        scripts: [
-          {
-            url: "https://johnnyguides.com/sync/scripts/brand-new-clip.funscript",
-            keys: ["123456"],
-            sheetError: "",
-          },
+      scriptCatalogueReplies.push({
+        status: "uploaded",
+        urls: [
+          "https://johnnyguides.com/sync/scripts/brand-new-clip.funscript",
         ],
+        sentKeys: ["123456"],
+        sheetPending: false,
+        error: "",
       }),
     );
     await scriptCard(page)
-      .getByRole("button", { name: "Retry script" })
+      .getByRole("button", { name: "Retry catalogue sync" })
       .click();
-    await page.waitForFunction(() =>
-      /Uploaded to JohnnyGuides/.test(
-        [...document.querySelectorAll(".result-card")].at(-1).textContent,
-      ),
-    );
+    await page.waitForFunction(() => {
+      const card = [...document.querySelectorAll(".result-card")].find(
+        (item) => item.querySelector("h3")?.textContent === "Script",
+      );
+      return card && card.querySelectorAll("button").length === 0;
+    });
     assert.equal(
       await scriptCard(page).locator("a").getAttribute("href"),
       "https://johnnyguides.com/sync/scripts/brand-new-clip.funscript",
     );
     assert.equal(await scriptCard(page).getByRole("button").count(), 0);
     assert.equal(await scriptCard(page).locator("a").count(), 1);
-    assert.equal((await sentScripts(page)).length, 3);
+    assert.equal(
+      (await sentScripts(page)).length,
+      2,
+      "catalogue-only retry never resends the provider upload",
+    );
+    assert.equal(
+      await page.evaluate(
+        () =>
+          calls.filter((call) => call.type === "RETRY_CREATOR_SCRIPT_CATALOGUE")
+            .length,
+      ),
+      1,
+    );
     assert.match(await onlyfans.textContent(), /Sheet updated and verified/);
 
     await page.evaluate(() =>
@@ -697,7 +886,7 @@ test("Script card validates, sends after the links exist and fails on its own", 
   });
 });
 
-test("Fansly failure keeps only its key retryable in a shared timing group", async () => {
+test("OnlyFans script failure retries its key without resending successful Fansly", async () => {
   await withConsole(async (page) => {
     await page.locator("#uploadTeaser").setInputFiles({
       name: "benign-preview.mp4",
@@ -707,22 +896,14 @@ test("Fansly failure keeps only its key retryable in a shared timing group", asy
     await chooseScript(page, "benign.funscript", JSON.stringify(script));
     await draftOnlyFansClip(page, { fansly: true });
     await page.locator("#uploadButton").click();
-    await page.waitForFunction(() =>
-      calls.some((call) => call.type === "START_CREATOR_UPLOAD"),
-    );
+    await waitForStartedUpload(page);
     await page.evaluate(() => {
       scriptReplies.push({
         ok: true,
         scripts: [
           {
-            keys: [],
-            error:
-              "The Fansly video media ID was not captured. The Fansly script was not sent; recover the video's attachment ID before retrying.",
-          },
-          {
             keys: ["123456"],
-            url: "https://johnnyguides.com/sync/scripts/benign.funscript",
-            sheetError: "",
+            error: "The OnlyFans script upload failed; retry this target.",
           },
         ],
       });
@@ -730,38 +911,151 @@ test("Fansly failure keeps only its key retryable in a shared timing group", asy
         status: "catalogue-updated",
         postUrl: "https://onlyfans.com/123456/johnny_guides",
       });
+    });
+    await scriptCard(page)
+      .getByRole("button", { name: "Retry script" })
+      .waitFor();
+    assert.match(
+      await scriptCard(page).textContent(),
+      /OnlyFans script upload failed/,
+    );
+    await page.evaluate(() => {
+      scriptReplies.push({
+        ok: true,
+        scripts: [
+          {
+            keys: ["987654321"],
+            url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+            sheetError: "",
+          },
+        ],
+      });
       deliverResult("fansly", {
         status: "catalogue-updated",
         postUrl: "https://fansly.com/post/987654321",
       });
     });
-    await scriptCard(page)
-      .getByRole("button", { name: "Retry script" })
-      .waitFor();
-    assert.match(await scriptCard(page).textContent(), /Fansly.*not sent/);
+    await page.waitForFunction(
+      () =>
+        calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 2,
+    );
     await page.evaluate(() =>
       scriptReplies.push({
         ok: true,
         scripts: [
           {
-            keys: ["987654321", "999000"],
+            keys: ["123456"],
             url: "https://johnnyguides.com/sync/scripts/benign.funscript",
             sheetError: "",
           },
         ],
       }),
     );
-    await scriptCard(page)
-      .getByRole("button", { name: "Retry script" })
-      .click();
+    await scriptCard(page).getByRole("button", { name: "Send script" }).click();
+    await page.waitForFunction(
+      () =>
+        calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 3,
+    );
+    const retried = await sentScripts(page);
+    assert.deepEqual(retried[0].uploads[0].keys, ["123456"]);
+    assert.deepEqual(retried[1].uploads[0].keys, ["987654321"]);
+    assert.deepEqual(retried[2].uploads[0].keys, ["123456"]);
+    assert.equal(
+      retried
+        .flatMap((upload) => upload.uploads.flatMap((item) => item.keys))
+        .filter((key) => key === "987654321").length,
+      1,
+      "the successful Fansly key is never resent",
+    );
+    assert.equal(await scriptCard(page).getByRole("button").count(), 0);
+  });
+});
+
+test("owner-confirmed OnlyFans URL adds only the missing script key", async () => {
+  await withConsole(async (page) => {
+    await page.locator("#uploadTeaser").setInputFiles({
+      name: "benign-preview.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("benign preview fixture"),
+    });
+    await chooseScript(page, "benign.funscript", JSON.stringify(script));
+    await draftOnlyFansClip(page, { fansly: true });
+    await page.locator("#uploadButton").click();
+    await waitForStartedUpload(page);
+    await page.evaluate(() => {
+      scriptReplies.push({
+        ok: true,
+        scripts: [
+          {
+            keys: ["987654321"],
+            url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+            sheetError: "",
+          },
+        ],
+      });
+      deliverResult("onlyfans", {
+        status: "posted-link-unresolved",
+        submitAttempted: true,
+      });
+      deliverResult("fansly", {
+        status: "catalogue-updated",
+        postUrl: "https://fansly.com/post/987654321",
+      });
+    });
+    await page.waitForFunction(
+      () =>
+        calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 1,
+    );
+    const onlyfans = page.locator(".result-card", {
+      has: page.locator("h3", { hasText: "OnlyFans" }),
+    });
+    await onlyfans.getByText("Already posted? Add the link").click();
+    const form = onlyfans.locator("form");
+    const input = form.getByLabel("OnlyFans published post link");
+    await input.fill("https://onlyfans.com/123456/johnny_guides");
+    await form.getByRole("button", { name: "Save published link" }).click();
+    assert.equal(
+      await page.evaluate(() => reconcileCalls.length),
+      0,
+      "the owner confirmation checkbox is required",
+    );
+    await form.locator('input[type="checkbox"]').check();
+    await page.evaluate(() =>
+      scriptReplies.push({
+        ok: true,
+        scripts: [
+          {
+            keys: ["123456"],
+            url: "https://johnnyguides.com/sync/scripts/benign.funscript",
+            sheetError: "",
+          },
+        ],
+      }),
+    );
+    await form.getByRole("button", { name: "Save published link" }).click();
+    await page.waitForFunction(() => reconcileCalls.length === 1);
     await page.waitForFunction(
       () =>
         calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 2,
     );
+    const [reconcile] = await page.evaluate(() => reconcileCalls);
+    assert.equal(reconcile.platform, "onlyfans");
+    assert.equal(
+      reconcile.postUrl,
+      "https://onlyfans.com/123456/johnny_guides",
+    );
+    assert.equal(reconcile.confirmSource, true);
     const sent = await sentScripts(page);
-    assert.deepEqual(sent[0].uploads[0].keys, ["123456", "987654321"]);
-    assert.deepEqual(sent[1].uploads[0].keys, ["987654321"]);
-    assert.equal(await scriptCard(page).getByRole("button").count(), 0);
+    assert.deepEqual(sent[0].uploads[0].keys, ["987654321"]);
+    assert.deepEqual(sent[1].uploads[0].keys, ["123456"]);
+    assert.deepEqual(
+      sent
+        .flatMap((commit) => commit.uploads.flatMap((upload) => upload.keys))
+        .sort(),
+      ["123456", "987654321"],
+      "each target key is sent once",
+    );
+    assert.match(await onlyfans.textContent(), /Sheet updated and verified/);
   });
 });
 
@@ -827,7 +1121,28 @@ test("the script for OnlyFans and Fansly is shifted by the measured opening fram
       calls.some((call) => call.type === "START_CREATOR_UPLOAD"),
     );
     await page.evaluate(() => {
-      scriptReplies.push({ ok: true, scripts: [] });
+      scriptReplies.push(
+        {
+          ok: true,
+          scripts: [
+            {
+              keys: ["123456"],
+              url: "https://johnnyguides.com/sync/scripts/Brand-new-clip.funscript",
+              sheetError: "",
+            },
+          ],
+        },
+        {
+          ok: true,
+          scripts: [
+            {
+              keys: ["987654321"],
+              url: "https://johnnyguides.com/sync/scripts/Brand-new-clip.funscript",
+              sheetError: "",
+            },
+          ],
+        },
+      );
       deliverResult("onlyfans", {
         status: "catalogue-updated",
         postUrl: "https://onlyfans.com/123456/johnny_guides",
@@ -837,10 +1152,11 @@ test("the script for OnlyFans and Fansly is shifted by the measured opening fram
         postUrl: "https://fansly.com/post/987654321",
       });
     });
-    await page.waitForFunction(() =>
-      calls.some((call) => call.type === "UPLOAD_SYNC_SCRIPT"),
+    await page.waitForFunction(
+      () =>
+        calls.filter((call) => call.type === "UPLOAD_SYNC_SCRIPT").length === 2,
     );
-    const [sent] = await sentScripts(page);
+    const sent = await sentScripts(page);
     assert.equal(
       await page.evaluate(
         () =>
@@ -849,16 +1165,32 @@ test("the script for OnlyFans and Fansly is shifted by the measured opening fram
       ),
       1023,
     );
-    assert.deepEqual(sent.uploads, [
-      {
-        keys: ["123456", "987654321"],
-        funscript: {
-          actions: [
-            { at: 1023, pos: 10 },
-            { at: 2523, pos: 90 },
-          ],
-        },
-      },
-    ]);
+    assert.deepEqual(
+      sent.map((commit) => commit.uploads),
+      [
+        [
+          {
+            keys: ["123456"],
+            funscript: {
+              actions: [
+                { at: 1023, pos: 10 },
+                { at: 2523, pos: 90 },
+              ],
+            },
+          },
+        ],
+        [
+          {
+            keys: ["987654321"],
+            funscript: {
+              actions: [
+                { at: 1023, pos: 10 },
+                { at: 2523, pos: 90 },
+              ],
+            },
+          },
+        ],
+      ],
+    );
   });
 });

@@ -19,6 +19,8 @@ public interface IGoogleCatalogueController : IDisposable
     void RefreshCatalogueForMatching();
     GoogleCatalogueStatusView applyGoogleWorkbookMigration(string planHash);
     GoogleCatalogueStatusView syncGoogleCatalogue();
+    GoogleCatalogueStatusView retryUploadWritebacks() =>
+        throw new GoogleCatalogueControllerException("google-upload-writeback-unavailable");
     GoogleCatalogueStatusView disconnectGoogleCatalogue();
 }
 
@@ -42,15 +44,24 @@ internal interface IGoogleCatalogueSession : IDisposable
     Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
         CancellationToken cancellationToken) =>
         throw new GoogleCatalogueException("google-upload-write-unavailable");
+    Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+        int? preferredSheetId, CancellationToken cancellationToken) =>
+        WriteUploadEntryAsync(request, cancellationToken);
+    Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+        int? preferredSheetId, GoogleUploadEntryExecution? execution, CancellationToken cancellationToken) =>
+        WriteUploadEntryAsync(request, preferredSheetId, cancellationToken);
     Task<GoogleTeaserLinkResult> AppendTeaserLinkAsync(string sourceKey, string url,
         CancellationToken cancellationToken) =>
         throw new GoogleCatalogueException("google-teaser-write-unavailable");
     Task<GoogleTeaserLinkResult> WriteUploadLinkAsync(UploadSheetWriteback intent, Action<int> beforeWrite,
         CancellationToken cancellationToken) =>
         throw new GoogleCatalogueException("google-upload-write-unavailable");
+    Task<GoogleWorkflowLedgerResult> WriteWorkflowLedgerAsync(CreatorWorkflowProjectionIntent intent,
+        Action<int> beforeWrite, CancellationToken cancellationToken) =>
+        throw new GoogleCatalogueException("google-workflow-ledger-unavailable");
 }
 
-internal sealed class GoogleCatalogueController : IGoogleCatalogueController
+internal sealed partial class GoogleCatalogueController : IGoogleCatalogueController
 {
     private const string CatalogueProfile = "catalogue-v1";
     private readonly object _gate = new();
@@ -473,21 +484,72 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             }) ?? throw new JsonException();
         }
         catch (JsonException) { throw new GoogleCatalogueControllerException("invalid-catalogue-entry"); }
+        bool operationIdWellFormed = request.OperationId is not null
+            && Guid.TryParseExact(request.OperationId, "D", out Guid parsedOperationId)
+            && parsedOperationId != Guid.Empty && parsedOperationId.ToString("D") == request.OperationId;
+        UploadCatalogueEntryIntent? priorIntent = request.Mode == "new" && operationIdWellFormed
+            ? _store.GetUploadCatalogueEntryIntent(request.OperationId!) : null;
+        bool readOnlyReconcile = priorIntent?.State is "attempted" or "unresolved" or "completed";
         IGoogleCatalogueSession session;
+        int? preferredSheetId;
+        GoogleCatalogueSelection? selected;
         lock (_gate)
         {
             ThrowIfDisposed();
             session = _session ?? throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
-            if (_ready && request.Mode == "new")
-                throw new GoogleCatalogueControllerException("google-sync-new-row-unavailable");
+            preferredSheetId = request.Mode == "new"
+                ? RequireReviewedProfileForNewEntryLocked(readOnlyReconcile)
+                : SelectedSheetIdLocked();
+            selected = _selection;
             EnterCatalogueOperationLocked();
         }
         try
         {
+            GoogleUploadEntryExecution? execution = null;
+            UploadCatalogueEntryIntent? intent = null;
+            if (request.Mode == "new")
+            {
+                if (request.OperationId is null || !Guid.TryParseExact(request.OperationId, "D", out Guid operationGuid)
+                    || operationGuid == Guid.Empty || operationGuid.ToString("D") != request.OperationId
+                    || selected?.SheetId is null || selected.WorkbookId.Length == 0)
+                    throw new GoogleCatalogueControllerException("invalid-catalogue-entry");
+                GoogleUploadEntryWriter.Validate(request);
+                string requestJson = JsonSerializer.Serialize(request, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
+                });
+                try
+                {
+                    intent = _store.BeginUploadCatalogueEntryIntent(request.OperationId, selected.WorkbookId,
+                        selected.SheetId, requestJson);
+                }
+                catch (InvalidOperationException error) when (error.Message == "catalogue-entry-operation-conflict")
+                {
+                    throw new GoogleCatalogueControllerException("catalogue-entry-operation-conflict");
+                }
+                if (intent.State is "attempted" or "unresolved" or "completed")
+                {
+                    if (intent.SourceKey is null || intent.ItemId is null || intent.Row is null)
+                        throw new GoogleCatalogueControllerException("catalogue-entry-operation-unresolved");
+                    execution = new(intent.SourceKey, intent.ItemId, ReconcileOnly: true);
+                }
+                else
+                {
+                    execution = new(BeforeWrite: (sourceKey, itemId, row) =>
+                        _store.MarkUploadCatalogueEntryAttempted(request.OperationId, sourceKey, itemId, row));
+                }
+            }
             GoogleUploadEntryResult result;
             try
             {
-                result = session.WriteUploadEntryAsync(request, _lifetime.Token).GetAwaiter().GetResult();
+                result = session.WriteUploadEntryAsync(request, preferredSheetId, execution, _lifetime.Token).GetAwaiter().GetResult();
+            }
+            catch (GoogleCatalogueException uncertain) when (request.Mode == "new"
+                && uncertain.Code is "google-row-identity-unresolved" or "google-row-write-unresolved" or "google-mutation-uncertain")
+            {
+                MarkNewRowProfilePending(session);
+                throw;
             }
             catch (GoogleCatalogueException missing) when (missing.Code == "catalogue-entry-missing")
             {
@@ -503,32 +565,136 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
                 }
                 try
                 {
-                    result = session.WriteUploadEntryAsync(request, _lifetime.Token).GetAwaiter().GetResult();
+                    result = session.WriteUploadEntryAsync(request, preferredSheetId, execution, _lifetime.Token).GetAwaiter().GetResult();
                 }
                 catch (GoogleCatalogueException again) when (again.Code == "catalogue-entry-missing")
                 {
                     throw new GoogleCatalogueControllerException("catalogue-entry-not-on-sheet");
                 }
             }
-            lock (_gate)
+            if (request.Mode != "new")
             {
-                ThrowIfDisposed();
-                if (!ReferenceEquals(session, _session))
-                    throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
-                _store.ImportWorkbookProjection(result.Preview.Projection, updateGoogleBindings: false);
+                lock (_gate)
+                {
+                    ThrowIfDisposed();
+                    if (!ReferenceEquals(session, _session))
+                        throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                    _store.ImportWorkbookProjection(result.Preview.Projection, updateGoogleBindings: false);
+                }
+            }
+            else
+            {
+                // The structural writer commits content, U identity, and row metadata together.
+                // Re-inspect before replacing bindings so existing reviewed identities survive
+                // and the new row is bound only from Google-authored identity evidence.
+                WorkbookInspection verified;
+                try { verified = session.InspectAsync(_lifetime.Token).GetAwaiter().GetResult(); }
+                catch
+                {
+                    MarkNewRowProfilePending(session);
+                    throw new GoogleCatalogueControllerException("google-row-identity-unresolved");
+                }
+                WorkbookCatalogueItem? created = verified.Projection.Items.SingleOrDefault(item =>
+                    item.SourceKey == result.Id && item.SourceRow == result.Row);
+                GoogleRowBinding? createdBinding = verified.Bindings.SingleOrDefault(binding =>
+                    binding.LastObservedRow == result.Row && binding.ItemId == binding.MetadataId);
+                if (!verified.AlreadyMigrated || verified.Conflicts.Count != 0 || created is null
+                    || created.MetadataId is null || createdBinding is null
+                    || createdBinding.ItemId != created.MetadataId
+                    || verified.Bindings.Count != verified.Projection.Items.Count)
+                {
+                    MarkNewRowProfilePending(session);
+                    throw new GoogleCatalogueControllerException("google-row-identity-unresolved");
+                }
+                lock (_gate)
+                {
+                    ThrowIfDisposed();
+                    if (!ReferenceEquals(session, _session))
+                        throw new GoogleCatalogueControllerException("google-catalogue-disconnected");
+                    _store.ImportWorkbookProjection(verified.Projection);
+                    _store.ReplaceGoogleBindings(verified.Projection.WorkbookId,
+                        verified.Bindings.Select(binding => binding with { VerifiedUtc = DateTimeOffset.UtcNow }).ToArray());
+                    if (_selection is { SheetId: not null, SheetTitle: not null, Profile: not null } selectedProfile
+                        && selectedProfile.WorkbookId == verified.Projection.WorkbookId
+                        && selectedProfile.SheetId == verified.Projection.SheetId)
+                    {
+                        if (!selectedProfile.Ready)
+                        {
+                            _store.SaveGoogleCatalogueProfile(selectedProfile.WorkbookId, selectedProfile.SheetId,
+                                selectedProfile.SheetTitle, selectedProfile.Profile, true, DateTimeOffset.UtcNow);
+                            _selection = _store.GetGoogleCatalogueSelection();
+                        }
+                        _ready = true;
+                    }
+                }
+                if (request.OperationId is not null)
+                {
+                    GoogleRowBinding binding = verified.Bindings.Single(item => item.LastObservedRow == result.Row
+                        && item.ItemId == item.MetadataId);
+                    _store.CompleteUploadCatalogueEntryIntent(request.OperationId, result.Id,
+                        binding.ItemId, result.Row);
+                }
             }
             return new { id = result.Id, row = result.Row, status = result.Status };
         }
-        catch (Exception exception) { throw SafeException(exception); }
+        catch (Exception exception)
+        {
+            if (request.Mode == "new" && request.OperationId is not null
+                && _store.GetUploadCatalogueEntryIntent(request.OperationId) is { State: "attempted" or "unresolved" } current)
+            {
+                try { _store.MarkUploadCatalogueEntryUnresolved(request.OperationId,
+                    SafeException(exception).Code); } catch { }
+            }
+            throw SafeException(exception);
+        }
         finally { ExitCatalogueOperation(); }
+    }
+
+    private int RequireReviewedProfileForNewEntryLocked(bool allowReadOnlyReconcile = false)
+    {
+        GoogleCatalogueSelection? persisted = _store.GetGoogleCatalogueSelection();
+        GoogleCatalogueSelection? active = _selection;
+        GoogleConnectionCompletion? connection = _completion;
+        if ((!_ready || active is null || persisted != active || connection is null
+            || !active.Ready || active.Profile != CatalogueProfile) && !allowReadOnlyReconcile
+            || active is null || persisted != active || connection is null || active.Profile != CatalogueProfile
+            || string.IsNullOrWhiteSpace(active.SheetId) || string.IsNullOrWhiteSpace(active.SheetTitle)
+            || !int.TryParse(active.SheetId, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out int sheetId)
+            || active.WorkbookId != connection.WorkbookId || sheetId < 0)
+            throw new GoogleCatalogueControllerException("google-sync-new-row-unavailable");
+        return sheetId;
+    }
+
+    private void MarkNewRowProfilePending(IGoogleCatalogueSession session)
+    {
+        lock (_gate)
+        {
+            if (!ReferenceEquals(session, _session)
+                || _selection is not { SheetId: not null, SheetTitle: not null, Profile: not null } selected)
+                return;
+            _ready = false;
+            _store.SaveGoogleCatalogueProfile(selected.WorkbookId, selected.SheetId,
+                selected.SheetTitle, selected.Profile, false, DateTimeOffset.UtcNow);
+            _selection = _store.GetGoogleCatalogueSelection();
+        }
+    }
+
+    private int? SelectedSheetIdLocked()
+    {
+        if (_selection?.SheetId is { } sheetId
+            && int.TryParse(sheetId, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out int parsed))
+            return parsed;
+        return _completion?.PreferredSheetId;
     }
 
     internal UploadResult WriteBackUploadResult(UploadResultRequest request, UploadResult local)
     {
-        if (request.Platform is not ("onlyfans" or "fansly" or "manyvids" or "x")) return local;
+        if (request.Platform is not ("pornhub" or "onlyfans" or "fansly" or "manyvids" or "clips4sale" or "redgifs" or "x" or "reddit" or "script")) return local;
         UploadSheetWriteback? intent = local.SheetWriteback is { } queued
             ? _store.GetUploadSheetWriteback(queued.Key) : null;
-        if (intent is null) return local with { Status = "recorded-local", GoogleError = "google-catalogue-disconnected" };
+        if (intent is null) return local with { Status = "recorded-local", GoogleError = local.GoogleError ?? "google-catalogue-disconnected" };
         UploadSheetWriteback result = WriteBackUploadLink(intent);
         return result.State == "completed"
             ? local with { Status = "updated", GoogleSynced = true,
@@ -536,21 +702,34 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             : local with { Status = "recorded-local", GoogleError = result.ErrorCode ?? "google-link-write-pending" };
     }
 
-    internal void WriteBackUploadLinks()
+    internal IReadOnlyList<UploadSheetWriteback> WriteBackUploadLinks()
     {
         GoogleCatalogueSelection? selection = _store.GetGoogleCatalogueSelection();
-        if (selection is null) return;
-        foreach (UploadSheetWriteback intent in _store.GetUploadSheetWritebacks(selection.WorkbookId))
-            WriteBackUploadLink(intent);
+        if (selection is null) return [];
+        return [.. _store.GetUploadSheetWritebacks(selection.WorkbookId).Select(WriteBackUploadLink)];
+    }
+
+    public GoogleCatalogueStatusView retryUploadWritebacks()
+    {
+        // WriteBackUploadLink owns the operation gate per intent. Do not acquire it
+        // here or each durable writeback would be rejected as a nested operation.
+        WriteBackUploadLinks();
+        WriteBackCreatorWorkflows(reconcileConflicts:true);
+        return getGoogleCatalogueStatus();
     }
 
     private UploadSheetWriteback WriteBackUploadLink(UploadSheetWriteback intent)
     {
-        if (intent.State is "completed" or "conflict") return intent;
-        if (intent.SheetId is null) return intent with { ErrorCode = "catalogue-layout-changed" };
+        if (intent.State == "completed") return intent;
+        bool reconcileConflict = intent.State == "conflict" && intent.ErrorCode == "catalogue-entry-changed";
+        if (intent.State == "conflict" && !reconcileConflict) return intent;
         GoogleCatalogueSelection? selection = _store.GetGoogleCatalogueSelection();
-        if (intent.State == "pending" && (selection is not { Ready: true }
-            || selection.WorkbookId != intent.WorkbookId || selection.SheetId != intent.SheetId))
+        string? activeWorkbookId;
+        lock (_gate) activeWorkbookId = _completion?.WorkbookId;
+        if (selection is null || selection.WorkbookId != intent.WorkbookId || activeWorkbookId != intent.WorkbookId)
+            return intent with { ErrorCode = "catalogue-layout-changed" };
+        if (intent.SheetId is not null && selection.SheetId is not null && selection.SheetId != intent.SheetId
+            || intent.State == "pending" && selection.SheetId is not null && !selection.Ready)
             return intent with { ErrorCode = "catalogue-layout-changed" };
         IGoogleCatalogueSession session;
         lock (_gate)
@@ -587,6 +766,7 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
         {
             string code = SafeException(error).Code;
             outcome = outcome with { State = outcome.State is "attempted" or "unresolved" ? "unresolved"
+                : outcome.State == "conflict" ? "conflict"
                 : code is "platform-link-conflict" or "catalogue-entry-changed" or "catalogue-layout-changed"
                     or "teaser-cell-formula" or "teaser-cell-linked" or "teaser-status-elsewhere"
                     ? "conflict" : "pending", ErrorCode = code };
@@ -1037,6 +1217,10 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
     {
         counts ??= CurrentCountsLocked();
         bool exposePlan = string.Equals(state, "migrationReady", StringComparison.Ordinal);
+        UploadSheetWritebackCounts writebacks = _selection is null
+            ? new(0, 0, 0, 0) : _store.GetUploadSheetWritebackCounts(_selection.WorkbookId);
+        CreatorWorkflowProjectionCounts workflows = _selection is null
+            ? new(0, 0, 0, 0) : _store.GetCreatorWorkflowProjectionCounts(_selection.WorkbookId);
         return new(
             state,
             _selection?.WorkbookTitle ?? _completion?.WorkbookTitle,
@@ -1050,7 +1234,15 @@ internal sealed class GoogleCatalogueController : IGoogleCatalogueController
             errorCode,
             counts.Attempted,
             counts.Unresolved,
-            _settings.Load().GoogleSheetUrl
+            _settings.Load().GoogleSheetUrl,
+            writebacks.Pending,
+            writebacks.Conflicts,
+            writebacks.Attempted,
+            writebacks.Unresolved,
+            workflows.Pending,
+            workflows.Conflicts,
+            workflows.Attempted,
+            workflows.Unresolved
         );
     }
 
@@ -1222,7 +1414,15 @@ public sealed record GoogleCatalogueStatusView(
     string? ErrorCode = null,
     int AttemptedCount = 0,
     int UnresolvedCount = 0,
-    string? PreferredSheetUrl = null
+    string? PreferredSheetUrl = null,
+    int UploadWritebackPendingCount = 0,
+    int UploadWritebackConflictCount = 0,
+    int UploadWritebackAttemptedCount = 0,
+    int UploadWritebackUnresolvedCount = 0,
+    int WorkflowPendingCount = 0,
+    int WorkflowConflictCount = 0,
+    int WorkflowAttemptedCount = 0,
+    int WorkflowUnresolvedCount = 0
 );
 
 internal sealed class GoogleCatalogueControllerException(string code) : Exception(code)
@@ -1265,6 +1465,9 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
             .ConfigureAwait(false);
         return GoogleWorkbookProfile.Inspect(snapshot, _store);
     }
+    public Task<GoogleWorkflowLedgerResult> WriteWorkflowLedgerAsync(CreatorWorkflowProjectionIntent intent,
+        Action<int> beforeWrite, CancellationToken cancellationToken) =>
+        new GoogleWorkflowLedgerWriter(_workbookId,_workspace).WriteAsync(intent,beforeWrite,cancellationToken);
 
     public async Task<GoogleCatalogueImportPreview> ReadImportAsync(CancellationToken cancellationToken)
     {
@@ -1284,9 +1487,17 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
         _syncWorker.RunOnceAsync(_workbookId, sheetId, cancellationToken);
 
     public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
-        CancellationToken cancellationToken) =>
-        new GoogleUploadEntryWriter(_workbookId, _preferredSheetId, _workspace)
-            .WriteAsync(request, cancellationToken);
+        CancellationToken cancellationToken) => WriteUploadEntryAsync(request, _preferredSheetId, cancellationToken);
+
+    public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+        int? preferredSheetId, CancellationToken cancellationToken) =>
+        WriteUploadEntryAsync(request, preferredSheetId, null, cancellationToken);
+
+    public Task<GoogleUploadEntryResult> WriteUploadEntryAsync(GoogleUploadEntryRequest request,
+        int? preferredSheetId, GoogleUploadEntryExecution? execution, CancellationToken cancellationToken) =>
+        new GoogleUploadEntryWriter(_workbookId, preferredSheetId ?? _preferredSheetId, _workspace,
+            _store.GetItems(includeArchived: true))
+            .WriteAsync(request, cancellationToken, execution);
 
     public Task<GoogleTeaserLinkResult> AppendTeaserLinkAsync(string sourceKey, string url,
         CancellationToken cancellationToken) =>
@@ -1295,7 +1506,10 @@ internal sealed class GoogleCatalogueSession : IGoogleCatalogueSession
 
     public Task<GoogleTeaserLinkResult> WriteUploadLinkAsync(UploadSheetWriteback intent, Action<int> beforeWrite,
         CancellationToken cancellationToken) =>
-        new GoogleTeaserLinkWriter(_workbookId, _preferredSheetId, _workspace)
+        new GoogleTeaserLinkWriter(_workbookId,
+            intent.SheetId is null ? _preferredSheetId
+                : int.TryParse(intent.SheetId,out int sheetId) && sheetId>=0 ? sheetId
+                    : throw new GoogleCatalogueException("catalogue-layout-changed"), _workspace)
             .WriteResultAsync(intent, beforeWrite, cancellationToken);
 
     public void Dispose() => _authorization?.Dispose();

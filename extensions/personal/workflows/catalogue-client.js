@@ -165,6 +165,14 @@
       fingerprint: String(payload.fingerprint || "").slice(0, 64),
       platform: String(payload.platform || ""),
       postUrl: String(payload.postUrl || "").slice(0, 500),
+      ...(payload.destination
+        ? {
+            destination:
+              globalThis.CreatorCatalogueContract.catalogueDestination(
+                payload.destination,
+              ),
+          }
+        : {}),
       metadata: {
         id: String(metadata.id || "").slice(0, 500),
         releaseDate: String(metadata.releaseDate || ""),
@@ -321,6 +329,9 @@
         : operation === "writeUploadCatalogueEntry"
           ? {
               mode: String(payload.mode || ""),
+              ...(payload.operationId
+                ? { operationId: String(payload.operationId) }
+                : {}),
               title: String(payload.title || ""),
               description: String(payload.description || ""),
               releaseDate: String(payload.releaseDate || ""),

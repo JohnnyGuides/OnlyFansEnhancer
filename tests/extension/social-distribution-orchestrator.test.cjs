@@ -290,6 +290,35 @@ test("deferred catalogue keeps captured posts local and association never republ
   );
 });
 
+test("explicit social association may fill a missing destination but cannot replace a frozen one", async () => {
+  const runtime = loadRuntime();
+  const input = plan({ catalogue: null });
+  await runtime.store.create(input);
+  const localAssociation = {
+    row: 42,
+    id: "episode-ashley",
+    title: "Episode Ashley",
+    fingerprint: "1234abcd",
+  };
+  await runtime.store.associateCatalogue(input.id, localAssociation);
+  const workbookAssociation = {
+    ...localAssociation,
+    destination: { workbookId: "workbook-a", sheetId: "0" },
+  };
+  await runtime.store.associateCatalogue(input.id, workbookAssociation);
+  assert.deepEqual(
+    plain((await runtime.store.load(input.id)).catalogueAssociation),
+    workbookAssociation,
+  );
+  await assert.rejects(
+    runtime.store.associateCatalogue(input.id, {
+      ...localAssociation,
+      destination: { workbookId: "workbook-b", sheetId: "0" },
+    }),
+    /another workbook/,
+  );
+});
+
 test("association cannot run adapters for unfinished publication jobs", async () => {
   const runtime = loadRuntime();
   const input = plan({ catalogue: null });

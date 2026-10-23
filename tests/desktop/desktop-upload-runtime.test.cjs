@@ -134,6 +134,30 @@ function extension(options = {}) {
   };
 }
 
+test("owner-confirmed link recovery and script catalogue-only retry cross the desktop relay", async () => {
+  const fixture = extension();
+  for (const type of [
+    "RECONCILE_CREATOR_UPLOAD_RESULT",
+    "RETRY_CREATOR_SCRIPT_CATALOGUE",
+  ]) {
+    await fixture.runtime.execute({
+      kind: "message",
+      message: { type, sessionId: "neutral-session" },
+    });
+  }
+  assert.deepEqual(
+    fixture.actions.map((message) => message.type),
+    ["RECONCILE_CREATOR_UPLOAD_RESULT", "RETRY_CREATOR_SCRIPT_CATALOGUE"],
+  );
+  await assert.rejects(
+    fixture.runtime.execute({
+      kind: "message",
+      message: { type: "UNREVIEWED_RECOVERY" },
+    }),
+    /unsupported-upload-message/,
+  );
+});
+
 test("a delayed self-uninstall refusal restarts exchange so the error is delivered without Reload", async () => {
   let rejectUninstall;
   const fixture = extension({
@@ -400,6 +424,26 @@ test("desktop transport cannot rewrite publication checkpoints or read arbitrary
     permissions: { origins: ["https://x.com/*"] },
   });
   assert.equal(permission.granted, false);
+});
+
+test("desktop transport persists the bounded catalogue create idempotency record", async () => {
+  const fixture = extension();
+  const record = {
+    operationId: "12345678-1234-1234-1234-123456789abc",
+    payload: { title: "Neutral episode", description: "A short description." },
+  };
+  await fixture.runtime.execute({
+    kind: "storageSet",
+    values: { creatorUploadCatalogueCreateOperationV1: record },
+  });
+  const result = await fixture.runtime.execute({
+    kind: "storageGet",
+    keys: ["creatorUploadCatalogueCreateOperationV1"],
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(result.creatorUploadCatalogueCreateOperationV1)),
+    record,
+  );
 });
 
 test("desktop Upload Hub can inspect its saved run and start a new one", async () => {

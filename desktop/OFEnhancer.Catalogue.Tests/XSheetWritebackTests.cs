@@ -27,25 +27,26 @@ public sealed class XSheetWritebackTests
             Post("101", t),                                                        // sheet-link: already in the sheet
             Post("103", t.AddHours(1)), Reply("104", t.AddHours(1.5), "103", "https://fansly.com/post/777"), // reply-link
             Post("105", t.AddHours(2)),                                            // unbound
-            Post("106", t.AddHours(3)),                                            // owner binding, conflicted
+            Post("106", t.AddHours(3)),                                            // owner binding; its reply destination does not conflict
             Reply("107", t.AddHours(3.5), "106", "https://onlyfans.com/555/owner"),
             Post("108", t.AddHours(4)),                                            // owner binding, no conflict
             Post("109", t.AddHours(5)),                                            // owner binding, link already present
             Post("110", t.AddHours(6), video: false),                              // not a video teaser
-            Post("111", t.AddHours(7)), Reply("112", t.AddHours(7.5), "111", "https://onlyfans.com/888/owner"), // ambiguous
+            Post("111", t.AddHours(7)), Reply("112", t.AddHours(7.5), "111", "https://onlyfans.com/888/owner"), // ambiguous destination, no source inference
         ]), Now);
         Exec(store, "INSERT OR REPLACE INTO x_post_bindings VALUES ('106','item-b','show-ep02','owner','high','x')");
         Exec(store, "INSERT OR REPLACE INTO x_post_bindings VALUES ('108','item-d','show-ep04','owner','high','x')");
         Exec(store, "INSERT OR REPLACE INTO x_post_bindings VALUES ('109','item-c','show-ep03','owner','high','x')");
         Exec(store, "INSERT OR REPLACE INTO x_post_bindings VALUES ('110','item-d','show-ep04','owner','high','x')");
         store.RefreshXBindings(Now);
-        Assert.IsNotNull(Scalar(store, "SELECT 1 FROM x_binding_conflicts WHERE status_id='106'"));
-        Assert.IsNotNull(Scalar(store, "SELECT 1 FROM x_binding_conflicts WHERE status_id='111'"));
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_binding_conflicts"),
+            "paid reply destinations do not conflict with explicit source ownership or create ambiguous source bindings");
 
         IReadOnlyList<XSheetWritebackCandidate> candidates = store.GetXSheetWritebackCandidates(Now);
 
         CollectionAssert.AreEqual(new[]
         {
+            "106|item-b|show-ep02|https://x.com/Owner_Handle/status/106",
             "108|item-d|show-ep04|https://x.com/Owner_Handle/status/108",
         }, candidates.Select(c => $"{c.StatusId}|{c.ItemId}|{c.SourceKey}|{c.Url}").ToArray());
     }
@@ -64,8 +65,9 @@ public sealed class XSheetWritebackTests
 
         store.RefreshXBindings(Now);
 
-        Assert.AreEqual("destination-b", Scalar(store,
-            "SELECT item_id FROM x_post_bindings WHERE status_id='103' AND evidence='reply-link'"));
+        Assert.IsNull(Scalar(store,
+            "SELECT item_id FROM x_post_bindings WHERE status_id='103'"),
+            "a paid reply destination is not source evidence for the teaser");
         Assert.AreEqual(0, store.GetXSheetWritebackCandidates(Now).Count,
             "A reply points at the promoted destination B, so it is not safe source evidence for A's teaser row.");
     }

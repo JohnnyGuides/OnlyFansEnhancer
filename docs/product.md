@@ -79,11 +79,17 @@ If the owner changes a selected row's title or description, Upload asks whether
 to update that row or create a new one. The run binds the resulting row and
 checks its fingerprint again before platform preparation. A verified platform
 result is recorded against that row; a prepared draft alone has no post link to
-record. Manual OnlyFans and Fansly preparations watch the prepared document for
-the owner's successful publication; ManyVids watches the exact editor's accepted
-final Save. These watches last six hours and end when the document is left or
-the tab is closed. Confirmed links are saved locally, then written to the
-connected Google catalogue through the protected link write-back path.
+record. A manual publication is captured automatically only when a known response
+proves the prepared video's identity. Fansly requires the exact attachment/media
+join; ManyVids requires the exact editor video ID. OnlyFans currently lacks a
+trace-backed media identity contract and therefore uses the in-app published-link
+recovery control, with explicit source confirmation. Watches last six hours and
+end when the document is left or its tab closes. An unresolved result never
+authorizes another final publish click. Confirmed links are saved locally, then
+written to their frozen Google destination through the protected write-back path.
+New-row creation has a durable operation ID: a lost acknowledgement is reconciled
+by the frozen source/item identity; editing the title cannot turn that retry into
+another row.
 The only main-video publishing control is an unchecked **Publish
 immediately** checkbox. Unchecked prepares the composers and leaves each final
 Save or publish action to the owner. Checked authorizes the adapters' existing
@@ -123,7 +129,7 @@ only its file identity and the measured video lead-in are saved for recovery.
 Resume requires reselecting the saved script and uses the original lead-in.
 The worker rejects missing, repeated or out-of-order parts and drops partial
 uploads after five minutes.
-Once every eligible script destination in the run has a post link, the script is posted to
+As each eligible destination returns a verified post link, its script can be posted to
 JohnnyGuides (`POST /sync/scripts`, Bearer token from the toolkit settings) with
 the post ids of the run's links (OnlyFans post id, Fansly id, Pornhub viewkey,
 ManyVids id). Fansly also receives its video's media id, captured from the owning
@@ -140,8 +146,12 @@ specifically for that limited clip. Resume keeps this binding from the saved run
 A script failure appears on its own result card with Retry and never alters the
 platform results. The website names the file by content hash, so the same keys
 and script always give the same file and mapping; a retry after a lost reply is
-harmless. Keys whose catalogue write failed remain retryable; completed keys are
-not posted again. The returned link is recorded in the catalogue's Script column.
+harmless. Provider-confirmed keys are saved before catalogue writeback and are not
+posted again when Google needs a retry. Failed destinations recover independently;
+a missing OnlyFans result cannot hold back a verified Fansly script. Script state
+distinguishes no catalogue association, pending Google sync, and verified sync.
+The catalogue marks selected, uploaded, partially uploaded, and failed scripts.
+The returned links reach the Script column and the versioned workflow ledger.
 The **JohnnyGuides Website** destination is shown disabled until video upload
 to the site exists.
 Only a creator-confirmed exact

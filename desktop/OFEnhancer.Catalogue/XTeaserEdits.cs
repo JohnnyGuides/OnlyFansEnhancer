@@ -44,7 +44,7 @@ public sealed partial class CatalogueStore
     public XTeaserLibraryClip? GetXTeaserLibraryClip(long clipId)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT clip_id,rel_path,episode_key,state,size_bytes,mtime_utc,sha256 FROM x_local_clips WHERE clip_id=$id AND missing=0 AND state IN ('ready','failed')";
+        command.CommandText = "SELECT clip_id,rel_path,episode_key,state,size_bytes,mtime_utc,sha256 FROM x_local_clips WHERE clip_id=$id AND missing=0 AND state IN ('ready','failed','posted')";
         command.Parameters.AddWithValue("$id", clipId);
         using var reader = command.ExecuteReader();
         return reader.Read() ? new(reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2),

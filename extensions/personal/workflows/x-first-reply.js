@@ -46,12 +46,25 @@
     "wrong-account",
   ]);
   const PAID_URL = /^https:\/\/onlyfans\.com\/\d{1,30}\/johnny_guides$/;
+  const EXPLICIT_PAID_URLS = [
+    /^https:\/\/onlyfans\.com\/(?:\d{1,30}|[A-Za-z0-9._]{1,64})(?:\/[A-Za-z0-9._]{1,64})?$/,
+    /^https:\/\/fansly\.com\/(?:[A-Za-z0-9._]{1,64}\/posts|post\/\d{1,30})$/,
+    /^https:\/\/www\.manyvids\.com\/Video\/\d{1,30}$/,
+    /^https:\/\/www\.pornhub\.com\/view_video\.php\?viewkey=[A-Za-z0-9_-]{1,100}$/,
+  ];
   const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
   const STATUS_ID = /^\d{1,25}$/;
   const EVIDENCE = /^[0-9a-f]{64}$/;
 
   function canonicalPaidUrl(value) {
     return typeof value === "string" && PAID_URL.test(value) ? value : "";
+  }
+
+  function canonicalIntentPaidUrl(value) {
+    return typeof value === "string" &&
+      EXPLICIT_PAID_URLS.some((pattern) => pattern.test(value))
+      ? value
+      : "";
   }
 
   function replyText(variant, paidUrl) {
@@ -81,22 +94,47 @@
       return { ok: false, reason: "unbound" };
     if (candidate.ownerReplyExists !== false)
       return { ok: false, reason: "existing-reply" };
-    if (!canonicalPaidUrl(candidate.paidUrl))
+    if (candidate.replyIntent !== undefined && candidate.replyIntent !== null) {
+      const intent = candidate.replyIntent;
+      if (
+        typeof intent.runId !== "string" ||
+        !intent.runId ||
+        typeof candidate.sourceKey !== "string" ||
+        !candidate.sourceKey ||
+        intent.sourceKey !== candidate.sourceKey ||
+        intent.autoReply !== true ||
+        intent.attempted !== false ||
+        intent.replyStatusUrl ||
+        !Number.isInteger(intent.replyDelayMinutes) ||
+        intent.replyDelayMinutes < 1 ||
+        intent.replyDelayMinutes > 1440 ||
+        (intent.wordingTemplate != null &&
+          typeof intent.wordingTemplate !== "string")
+      )
+        return { ok: false, reason: "workflow-ineligible" };
+      if (!canonicalIntentPaidUrl(candidate.paidUrl))
+        return { ok: false, reason: "no-link" };
+    } else if (!canonicalPaidUrl(candidate.paidUrl))
       return { ok: false, reason: "no-link" };
     return { ok: true, reason: "" };
   }
 
   function planItem(candidate, ownerHandle, { now, random, rotation, line }) {
     const postedAt = Date.parse(candidate.postedUtc);
-    const unit = Math.min(Math.max(Number(random()) || 0, 0), 1);
-    const delayMinutes =
-      MIN_DELAY_MINUTES + unit * (MAX_DELAY_MINUTES - MIN_DELAY_MINUTES);
-    const variant = line ?? VARIANTS[rotation % VARIANTS.length];
+    const intent = candidate.replyIntent;
+    const delayMinutes = intent
+      ? intent.replyDelayMinutes
+      : MIN_DELAY_MINUTES +
+        Math.min(Math.max(Number(random()) || 0, 0), 1) *
+          (MAX_DELAY_MINUTES - MIN_DELAY_MINUTES);
+    const variant =
+      line ?? intent?.wordingTemplate ?? VARIANTS[rotation % VARIANTS.length];
     return {
       statusId: candidate.statusId,
       statusUrl: `https://x.com/${ownerHandle}/status/${candidate.statusId}`,
       ownerHandle,
       itemId: candidate.itemId,
+      sourceKey: candidate.sourceKey,
       paidUrl: candidate.paidUrl,
       variant,
       text: replyText(variant, candidate.paidUrl),
@@ -109,6 +147,7 @@
       attempts: 0,
       late: false,
       outcome: "",
+      ...(intent ? { replyIntentRunId: intent.runId } : {}),
     };
   }
 
@@ -244,15 +283,23 @@
         }
         if (!verdict.ok) continue;
         if ((await replyPolicy.lookup(statusId))?.owner === "editor") continue;
-        const reply = await replyPolicy.reserve(statusId, candidate.paidUrl);
+        const reply = await replyPolicy.reserve(
+          statusId,
+          candidate.paidUrl,
+          candidate.replyIntent
+            ? { line: candidate.replyIntent.wordingTemplate || "" }
+            : null,
+        );
         if (reply.owner === "editor") continue;
         state.items[statusId] = planItem(candidate, owner, {
           now: at,
           random,
           rotation: state.rotation,
-          line: reply.line,
+          line: candidate.replyIntent
+            ? candidate.replyIntent.wordingTemplate || ""
+            : reply.line,
         });
-        state.rotation += 1;
+        if (!candidate.replyIntent) state.rotation += 1;
       }
       return current;
     }
@@ -265,6 +312,21 @@
       if (
         listed.candidate.paidUrl !== item.paidUrl ||
         item.text !== replyText(item.variant, item.paidUrl)
+      )
+        return "binding-changed";
+      const intent = listed.candidate.replyIntent;
+      if (
+        Boolean(item.replyIntentRunId) !== Boolean(intent) ||
+        (item.replyIntentRunId &&
+          listed.candidate.sourceKey !== item.sourceKey) ||
+        (item.replyIntentRunId &&
+          (intent.runId !== item.replyIntentRunId ||
+            intent.autoReply !== true ||
+            intent.attempted !== false ||
+            intent.replyStatusUrl ||
+            intent.replyDelayMinutes * MINUTE !==
+              item.notBefore - item.postedAt ||
+            (intent.wordingTemplate || "") !== item.variant))
       )
         return "binding-changed";
       return "";
@@ -596,6 +658,7 @@
     VARIANTS,
     OUTCOMES,
     canonicalPaidUrl,
+    canonicalIntentPaidUrl,
     replyText,
     evidencePresent,
     eligibility,

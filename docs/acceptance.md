@@ -1110,7 +1110,6 @@ installed Chrome-process restart. No live publication was used as a test.
 Installer SHA-256: 5ebaab46537681d747d638ad60feab70ce780403be003cef112413d31aae6d16.
 Stage manifest SHA-256: dbd2589f902ed69c91fad8361b524d5f1a87a05c79827b80f72b93c1b5c8f8e3.
 
-
 ## Release 0.20.127 — refresh before matching, 23 October 2026
 
 Upload catalogue reads now pull the selected Google sheet before returning rows
@@ -1136,7 +1135,6 @@ as PID 38552 and reports 0.20.127+0ff5cf5. Installer SHA-256:
 The existing Chrome extension still needs the owner's reload. A live Google
 refresh through the installed matching window and real publication/delayed-reply
 UAT have not been claimed. Prior full Chrome-process recovery limitations remain.
-
 
 ## Release 0.20.128 — truthful Google authorization errors, 23 October 2026
 
@@ -1164,7 +1162,6 @@ Installer SHA-256: `b3015e02efc84beab4cd443ae733acae4d2ceae6ea63101878fb449d7015
 The loaded Chrome extension still requires a reload to use its new upload-window
 copy. Live Google reconnect and end-to-end upload/public reply acceptance remain
 unverified; this release does not claim those outcomes.
-
 
 ## Release 0.20.129 — teaser send and catalogue identity, 23 October 2026
 

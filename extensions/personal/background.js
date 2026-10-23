@@ -6,6 +6,7 @@ importScripts(
   "workflows/extension-lifecycle.js",
   "workflows/catalogue-contract.js",
   "workflows/catalogue-client.js",
+  "workflows/catalogue-workflow.js",
   "workflows/subreddit-presets.js",
   "workflows/sync-script.js",
   "workflows/upload-session-store.js",
@@ -53,8 +54,17 @@ const CREATOR_CATALOGUE_CLIENT = globalThis.CreatorCatalogueClient;
 const CREATOR_CATALOGUE_CONTRACT = globalThis.CreatorCatalogueContract;
 const CREATOR_UPLOAD_SESSION_STORE = globalThis.CreatorUploadSessionStore;
 const CREATOR_SOCIAL_CONTRACT = globalThis.CreatorSocialDistributionContract;
-const CREATOR_SOCIAL_SESSION_STORE =
+const CREATOR_SOCIAL_SESSION_STORE_BASE =
   globalThis.CreatorSocialDistributionSessionStore;
+const CREATOR_CATALOGUE_WORKFLOW_API = globalThis.CreatorCatalogueWorkflow;
+const CREATOR_CATALOGUE_WORKFLOW = CREATOR_CATALOGUE_WORKFLOW_API?.create({
+  storage: chrome.storage.local,
+  send: sendDesktopRequest,
+  now: Date.now,
+});
+const CREATOR_SOCIAL_SESSION_STORE = createCreatorSocialStoreMirror(
+  CREATOR_SOCIAL_SESSION_STORE_BASE,
+);
 const CREATOR_SOCIAL_ORCHESTRATOR =
   globalThis.CreatorSocialDistributionOrchestrator;
 const X_TEASER_CONTRACT = globalThis.CreatorXTeaserContract;
@@ -143,6 +153,12 @@ async function routeOFEnhancerAppRequest(operation, payload = {}) {
       "getUploadThumbnailPreview",
       "getCatalogueThumbnailPreviews",
       "recordUploadResult",
+      "getCreatorWorkflows",
+      "associateCreatorWorkflow",
+      "getUploadWritebacks",
+      "getCreatorWorkflowWritebacks",
+      "rebaseUploadWriteback",
+      "retryUploadWritebacks",
       "writeUploadCatalogueEntry",
       "getSubredditPresets",
       "getTeaserOverview",
@@ -2945,7 +2961,7 @@ const CREATOR_UPLOAD_RESPONSE_OBSERVER =
 
 function installCreatorUploadFileBridge(config) {
   if (
-    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.129"
+    globalThis.CreatorUploadPlatformAdapters?.revision !== "upload-hub-0.20.130"
   )
     throw new Error(
       "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -3141,6 +3157,65 @@ async function assertCreatorUploadPageBinding(session, target, sender) {
   }
 }
 
+function creatorCatalogueErrorCode(error) {
+  const code = String(
+    error?.code || error?.message || "catalogue_mirror_pending",
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .slice(0, 64);
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(code)
+    ? code
+    : "catalogue_mirror_pending";
+}
+
+async function enqueueCreatorUploadSnapshot(record) {
+  if (!CREATOR_CATALOGUE_WORKFLOW || !record?.draft) return "";
+  try {
+    const result = await CREATOR_CATALOGUE_WORKFLOW.enqueue(
+      CREATOR_CATALOGUE_WORKFLOW_API.uploadSnapshot(record),
+    );
+    if (!result?.unchanged) scheduleCreatorCatalogueWorkflowFlush();
+    return "";
+  } catch (error) {
+    return creatorCatalogueErrorCode(error);
+  }
+}
+
+async function enqueueCreatorSocialSnapshot(record) {
+  if (!CREATOR_CATALOGUE_WORKFLOW || !record?.plan) return record;
+  try {
+    const result = await CREATOR_CATALOGUE_WORKFLOW.enqueue(
+      CREATOR_CATALOGUE_WORKFLOW_API.socialSnapshot(record),
+    );
+    if (!result?.unchanged) scheduleCreatorCatalogueWorkflowFlush();
+    return record;
+  } catch (error) {
+    return {
+      ...record,
+      catalogueMirrorError: creatorCatalogueErrorCode(error),
+    };
+  }
+}
+
+function createCreatorSocialStoreMirror(base) {
+  if (!base) return base;
+  const mirror = { ...base };
+  for (const method of [
+    "create",
+    "checkpoint",
+    "associateCatalogue",
+    "unblock",
+  ]) {
+    const original = base[method];
+    if (typeof original !== "function") continue;
+    mirror[method] = async (...args) =>
+      enqueueCreatorSocialSnapshot(await original(...args));
+  }
+  return Object.freeze(mirror);
+}
+
 function creatorUploadSessionRecord(session) {
   return {
     id: session.id,
@@ -3149,6 +3224,7 @@ function creatorUploadSessionRecord(session) {
     updatedAt: session.updatedAt,
     draft: session.draft,
     catalogue: session.catalogue,
+    ...(session.scriptState ? { scriptState: session.scriptState } : {}),
     platforms: Object.fromEntries(
       [...session.platforms].map(([platform, target]) => [
         platform,
@@ -3172,6 +3248,7 @@ function creatorUploadSessionRecord(session) {
           editorHandoff: target.editorHandoff,
           manualWatchId: target.manualWatchId,
           manualWatchUntil: target.manualWatchUntil,
+          receiptEvidence: target.receiptEvidence,
         },
       ]),
     ),
@@ -3187,15 +3264,39 @@ async function checkpointCreatorUploadSession(session) {
   const saved = await CREATOR_UPLOAD_SESSION_STORE.save(
     creatorUploadSessionRecord(session),
   );
+  const catalogueMirrorError = await enqueueCreatorUploadSnapshot(saved);
+  session.catalogueMirrorError = catalogueMirrorError;
+  if (catalogueMirrorError) {
+    for (const target of session.platforms.values())
+      if (target.postUrl && !target.error)
+        target.catalogueMirrorError = catalogueMirrorError;
+  } else {
+    for (const target of session.platforms.values())
+      delete target.catalogueMirrorError;
+  }
   if (
     session.platforms.size > 0 &&
     [...session.platforms.values()].every((target) =>
       CREATOR_UPLOAD_TERMINAL_STATUSES.has(target.status),
+    ) &&
+    (!session.scriptState ||
+      (session.scriptState.status === "uploaded" &&
+        [...session.platforms.values()].every(
+          (target) =>
+            target.postUrl || ["skipped", "cancelled"].includes(target.status),
+        ))) &&
+    !catalogueMirrorError &&
+    ![...session.platforms.values()].some(
+      (target) =>
+        ((target.submitAttempted || target.submitted) && !target.postUrl) ||
+        ["posted-link-unresolved", "manual-link-watch-ended"].includes(
+          target.status,
+        ),
     )
   ) {
     await CREATOR_UPLOAD_SESSION_STORE.remove(session.id);
   }
-  return saved;
+  return catalogueMirrorError ? { ...saved, catalogueMirrorError } : saved;
 }
 
 async function ensureCreatorUploadRuntimeVersion() {
@@ -3219,6 +3320,7 @@ async function getCreatorUploadSession(sessionId) {
     updatedAt: stored.updatedAt || Date.now(),
     draft: stored.draft || {},
     catalogue: stored.catalogue ?? null,
+    scriptState: stored.scriptState ?? null,
     launcher: stored.launcher || "extension",
     platforms: new Map(Object.entries(stored.platforms || {})),
     commitChain: Promise.resolve(),
@@ -3620,6 +3722,13 @@ async function validateCreatorUploadRequest(message) {
     manyvidsLink: creatorUploadClean(message.catalogue?.manyvidsLink, 500),
     fingerprint: creatorUploadClean(message.catalogue?.fingerprint, 64),
     status: creatorUploadClean(message.catalogue?.status, 20),
+    ...(message.catalogue?.destination
+      ? {
+          destination: CREATOR_CATALOGUE_CONTRACT.catalogueDestination(
+            message.catalogue.destination,
+          ),
+        }
+      : {}),
   };
   const catalogueRelease = new Date(`${catalogue.releaseDate}T15:00:00.000Z`);
   if (
@@ -3809,7 +3918,13 @@ function creatorUploadPost(sessionId, message) {
 // closed console must not change the outcome that was already recorded.
 function creatorUploadNotify(sessionId, message) {
   try {
-    creatorUploadPost(sessionId, message);
+    const session = creatorUploadSessions.get(sessionId);
+    creatorUploadPost(
+      sessionId,
+      session?.catalogueMirrorError
+        ? { ...message, catalogueMirrorError: session.catalogueMirrorError }
+        : message,
+    );
     return true;
   } catch (error) {
     if (
@@ -4022,7 +4137,69 @@ async function ensureSocialFollowUpAlarm() {
   await chrome.alarms.create(SOCIAL_FOLLOW_UP_ALARM, { periodInMinutes: 1 });
 }
 void ensureSocialFollowUpAlarm();
+
+const CREATOR_CATALOGUE_MIRROR_ALARM = "creator-catalogue-workflow-mirror";
+let creatorCatalogueFlushTimer = null;
+function scheduleCreatorCatalogueWorkflowFlush() {
+  if (!CREATOR_CATALOGUE_WORKFLOW || creatorCatalogueFlushTimer !== null)
+    return;
+  creatorCatalogueFlushTimer = setTimeout(() => {
+    creatorCatalogueFlushTimer = null;
+    void flushCreatorCatalogueWorkflow().catch((error) =>
+      console.error(
+        "Creator catalogue workflow mirror remains pending.",
+        creatorCatalogueErrorCode(error),
+      ),
+    );
+  }, 250);
+}
+async function flushCreatorCatalogueWorkflow() {
+  if (!CREATOR_CATALOGUE_WORKFLOW) return { processed: 0, remaining: 0 };
+  return CREATOR_CATALOGUE_WORKFLOW.flush();
+}
+async function bootstrapCreatorCatalogueWorkflow() {
+  if (!CREATOR_CATALOGUE_WORKFLOW) return;
+  try {
+    for (const record of await CREATOR_UPLOAD_SESSION_STORE.list()) {
+      if (record?.draft) await enqueueCreatorUploadSnapshot(record);
+    }
+    for (const record of await CREATOR_SOCIAL_SESSION_STORE_BASE.list())
+      await enqueueCreatorSocialSnapshot(record);
+    if (creatorCatalogueFlushTimer !== null) {
+      clearTimeout(creatorCatalogueFlushTimer);
+      creatorCatalogueFlushTimer = null;
+    }
+    await flushCreatorCatalogueWorkflow();
+  } catch (error) {
+    console.error(
+      "Creator catalogue workflow mirror remains pending.",
+      creatorCatalogueErrorCode(error),
+    );
+  }
+}
+async function ensureCreatorCatalogueMirrorAlarm() {
+  if (
+    !chrome.alarms ||
+    (await chrome.alarms.get(CREATOR_CATALOGUE_MIRROR_ALARM))
+  )
+    return;
+  await chrome.alarms.create(CREATOR_CATALOGUE_MIRROR_ALARM, {
+    periodInMinutes: 5,
+  });
+}
+void ensureCreatorCatalogueMirrorAlarm();
+void bootstrapCreatorCatalogueWorkflow();
+
 chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name === CREATOR_CATALOGUE_MIRROR_ALARM) {
+    void flushCreatorCatalogueWorkflow().catch((error) =>
+      console.error(
+        "Creator catalogue workflow mirror remains pending.",
+        creatorCatalogueErrorCode(error),
+      ),
+    );
+    return;
+  }
   if (alarm.name !== SOCIAL_FOLLOW_UP_ALARM) return;
   if (socialFollowUpRunning) return;
   socialFollowUpRunning = true;
@@ -4717,7 +4894,12 @@ async function checkCreatorUploadPreflight(message, launcher = "extension") {
         row.row === request.catalogue.row &&
         row.itemId === request.catalogue.itemId,
     );
-    if (!current || current.fingerprint !== request.catalogue.fingerprint)
+    if (
+      !current ||
+      current.fingerprint !== request.catalogue.fingerprint ||
+      JSON.stringify(current.destination || null) !==
+        JSON.stringify(request.catalogue.destination || null)
+    )
       throw new Error(
         "The connected catalogue changed. Review the item again before uploading.",
       );
@@ -5005,7 +5187,7 @@ async function invokeCreatorUploadAdapter(args) {
   const execute = () => {
     if (
       globalThis.CreatorUploadPlatformAdapters?.revision !==
-      "upload-hub-0.20.129"
+      "upload-hub-0.20.130"
     )
       throw new Error(
         "Stale Upload Hub page runtime. Review existing uploads, reload the extension and this page, then prepare again. No new file was delivered.",
@@ -5114,13 +5296,25 @@ function startCreatorUploadResponseObserver(
   platform,
   videoId = "",
   documentId = null,
+  expectedMediaIds = null,
 ) {
   return chrome.scripting.executeScript({
     target: { tabId, ...(documentId ? { documentIds: [documentId] } : {}) },
     world: "MAIN",
     func: installCreatorUploadResponseObserver,
-    args: [{ sessionId, platform, videoId, deferred: true }],
+    args: [{ sessionId, platform, videoId, expectedMediaIds, deferred: true }],
   });
+}
+
+function creatorPreparedMediaIds(target) {
+  return [
+    ...new Set(
+      (Array.isArray(target?.receiptEvidence?.expectedMediaIds)
+        ? target.receiptEvidence.expectedMediaIds
+        : []
+      ).filter((id) => typeof id === "string" && /^\d{1,40}$/.test(id)),
+    ),
+  ].slice(0, 20);
 }
 
 async function cancelCreatorUploadResponseObserver(tabId, sessionId, platform) {
@@ -5137,12 +5331,55 @@ async function cancelCreatorUploadResponseObserver(tabId, sessionId, platform) {
 }
 
 async function commitCreatorUploadResult(session, platform, postUrl) {
+  const target = session.platforms.get(platform);
+  const canonicalPostUrl = CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(
+    platform,
+    postUrl,
+  );
+  if (!canonicalPostUrl || canonicalPostUrl !== postUrl)
+    throw new Error("A canonical verified publication receipt is required.");
+  if (
+    target &&
+    !(
+      (target.commitArmed === true && target.submitAttempted === true) ||
+      [
+        "provider-response",
+        "owner-confirmed",
+        "media-identity",
+        "browser-verified",
+      ].includes(target.receiptEvidence?.kind)
+    )
+  )
+    throw new Error(
+      "The post link has no verified receipt or owner confirmation.",
+    );
+  if (
+    target &&
+    ["onlyfans", "fansly", "manyvids", "pornhub"].includes(platform) &&
+    target.commitArmed === true &&
+    target.submitAttempted === true
+  ) {
+    const durable = await CREATOR_UPLOAD_SESSION_STORE.load(session.id);
+    const durableTarget = durable?.platforms?.[platform];
+    if (
+      durableTarget?.commitArmed === true &&
+      durableTarget?.submitAttempted === true
+    )
+      await CREATOR_UPLOAD_SESSION_STORE.recordPublicationReceipt(
+        session.id,
+        platform,
+        canonicalPostUrl,
+      );
+  }
   if (session.catalogue === null) return { status: "uploaded-no-sheet" };
   session.commitChain = session.commitChain
     .catch(() => {})
     .then(async () => {
       const result = await CREATOR_CATALOGUE_CLIENT.commitPlatformLink({
         row: session.catalogue.row,
+        ...(session.catalogue.destination
+          ? { destination: session.catalogue.destination }
+          : {}),
         repeatUploadConfirmed:
           session.catalogue.source === "desktop" &&
           session.catalogue.repeatPlatforms?.includes(platform) === true,
@@ -5158,8 +5395,10 @@ async function commitCreatorUploadResult(session, platform, postUrl) {
       });
       if (result.fingerprint)
         session.catalogue.fingerprint = result.fingerprint;
-      await checkpointCreatorUploadSession(session);
-      return result;
+      const checkpoint = await checkpointCreatorUploadSession(session);
+      return checkpoint.catalogueMirrorError
+        ? { ...result, catalogueMirrorError: checkpoint.catalogueMirrorError }
+        : result;
     });
   return session.commitChain;
 }
@@ -5258,6 +5497,7 @@ async function runCreatorManyVidsPlatform(session, target) {
         platform,
         target.manyvidsId,
         target.documentId,
+        creatorPreparedMediaIds(target),
       ).then(
         (value) => ({ value }),
         (error) => ({ error }),
@@ -5335,6 +5575,9 @@ async function runCreatorManyVidsPlatform(session, target) {
         ? {
             error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
           }
+        : {}),
+      ...(commit.catalogueMirrorError
+        ? { catalogueMirrorError: commit.catalogueMirrorError }
         : {}),
       ...(commit.status === "conflict" || commit.status === "stale"
         ? { error: `Catalogue commit stopped: ${commit.status}.` }
@@ -5507,6 +5750,9 @@ async function runCreatorUploadPlatform(session, platform) {
         target.tabId,
         session.id,
         platform,
+        "",
+        target.documentId,
+        creatorPreparedMediaIds(target),
       )
         .then(
           async (value) => {
@@ -5522,6 +5768,13 @@ async function runCreatorUploadPlatform(session, platform) {
               postUrl
             ) {
               target.postUrl = postUrl;
+              target.receiptEvidence = {
+                kind: "provider-response",
+                ...(platform === "fansly" &&
+                /^\d{1,40}$/.test(receipt.fanslyMediaId || "")
+                  ? { expectedMediaIds: [receipt.fanslyMediaId] }
+                  : {}),
+              };
               if (
                 platform === "fansly" &&
                 typeof receipt.fanslyMediaId === "string" &&
@@ -5618,6 +5871,7 @@ async function runCreatorUploadPlatform(session, platform) {
     }
     target.status = "link-captured";
     target.postUrl = postUrl;
+    target.receiptEvidence ||= { kind: "provider-response" };
     if (
       platform === "fansly" &&
       typeof observed.fanslyMediaId === "string" &&
@@ -5642,6 +5896,9 @@ async function runCreatorUploadPlatform(session, platform) {
         ? {
             error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
           }
+        : {}),
+      ...(commit.catalogueMirrorError
+        ? { catalogueMirrorError: commit.catalogueMirrorError }
         : {}),
       ...(commit.status === "conflict" || commit.status === "stale"
         ? { error: `Catalogue commit stopped: ${commit.status}.` }
@@ -5754,32 +6011,400 @@ async function uploadCreatorSyncScripts(message) {
     );
   const session = await getCreatorUploadSession(message.sessionId);
   if (!session) throw new Error("Unknown creator upload run.");
+  const proof = session.draft?.fileProof?.script || {};
+  const previous = session.scriptState || {};
+  const hasCatalogueDestination =
+    session.catalogue?.source === "desktop" &&
+    Boolean(session.catalogue.destination?.workbookId);
+  const sentKeys = new Set(
+    Array.isArray(previous.sentKeys) ? previous.sentKeys : [],
+  );
   const fansly = session.platforms.get("fansly");
-  return sync.uploadScripts(
+  const prepared = sync.addFanslyMediaKey(
+    uploads,
+    fansly?.postUrl,
+    fansly?.fanslyMediaId,
+  );
+  const knownDestinations = [...session.platforms.entries()]
+    .filter(
+      ([, target]) => typeof target.postUrl === "string" && target.postUrl,
+    )
+    .map(([platform, target]) => ({ platform, postUrl: target.postUrl }));
+  const readiness = sync.scriptDispatchReadiness(knownDestinations, [
+    ...sentKeys,
+  ]);
+  const readyKeys = new Set(readiness.ready.map((item) => item.key));
+  const scriptsToSend = prepared
+    .map((upload) => {
+      const allowed = new Set(readyKeys);
+      if (fansly?.postUrl) {
+        const postKey = sync.scriptKey("fansly", fansly.postUrl);
+        const mediaKey =
+          typeof fansly.fanslyMediaId === "string" &&
+          /^\d{1,40}$/.test(fansly.fanslyMediaId)
+            ? fansly.fanslyMediaId
+            : "";
+        if (postKey && readyKeys.has(postKey) && mediaKey)
+          allowed.add(mediaKey);
+      }
+      return {
+        ...upload,
+        keys: (upload.keys || []).filter((key) => allowed.has(key)),
+      };
+    })
+    .filter((upload) => upload.keys.length || upload.fanslyError);
+  const missingTargets = [...session.platforms.entries()]
+    .filter(
+      ([, target]) =>
+        !target.postUrl && !["cancelled", "skipped"].includes(target.status),
+    )
+    .map(([platform]) => platform);
+  const knownPending =
+    readiness.pending.length > 0 ||
+    missingTargets.length > 0 ||
+    prepared.some((upload) => upload.fanslyError);
+  const setScriptState = async (patch) => {
+    const urls = [
+      ...new Set([...(session.scriptState?.urls || []), ...(patch.urls || [])]),
+    ].slice(0, 100);
+    const keys = [
+      ...new Set([
+        ...(session.scriptState?.sentKeys || []),
+        ...(patch.sentKeys || []),
+      ]),
+    ].slice(0, 100);
+    const resultsByUrl = new Map(
+      (session.scriptState?.results || []).map((result) => [
+        result.url,
+        result,
+      ]),
+    );
+    for (const result of patch.results || []) {
+      if (typeof result?.url !== "string") continue;
+      const priorResult = resultsByUrl.get(result.url) || {};
+      const resultKeys = [
+        ...new Set([...(priorResult.keys || []), ...(result.keys || [])]),
+      ].slice(0, 10);
+      const sheetError =
+        result.sheetPending === false
+          ? ""
+          : result.sheetError || priorResult.sheetError || "";
+      resultsByUrl.set(result.url, {
+        url: result.url,
+        keys: resultKeys,
+        sheetPending:
+          result.sheetPending ??
+          priorResult.sheetPending ??
+          Boolean(sheetError),
+        ...(result.writebackState || priorResult.writebackState
+          ? {
+              writebackState:
+                result.writebackState || priorResult.writebackState,
+            }
+          : {}),
+        ...(sheetError
+          ? { sheetError: creatorCatalogueErrorCode(sheetError) }
+          : {}),
+      });
+    }
+    session.scriptState = {
+      status: patch.status || session.scriptState?.status || "pending",
+      ...(proof.name ? { filename: String(proof.name).slice(0, 255) } : {}),
+      ...(typeof proof.sha256 === "string" &&
+      /^[a-f0-9]{64}$/i.test(proof.sha256)
+        ? { sha256: proof.sha256.toLowerCase() }
+        : {}),
+      urls,
+      sentKeys: keys,
+      results: [...resultsByUrl.values()].slice(-100),
+      sheetPending:
+        patch.sheetPending ??
+        [...resultsByUrl.values()].some((result) => result.sheetPending),
+      writebackState:
+        patch.writebackState ||
+        session.scriptState?.writebackState ||
+        (hasCatalogueDestination ? "pending" : "not-associated"),
+      ...(patch.error
+        ? {
+            error: creatorCatalogueErrorCode(patch.error),
+            errorCode: creatorCatalogueErrorCode(patch.error),
+          }
+        : {}),
+    };
+    await checkpointCreatorUploadSession(session);
+  };
+  await setScriptState({ status: previous.status || "pending" });
+
+  // A previous successful provider upload may only need its catalogue writeback retried.
+  const priorWritebackErrors = [];
+  if (!hasCatalogueDestination && session.scriptState.urls?.length) {
+    await setScriptState({
+      writebackState: "not-associated",
+      sheetPending: false,
+      results: session.scriptState.results.map((item) => ({
+        ...item,
+        sheetPending: false,
+        writebackState: "not-associated",
+        sheetError: "",
+      })),
+    });
+  }
+  for (const url of hasCatalogueDestination
+    ? session.scriptState.urls || []
+    : []) {
+    try {
+      const commit = await commitCreatorUploadResult(session, "script", url);
+      const sheetPending =
+        Boolean(commit.googleError) ||
+        !(commit.googleSynced === true || commit.status === "updated");
+      if (sheetPending)
+        priorWritebackErrors.push(
+          creatorCatalogueErrorCode(commit.googleError || commit.status),
+        );
+      const savedResult = session.scriptState.results?.find(
+        (item) => item.url === url,
+      );
+      await setScriptState({
+        results: [
+          {
+            url,
+            keys: savedResult?.keys || [],
+            sheetPending,
+            ...(sheetPending
+              ? { sheetError: commit.googleError || commit.status }
+              : { sheetError: "" }),
+          },
+        ],
+        sheetPending:
+          session.scriptState.results?.some(
+            (item) => item.url !== url && item.sheetPending,
+          ) || sheetPending,
+      });
+    } catch (error) {
+      priorWritebackErrors.push(creatorCatalogueErrorCode(error));
+      const savedResult = session.scriptState.results?.find(
+        (item) => item.url === url,
+      );
+      await setScriptState({
+        results: [
+          {
+            url,
+            keys: savedResult?.keys || [],
+            sheetPending: true,
+            sheetError: error,
+          },
+        ],
+        sheetPending: true,
+      });
+    }
+  }
+  const dispatchResults = await sync.uploadScripts(
     {
       settings: settings.value,
       title,
-      uploads: sync.addFanslyMediaKey(
-        uploads,
-        fansly?.postUrl,
-        fansly?.fanslyMediaId,
-      ),
+      uploads: scriptsToSend,
     },
     {
-      async commit(url) {
-        if (session.catalogue?.source !== "desktop")
+      async commit(url, result = {}) {
+        const resultKeys = Array.isArray(result.keys) ? result.keys : [];
+        await setScriptState({
+          status: knownPending ? "partial" : "uploaded",
+          urls: [url],
+          sentKeys: resultKeys,
+          writebackState: hasCatalogueDestination
+            ? "pending"
+            : "not-associated",
+          results: [
+            {
+              url,
+              keys: resultKeys,
+              sheetPending: hasCatalogueDestination,
+              writebackState: hasCatalogueDestination
+                ? "pending"
+                : "not-associated",
+              ...(hasCatalogueDestination
+                ? { sheetError: "catalogue_writeback_pending" }
+                : {}),
+            },
+          ],
+          sheetPending: hasCatalogueDestination,
+        });
+        if (!hasCatalogueDestination)
           return session.catalogue
             ? "Script links reach the sheet only through the OFEnhancer desktop catalogue."
             : "";
         const commit = await commitCreatorUploadResult(session, "script", url);
-        return ["updated", "idempotent", "recorded-local"].includes(
-          commit.status,
-        ) && !commit.googleError
+        const sheetPending =
+          Boolean(commit.googleError) ||
+          !(commit.googleSynced === true || commit.status === "updated");
+        await setScriptState({
+          writebackState: sheetPending ? "pending" : "synced",
+          results: [
+            {
+              url,
+              keys: resultKeys,
+              sheetPending,
+              writebackState: sheetPending ? "pending" : "synced",
+              ...(sheetPending
+                ? { sheetError: commit.googleError || commit.status }
+                : { sheetError: "" }),
+            },
+          ],
+          sheetPending:
+            session.scriptState.results.some(
+              (item) => item.url !== url && item.sheetPending,
+            ) || sheetPending,
+        });
+        return !sheetPending &&
+          ["updated", "idempotent", "recorded-local"].includes(commit.status)
           ? ""
           : `Script link not written to the sheet (${commit.googleError || commit.status}).`;
       },
     },
   );
+  const failed = dispatchResults.filter(
+    (item) => item.status === "upload-failed",
+  );
+  const successful = dispatchResults.filter(
+    (item) => item.url && Array.isArray(item.keys),
+  );
+  const hasSentKeys = session.scriptState.sentKeys.length > 0;
+  const finalStatus = successful.length
+    ? failed.length || knownPending
+      ? "partial"
+      : "uploaded"
+    : failed.length
+      ? hasSentKeys
+        ? "partial"
+        : "failed"
+      : knownPending
+        ? "partial"
+        : hasSentKeys
+          ? "uploaded"
+          : "pending";
+  await setScriptState({
+    status: finalStatus,
+    writebackState: hasCatalogueDestination
+      ? session.scriptState.results.some((item) => item.sheetPending)
+        ? "pending"
+        : "synced"
+      : "not-associated",
+    urls: successful.map((item) => item.url),
+    sentKeys: successful.flatMap((item) => item.keys),
+    ...(failed.length
+      ? { error: "provider_upload_failed" }
+      : priorWritebackErrors.length ||
+          dispatchResults.some((item) => item.sheetError)
+        ? { error: "catalogue_writeback_pending" }
+        : {}),
+    sheetPending: session.scriptState.results.some((item) => item.sheetPending),
+  });
+  if (!dispatchResults.length && session.scriptState.sentKeys.length)
+    return (session.scriptState.results || []).map((item) => ({
+      url: item.url,
+      keys: [...(item.keys || [])],
+      status: item.sheetPending ? "uploaded-sheet-pending" : "complete",
+      stage: item.sheetPending ? "sheet" : "complete",
+      ...(item.sheetPending
+        ? {
+            sheetError:
+              "Script link not written to the sheet; retry the catalogue writeback.",
+          }
+        : {}),
+    }));
+  return dispatchResults;
+}
+
+async function retryCreatorScriptCatalogue(sessionId, force = false) {
+  const session = await getCreatorUploadSession(sessionId);
+  if (!session?.scriptState)
+    throw new Error("This upload has no saved script result.");
+  const results = [...(session.scriptState.results || [])];
+  const hasCatalogueDestination =
+    session.catalogue?.source === "desktop" &&
+    Boolean(session.catalogue.destination?.workbookId);
+  if (!hasCatalogueDestination) {
+    session.scriptState = {
+      ...session.scriptState,
+      writebackState: "not-associated",
+      sheetPending: false,
+      results: results.map((item) => ({
+        ...item,
+        writebackState: "not-associated",
+        sheetPending: false,
+        sheetError: undefined,
+      })),
+    };
+    await checkpointCreatorUploadSession(session);
+    return {
+      scripts: results.map((item) => ({
+        url: item.url,
+        keys: [...(item.keys || [])],
+        status: "complete",
+        stage: "local",
+      })),
+      scriptState: session.scriptState,
+    };
+  }
+  for (const saved of results.filter(
+    (item) => force || item.sheetPending || item.sheetError,
+  )) {
+    let sheetPending = true;
+    let sheetError;
+    try {
+      const commit = await commitCreatorUploadResult(
+        session,
+        "script",
+        saved.url,
+      );
+      sheetPending =
+        Boolean(commit.googleError) ||
+        !(commit.googleSynced === true || commit.status === "updated");
+      sheetError = sheetPending
+        ? creatorCatalogueErrorCode(commit.googleError || commit.status)
+        : "";
+    } catch (error) {
+      sheetError = creatorCatalogueErrorCode(error);
+    }
+    const index = results.findIndex((item) => item.url === saved.url);
+    if (index >= 0)
+      results[index] = {
+        ...saved,
+        sheetPending,
+        writebackState: sheetPending ? "pending" : "synced",
+        ...(sheetPending ? { sheetError } : { sheetError: undefined }),
+      };
+  }
+  const sheetPending = results.some((item) => item.sheetPending);
+  session.scriptState = {
+    ...session.scriptState,
+    results,
+    sheetPending,
+    writebackState: sheetPending ? "pending" : "synced",
+    // Provider status is unchanged by a catalogue-only retry.
+    ...(sheetPending
+      ? {
+          error: "catalogue_writeback_pending",
+          errorCode: "catalogue_writeback_pending",
+        }
+      : { error: undefined, errorCode: undefined }),
+  };
+  await checkpointCreatorUploadSession(session);
+  return {
+    scripts: results.map((item) => ({
+      url: item.url,
+      keys: [...(item.keys || [])],
+      status: item.sheetPending ? "uploaded-sheet-pending" : "complete",
+      stage: item.sheetPending ? "sheet" : "complete",
+      ...(item.sheetPending
+        ? {
+            sheetError:
+              "Script link not written to the sheet; retry the catalogue writeback.",
+          }
+        : {}),
+    })),
+    scriptState: session.scriptState,
+  };
 }
 
 async function retryCreatorUploadPlatform(sessionId, platform) {
@@ -5808,6 +6433,9 @@ async function retryCreatorUploadPlatform(sessionId, platform) {
           ? {
               error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
             }
+          : {}),
+        ...(commit.catalogueMirrorError
+          ? { catalogueMirrorError: commit.catalogueMirrorError }
           : {}),
         ...(commit.status === "conflict" || commit.status === "stale"
           ? { error: `Catalogue commit stopped: ${commit.status}.` }
@@ -6047,6 +6675,7 @@ chrome.runtime.onStartup.addListener(() => {
   syncCreatorToolRegistrations().catch((error) => {
     console.error("Creator tool registration sync failed on startup.", error);
   });
+  void bootstrapCreatorCatalogueWorkflow();
 });
 
 function syncCreatorToolsAfterPermissionChange() {
@@ -6352,6 +6981,7 @@ function handleExtensionMessage(message, sender, sendResponse) {
           resumable: latest
             ? {
                 id: latest.id,
+                scriptState: latest.scriptState || null,
                 draft: {
                   title: latest.draft.title || "",
                   fullFilename: latest.draft.fullFilename || "",
@@ -6462,11 +7092,10 @@ function handleExtensionMessage(message, sender, sendResponse) {
         };
       case "ASSOCIATE_CREATOR_SOCIAL_CATALOGUE":
         return {
-          socialDistribution:
-            await getCreatorSocialRuntime().associateCatalogue(
-              message.sessionId,
-              message.catalogue,
-            ),
+          socialDistribution: await associateCreatorSocialCatalogue(
+            message.sessionId,
+            message.catalogue,
+          ),
         };
       case "ASSOCIATE_CREATOR_UPLOAD_CATALOGUE":
         return {
@@ -6477,8 +7106,13 @@ function handleExtensionMessage(message, sender, sendResponse) {
         };
       case "UPLOAD_SYNC_SCRIPT_PART":
         return { received: CREATOR_SYNC_SCRIPT_PARTS.add(message) };
-      case "UPLOAD_SYNC_SCRIPT":
-        return { scripts: await uploadCreatorSyncScripts(message) };
+      case "UPLOAD_SYNC_SCRIPT": {
+        const scripts = await uploadCreatorSyncScripts(message);
+        const session = await getCreatorUploadSession(message.sessionId);
+        return { scripts, scriptState: session?.scriptState || null };
+      }
+      case "RETRY_CREATOR_SCRIPT_CATALOGUE":
+        return retryCreatorScriptCatalogue(message.sessionId);
       case "RETRY_CREATOR_UPLOAD_PLATFORM":
         return {
           results: await retryCreatorUploadPlatform(
@@ -6488,6 +7122,8 @@ function handleExtensionMessage(message, sender, sendResponse) {
         };
       case "CREATOR_UPLOAD_MANUAL_PUBLISH_OBSERVED":
         return acceptCreatorManualPublishOutcome(message, sender);
+      case "RECONCILE_CREATOR_UPLOAD_RESULT":
+        return reconcileCreatorUploadResult(message, sender);
       case "CHECKPOINT_CREATOR_UPLOAD_COMMIT":
         return checkpointCreatorUploadCommit(
           message.sessionId,
@@ -6868,12 +7504,12 @@ chrome.runtime.onMessage.addListener(handleExtensionMessage);
 const CREATOR_MANUAL_PUBLISH_WATCH_MS = 6 * 60 * 60_000;
 const CREATOR_MANUAL_PUBLISH_ENDINGS = Object.freeze({
   expired:
-    "Stopped watching after 6 hours without a new post. If you published it, add the link to the sheet manually.",
+    "Stopped watching after 6 hours without a new post. If you published it, add the published link here.",
   closed:
-    "The prepared tab was closed before a post was seen. If you published it, add the link to the sheet manually.",
-  left: "The prepared page was left before a post was seen. If you published it, add the link to the sheet manually.",
+    "The prepared tab was closed before a post was seen. If you published it, add the published link here.",
+  left: "The prepared page was left before a post was seen. If you published it, add the published link here.",
   stopped:
-    "Stopped watching for your post. The draft is preserved; if you publish it, add the link to the sheet manually.",
+    "Stopped watching for your post. The draft is preserved; if you publish it, add the published link here.",
 });
 
 function creatorUploadOnlyWatching(targets) {
@@ -6906,7 +7542,16 @@ async function armCreatorManualPublishWatch(session, target) {
     platform: target.platform,
     watchId,
     videoId: target.manyvidsId || "",
+    expectedMediaIds: creatorPreparedMediaIds(target),
   };
+  if (target.platform === "onlyfans")
+    throw new Error(
+      "OnlyFans post identity cannot be verified automatically. After posting, add the published link here.",
+    );
+  if (target.platform === "fansly" && config.expectedMediaIds.length !== 1)
+    throw new Error(
+      "Automatic post matching is unavailable for this prepared target. After posting, add the published link here.",
+    );
   const [bridge] =
     (await chrome.scripting.executeScript({
       target: documentTarget,
@@ -6973,7 +7618,7 @@ async function finishCreatorManualPublish(
       status: "posted-link-unresolved",
       submitted: true,
       error:
-        "The site created a post, but its link could not be read safely. Add the link to the sheet manually.",
+        "The site created a post, but its link could not be read safely. After posting, add the published link here.",
     };
     Object.assign(target, result);
     await checkpointCreatorUploadSession(session);
@@ -7013,6 +7658,9 @@ async function finishCreatorManualPublish(
         ? {
             error: `Post link saved locally; sheet update pending (${commit.googleError}).`,
           }
+        : {}),
+      ...(commit.catalogueMirrorError
+        ? { catalogueMirrorError: commit.catalogueMirrorError }
         : {}),
       ...(commit.status === "conflict" || commit.status === "stale"
         ? { error: `Catalogue commit stopped: ${commit.status}.` }
@@ -7067,19 +7715,94 @@ async function acceptCreatorManualPublishOutcome(message, sender) {
   let result;
   if (!(target.manualWatchUntil > Date.now()))
     result = await endCreatorManualPublishWatch(session, target, "expired");
-  else if (outcome === "captured" || outcome === "unresolved")
+  else if (outcome === "captured" || outcome === "unresolved") {
+    if (outcome === "captured")
+      target.receiptEvidence = {
+        ...(target.receiptEvidence && typeof target.receiptEvidence === "object"
+          ? target.receiptEvidence
+          : {}),
+        kind:
+          target.platform === "fansly" ? "media-identity" : "browser-verified",
+        ...(target.platform === "fansly" &&
+        /^\d{1,40}$/.test(message.fanslyMediaId || "")
+          ? { expectedMediaIds: [message.fanslyMediaId] }
+          : {}),
+      };
     result = await finishCreatorManualPublish(
       session,
       target,
       outcome === "captured" ? message.postUrl : null,
       message.fanslyMediaId,
     );
-  else
+  } else
     result = await endCreatorManualPublishWatch(
       session,
       target,
       outcome === "left" || outcome === "expired" ? outcome : "stopped",
     );
+  return { accepted: true, result };
+}
+
+async function reconcileCreatorUploadResult(message, sender) {
+  if (
+    sender?.id !== chrome.runtime.id ||
+    (sender.desktopUploadRuntime !== true &&
+      (sender?.url !== chrome.runtime.getURL("upload-console.html") ||
+        !sender.documentId))
+  )
+    throw new Error(
+      "Publication link recovery is restricted to the Upload Console.",
+    );
+  if (message?.confirmSource !== true)
+    throw new Error(
+      "Confirm that this post belongs to the selected upload source.",
+    );
+  const session = await getCreatorUploadSession(message?.sessionId);
+  const target = session?.platforms.get(message?.platform);
+  if (
+    !session ||
+    !target ||
+    !Object.hasOwn(CREATOR_UPLOAD_TARGETS, message.platform)
+  )
+    throw new Error("The selected upload target is no longer available.");
+  const postUrl = CREATOR_CATALOGUE_CONTRACT.canonicalPostUrl(
+    message.platform,
+    message.postUrl,
+  );
+  if (!postUrl || postUrl !== message.postUrl)
+    throw new Error("Enter a canonical published link for this platform.");
+  if (target.postUrl && target.postUrl !== postUrl)
+    throw new Error(
+      "This upload already has a different published link. Preserve the existing result.",
+    );
+  if (!(
+    target.submitAttempted ||
+    target.submitted ||
+    target.status === "awaiting-manual-publish" ||
+    target.status === "manual-link-watch-ended" ||
+    target.status === "manual-submit-required" ||
+    target.status === "posted-link-unresolved" ||
+    target.status === "link-captured" ||
+    target.status === "catalogue-commit-failed" ||
+    target.status === "catalogue-updated" ||
+    target.status === "uploaded-no-sheet"
+  ))
+    throw new Error(
+      "This upload has not reached a state that can accept a published link.",
+    );
+  target.receiptEvidence = {
+    ...(target.receiptEvidence && typeof target.receiptEvidence === "object"
+      ? target.receiptEvidence
+      : {}),
+    kind: "owner-confirmed",
+    confirmedAt: Date.now(),
+  };
+  const result = await finishCreatorManualPublish(
+    session,
+    target,
+    postUrl,
+    target.fanslyMediaId,
+  );
   return { accepted: true, result };
 }
 
@@ -7122,7 +7845,7 @@ async function recordCreatorManualPreparation(session, target) {
       result = {
         ...result,
         error:
-          "The post link will not be recorded automatically. After publishing, add it to the sheet manually.",
+          "The post link will not be recorded automatically. After posting, add the published link here.",
       };
     }
     if (session.cancelled || target.stage === "cancelled") {
@@ -7154,13 +7877,37 @@ async function associateCreatorUploadCatalogue(sessionId, candidate) {
   if (!row || row.fingerprint !== candidate.fingerprint)
     throw new Error("The catalogue changed. Choose the item again.");
   if (
+    candidate?.destination &&
+    JSON.stringify(row.destination || null) !==
+      JSON.stringify(candidate.destination)
+  )
+    throw new Error(
+      "The selected workbook changed. Choose the catalogue entry again.",
+    );
+  if (
     session.catalogue &&
     (session.catalogue.id !== row.id || session.catalogue.row !== row.row)
   )
     throw new Error(
       "This upload is already associated with another catalogue item.",
     );
-  session.catalogue = { ...row, status: "matched" };
+  if (
+    session.catalogue?.destination &&
+    !sameCreatorCatalogueDestination(
+      session.catalogue.destination,
+      row.destination,
+    )
+  )
+    throw new Error(
+      "This upload is frozen to another workbook. Reconnect it to the original catalogue destination.",
+    );
+  await associateCreatorWorkflowWithOwner(
+    CREATOR_CATALOGUE_WORKFLOW_API.uploadSnapshot(
+      creatorUploadSessionRecord(session),
+    ),
+    row,
+  );
+  session.catalogue = { ...row, source: snapshot.source, status: "matched" };
   await checkpointCreatorUploadSession(session);
   const results = [];
   for (const [platform, target] of session.platforms) {
@@ -7174,7 +7921,91 @@ async function associateCreatorUploadCatalogue(sessionId, candidate) {
     await checkpointCreatorUploadSession(session);
     results.push({ platform, postUrl: target.postUrl, status: result.status });
   }
+  if (session.scriptState?.urls?.length) {
+    const script = await retryCreatorScriptCatalogue(session.id, true);
+    results.push({
+      platform: "script",
+      status: script.scriptState.sheetPending
+        ? "uploaded-sheet-pending"
+        : "catalogue-updated",
+      writebackState: script.scriptState.writebackState,
+      sheetPending: script.scriptState.sheetPending,
+    });
+  }
   return results;
+}
+
+function sameCreatorCatalogueDestination(left, right) {
+  return (
+    (left?.workbookId || null) === (right?.workbookId || null) &&
+    (left?.sheetId || null) === (right?.sheetId || null)
+  );
+}
+
+async function associateCreatorWorkflowWithOwner(initialSnapshot, row) {
+  if (!CREATOR_CATALOGUE_WORKFLOW || !initialSnapshot?.runId)
+    throw new Error("creator-workflow-mirror-unavailable");
+  const queued = await CREATOR_CATALOGUE_WORKFLOW.enqueue(initialSnapshot);
+  if (queued?.error) throw new Error(queued.error);
+  await CREATOR_CATALOGUE_WORKFLOW.flush();
+  // A desktop owner may already have associated this run. Native validates that
+  // identity; an older mirror conflict must not block the same explicit choice.
+  const association = await sendDesktopRequest("associateCreatorWorkflow", {
+    runId: initialSnapshot.runId,
+    sourceKey: row.id,
+    expectedFingerprint: row.fingerprint,
+    confirmSource: true,
+  });
+  const bound = association?.snapshot;
+  if (
+    !["recorded", "idempotent", "partial"].includes(association?.status) ||
+    bound?.runId !== initialSnapshot.runId ||
+    bound?.sourceKey !== row.id ||
+    !sameCreatorCatalogueDestination(bound.destination, row.destination)
+  )
+    throw new Error(
+      association?.code || "creator-workflow-association-unresolved",
+    );
+  // Native association creates its own revision. The next browser checkpoint
+  // must advance past it, including after the worker restarts.
+  await CREATOR_CATALOGUE_WORKFLOW.observeRevision(bound.runId, bound.revision);
+  return association;
+}
+
+async function associateCreatorSocialCatalogue(sessionId, candidate) {
+  const session = await CREATOR_SOCIAL_SESSION_STORE_BASE.load(sessionId);
+  if (!session) throw new Error("The social workflow is no longer available.");
+  const catalogueSnapshot =
+    await CREATOR_CATALOGUE_CLIENT.getCatalogueSnapshot();
+  const row = catalogueSnapshot.rows?.find(
+    (item) => item.row === candidate?.row && item.id === candidate?.id,
+  );
+  if (!row || row.fingerprint !== candidate.fingerprint)
+    throw new Error("The catalogue changed. Choose the item again.");
+  if (
+    candidate?.destination &&
+    !sameCreatorCatalogueDestination(row.destination, candidate.destination)
+  )
+    throw new Error(
+      "The selected workbook changed. Choose the catalogue entry again.",
+    );
+  const existing = session.catalogueAssociation || session.plan.catalogue;
+  if (existing && (existing.id !== row.id || existing.row !== row.row))
+    throw new Error(
+      "This social workflow is already associated with another catalogue item.",
+    );
+  if (
+    existing?.destination &&
+    !sameCreatorCatalogueDestination(existing.destination, row.destination)
+  )
+    throw new Error(
+      "This social workflow is frozen to another workbook. Reconnect it to the original catalogue destination.",
+    );
+  await associateCreatorWorkflowWithOwner(
+    CREATOR_CATALOGUE_WORKFLOW_API.socialSnapshot(session),
+    row,
+  );
+  return getCreatorSocialRuntime().associateCatalogue(sessionId, row);
 }
 
 function assertDevelopmentConsole(sender) {

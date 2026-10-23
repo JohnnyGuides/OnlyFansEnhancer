@@ -292,6 +292,24 @@ internal static class Migrations
         """
     );
 
+    internal static readonly MigrationStep VersionTen = new(
+        10,
+        """
+        CREATE TABLE creator_workflows (
+            run_id TEXT PRIMARY KEY NOT NULL CHECK (length(run_id) BETWEEN 1 AND 128),
+            item_id TEXT REFERENCES catalogue_items(item_id) ON DELETE SET NULL,
+            source_key TEXT,
+            kind TEXT NOT NULL CHECK (kind IN ('upload', 'social')),
+            revision INTEGER NOT NULL CHECK (revision > 0),
+            snapshot_json TEXT NOT NULL CHECK (length(snapshot_json) <= 262144),
+            created_utc TEXT NOT NULL,
+            updated_utc TEXT NOT NULL
+        );
+        CREATE INDEX creator_workflows_source_updated ON creator_workflows(source_key, updated_utc DESC, run_id);
+        CREATE INDEX creator_workflows_updated ON creator_workflows(updated_utc DESC, run_id);
+        """
+    );
+
     internal static IReadOnlyList<MigrationStep> All { get; } = [VersionOne, VersionTwo, VersionThree, VersionFour, VersionFive, VersionSix, VersionSeven,
-        VersionEight, VersionNine];
+        VersionEight, VersionNine, VersionTen];
 }

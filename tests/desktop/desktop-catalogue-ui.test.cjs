@@ -230,6 +230,9 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__catalogueConfirmCalls = 0;
       globalThis.__googleHostCalls = [];
       globalThis.__browserHostCalls = [];
+      globalThis.__workflowHostCalls = [];
+      globalThis.__recoveryHostCalls = [];
+      globalThis.__teaserOverviewCalls = [];
       globalThis.__setGoogleState = (next) => {
         googleStatus = structuredClone(next);
         googleStatusQueue.length = 0;
@@ -237,7 +240,7 @@ async function installHost(page, initialState = null, googleOptions = {}) {
       globalThis.__OFENHANCER_TEST_HOST__ = async (operation, payload) => {
         if (operation === "getStatus") {
           return {
-            productVersion: "0.20.129",
+            productVersion: "0.20.130",
             protocolVersion: 1,
             capabilities: ["desktop-shell", "chrome-readiness"],
             testData: true,
@@ -251,6 +254,87 @@ async function installHost(page, initialState = null, googleOptions = {}) {
               "Chrome is unavailable in this synthetic Google/catalogue fixture.",
           };
         if (operation === "getCatalogue") return structuredClone(catalogue);
+        if (operation === "getCreatorWorkflows") {
+          globalThis.__workflowHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          if (payload?.unboundOnly)
+            return structuredClone(
+              googleFixtures.unassignedPage || {
+                items: [],
+                totalCount: 0,
+                offset: payload.offset || 0,
+                limit: payload.limit || 25,
+              },
+            );
+          return structuredClone(
+            googleFixtures.workflowSnapshots?.[payload.sourceKey] || [],
+          );
+        }
+        if (operation === "getUploadCatalogueSnapshot") {
+          globalThis.__recoveryHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          return structuredClone(
+            googleFixtures.uploadCatalogueSnapshot || {
+              rows: catalogue.items.map((item) => ({
+                id: item.sourceKey,
+                fingerprint: "f".repeat(64),
+              })),
+            },
+          );
+        }
+        if (operation === "associateCreatorWorkflow") {
+          globalThis.__recoveryHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          return structuredClone(
+            googleFixtures.associationResult || {
+              status: "associated",
+              snapshot: {},
+              results: [],
+              code: null,
+            },
+          );
+        }
+        if (operation === "getUploadWritebacks") {
+          globalThis.__recoveryHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          return structuredClone(googleFixtures.uploadWritebacks || []);
+        }
+        if (operation === "getCreatorWorkflowWritebacks") {
+          globalThis.__recoveryHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          return structuredClone(googleFixtures.workflowWritebacks || []);
+        }
+        if (operation === "rebaseUploadWriteback") {
+          globalThis.__recoveryHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          return { ...(googleFixtures.rebasedIntent || {}), state: "pending" };
+        }
+        if (operation === "retryUploadWritebacks") {
+          globalThis.__recoveryHostCalls.push({
+            operation,
+            payload: structuredClone(payload),
+          });
+          googleStatus = structuredClone(
+            googleFixtures.afterWritebackRetry || googleStatus,
+          );
+          return structuredClone(googleStatus);
+        }
+        if (operation === "getTeaserOverview") {
+          globalThis.__teaserOverviewCalls.push({ operation });
+          return structuredClone(googleFixtures.teaserOverview || {});
+        }
         if (operation === "importCatalogueSnapshot") {
           globalThis.__catalogueImportCalls += 1;
           JSON.parse(payload.json);
@@ -2237,6 +2321,641 @@ async function testCatalogueLoadingRecovery(browser, port) {
   await page.close();
 }
 
+async function testCatalogueWorkflowAndPromotionDetails(browser, port) {
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 960 },
+  });
+  const errors = captureErrors(page);
+  const catalogue = clone(populated);
+  catalogue.items[0].scriptStatus = "partial";
+  catalogue.items[1].platformLinks.script =
+    "https://script.example.test/episode-05";
+  const snapshots = {
+    "ashley-04": [
+      {
+        runId: "run-a",
+        kind: "upload",
+        revision: 2,
+        sourceKey: "ashley-04",
+        targets: [
+          {
+            platform: "onlyfans",
+            status: "partial",
+            postUrl: "https://onlyfans.com/123/johnny_guides",
+            error: null,
+            submitted: true,
+            googleError: "sync-pending",
+          },
+          {
+            platform: "reddit",
+            status: "partial",
+            postUrl:
+              "https://www.reddit.com/r/first_community/comments/abc123/posted",
+            postUrls: [
+              "https://www.reddit.com/r/first_community/comments/abc123/posted",
+              "https://www.reddit.com/r/second_community/comments/def456/posted",
+            ],
+            submitted: true,
+          },
+        ],
+        assets: [
+          {
+            role: "video",
+            name: "episode-04.mp4",
+            size: 2097152,
+            lastModified: "2026-09-01T12:00:00Z",
+            sha256: "a".repeat(64),
+          },
+        ],
+        script: {
+          status: "partial",
+          writebackState: "pending",
+          filename: "episode-04.funscript",
+          sha256: "b".repeat(64),
+          links: [],
+          sentKeys: [],
+          error: "link-missing",
+        },
+        reply: {
+          paidUrl: "https://onlyfans.com/123/johnny_guides",
+          autoReply: true,
+          replyDelayMinutes: 15,
+          wordingTemplate: "New clip: {{link}}",
+          mainStatusUrl: "https://x.com/owner/status/1001",
+          replyStatusUrl: null,
+          dueAt: "2026-09-12T12:15:00Z",
+          attempted: false,
+        },
+        clip: {
+          clipId: "clip-1",
+          sha256: "c".repeat(64),
+          episodeKey: "ashley-04",
+        },
+      },
+    ],
+    "ashley-05": [],
+  };
+  const overview = {
+    episodes: [
+      {
+        itemId: catalogue.items[0].itemId,
+        sourceKey: "ashley-04",
+        incomingOwnerTeasers: [],
+      },
+      {
+        itemId: catalogue.items[1].itemId,
+        sourceKey: "ashley-05",
+        incomingOwnerTeasers: [
+          {
+            statusId: "1001",
+            postedUtc: "2026-09-12T12:00:00Z",
+            sourceItemId: catalogue.items[0].itemId,
+            sourceKey: "ashley-04",
+            sourceTitle: "Ashley episode 04",
+            replyStatusId: "1002",
+            replyLink: "https://onlyfans.com/456/johnny_guides",
+            replyLinkKind: "onlyfans",
+          },
+          {
+            statusId: "1003",
+            postedUtc: "2026-09-13T12:00:00Z",
+            sourceItemId: null,
+            sourceKey: null,
+            sourceTitle: null,
+            replyStatusId: "1004",
+            replyLink: "https://onlyfans.com/456/johnny_guides",
+            replyLinkKind: "onlyfans",
+          },
+        ],
+      },
+    ],
+    posts: [
+      {
+        statusId: "1001",
+        itemId: catalogue.items[0].itemId,
+        sourceKey: "ashley-04",
+        firstReply: {
+          statusId: "1002",
+          link: "https://onlyfans.com/456/johnny_guides",
+          kind: "onlyfans",
+          promotedItemId: catalogue.items[1].itemId,
+          promotedSourceKey: "ashley-05",
+          promotedTitle: "Ashley episode 05",
+        },
+      },
+    ],
+  };
+  await installHost(page, catalogue, {
+    workflowSnapshots: snapshots,
+    teaserOverview: overview,
+  });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page.getByText("Ashley episode 04", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByText("Script partial", { exact: true }).count(),
+    1,
+  );
+  assert.equal(
+    await page.getByText("Script uploaded", { exact: true }).count(),
+    1,
+  );
+  assert.deepEqual(
+    await page.evaluate(() =>
+      __workflowHostCalls.filter((call) => call.payload.sourceKey),
+    ),
+    [],
+  );
+  assert.deepEqual(await page.evaluate(() => __teaserOverviewCalls), []);
+
+  const firstRow = page.locator(
+    '[data-catalogue-row][data-source-key="ashley-04"]',
+  );
+  const secondRow = page.locator(
+    '[data-catalogue-row][data-source-key="ashley-05"]',
+  );
+  await firstRow.locator(".catalogue-workflow-details summary").click();
+  await firstRow.getByText("Google: sync-pending", { exact: true }).waitFor();
+  await firstRow.getByText("Script: partial", { exact: true }).waitFor();
+  await firstRow
+    .getByText("Catalogue link: pending", { exact: true })
+    .waitFor();
+  await firstRow
+    .getByText(
+      "Reply destination: https://onlyfans.com/123/johnny_guides · 15 min delay",
+    )
+    .waitFor();
+  for (const url of [
+    "https://www.reddit.com/r/first_community/comments/abc123/posted",
+    "https://www.reddit.com/r/second_community/comments/def456/posted",
+  ])
+    await firstRow.locator(`a[href="${url}"]`).waitFor();
+  await firstRow.getByText("Own source posts", { exact: true }).waitFor();
+  await firstRow
+    .getByText("Ashley episode 05", { exact: true })
+    .last()
+    .waitFor();
+  assert.deepEqual(
+    await page.evaluate(() =>
+      __workflowHostCalls
+        .filter((call) => call.payload.sourceKey)
+        .map((call) => call.payload.sourceKey),
+    ),
+    ["ashley-04"],
+  );
+  assert.equal(await page.evaluate(() => __teaserOverviewCalls.length), 1);
+
+  await secondRow.locator(".catalogue-workflow-details summary").click();
+  await secondRow
+    .getByText("source not identified", { exact: false })
+    .waitFor();
+  await secondRow.getByText("Incoming promotions", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => __teaserOverviewCalls.length), 1);
+  assert.deepEqual(
+    await page.evaluate(() =>
+      __workflowHostCalls
+        .filter((call) => call.payload.sourceKey)
+        .map((call) => call.payload.sourceKey),
+    ),
+    ["ashley-04", "ashley-05"],
+  );
+
+  const screenshotDir = process.env.OFENHANCER_TEASER_SCREENSHOTS;
+  if (screenshotDir) {
+    fs.mkdirSync(screenshotDir, { recursive: true });
+    await page.screenshot({
+      path: path.join(screenshotDir, "catalogue-workflow-desktop.png"),
+      fullPage: true,
+    });
+  }
+  assert.deepEqual(errors, []);
+  await page.close();
+
+  if (screenshotDir) {
+    const compact = await browser.newPage({
+      viewport: { width: 800, height: 900 },
+    });
+    await installHost(compact, catalogue, {
+      workflowSnapshots: snapshots,
+      teaserOverview: overview,
+    });
+    await compact.goto(`http://127.0.0.1:${port}/index.html`);
+    await compact.getByRole("button", { name: "Catalogue" }).click();
+    const row = compact.locator(
+      '[data-catalogue-row][data-source-key="ashley-05"]',
+    );
+    await row.locator(".catalogue-workflow-details summary").click();
+    await row.getByText("Incoming promotions", { exact: true }).waitFor();
+    assert.equal(
+      await compact.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+      "compact workflow details overflow",
+    );
+    await compact.screenshot({
+      path: path.join(screenshotDir, "catalogue-workflow-compact.png"),
+      fullPage: true,
+    });
+    await compact.close();
+  }
+}
+
+async function testGoogleUploadWritebackCounts(browser, port) {
+  const page = await browser.newPage();
+  const state = {
+    ...googleStates.ready,
+    uploadWritebackPendingCount: 2,
+    uploadWritebackConflictCount: 1,
+    uploadWritebackAttemptedCount: 3,
+    uploadWritebackUnresolvedCount: 4,
+  };
+  await installHost(page, populated, { initial: state });
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+  await page
+    .getByText(
+      "Upload links: 2 pending · 1 conflict · 3 attempted · 4 unresolved.",
+    )
+    .waitFor();
+  await page.close();
+}
+
+async function testCatalogueRecoveryControls(browser, port) {
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+  });
+  const errors = captureErrors(page);
+  const pendingRun = {
+    runId: "upload-run-20261023",
+    kind: "upload",
+    revision: 2,
+    sourceKey: null,
+    targets: [
+      {
+        platform: "onlyfans",
+        status: "uploaded",
+        postUrl: "https://onlyfans.com/123/johnny_guides",
+        submitted: true,
+      },
+      {
+        platform: "reddit",
+        status: "partial",
+        postUrl:
+          "https://www.reddit.com/r/first_community/comments/abc123/posted",
+        postUrls: [
+          "https://www.reddit.com/r/first_community/comments/abc123/posted",
+          "https://www.reddit.com/r/second_community/comments/def456/posted",
+        ],
+        submitted: true,
+      },
+    ],
+    assets: [],
+    script: {
+      status: "uploaded",
+      writebackState: "not-associated",
+      filename: "episode.funscript",
+      links: ["https://johnnyguides.com/sync/scripts/hash.funscript"],
+    },
+  };
+  const writebacks = [
+    {
+      intent: {
+        key: "metadata-conflict-key",
+        sourceKey: "ashley-04",
+        platform: "onlyfans",
+        url: "https://onlyfans.com/123/johnny_guides",
+        title: "Old episode title",
+        description: "Old description",
+        state: "conflict",
+        errorCode: "catalogue-entry-changed",
+      },
+      currentFingerprint: "e".repeat(64),
+    },
+    {
+      intent: {
+        key: "attempted-key",
+        sourceKey: "ashley-05",
+        platform: "fansly",
+        url: "https://fansly.com/post/1",
+        title: "Ashley episode 05",
+        description: "Description",
+        state: "attempted",
+        errorCode: "google-write-unresolved",
+      },
+      currentFingerprint: "d".repeat(64),
+    },
+    {
+      intent: {
+        key: "layout-conflict-key",
+        sourceKey: "ashley-04",
+        platform: "script",
+        url: "https://johnnyguides.com/sync/scripts/episode.funscript",
+        state: "conflict",
+        errorCode: "catalogue-layout-changed",
+      },
+      currentFingerprint: "e".repeat(64),
+    },
+  ];
+  await installHost(page, populated, {
+    initial: googleStates.ready,
+    unassignedPage: {
+      items: [pendingRun],
+      totalCount: 1,
+      offset: 0,
+      limit: 25,
+    },
+    uploadWritebacks: writebacks,
+    workflowWritebacks: [
+      {
+        key: "workflow-attempted",
+        runId: "teaser-run-04",
+        revision: 3,
+        sourceTitle: "Ashley episode 04",
+        state: "attempted",
+        errorCode: "google-write-unresolved",
+        snapshot: {
+          runId: "teaser-run-04",
+          sourceKey: "ashley-04",
+          targets: [
+            {
+              platform: "x",
+              status: "uploaded",
+              postUrl: "https://x.com/owner/status/1001",
+              postUrls: [
+                "https://x.com/owner/status/1001",
+                "https://x.com/owner/status/1002",
+              ],
+            },
+          ],
+          reply: { paidUrl: "https://onlyfans.com/456/johnny_guides" },
+        },
+      },
+    ],
+    afterWritebackRetry: googleStates.ready,
+  });
+  await routeThumbnails(page);
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
+  await page.getByRole("button", { name: "Catalogue" }).click();
+
+  const unassigned = page.locator("#unassignedCreatorWorkflows");
+  await unassigned.locator("summary").click();
+  await unassigned
+    .getByText("Unassigned uploads (1)", { exact: true })
+    .waitFor();
+  await unassigned
+    .getByText("Script: uploaded · catalogue link: not-associated", {
+      exact: true,
+    })
+    .waitFor();
+  await unassigned
+    .getByText("https://johnnyguides.com/sync/scripts/hash.funscript", {
+      exact: true,
+    })
+    .waitFor();
+  await unassigned
+    .getByText(
+      "https://www.reddit.com/r/first_community/comments/abc123/posted",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  await unassigned
+    .getByText(
+      "https://www.reddit.com/r/second_community/comments/def456/posted",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  const episode = unassigned.getByRole("combobox", {
+    name: /Link Upload · upload-run/,
+  });
+  await episode.selectOption("ashley-04");
+  await unassigned.getByRole("button", { name: "Link workflow" }).click();
+  await unassigned
+    .getByText(/Record this saved run on “Ashley episode 04”/)
+    .waitFor();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        __recoveryHostCalls.filter(
+          (call) => call.operation === "associateCreatorWorkflow",
+        ).length,
+    ),
+    0,
+    "association happened before explicit owner confirmation",
+  );
+  await unassigned.getByRole("button", { name: "Confirm link" }).click();
+  await page.waitForFunction(() =>
+    __recoveryHostCalls.some(
+      (call) => call.operation === "associateCreatorWorkflow",
+    ),
+  );
+  const association = await page.evaluate(
+    () =>
+      __recoveryHostCalls.find(
+        (call) => call.operation === "associateCreatorWorkflow",
+      ).payload,
+  );
+  assert.deepEqual(association, {
+    runId: pendingRun.runId,
+    sourceKey: "ashley-04",
+    expectedFingerprint: "f".repeat(64),
+    confirmSource: true,
+  });
+
+  const recovery = page.locator("#googleUploadWritebacks");
+  assert.equal(
+    await page.evaluate(() =>
+      __recoveryHostCalls.some(
+        (call) => call.operation === "getCreatorWorkflowWritebacks",
+      ),
+    ),
+    false,
+    "workflow writeback detail is not requested while its panel is collapsed",
+  );
+  await recovery.locator("summary").click();
+  await recovery
+    .getByText("Writeback recovery (uploads 3 · workflows 1)", { exact: true })
+    .waitFor();
+  await recovery.getByText("Workflow · attempted", { exact: true }).waitFor();
+  assert.equal(
+    await recovery.locator(".workflow-history-row").getByRole("button").count(),
+    0,
+    "attempted workflow history exposes no reset or replay action",
+  );
+  await recovery
+    .getByText("Run teaser-run-04 · revision 3", { exact: true })
+    .waitFor();
+  await recovery
+    .locator(".workflow-history-row")
+    .getByText("Code: google-write-unresolved", { exact: true })
+    .waitFor();
+  await recovery
+    .getByText("X: https://x.com/owner/status/1001", { exact: true })
+    .waitFor();
+  await recovery
+    .getByText("X: https://x.com/owner/status/1002", { exact: true })
+    .waitFor();
+  await recovery
+    .getByText("Promoted destination: https://onlyfans.com/456/johnny_guides", {
+      exact: true,
+    })
+    .waitFor();
+  await recovery
+    .getByText("Sheet details: Old episode title · Old description", {
+      exact: true,
+    })
+    .waitFor();
+  await recovery
+    .getByText("Current details: Ashley episode 04 · Description", {
+      exact: true,
+    })
+    .waitFor();
+  await recovery
+    .getByText("Check the destination column in your sheet before retrying.", {
+      exact: true,
+    })
+    .waitFor();
+  const layoutRow = recovery.locator(".google-writeback-row").nth(3);
+  await layoutRow.getByLabel("I checked the destination column").check();
+  await layoutRow
+    .getByRole("button", { name: "Retry after checking the sheet" })
+    .click();
+  await page.waitForFunction(
+    () =>
+      __recoveryHostCalls.filter(
+        (call) => call.operation === "rebaseUploadWriteback",
+      ).length === 1,
+  );
+  assert.deepEqual(
+    await page.evaluate(
+      () =>
+        __recoveryHostCalls
+          .filter((call) => call.operation === "rebaseUploadWriteback")
+          .at(-1).payload,
+    ),
+    {
+      key: "layout-conflict-key",
+      expectedFingerprint: "e".repeat(64),
+      confirmCurrentDetails: true,
+    },
+  );
+  const screenshotDir = process.env.OFENHANCER_TEASER_SCREENSHOTS;
+  if (screenshotDir) {
+    fs.mkdirSync(screenshotDir, { recursive: true });
+    await page.screenshot({
+      path: path.join(screenshotDir, "catalogue-recovery-desktop.png"),
+      fullPage: true,
+    });
+    const compact = await browser.newPage({
+      viewport: { width: 800, height: 900 },
+    });
+    await installHost(compact, populated, {
+      initial: googleStates.ready,
+      unassignedPage: {
+        items: [pendingRun],
+        totalCount: 1,
+        offset: 0,
+        limit: 25,
+      },
+      uploadWritebacks: writebacks,
+      workflowWritebacks: [
+        {
+          key: "workflow-attempted",
+          runId: "teaser-run-04",
+          revision: 3,
+          sourceTitle: "Ashley episode 04",
+          state: "attempted",
+          errorCode: "google-write-unresolved",
+          snapshot: {
+            runId: "teaser-run-04",
+            sourceKey: "ashley-04",
+            targets: [
+              {
+                platform: "x",
+                status: "uploaded",
+                postUrl: "https://x.com/owner/status/1001",
+                postUrls: [
+                  "https://x.com/owner/status/1001",
+                  "https://x.com/owner/status/1002",
+                ],
+              },
+            ],
+            reply: { paidUrl: "https://onlyfans.com/456/johnny_guides" },
+          },
+        },
+      ],
+      afterWritebackRetry: googleStates.ready,
+    });
+    await routeThumbnails(compact);
+    await compact.goto(`http://127.0.0.1:${port}/index.html`);
+    await compact.getByRole("button", { name: "Catalogue" }).click();
+    const compactUnassigned = compact.locator("#unassignedCreatorWorkflows");
+    await compactUnassigned.locator("summary").click();
+    await compactUnassigned
+      .getByText("Unassigned uploads (1)", { exact: true })
+      .waitFor();
+    const compactRecovery = compact.locator("#googleUploadWritebacks");
+    await compactRecovery.locator("summary").click();
+    await compactRecovery
+      .getByText("Writeback recovery (uploads 3 · workflows 1)", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(
+      await compact.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await compact.screenshot({
+      path: path.join(screenshotDir, "catalogue-recovery-compact.png"),
+      fullPage: true,
+    });
+    await compact.close();
+  }
+  assert.equal(
+    await recovery
+      .getByRole("button", { name: "Use current details and retry" })
+      .isDisabled(),
+    true,
+  );
+  await recovery.getByLabel("I reviewed the current details").check();
+  await recovery
+    .getByRole("button", { name: "Use current details and retry" })
+    .click();
+  await page.waitForFunction(() =>
+    __recoveryHostCalls.some(
+      (call) => call.operation === "retryUploadWritebacks",
+    ),
+  );
+  const rebase = await page.evaluate(
+    () =>
+      __recoveryHostCalls
+        .filter((call) => call.operation === "rebaseUploadWriteback")
+        .at(-1).payload,
+  );
+  assert.deepEqual(rebase, {
+    key: "metadata-conflict-key",
+    expectedFingerprint: "e".repeat(64),
+    confirmCurrentDetails: true,
+  });
+  assert.equal(
+    await recovery
+      .locator(".google-writeback-row")
+      .nth(2)
+      .getByRole("button", { name: "Use current details and retry" })
+      .count(),
+    0,
+    "attempted intent exposed the rebase action",
+  );
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
 async function main() {
   await withServer(async (port) => {
     const browser = await chromium.launch({ headless: true });
@@ -2262,6 +2981,9 @@ async function main() {
       await testGooglePolling(browser, port);
       await testGoogleResponsive(browser, port);
       await testCatalogueResultAnnouncements(browser, port);
+      await testCatalogueWorkflowAndPromotionDetails(browser, port);
+      await testGoogleUploadWritebackCounts(browser, port);
+      await testCatalogueRecoveryControls(browser, port);
       await testGoogleMobileDialogAndSettings(browser, port);
 
       const page = await browser.newPage({

@@ -159,6 +159,18 @@
     return videos.size === 1 ? [...videos][0] : "";
   }
 
+  function expectedMediaIdList(value) {
+    if (
+      !Array.isArray(value) ||
+      value.length < 1 ||
+      value.length > 20 ||
+      value.some((id) => typeof id !== "string" || !/^\d{1,40}$/.test(id)) ||
+      new Set(value).size !== value.length
+    )
+      return null;
+    return [...value].sort();
+  }
+
   function matchesEndpoint(meta, platform) {
     if (!meta || meta.method !== "POST") return false;
     try {
@@ -238,6 +250,18 @@
         observer.platform === "fansly"
           ? extractFanslyMediaId(payload, postUrl)
           : "";
+      // No verified OnlyFans response/request media-identity contract is
+      // available. Never turn a same-endpoint response into a manual receipt.
+      if (observer.manual && observer.platform === "onlyfans") continue;
+      if (
+        observer.manual &&
+        observer.platform === "fansly" &&
+        (!postUrl ||
+          !fanslyMediaId ||
+          observer.expectedMediaIds.length !== 1 ||
+          observer.expectedMediaIds[0] !== fanslyMediaId)
+      )
+        continue;
       settle(observer, {
         platform: observer.platform,
         postUrl,
@@ -289,6 +313,7 @@
     deferred = false,
     manual = false,
     videoId = "",
+    expectedMediaIds = null,
   }) {
     if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(sessionId || ""))) {
       return Promise.reject(new Error("Invalid upload response session."));
@@ -296,6 +321,17 @@
     if (!Object.hasOwn(ENDPOINTS, platform)) {
       return Promise.reject(new Error("Unsupported upload response platform."));
     }
+    const normalizedExpectedMediaIds = expectedMediaIdList(expectedMediaIds);
+    if (manual && platform === "onlyfans")
+      return Promise.reject(
+        new Error(
+          "OnlyFans manual observation has no verified media identity contract.",
+        ),
+      );
+    if (manual && platform === "fansly" && !normalizedExpectedMediaIds)
+      return Promise.reject(
+        new Error("Manual publish observation requires prepared media IDs."),
+      );
     if (
       platform === "manyvids" &&
       (!/^\d+$/.test(String(videoId)) ||
@@ -319,6 +355,7 @@
         timeoutMs,
         manual: manual === true,
         videoId: String(videoId),
+        expectedMediaIds: normalizedExpectedMediaIds || [],
       };
       observers.add(observer);
       if (!deferred) arm(sessionId, platform);
@@ -366,8 +403,18 @@
   // Only requests opened after arming in this document count, and the first
   // matching response settles it. The outcome is announced to the isolated
   // bridge, and from there to the extension worker.
-  function watch({ sessionId, platform, watchId, timeoutMs, videoId }) {
+  function watch({
+    sessionId,
+    platform,
+    watchId,
+    timeoutMs,
+    videoId,
+    expectedMediaIds,
+  }) {
     if (!/^[a-f0-9]{32}$/.test(String(watchId || ""))) return false;
+    const normalizedExpectedMediaIds = expectedMediaIdList(expectedMediaIds);
+    if (platform === "onlyfans") return false;
+    if (platform === "fansly" && !normalizedExpectedMediaIds) return false;
     cancel(sessionId, platform);
     const announce = (outcome, postUrl = "", fanslyMediaId = "") =>
       document.dispatchEvent(
@@ -380,7 +427,14 @@
           }),
         }),
       );
-    install({ sessionId, platform, timeoutMs, videoId, manual: true }).then(
+    install({
+      sessionId,
+      platform,
+      timeoutMs,
+      videoId,
+      expectedMediaIds: normalizedExpectedMediaIds,
+      manual: true,
+    }).then(
       (receipt) =>
         announce(
           receipt?.postUrl ? "captured" : "unresolved",

@@ -266,6 +266,170 @@ test("eligibility accepts only bound owner teasers with a canonical OnlyFans lin
   }
 });
 
+test("explicit workflow intent freezes cross-promotion link, wording, and post-relative delay", async () => {
+  const paidUrl = "https://onlyfans.com/987654321/othercreator";
+  const wording = "Frozen first line\nFrozen second line -> {link}";
+  let submitted;
+  const runner = fakeRunner({
+    submit(item) {
+      submitted = item;
+      return { replyId: "912" };
+    },
+  });
+  const clock = { now: T0 + 6 * MINUTE };
+  const teaser = candidate("101", T0 + 5 * MINUTE, {
+    paidUrl,
+    replyIntent: {
+      runId: "social-run-1",
+      sourceKey: "ep-101",
+      autoReply: true,
+      replyDelayMinutes: 37,
+      wordingTemplate: wording,
+      attempted: false,
+      replyStatusUrl: null,
+    },
+  });
+  const { instance, storage } = scheduler({ runner, clock, items: [teaser] });
+  await instance.tick();
+  const planned = state(storage).items["101"];
+  assert.equal(planned.paidUrl, paidUrl);
+  assert.equal(planned.variant, wording);
+  assert.equal(planned.notBefore, T0 + 42 * MINUTE);
+  assert.equal(
+    planned.text,
+    `Frozen first line\nFrozen second line -> ${paidUrl}`,
+  );
+  clock.now = T0 + 42 * MINUTE;
+  await instance.tick();
+  assert.equal(submitted.text, planned.text);
+  assert.equal(state(storage).items["101"].outcome, "posted");
+  clock.now += 10 * MINUTE;
+  await instance.tick();
+  assert.equal(
+    runner.calls.filter(([action]) => action === "submit").length,
+    1,
+  );
+});
+
+test("explicit workflow intents fail closed for manual, attempted, replied, or mismatched-source posts", async () => {
+  const baseIntent = {
+    runId: "social-run-2",
+    sourceKey: "ep-101",
+    autoReply: true,
+    replyDelayMinutes: 15,
+    wordingTemplate: "Frozen {link}",
+    attempted: false,
+    replyStatusUrl: null,
+  };
+  for (const [replyIntent, sourceKey] of [
+    [{ ...baseIntent, autoReply: false }, "ep-101"],
+    [{ ...baseIntent, attempted: true }, "ep-101"],
+    [
+      {
+        ...baseIntent,
+        replyStatusUrl: "https://x.com/Owner_Handle/status/202",
+      },
+      "ep-101",
+    ],
+    [baseIntent, "ep-other"],
+  ]) {
+    const runner = fakeRunner();
+    const { instance, storage } = scheduler({
+      runner,
+      items: [
+        candidate("101", T0, {
+          paidUrl: "https://fansly.com/post/777",
+          sourceKey,
+          replyIntent,
+        }),
+      ],
+    });
+    await instance.tick();
+    assert.deepEqual(state(storage).items, {});
+    assert.deepEqual(runner.calls, []);
+  }
+  const api = load();
+  assert.equal(
+    api.eligibility(
+      candidate("101", T0, {
+        paidUrl: "https://fansly.com/post/777",
+        replyIntent: baseIntent,
+      }),
+      "Owner_Handle",
+    ).ok,
+    true,
+  );
+  assert.equal(
+    api.eligibility(
+      candidate("101", T0, {
+        paidUrl: "https://fansly.com/post/notnumeric",
+        replyIntent: baseIntent,
+      }),
+      "Owner_Handle",
+    ).reason,
+    "no-link",
+  );
+
+  const explicit = candidate("103", T0, {
+    paidUrl: "https://fansly.com/post/777",
+    replyIntent: baseIntent,
+  });
+  const editorStorage = memoryStorage({
+    creatorXReplyReservationsV1: {
+      next: 0,
+      items: {
+        103: {
+          owner: "editor",
+          line: "Editor choice",
+          paidUrl: explicit.paidUrl,
+          text: `Editor choice\n-> ${explicit.paidUrl}`,
+          attempted: false,
+        },
+      },
+    },
+  });
+  const editor = scheduler({ storage: editorStorage, items: [explicit] });
+  await editor.instance.tick();
+  assert.equal(state(editorStorage).items["103"], undefined);
+  assert.equal(
+    editorStorage.data.creatorXReplyReservationsV1.items["103"].owner,
+    "editor",
+  );
+});
+
+test("a pending workflow reply is cancelled when its frozen intent changes", async () => {
+  const clock = { now: T0 };
+  const intent = {
+    runId: "social-run-3",
+    sourceKey: "ep-104",
+    autoReply: true,
+    replyDelayMinutes: 15,
+    wordingTemplate: "Frozen {link}",
+    attempted: false,
+    replyStatusUrl: null,
+  };
+  const runner = fakeRunner();
+  const made = scheduler({
+    clock,
+    runner,
+    items: [
+      candidate("104", T0, {
+        paidUrl: "https://fansly.com/post/777",
+        replyIntent: intent,
+      }),
+    ],
+  });
+  await made.instance.tick();
+  made.queue.items[0].replyIntent = { ...intent, runId: "newer-run" };
+  clock.now = T0 + 15 * MINUTE;
+  assert.equal((await made.instance.tick()).changed, "binding-changed");
+  assert.equal(
+    runner.calls.filter(([action]) => action === "submit").length,
+    0,
+  );
+  assert.equal(state(made.storage).items["104"].outcome, "binding-changed");
+});
+
 test("ineligible teasers are not scheduled and a missing link is recorded once", async () => {
   const runner = fakeRunner();
   const { instance, storage } = scheduler({

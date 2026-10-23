@@ -2,9 +2,51 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
 namespace OFEnhancer.Catalogue;
+
+internal static class CatalogueProjectionProvenance
+{
+    internal const string WorkbookIdSetting = "catalogue.projection.workbook_id";
+    internal const string SheetIdSetting = "catalogue.projection.sheet_id";
+
+    internal static void Record(SqliteConnection connection, SqliteTransaction transaction,
+        string workbookId, string sheetId)
+    {
+        Set(WorkbookIdSetting, workbookId);
+        Set(SheetIdSetting, sheetId);
+
+        void Set(string key, string value) => CatalogueSql.Execute(connection, transaction,
+            "INSERT INTO settings(key,value) VALUES ($key,$value) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("$key", key), ("$value", value));
+    }
+
+    internal static void Clear(SqliteConnection connection, SqliteTransaction transaction) => CatalogueSql.Execute(
+        connection, transaction,
+        "DELETE FROM settings WHERE key IN ($workbook,$sheet)",
+        ("$workbook", WorkbookIdSetting), ("$sheet", SheetIdSetting));
+
+    internal static UploadCatalogueDestination? Read(SqliteConnection connection)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT key,value FROM settings WHERE key IN ($workbook,$sheet)";
+        command.Parameters.AddWithValue("$workbook", WorkbookIdSetting);
+        command.Parameters.AddWithValue("$sheet", SheetIdSetting);
+        Dictionary<string, string> values = new(StringComparer.Ordinal);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read()) values[reader.GetString(0)] = reader.GetString(1);
+        if (!values.TryGetValue(WorkbookIdSetting, out string? workbookId)
+            || !values.TryGetValue(SheetIdSetting, out string? sheetId)
+            || workbookId.Length is 0 or > 256 || !Regex.IsMatch(workbookId, "^[A-Za-z0-9_-]+$", RegexOptions.CultureInvariant)
+            || sheetId.Length is 0 or > 64 || !Regex.IsMatch(sheetId, "^[0-9]+$", RegexOptions.CultureInvariant)
+            || !int.TryParse(sheetId, NumberStyles.None, CultureInfo.InvariantCulture, out int numericSheetId)
+            || numericSheetId < 0)
+            return null;
+        return new(workbookId, sheetId);
+    }
+}
 
 internal static class WorkbookProjectionImporter
 {
@@ -82,6 +124,10 @@ internal static class WorkbookProjectionImporter
         }
         if (updateGoogleBindings)
             ReplaceSheetBindings(connection, transaction, validated.WorkbookId, validated.SheetId, bindings, validated.Complete);
+        if (validated.Complete)
+            CatalogueProjectionProvenance.Record(connection, transaction, validated.WorkbookId, validated.SheetId);
+        else
+            CatalogueProjectionProvenance.Clear(connection, transaction);
         transaction.Commit();
     }
 

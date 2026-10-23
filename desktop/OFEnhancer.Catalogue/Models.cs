@@ -23,7 +23,8 @@ public sealed record CatalogueItemSummary(
     string ThumbnailStatus = "missing",
     IReadOnlyList<CatalogueCandidate>? Candidates = null,
     IReadOnlyDictionary<string, CatalogueSourceLinkCell>? SourceLinkCells = null,
-    string? Category = null
+    string? Category = null,
+    string? ScriptStatus = null
 );
 
 public sealed record CatalogueSourceLinkCell(string Text, string? Hyperlink, IReadOnlyList<string> Urls, string? IssueCode = null);

@@ -200,6 +200,9 @@
         scheduledUtc,
         timeZone,
         replyDelayMinutes,
+        ...(Number.isSafeInteger(options.clipId) && options.clipId > 0
+          ? { clipId: options.clipId }
+          : {}),
         ...(options.autoReply !== undefined
           ? { autoReply: options.autoReply }
           : {}),

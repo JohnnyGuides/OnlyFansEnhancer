@@ -665,6 +665,36 @@ button[aria-busy="true"] {
   color: #78ddb1;
 }
 
+.script-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 24px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #1b222d;
+  color: #dce1e8;
+  font-size: 0.72rem;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.script-status.is-uploaded {
+  background: #142820;
+  color: #78ddb1;
+}
+
+.script-status.is-partial,
+.script-status.is-pending {
+  background: #30291c;
+  color: #f1d28d;
+}
+
+.script-status.is-failed {
+  background: #352123;
+  color: #ffb0b0;
+}
+
 .catalogue-meta {
   margin: 6px 0 9px;
   color: #8f99a8;
@@ -691,6 +721,204 @@ button[aria-busy="true"] {
 .catalogue-source-links summary {
   cursor: pointer;
   color: #c6cfdb;
+}
+
+.catalogue-workflow-details {
+  margin-top: 12px;
+  border-top: 1px solid #303744;
+  color: #dce1e8;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.catalogue-workflow-details > summary {
+  width: fit-content;
+  padding: 8px 0 2px;
+  color: #c6cfdb;
+  cursor: pointer;
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.catalogue-workflow-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 8px 0 4px;
+}
+
+.catalogue-recovery-panel,
+.google-writeback-details {
+  border: 1px solid #303744;
+  border-radius: 8px;
+  color: #dce1e8;
+  font-size: 0.84rem;
+}
+
+.catalogue-recovery-panel {
+  margin: 10px 0 18px;
+  padding: 0 12px;
+}
+
+.catalogue-recovery-panel > summary,
+.google-writeback-details > summary {
+  padding: 10px 0;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.catalogue-recovery-content,
+.google-writeback-content {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 0 12px;
+}
+
+.unassigned-workflow-run,
+.google-writeback-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid #303744;
+}
+
+.unassigned-workflow-run p,
+.google-writeback-row p {
+  margin: 0;
+}
+
+.workflow-association-controls,
+.workflow-association-confirm,
+.workflow-paging {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-association-controls label {
+  display: grid;
+  gap: 4px;
+  color: #b6bfcd;
+}
+
+.workflow-association-controls select {
+  min-height: 44px;
+  min-width: min(100%, 240px);
+  padding: 10px 13px;
+  border: 1px solid #3a4352;
+  border-radius: 12px;
+  background: #0d1118;
+  color: #f4f5f7;
+  font: inherit;
+}
+
+.workflow-association-confirm {
+  flex-basis: 100%;
+  padding: 8px 0;
+}
+
+.workflow-association-confirm p {
+  flex-basis: 100%;
+}
+
+.workflow-paging {
+  justify-content: space-between;
+  padding-top: 6px;
+}
+
+.google-writeback-details {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 0 12px;
+}
+
+.writeback-review-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #e2e8f0;
+}
+
+.writeback-review-check input {
+  accent-color: #78ddb1;
+}
+
+.workflow-list,
+.workflow-run,
+.workflow-target,
+.workflow-subsection,
+.teaser-link-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflow-run + .workflow-run,
+.teaser-links {
+  border-top: 1px solid #303744;
+  padding-top: 12px;
+}
+
+.workflow-heading,
+.workflow-run p,
+.workflow-subsection p,
+.teaser-link-group p {
+  margin: 0;
+}
+
+.workflow-heading {
+  color: #f4f5f7;
+  font-size: 0.84rem;
+}
+
+.workflow-target {
+  grid-template-columns: minmax(160px, 1fr) minmax(0, auto);
+  padding: 8px 0;
+  border-bottom: 1px solid #252c37;
+}
+
+.workflow-target-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.workflow-target > p,
+.workflow-error,
+.workflow-note,
+.workflow-asset,
+.workflow-wording,
+.workflow-empty {
+  color: #b6bfcd;
+  overflow-wrap: anywhere;
+}
+
+.workflow-error {
+  color: #ffb0b0;
+}
+
+.workflow-link {
+  width: fit-content;
+  color: #85d9ff;
+  overflow-wrap: anywhere;
+  text-underline-offset: 3px;
+}
+
+.workflow-wording {
+  white-space: pre-wrap;
+}
+
+.teaser-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  overflow-wrap: anywhere;
 }
 
 .catalogue-source-links p,
@@ -941,6 +1169,17 @@ dialog::backdrop {
 
 .settings-control select,
 .connect-browser-field select {
+  width: min(100%, 360px);
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid #3a4352;
+  border-radius: 12px;
+  background: #0d1118;
+  color: #f4f5f7;
+  font: inherit;
+}
+
+#savedCatalogueAssociation select {
   width: min(100%, 360px);
   min-height: 44px;
   padding: 10px 13px;
@@ -1364,6 +1603,10 @@ dialog::backdrop {
 
   .catalogue-title-line h3 {
     white-space: normal;
+  }
+
+  .workflow-target {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .social-counts {

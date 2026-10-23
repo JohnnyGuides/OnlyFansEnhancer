@@ -16,6 +16,8 @@
     "START_NEW_CREATOR_UPLOAD",
     "CLEAR_CREATOR_UPLOAD_PREPARATION",
     "RETRY_CREATOR_UPLOAD_PLATFORM",
+    "RECONCILE_CREATOR_UPLOAD_RESULT",
+    "RETRY_CREATOR_SCRIPT_CATALOGUE",
     "UPLOAD_SYNC_SCRIPT",
     "UPLOAD_SYNC_SCRIPT_PART",
     "PREPARE_CREATOR_SOCIAL_DISTRIBUTION",
@@ -31,6 +33,7 @@
     "creatorToolkitActionLogV1",
     "creatorSocialSubredditSelectionV1",
     "creatorUploadSheetBridgeV1",
+    "creatorUploadCatalogueCreateOperationV1",
   ]);
   const storageKey = (key) => SETTINGS.has(key);
   const UUID =

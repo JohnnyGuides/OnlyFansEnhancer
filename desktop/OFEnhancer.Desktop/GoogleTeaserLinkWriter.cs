@@ -36,13 +36,14 @@ internal sealed class GoogleTeaserLinkWriter(
         UploadSheetWriteback? intent, Action<int>? beforeWrite, CancellationToken cancellationToken)
     {
         bool teaser = platform == "x";
-        // X teasers and toy-sync scripts may hold several links in one cell.
-        bool append = teaser || platform == "script";
+        string columnPlatform = platform == "pornhub" ? "pornhubFree" : platform;
+        // These columns intentionally hold multiple results for the same source item.
+        bool append = platform is "x" or "reddit" or "script";
         string LinkKey(string value) => platform == "onlyfans" ? new Uri(value).AbsolutePath.Split('/')[1] : value;
         string statusId = (teaser ? CatalogueStore.XStatusIdFromUrl(url)
             : Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
-                && platform is "onlyfans" or "fansly" or "manyvids" or "script"
-                ? CatalogueSnapshotImporter.CanonicalPlatformLink(platform, uri) : null) is { } id
+                && columnPlatform is "onlyfans" or "fansly" or "manyvids" or "pornhubFree" or "reddit" or "redgifs" or "clips4sale" or "script"
+                ? CatalogueSnapshotImporter.CanonicalPlatformLink(columnPlatform, uri) : null) is { } id
             && url.Length <= 2048 && !url.Any(char.IsWhiteSpace)
             ? id : throw new GoogleCatalogueException("invalid-teaser-link");
         if (!teaser) statusId = LinkKey(statusId);
@@ -51,24 +52,39 @@ internal sealed class GoogleTeaserLinkWriter(
         if (intent is not null && (intent.WorkbookId != before.Projection.WorkbookId ||
             intent.SheetId is not null && intent.SheetId != before.Projection.SheetId))
             throw new GoogleCatalogueException("catalogue-layout-changed");
-        if (!before.Columns.TryGetValue(platform, out int column))
+        if (!before.Columns.TryGetValue(columnPlatform, out int column))
             throw new GoogleCatalogueException("catalogue-layout-changed");
         WorkbookCatalogueItem item = before.Projection.Items.SingleOrDefault(candidate => candidate.SourceKey == sourceKey)
             ?? throw new GoogleCatalogueException("catalogue-entry-missing");
         GoogleSheetSnapshot sheet = workbook.Sheets.Single(candidate => candidate.SheetId == before.CatalogueSheetId);
         GoogleWorkbookCellSnapshot? cell = CellAt(sheet, item.SourceRow, column);
         string text = cell?.Value ?? "";
+        if (cell?.Formula is not null) throw new GoogleCatalogueException("teaser-cell-formula");
         HashSet<string> Links(string value) => teaser ? StatusIds(value) :
             [.. CellUrl.Matches(value).Select(match => Uri.TryCreate(match.Value, UriKind.Absolute, out Uri? parsed)
-                ? CatalogueSnapshotImporter.CanonicalPlatformLink(platform, parsed) : null).OfType<string>().Select(LinkKey)];
-        if (intent is not null && (item.Title != intent.Title || item.Description != intent.Description))
-            throw new GoogleCatalogueException("catalogue-entry-changed");
+                ? CatalogueSnapshotImporter.CanonicalPlatformLink(columnPlatform, parsed) : null).OfType<string>().Select(LinkKey)];
+        bool isAutoLinkedUrl = cell?.Hyperlink is { } hyperlink
+            && string.Equals(text.Trim(), hyperlink, StringComparison.Ordinal)
+            && Uri.TryCreate(hyperlink, UriKind.Absolute, out Uri? hyperlinkUri)
+            && hyperlinkUri.Scheme == Uri.UriSchemeHttps && hyperlinkUri.IsDefaultPort
+            && string.IsNullOrEmpty(hyperlinkUri.UserInfo)
+            && (teaser ? CatalogueStore.XStatusIdFromUrl(hyperlink) is not null
+                : CatalogueSnapshotImporter.CanonicalPlatformLink(columnPlatform, hyperlinkUri) is not null);
         if (intent is not null && item.SourceLinkCells is { } sourceCells
-            && sourceCells.TryGetValue(platform, out CatalogueSourceLinkCell? sourceCell) && sourceCell.IssueCode is not null)
+            && sourceCells.TryGetValue(columnPlatform, out CatalogueSourceLinkCell? sourceCell) && sourceCell.IssueCode is not null)
             throw new GoogleCatalogueException("platform-link-conflict");
-        if (Links(text).Contains(statusId)
-            || cell?.Hyperlink is { } target && Links(target).Contains(statusId))
+        bool exactUrlPresent = Links(text).Contains(statusId)
+            || cell?.Hyperlink is { } target && Links(target).Contains(statusId);
+        bool safeConflictReconciliation = intent is { State: "conflict", ErrorCode: "catalogue-entry-changed" }
+            && exactUrlPresent;
+        if (intent is not null && (item.Title != intent.Title || item.Description != intent.Description)
+            && !safeConflictReconciliation)
+            throw new GoogleCatalogueException("catalogue-entry-changed");
+        if (exactUrlPresent)
             return new("already-present", before);
+        // A never-attempted intent may have become a conflict after harmless
+        // metadata edits. If its exact URL is already on the uniquely resolved
+        // source row, reconciliation needs no metadata comparison or mutation.
         if (!append && (!string.IsNullOrWhiteSpace(text) || cell?.Hyperlink is not null))
             throw new GoogleCatalogueException("platform-link-conflict");
         // A status already linked from another row is never duplicated here.
@@ -79,7 +95,7 @@ internal sealed class GoogleTeaserLinkWriter(
         if (text.Any(c => c is '\r' or '\t'))
             throw new GoogleCatalogueException("teaser-cell-unreadable");
         // A whole-cell link on non-link text would be lost by a value write.
-        if (cell?.Hyperlink is not null)
+        if (cell?.Hyperlink is not null && !isAutoLinkedUrl)
             throw new GoogleCatalogueException("teaser-cell-linked");
 
         string existing = text.Trim();

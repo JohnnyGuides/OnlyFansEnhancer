@@ -221,7 +221,12 @@ internal static partial class CatalogueMatcher
 
 public sealed partial class CatalogueStore
 {
-    public CatalogueView GetCatalogue() => CatalogueMatcher.BuildView(this);
+    public CatalogueView GetCatalogue()
+    {
+        CatalogueView view=CatalogueMatcher.BuildView(this);
+        var scriptStatuses=GetCreatorScriptStatuses();
+        return view with { Items=[..view.Items.Select(item=>item with {ScriptStatus=scriptStatuses.GetValueOrDefault(item.SourceKey)})] };
+    }
 
     public BindingSummary ConfirmAssetBinding(string assetId, string itemId)
     {

@@ -515,7 +515,33 @@ sheet edits and later site observations. Neither an incoming refresh nor a froze
 browser job should silently redefine those rules. The existing auxiliary workbook
 tabs can be considered for richer projections; their presence alone is not synchronization.
 
-## Verdict
+## Repair status
+
+The subsequent catalogue foundation repair addresses findings 1–11 and 13 in the
+supported workflows: source/promotion separation; identity-bound manual capture
+with explicit in-app recovery when evidence is insufficient; frozen workbook
+affinity and durable writeback; stable row recovery; distinct local/Google states;
+full-row Apps Script occupancy; archived completed publication guards; canonical
+OnlyFans identity; reviewed conflict recovery; exact clip publication state; and
+central workflow/reply/script records. New-row creation uses a durable operation
+ID and one atomic content/U-ID/developer-metadata mutation. The additive
+`_Workflows` ledger projects verified workflow metadata to its original workbook.
+The optional Apps Script source must still be deployed independently.
+
+Finding 12 remains a coverage boundary: there is no universal collector for later
+edits/deletions made directly on every platform, no general cross-platform metrics
+collector, and no complete versioned filesystem media engine. The new metadata
+ledger does not pretend those collectors exist. OnlyFans manual publication also
+requires owner-confirmed link recovery until an identity-backed provider response
+contract is qualified. Unsupported autonomous site actions remain manual.
+
+Source/unit/browser-fixture verification and installed release evidence belong in
+`docs/acceptance.md`. They do not establish live provider publication or Google
+write acceptance. Full UAT must verify the supported installed workflow with the
+owner's selected source, actual post, frozen reply destination, script mapping and
+read-back catalogue results.
+
+## Original audit verdict
 
 The current program does not guarantee that every upload or change is correctly
 catalogued and synchronized. Some protection mechanisms are sound, but the owner’s

@@ -34,6 +34,12 @@ async function mount(page, { init, seed } = {}) {
             queueMicrotask(() => callback?.());
             return Promise.resolve();
           },
+          remove(keys, callback) {
+            for (const key of Array.isArray(keys) ? keys : [keys])
+              delete values[key];
+            queueMicrotask(() => callback?.());
+            return Promise.resolve();
+          },
         },
         onChanged: { addListener() {}, removeListener() {} },
       },
@@ -834,6 +840,81 @@ test("a new-pending draft narrower than the default platforms still writes and p
     assert.doesNotMatch(
       await page.locator("#uploadError").textContent(),
       /needs review|Verify the selected/,
+    );
+    assert.deepEqual(errors, []);
+  });
+});
+
+test("new catalogue creation keeps one operation ID across uncertainty and refuses edited payloads", async () => {
+  await withPage(async (page, errors) => {
+    await installDesktopCatalogue(page);
+    await page.evaluate(() => {
+      let acknowledged = false;
+      globalThis.CreatorCatalogueClient.getCatalogueSnapshot = async () => ({
+        status: "snapshot",
+        source: "desktop",
+        rows: acknowledged
+          ? [
+              {
+                row: 43,
+                id: "created",
+                itemId: "created",
+                title: "Brand new clip",
+                description: "A benign description.",
+                releaseDate: "2026-01-02",
+                fingerprint: "b".repeat(64),
+                publicationState: {},
+              },
+            ]
+          : [],
+        emptyRow: { row: 43, fingerprint: "e".repeat(64) },
+      });
+      globalThis.writeAttempts = [];
+      globalThis.CreatorCatalogueClient.writeUploadCatalogueEntry = async (
+        request,
+      ) => {
+        writeAttempts.push(structuredClone(request));
+        if (writeAttempts.length === 1)
+          throw new Error("catalogue-entry-operation-unresolved");
+        acknowledged = true;
+        return { id: "created", row: 43, status: "created" };
+      };
+    });
+    await draftNewClip(page, {
+      pastDate: false,
+      publishNow: false,
+      onlyOnlyfans: true,
+    });
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() => globalThis.writeAttempts.length === 1);
+    const stored = await page.evaluate(async () =>
+      chrome.storage.local.get("creatorUploadCatalogueCreateOperationV1"),
+    );
+    const operation = stored.creatorUploadCatalogueCreateOperationV1;
+    assert.match(
+      operation.operationId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    await page.locator("#uploadTitle").fill("Edited after uncertain save");
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() =>
+      document.querySelector("#uploadError").textContent.includes("unresolved"),
+    );
+    assert.equal(await page.evaluate(() => globalThis.writeAttempts.length), 1);
+    await page.locator("#uploadTitle").fill("Brand new clip");
+    await page.locator("#uploadButton").click();
+    await page.waitForFunction(() => globalThis.writeAttempts.length === 2);
+    assert.equal(
+      await page.evaluate(
+        () =>
+          globalThis.writeAttempts[0].operationId ===
+          globalThis.writeAttempts[1].operationId,
+      ),
+      true,
+    );
+    assert.equal(
+      await page.evaluate(() => globalThis.writeAttempts[0].operationId),
+      operation.operationId,
     );
     assert.deepEqual(errors, []);
   });

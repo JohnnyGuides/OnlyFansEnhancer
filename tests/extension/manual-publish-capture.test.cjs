@@ -83,7 +83,7 @@ function post(Xhr, url = "https://onlyfans.com/api2/v2/posts") {
   return xhr;
 }
 
-test("a manual watch captures only the first post opened after arming", async () => {
+test("OnlyFans manual observation fails closed without a verified media identity contract", async () => {
   const { api, Xhr, events, settle } = loadObserver();
   // An unrelated deferred observer patches XHR before the early request.
   api
@@ -100,27 +100,26 @@ test("a manual watch captures only the first post opened after arming", async ()
       platform: "onlyfans",
       watchId: WATCH,
       timeoutMs: 6 * 60 * 60_000,
+      expectedMediaIds: ["444444444"],
     }),
-    true,
+    false,
+    "media IDs alone do not establish their request-body meaning",
   );
   early.complete({ id: 111111111 });
   await settle();
-  assert.deepEqual(events, [], "a request opened before arming is ignored");
+  assert.deepEqual(events, []);
   post(Xhr, "https://onlyfans.com/api2/v2/users/me").complete({ id: 1234567 });
   await settle();
   assert.deepEqual(events, [], "another endpoint is ignored");
-  post(Xhr).complete({ id: 222222222 });
+  const unrelated = post(Xhr);
+  unrelated.send('{"unrelatedMedia":["999999999"],"caption":"444444444"}');
+  unrelated.complete({ id: 222222222 });
   await settle();
-  post(Xhr).complete({ id: 333333333 });
-  await settle();
-  assert.deepEqual(events, [
-    {
-      type: "creator-upload-manual-publish",
-      watchId: WATCH,
-      outcome: "captured",
-      postUrl: "https://onlyfans.com/222222222/johnny_guides",
-    },
-  ]);
+  assert.deepEqual(
+    events,
+    [],
+    "same-endpoint responses cannot be trusted without identity evidence",
+  );
 });
 
 test("a manual watch survives a rejected publish and captures the retry", async () => {
@@ -130,6 +129,7 @@ test("a manual watch survives a rejected publish and captures the retry", async 
     platform: "fansly",
     watchId: WATCH,
     timeoutMs: 60_000,
+    expectedMediaIds: ["956574905413943296"],
   });
   post(Xhr, "https://apiv3.fansly.com/api/v1/post").complete(
     { success: false },
@@ -137,12 +137,56 @@ test("a manual watch survives a rejected publish and captures the retry", async 
   );
   await settle();
   assert.deepEqual(events, []);
+  const unrelated = post(Xhr, "https://apiv3.fansly.com/api/v1/post");
+  unrelated.complete({
+    success: true,
+    response: {
+      posts: [
+        {
+          id: "987654321",
+          attachments: [
+            { postId: "987654321", contentType: 1, contentId: "111111111" },
+          ],
+        },
+      ],
+      accountMedia: [
+        {
+          id: "111111111",
+          mediaId: "222222222",
+          media: { id: "222222222", type: 2, mimetype: "video/mp4" },
+        },
+      ],
+    },
+  });
+  await settle();
+  assert.deepEqual(events, [], "a different attached video is ignored");
   post(Xhr, "https://apiv3.fansly.com/api/v1/post").complete({
-    response: { id: "987654321" },
+    success: true,
+    response: {
+      posts: [
+        {
+          id: "987654322",
+          attachments: [
+            { postId: "987654322", contentType: 1, contentId: "333333333" },
+          ],
+        },
+      ],
+      accountMedia: [
+        {
+          id: "333333333",
+          mediaId: "956574905413943296",
+          media: {
+            id: "956574905413943296",
+            type: 2,
+            mimetype: "video/mp4",
+          },
+        },
+      ],
+    },
   });
   await settle();
   assert.equal(events.length, 1);
-  assert.equal(events[0].postUrl, "https://fansly.com/post/987654321");
+  assert.equal(events[0].postUrl, "https://fansly.com/post/987654322");
 });
 
 test("ManyVids records only the bound editor's accepted final Save", async () => {
@@ -205,28 +249,27 @@ test("ManyVids manual preparation watches Save and refuses a different video's r
   assert.equal(captured.result.status, "catalogue-updated");
 });
 
-test("a manual watch announces unresolved, cancelled and expired outcomes", async () => {
+test("a media-bound manual watch announces cancelled and expired outcomes", async () => {
   const { api, Xhr, events, timers, settle } = loadObserver();
   api.watch({
     sessionId: OBSERVER_SESSION,
-    platform: "onlyfans",
+    platform: "fansly",
     watchId: WATCH,
     timeoutMs: 6 * 60 * 60_000,
+    expectedMediaIds: ["956574905413943296"],
   });
   assert.equal(timers.at(-1).delay, 6 * 60 * 60_000);
-  post(Xhr).complete({ ok: true });
-  await settle();
-  assert.equal(events.at(-1).outcome, "unresolved");
 
   const second = "fedcba9876543210fedcba9876543210";
   api.watch({
     sessionId: OBSERVER_SESSION,
-    platform: "onlyfans",
+    platform: "fansly",
     watchId: second,
     timeoutMs: 24 * 60 * 60_000,
+    expectedMediaIds: ["956574905413943296"],
   });
   assert.equal(timers.at(-1).delay, 12 * 60 * 60_000, "the watch is bounded");
-  api.cancel(OBSERVER_SESSION, "onlyfans");
+  api.cancel(OBSERVER_SESSION, "fansly");
   await settle();
   assert.deepEqual(events.at(-1), {
     type: "creator-upload-manual-publish",
@@ -237,14 +280,24 @@ test("a manual watch announces unresolved, cancelled and expired outcomes", asyn
 
   api.watch({
     sessionId: OBSERVER_SESSION,
-    platform: "onlyfans",
+    platform: "fansly",
     watchId: WATCH,
     timeoutMs: 60_000,
+    expectedMediaIds: ["956574905413943296"],
   });
   timers.at(-1).callback();
   await settle();
   assert.equal(events.at(-1).outcome, "expired");
   assert.equal(api.watch({ sessionId: OBSERVER_SESSION, watchId: "x" }), false);
+  assert.equal(
+    api.watch({
+      sessionId: OBSERVER_SESSION,
+      platform: "onlyfans",
+      watchId: WATCH,
+    }),
+    false,
+    "manual observation cannot arm without prepared media identity",
+  );
 });
 
 test("autonomous observation still fails on a rejected final request", async () => {
@@ -417,6 +470,14 @@ function addSession(env, id, options = {}) {
             stage: "upload",
             tabId: 100 + index,
             documentId: "doc-" + index,
+            ...(platform === "fansly"
+              ? {
+                  receiptEvidence: {
+                    kind: "prepared-media",
+                    expectedMediaIds: ["956574905413943296"],
+                  },
+                }
+              : {}),
           },
         ]),
       ),
@@ -458,13 +519,17 @@ function deliver(env, message, sender) {
 }
 
 function outcome(id, target, extra = {}) {
+  const postUrl =
+    target.platform === "fansly"
+      ? "https://fansly.com/post/424242424"
+      : "https://onlyfans.com/424242424/johnny_guides";
   return {
     type: "CREATOR_UPLOAD_MANUAL_PUBLISH_OBSERVED",
     sessionId: id,
     platform: target.platform,
     watchId: target.manualWatchId,
     outcome: "captured",
-    postUrl: "https://onlyfans.com/424242424/johnny_guides",
+    postUrl,
     ...extra,
   };
 }
@@ -474,7 +539,10 @@ function senderFor(target, extra = {}) {
     frameId: 0,
     tab: { id: target.tabId },
     documentId: target.documentId,
-    url: "https://onlyfans.com/posts/create",
+    url:
+      target.platform === "fansly"
+        ? "https://fansly.com/home"
+        : "https://onlyfans.com/posts/create",
     ...extra,
   };
 }
@@ -537,23 +605,24 @@ test("Fansly manual receipt survives recovery and adds its media ID to the websi
   })()`);
   assert.deepEqual(
     requests.map((r) => r.body.keys),
-    [["956588460972449792", "956574905413943296"], ["ph123"]],
+    [["956588460972449792", "956574905413943296"]],
   );
   assert.deepEqual(
     requests.map((r) => r.body.funscript.actions[0].at),
-    [1023, 0],
+    [1023],
   );
-  assert.equal(result.length, 2);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].status, "complete");
   assert.equal(result[0].sheetError, "");
 });
 
-test("manual preparation arms a watch in the exact prepared document", async () => {
+test("Fansly manual preparation arms a media-bound watch in the exact document", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id);
+  const session = addSession(env, id, { platforms: ["fansly"] });
   const port = connect(env, id);
-  const result = await prepare(env, id);
-  const target = session.platforms.get("onlyfans");
+  const result = await prepare(env, id, "fansly");
+  const target = session.platforms.get("fansly");
   assert.equal(result.status, "awaiting-manual-publish");
   assert.equal(target.status, "awaiting-manual-publish");
   assert.match(target.manualWatchId, /^[a-f0-9]{32}$/);
@@ -573,21 +642,21 @@ test("manual preparation arms a watch in the exact prepared document", async () 
   assert.equal(armCalls[2].args[0].watchId, target.manualWatchId);
   assert.equal(port.messages.at(-1).result.status, "awaiting-manual-publish");
   const record = await stored(env, id);
-  assert.equal(record.platforms.onlyfans.status, "awaiting-manual-publish");
-  assert.equal(record.platforms.onlyfans.manualWatchId, target.manualWatchId);
+  assert.equal(record.platforms.fansly.status, "awaiting-manual-publish");
+  assert.equal(record.platforms.fansly.manualWatchId, target.manualWatchId);
   assert.equal(
-    record.platforms.onlyfans.manualWatchUntil,
+    record.platforms.fansly.manualWatchUntil,
     target.manualWatchUntil,
   );
 });
 
-test("a matching post commits its link once; duplicates are inert", async () => {
+test("a matching Fansly post commits its link once; duplicates are inert", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id);
+  const session = addSession(env, id, { platforms: ["fansly"] });
   connect(env, id);
-  await prepare(env, id);
-  const target = session.platforms.get("onlyfans");
+  await prepare(env, id, "fansly");
+  const target = session.platforms.get("fansly");
   const message = outcome(id, target);
   const sender = senderFor(target);
   const [first, duplicate] = await Promise.all([
@@ -601,15 +670,15 @@ test("a matching post commits its link once; duplicates are inert", async () => 
   assert.equal(again.accepted, false);
   assert.deepEqual(JSON.parse(JSON.stringify(env.commits)), [
     {
-      platform: "onlyfans",
-      postUrl: "https://onlyfans.com/424242424/johnny_guides",
+      platform: "fansly",
+      postUrl: "https://fansly.com/post/424242424",
     },
   ]);
   assert.equal(target.status, "catalogue-updated");
-  assert.equal(target.postUrl, "https://onlyfans.com/424242424/johnny_guides");
+  assert.equal(target.postUrl, "https://fansly.com/post/424242424");
   assert.equal(target.submitAttempted, undefined, "no publication journal");
   assert.equal(
-    (await stored(env, id))?.platforms?.onlyfans,
+    (await stored(env, id))?.platforms?.fansly,
     undefined,
     "a fully terminal session retires from the store",
   );
@@ -618,16 +687,17 @@ test("a matching post commits its link once; duplicates are inert", async () => 
 test("an unrelated tab, document, frame or superseded watch cannot commit", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id, { platforms: ["onlyfans", "fansly"] });
-  await prepare(env, id, "onlyfans");
+  const session = addSession(env, id, { platforms: ["fansly", "manyvids"] });
+  session.platforms.get("manyvids").manyvidsId = "7470821";
   await prepare(env, id, "fansly");
-  const target = session.platforms.get("onlyfans");
-  const fansly = session.platforms.get("fansly");
+  await prepare(env, id, "manyvids");
+  const target = session.platforms.get("fansly");
+  const manyvids = session.platforms.get("manyvids");
   for (const sender of [
     senderFor(target, { tab: { id: 999 } }),
     senderFor(target, { documentId: "doc-other" }),
     senderFor(target, { frameId: 3 }),
-    senderFor(fansly),
+    senderFor(manyvids),
   ])
     await assert.rejects(
       deliver(env, outcome(id, target), sender),
@@ -647,50 +717,49 @@ test("an unrelated tab, document, frame or superseded watch cannot commit", asyn
   assert.equal(unknown.accepted, false);
   assert.deepEqual(env.commits, []);
   assert.equal(target.status, "awaiting-manual-publish");
-  assert.equal(fansly.status, "awaiting-manual-publish");
+  assert.equal(manyvids.status, "awaiting-manual-publish");
 });
 
 test("tab close, leaving the page, expiry and stop end the watch without a commit", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id, {
-    platforms: ["onlyfans", "fansly"],
-  });
+  const session = addSession(env, id, { platforms: ["fansly", "manyvids"] });
+  session.platforms.get("manyvids").manyvidsId = "7470821";
   const port = connect(env, id);
-  await prepare(env, id, "onlyfans");
   await prepare(env, id, "fansly");
-  const onlyfans = session.platforms.get("onlyfans");
+  await prepare(env, id, "manyvids");
   const fansly = session.platforms.get("fansly");
+  const manyvids = session.platforms.get("manyvids");
 
   assert.equal(env.removedListeners.length, 1);
   env.removedListeners[0](101);
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(fansly.status, "manual-link-watch-ended");
-  assert.match(fansly.error, /tab was closed/);
-  assert.equal(onlyfans.status, "awaiting-manual-publish");
+  assert.equal(manyvids.status, "manual-link-watch-ended");
+  assert.match(manyvids.error, /tab was closed/);
+  assert.equal(fansly.status, "awaiting-manual-publish");
 
   const left = await deliver(
     env,
-    outcome(id, onlyfans, { outcome: "left", postUrl: "" }),
-    senderFor(onlyfans),
+    outcome(id, fansly, { outcome: "left", postUrl: "" }),
+    senderFor(fansly),
   );
   assert.equal(left.result.status, "manual-link-watch-ended");
-  assert.match(onlyfans.error, /page was left/);
+  assert.match(fansly.error, /page was left/);
   assert.equal(port.messages.at(-1).result.status, "manual-link-watch-ended");
 
   const expiredId = sessionId();
-  const expiring = addSession(env, expiredId);
-  await prepare(env, expiredId);
-  const late = expiring.platforms.get("onlyfans");
+  const expiring = addSession(env, expiredId, { platforms: ["fansly"] });
+  await prepare(env, expiredId, "fansly");
+  const late = expiring.platforms.get("fansly");
   late.manualWatchUntil = Date.now() - 1;
   const expired = await deliver(env, outcome(expiredId, late), senderFor(late));
   assert.equal(expired.result.status, "manual-link-watch-ended");
   assert.match(late.error, /6 hours/);
 
   const stopId = sessionId();
-  const stopping = addSession(env, stopId);
-  await prepare(env, stopId);
-  const stopped = stopping.platforms.get("onlyfans");
+  const stopping = addSession(env, stopId, { platforms: ["fansly"] });
+  await prepare(env, stopId, "fansly");
+  const stopped = stopping.platforms.get("fansly");
   const before = env.scriptCalls.length;
   await env.run(
     `stopCreatorUploadSession(creatorUploadSessions.get("${stopId}"))`,
@@ -716,10 +785,10 @@ test("tab close, leaving the page, expiry and stop end the watch without a commi
 test("the link still commits with the console closed and after a worker restart", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id);
+  const session = addSession(env, id, { platforms: ["fansly"] });
   const port = connect(env, id);
-  await prepare(env, id);
-  const target = { ...session.platforms.get("onlyfans") };
+  await prepare(env, id, "fansly");
+  const target = { ...session.platforms.get("fansly") };
   port.dead = true;
   env.run("creatorUploadConsolePorts.clear(); creatorUploadSessions.clear()");
   const result = await deliver(env, outcome(id, target), senderFor(target));
@@ -730,9 +799,9 @@ test("the link still commits with the console closed and after a worker restart"
 test("an expired watch restored after a worker restart ends without a commit", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id);
-  await prepare(env, id);
-  const target = session.platforms.get("onlyfans");
+  const session = addSession(env, id, { platforms: ["fansly"] });
+  await prepare(env, id, "fansly");
+  const target = session.platforms.get("fansly");
   target.manualWatchUntil = Date.now() - 1;
   await env.run(
     `checkpointCreatorUploadSession(creatorUploadSessions.get("${id}"))`,
@@ -746,21 +815,24 @@ test("an expired watch restored after a worker restart ends without a commit", a
 test("without a catalogue row the captured post keeps uploaded-no-sheet semantics", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id, { catalogue: null });
-  await prepare(env, id);
-  const target = session.platforms.get("onlyfans");
+  const session = addSession(env, id, {
+    catalogue: null,
+    platforms: ["fansly"],
+  });
+  await prepare(env, id, "fansly");
+  const target = session.platforms.get("fansly");
   env.run("commitCreatorUploadResult = realCommitCreatorUploadResult");
   const result = await deliver(env, outcome(id, target), senderFor(target));
   assert.equal(result.result.status, "uploaded-no-sheet");
-  assert.equal(target.postUrl, "https://onlyfans.com/424242424/johnny_guides");
+  assert.equal(target.postUrl, "https://fansly.com/post/424242424");
 });
 
 test("an unresolvable post response records posted-link-unresolved", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id);
-  await prepare(env, id);
-  const target = session.platforms.get("onlyfans");
+  const session = addSession(env, id, { platforms: ["fansly"] });
+  await prepare(env, id, "fansly");
+  const target = session.platforms.get("fansly");
   const result = await deliver(
     env,
     outcome(id, target, { outcome: "unresolved", postUrl: "" }),
@@ -794,22 +866,36 @@ test("autonomous mode, ManyVids and a failed arm keep manual-submit-required", a
 
   const failing = await loadWorker({ armResult: false });
   const failedId = sessionId();
-  const session = addSession(failing, failedId);
-  const result = await prepare(failing, failedId);
+  const session = addSession(failing, failedId, { platforms: ["fansly"] });
+  const result = await prepare(failing, failedId, "fansly");
   assert.equal(result.status, "manual-submit-required");
   assert.match(result.error, /will not be recorded automatically/);
-  assert.equal(session.platforms.get("onlyfans").manualWatchId, undefined);
+  assert.equal(session.platforms.get("fansly").manualWatchId, undefined);
+});
+
+test("OnlyFans manual publishing requires the owner link and never autocaptures", async () => {
+  const env = await loadWorker();
+  const id = sessionId();
+  const session = addSession(env, id);
+  const prepared = await prepare(env, id, "onlyfans");
+  const target = session.platforms.get("onlyfans");
+  assert.equal(prepared.status, "manual-submit-required");
+  assert.match(prepared.error, /add the published link here/);
+  assert.equal(target.manualWatchId, undefined);
+  const unrelated = await deliver(env, outcome(id, target), senderFor(target));
+  assert.equal(unrelated.accepted, false);
+  assert.deepEqual(env.commits, []);
 });
 
 test("New keeps a watch-only session and hides it from resume", async () => {
   const env = await loadWorker();
   const id = sessionId();
-  const session = addSession(env, id);
-  await prepare(env, id);
+  const session = addSession(env, id, { platforms: ["fansly"] });
+  await prepare(env, id, "fansly");
   const reset = await env.run("retireCreatorUploadSessions()");
   assert.equal(reset.retired, 0);
   assert.equal(
-    session.platforms.get("onlyfans").status,
+    session.platforms.get("fansly").status,
     "awaiting-manual-publish",
   );
   const resumable = await new Promise((resolve) =>
@@ -820,7 +906,7 @@ test("New keeps a watch-only session and hides it from resume", async () => {
     ),
   );
   assert.equal(resumable.resumable ?? null, null);
-  const target = session.platforms.get("onlyfans");
+  const target = session.platforms.get("fansly");
   const result = await deliver(env, outcome(id, target), senderFor(target));
   assert.equal(result.result.status, "catalogue-updated");
 });

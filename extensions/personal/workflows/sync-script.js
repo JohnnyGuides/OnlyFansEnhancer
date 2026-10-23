@@ -111,11 +111,45 @@
       if (!group.keys.includes(key)) group.keys.push(key);
       groups.set(leadIn, group);
     }
+    if (
+      groups.size > 4 ||
+      [...groups.values()].some((group) => group.keys.length > 10)
+    )
+      throw new Error(
+        "Script destinations exceed the four-upload or 10-key limit.",
+      );
     return [...groups.values()].map((group) => ({
       leadInMs: group.leadInMs,
-      keys: group.keys.slice(0, 10),
+      keys: group.keys,
       funscript: shiftFunscript(funscript, group.leadInMs),
     }));
+  }
+
+  // Classify each destination independently. A missing/uncertain link stays
+  // pending while known successful siblings remain dispatchable.
+  function scriptDispatchReadiness(destinations, sentKeys = []) {
+    const sent = new Set(
+      (Array.isArray(sentKeys) ? sentKeys : [])
+        .map((key) => String(key || ""))
+        .filter((key) => KEY.test(key)),
+    );
+    const results = (Array.isArray(destinations) ? destinations : []).map(
+      (destination) => {
+        const platform = String(destination?.platform || "");
+        const postUrl = String(destination?.postUrl || "");
+        const key = scriptKey(platform, postUrl);
+        return !key
+          ? { platform, postUrl, key: "", status: "pending" }
+          : sent.has(key)
+            ? { platform, postUrl, key, status: "already-sent" }
+            : { platform, postUrl, key, status: "ready" };
+      },
+    );
+    return {
+      ready: results.filter((result) => result.status === "ready"),
+      alreadySent: results.filter((result) => result.status === "already-sent"),
+      pending: results.filter((result) => result.status === "pending"),
+    };
   }
 
   function normalizeSettings(value = {}) {
@@ -162,6 +196,7 @@
         return {
           ...upload,
           keys: upload.keys.filter((key) => key !== postKey),
+          failedKeys: [postKey],
           fanslyError,
         };
       return { ...upload, keys };
@@ -237,7 +272,7 @@
   // others, and a sheet failure never hides a stored script link.
   /**
    * @param {{settings: {origin: string, token: string}, title: string, uploads: any}} run
-   * @param {{commit?: (url: string) => Promise<string>, fetchImpl?: typeof fetch}} [options]
+   * @param {{commit?: (url: string, metadata: {keys: string[]}) => Promise<string>, fetchImpl?: typeof fetch}} [options]
    */
   async function uploadScripts(
     { settings, title, uploads },
@@ -246,7 +281,12 @@
     const scripts = [];
     for (const upload of (Array.isArray(uploads) ? uploads : []).slice(0, 4)) {
       if (upload.fanslyError) {
-        scripts.push({ keys: [], error: upload.fanslyError });
+        scripts.push({
+          keys: [...(upload.failedKeys || [])],
+          status: "upload-failed",
+          stage: "identity",
+          error: upload.fanslyError,
+        });
         if (!upload.keys.length) continue;
       }
       let sent;
@@ -261,16 +301,30 @@
           fetchImpl,
         );
       } catch (error) {
-        scripts.push({ keys: [], error: error.message });
+        scripts.push({
+          keys: [...(upload?.keys || [])],
+          status: "upload-failed",
+          stage: "provider",
+          error: error.message,
+        });
         continue;
       }
-      const sheetError = await Promise.resolve()
-        .then(() => commit?.(sent.url))
-        .then(
-          (message) => message || "",
-          (error) => `Script link not written to the sheet (${error.message}).`,
-        );
-      scripts.push({ url: sent.url, keys: sent.keys, sheetError });
+      const sheetError = commit
+        ? await Promise.resolve()
+            .then(() => commit(sent.url, { keys: sent.keys }))
+            .then(
+              (message) => message || "",
+              (error) =>
+                `Script link not written to the sheet (${error.message}).`,
+            )
+        : "Script link not written to the sheet (writeback is unavailable).";
+      scripts.push({
+        url: sent.url,
+        keys: sent.keys,
+        status: sheetError ? "uploaded-sheet-pending" : "complete",
+        stage: sheetError ? "sheet" : "complete",
+        sheetError,
+      });
     }
     return scripts;
   }
@@ -404,6 +458,7 @@
     parseFunscript,
     scriptKey,
     scriptUploads,
+    scriptDispatchReadiness,
     addFanslyMediaKey,
     shiftFunscript,
     uploadScript,

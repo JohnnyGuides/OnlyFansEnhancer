@@ -70,7 +70,7 @@ public sealed class XTeaserManagerTests
             Assert.AreEqual(6, oldStore.SchemaVersion);
         }
         using CatalogueStore store = CatalogueStore.Open(databasePath);
-        Assert.AreEqual(9, store.SchemaVersion);
+        Assert.AreEqual(10, store.SchemaVersion);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path, "catalogue.db.backup-v6-*.sqlite").Length);
         Assert.AreEqual("kept-id", store.GetItems().Single().ItemId);
         Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_posts"));
@@ -99,23 +99,24 @@ public sealed class XTeaserManagerTests
         ]), Now);
 
         Assert.AreEqual("item-a|sheet-link|high", Scalar(store, "SELECT item_id||'|'||evidence||'|'||confidence FROM x_post_bindings WHERE status_id='101'"));
-        Assert.AreEqual("item-b|reply-link|medium", Scalar(store, "SELECT item_id||'|'||evidence||'|'||confidence FROM x_post_bindings WHERE status_id='103'"));
-        Assert.AreEqual("item-c|reply-link", Scalar(store, "SELECT item_id||'|'||evidence FROM x_post_bindings WHERE status_id='107'"));
+        Assert.IsNull(Scalar(store, "SELECT item_id FROM x_post_bindings WHERE status_id='103'"), "a paid reply link names the promotion destination, not the teaser source");
+        Assert.IsNull(Scalar(store, "SELECT item_id FROM x_post_bindings WHERE status_id='107'"), "a Fansly reply link does not identify the source episode");
         Assert.IsNull(Scalar(store, "SELECT item_id FROM x_post_bindings WHERE status_id='105'"), "two sheet rows claim 105");
         Assert.IsNull(Scalar(store, "SELECT item_id FROM x_post_bindings WHERE status_id='106'"), "titles are never matched");
-        Assert.AreEqual(3L, Scalar(store, "SELECT COUNT(*) FROM x_post_bindings"));
-        StringAssert.Contains((string)Scalar(store, "SELECT candidates_json FROM x_binding_conflicts WHERE status_id='101'")!, "\"evidence\":\"reply-link\"");
+        Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_post_bindings"));
+        Assert.IsNull(Scalar(store, "SELECT candidates_json FROM x_binding_conflicts WHERE status_id='101'"),
+            "source A and promoted destination B are separate relationships");
         StringAssert.Contains((string)Scalar(store, "SELECT candidates_json FROM x_binding_conflicts WHERE status_id='105'")!, "item-b");
-        Assert.AreEqual(2L, Scalar(store, "SELECT COUNT(*) FROM x_binding_conflicts"));
+        Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_binding_conflicts"));
 
         // An owner binding is never replaced by derived evidence; the job is repeatable.
         Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('106','item-c','show-ep03','owner','high','x')");
-        Exec(store, "UPDATE x_post_bindings SET item_id='item-c', evidence='owner' WHERE status_id='103'");
+        Exec(store, "INSERT INTO x_post_bindings(status_id,item_id,source_key,evidence,confidence,bound_utc) VALUES ('103','item-c','show-ep03','owner','high','x')");
         XBindingResult again = store.RefreshXBindings(Now.AddHours(1));
         Assert.AreEqual("item-c|owner", Scalar(store, "SELECT item_id||'|'||evidence FROM x_post_bindings WHERE status_id='106'"));
         Assert.AreEqual("item-c|owner", Scalar(store, "SELECT item_id||'|'||evidence FROM x_post_bindings WHERE status_id='103'"));
-        Assert.AreEqual(4, again.Bound);
-        Assert.AreEqual(3L, Scalar(store, "SELECT COUNT(*) FROM x_binding_conflicts"), "owner 103 disagrees with its reply link");
+        Assert.AreEqual(3, again.Bound);
+        Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_binding_conflicts"), "an explicit source mapping is not compared with the paid destination");
     }
 
     [TestMethod]
@@ -150,6 +151,42 @@ public sealed class XTeaserManagerTests
         Assert.AreEqual("304|onlyfans|123456|onlyfans.com/123456/owner_handle",
             Scalar(store, "SELECT reply_status_id||'|'||link_kind||'|'||link_post_id||'|'||reply_link FROM x_first_replies WHERE status_id='301'"));
         Assert.AreEqual(1L, Scalar(store, "SELECT COUNT(*) FROM x_first_replies"));
+    }
+
+    [TestMethod]
+    public void OverviewKeepsSourceAndPromotionDestinationSeparateAndIncludesUnknownSources()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "source-a", "ep-a", "Episode A", onlyFans: "https://onlyfans.com/111/johnny_guides",
+            sheetX: ["https://x.com/Owner_Handle/status/601"]);
+        AddItem(store, "destination-b", "ep-b", "Episode B", onlyFans: "https://onlyfans.com/222/johnny_guides");
+        store.RecordXObservations(new(Owner, [
+            Post("601", Now.AddHours(-2)),
+            Post("602", Now.AddHours(-1)),
+            Post("603", Now.AddHours(-1).AddMinutes(5), "promo -> https://onlyfans.com/222/johnny_guides", "601", "601", video: false),
+            Post("604", Now.AddMinutes(-50), "promo -> https://onlyfans.com/222/johnny_guides", "602", "602", video: false),
+        ]), Now);
+
+        XTeaserOverview overview = store.GetXTeaserOverview();
+        XTeaserPost sourceKnown = overview.Posts.Single(post => post.StatusId == "601");
+        Assert.AreEqual("source-a", sourceKnown.ItemId);
+        Assert.AreEqual("603|https://onlyfans.com/222/johnny_guides|onlyfans|destination-b|ep-b|Episode B",
+            $"{sourceKnown.FirstReply!.StatusId}|{sourceKnown.FirstReply.Link}|{sourceKnown.FirstReply.Kind}|{sourceKnown.FirstReply.PromotedItemId}|{sourceKnown.FirstReply.PromotedSourceKey}|{sourceKnown.FirstReply.PromotedTitle}");
+        XTeaserPost sourceUnknown = overview.Posts.Single(post => post.StatusId == "602");
+        Assert.IsNull(sourceUnknown.ItemId, "the owner profile handle must not invent a source episode");
+        Assert.AreEqual("destination-b", sourceUnknown.FirstReply!.PromotedItemId);
+        Assert.AreEqual(0L, Scalar(store, "SELECT COUNT(*) FROM x_binding_conflicts"));
+
+        XTeaserEpisode destination = overview.Episodes.Single(episode => episode.ItemId == "destination-b");
+        Assert.AreEqual(0, destination.UsedCount, "incoming promotions do not become destination-owned teaser counts");
+        Assert.AreEqual(2, destination.IncomingOwnerTeasers!.Count);
+        Assert.AreEqual("601|source-a|ep-a|Episode A", string.Join("|",
+            destination.IncomingOwnerTeasers.Single(item => item.StatusId == "601").StatusId,
+            destination.IncomingOwnerTeasers.Single(item => item.StatusId == "601").SourceItemId,
+            destination.IncomingOwnerTeasers.Single(item => item.StatusId == "601").SourceKey,
+            destination.IncomingOwnerTeasers.Single(item => item.StatusId == "601").SourceTitle));
+        Assert.IsNull(destination.IncomingOwnerTeasers.Single(item => item.StatusId == "602").SourceItemId);
     }
 
     [TestMethod]
@@ -577,6 +614,65 @@ public sealed class XTeaserManagerTests
         Assert.IsFalse(store.GetXTeaserReplyQueue(Now).Items.Any(item => item.StatusId == "404"));
         Assert.AreEqual(0, store.GetXTeaserReplyQueue(Now.AddHours(30)).Items.Count, "older than 24 h");
     }
+
+    [TestMethod]
+    public void ReplyQueueIgnoresLegacyPromotionDestinationBindings()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "item-a", "ep-a", "Episode A", onlyFans: "https://onlyfans.com/111/johnny_guides",
+            sheetX: ["https://x.com/Owner_Handle/status/411"]);
+        store.RecordXObservations(new(Owner, [Post("411", Now.AddMinutes(-10))]), Now);
+        Exec(store, "UPDATE x_post_bindings SET evidence='reply-link' WHERE status_id='411'");
+
+        Assert.AreEqual(0, store.GetXTeaserReplyQueue(Now).Items.Count,
+            "stale reply-derived bindings must not be treated as source ownership");
+    }
+
+    [TestMethod]
+    public void ReplyQueueUsesLatestBoundWorkflowIntentAndSkipsManualOrAttemptedReplies()
+    {
+        using TempDirectory temp = new();
+        using CatalogueStore store = CatalogueStore.Open(Path.Combine(temp.Path, "catalogue.db"));
+        AddItem(store, "item-a", "ep-a", "Source A", onlyFans: "https://onlyfans.com/111/johnny_guides",
+            sheetX: ["https://x.com/Owner_Handle/status/411", "https://x.com/Owner_Handle/status/412",
+                "https://x.com/Owner_Handle/status/413", "https://x.com/Owner_Handle/status/414",
+                "https://x.com/Owner_Handle/status/415"]);
+        store.RecordXObservations(new(Owner, [Post("411", Now.AddMinutes(-40)), Post("412", Now.AddMinutes(-39)),
+            Post("413", Now.AddMinutes(-38)), Post("414", Now.AddMinutes(-37)), Post("415", Now.AddMinutes(-36))]), Now);
+
+        store.RecordCreatorWorkflow(Workflow("old-run", "ep-a", "411", "https://onlyfans.com/111/johnny_guides",
+            "Old wording {link}", 15));
+        store.RecordCreatorWorkflow(Workflow("new-run", "ep-a", "411", "https://onlyfans.com/222/othercreator",
+            "Frozen first line\nFrozen second line -> {link}", 37));
+        for (int index = 0; index < 51; index++)
+            store.RecordCreatorWorkflow(Workflow($"unrelated-{index:00}", "ep-a", $"5000{index:00}",
+                "https://onlyfans.com/333/othercreator", "Unrelated", 15));
+        store.RecordCreatorWorkflow(Workflow("manual-run", "ep-a", "413", "https://onlyfans.com/111/johnny_guides",
+            "Manual", 15, autoReply: false));
+        store.RecordCreatorWorkflow(Workflow("attempted-run", "ep-a", "414", "https://onlyfans.com/111/johnny_guides",
+            "Attempted", 15, attempted: true));
+        store.RecordCreatorWorkflow(Workflow("replied-run", "ep-a", "415", "https://onlyfans.com/111/johnny_guides",
+            "Already replied", 15, replyStatusUrl: "https://x.com/Owner_Handle/status/515"));
+
+        XTeaserReplyQueue queue = store.GetXTeaserReplyQueue(Now);
+        Assert.IsFalse(store.GetCreatorWorkflows("ep-a").Any(workflow => workflow.RunId == "new-run"),
+            "the intent is deliberately outside the ordinary recent-50 view");
+        CollectionAssert.AreEquivalent(new[] { "411", "412" }, queue.Items.Select(item => item.StatusId).ToArray());
+        XTeaserReplyCandidate explicitIntent = queue.Items.Single(item => item.StatusId == "411");
+        Assert.AreEqual("https://onlyfans.com/222/othercreator", explicitIntent.PaidUrl,
+            "the workflow destination can differ from the catalogue source link");
+        Assert.AreEqual("new-run|ep-a|37|Frozen first line\nFrozen second line -> {link}",
+            $"{explicitIntent.ReplyIntent!.RunId}|{explicitIntent.ReplyIntent.SourceKey}|{explicitIntent.ReplyIntent.ReplyDelayMinutes}|{explicitIntent.ReplyIntent.WordingTemplate}");
+        XTeaserReplyCandidate legacy = queue.Items.Single(item => item.StatusId == "412");
+        Assert.IsNull(legacy.ReplyIntent, "legacy rows retain the canonical OnlyFans fallback");
+        Assert.AreEqual("https://onlyfans.com/111/johnny_guides", legacy.PaidUrl);
+    }
+
+    private static CreatorWorkflowSnapshot Workflow(string runId, string sourceKey, string statusId, string paidUrl,
+        string wording, int delay, bool autoReply = true, bool attempted = false, string? replyStatusUrl = null) =>
+        new(runId, "social", 1, sourceKey, [], [], Reply: new(paidUrl, autoReply, delay, wording,
+            $"https://x.com/Owner_Handle/status/{statusId}", replyStatusUrl, Attempted: attempted));
 
     [TestMethod]
     public void CanonicalOnlyFansLinkAcceptsTheTrailingSlashFormOnly()

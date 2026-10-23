@@ -16,6 +16,10 @@ public sealed class GoogleTeaserLinkWriterTests
     [DataRow("onlyfans", "OnlyFans", "https://onlyfans.com/500/johnny_guides")]
     [DataRow("fansly", "Fansly", "https://fansly.com/post/500")]
     [DataRow("manyvids", "ManyVids", "https://www.manyvids.com/Video/500")]
+    [DataRow("pornhub", "Pornhub", "https://www.pornhub.com/view_video.php?viewkey=publicKey_500")]
+    [DataRow("reddit", "Reddit Posts", "https://www.reddit.com/r/example/comments/abc123/episode-title")]
+    [DataRow("clips4sale", "Clips4Sale", "https://www.clips4sale.com/studio/123/456/episode")]
+    [DataRow("redgifs", "Redgifs", "https://www.redgifs.com/watch/example-clip")]
     public async Task VerifiedPlatformLinkWritesOnlyItsEmptyCellAndNeverRepeatsAnAttempt(string platform, string header, string url)
     {
         FakeSheet sheet = Workbook();
@@ -36,6 +40,41 @@ public sealed class GoogleTeaserLinkWriterTests
         Assert.AreEqual("google-row-write-unresolved", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
             Writer(unresolved).WriteResultAsync(intent with { State = "attempted" }, _ => Assert.Fail(), CancellationToken.None))).Code);
         Assert.AreEqual(0, unresolved.Posts.Count);
+    }
+
+    [TestMethod]
+    public async Task MissingForeignTargetColumnIsRefusedWithoutWriting()
+    {
+        FakeSheet sheet = Workbook();
+        sheet.SetCell(1, 4, "Unrelated notes");
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            "redgifs", "https://www.redgifs.com/watch/example-clip", "Episode A", "");
+
+        GoogleCatalogueException error = await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
+            Writer(sheet).WriteResultAsync(intent, _ => Assert.Fail("No mapped destination column exists"), CancellationToken.None));
+
+        Assert.AreEqual("catalogue-layout-changed", error.Code);
+        Assert.AreEqual(0, sheet.Posts.Count);
+        Assert.AreEqual("Unrelated notes", sheet.Cell(1, 4));
+    }
+
+    [TestMethod]
+    public async Task PornhubResultWritesFreeColumnWithoutChangingPaidPublication()
+    {
+        const string paid = "https://www.pornhub.com/view_video.php?viewkey=paid500";
+        const string free = "https://www.pornhub.com/view_video.php?viewkey=free500";
+        FakeSheet sheet = new([
+            ["ID", "Title", "Description", "Pornhub Free", "Pornhub Paid"],
+            ["ep-a", "Episode A", "Description", "", paid],
+        ]);
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            "pornhub", free, "Episode A", "Description");
+
+        Assert.AreEqual("appended", (await Writer(sheet).WriteResultAsync(intent, _ => { }, CancellationToken.None)).Status);
+
+        Assert.AreEqual(free, sheet.Cell(2, 4));
+        Assert.AreEqual(paid, sheet.Cell(2, 5));
+        Assert.AreEqual($"'{Sheet}'!D2", sheet.Posts.Single().GetProperty("data")[0].GetProperty("range").GetString());
     }
 
     [TestMethod]
@@ -98,6 +137,23 @@ public sealed class GoogleTeaserLinkWriterTests
     }
 
     [TestMethod]
+    public async Task ExactUrlOnResolvedRowReconcilesAfterMetadataDriftWithoutWriting()
+    {
+        FakeSheet sheet = Workbook();
+        sheet.SetCell(1, 4, "Fansly");
+        var intent = new OFEnhancer.Catalogue.UploadSheetWriteback("key", "workbook-one", "7", "ep-a",
+            "fansly", "https://fansly.com/post/500", "Episode A", "");
+        sheet.SetCell(2, 4, intent.Url);
+
+        GoogleTeaserLinkResult result = await Writer(sheet).WriteResultAsync(
+            intent with { State = "conflict", ErrorCode = "catalogue-entry-changed", Title = "Old title" },
+            _ => Assert.Fail("Read-only conflict reconciliation must not mark a write attempt"), CancellationToken.None);
+
+        Assert.AreEqual("already-present", result.Status);
+        Assert.AreEqual(0, sheet.Posts.Count);
+    }
+
+    [TestMethod]
     public async Task MetadataChangedAfterDispatchLeavesTheWriteUnresolved()
     {
         FakeSheet sheet = Workbook();
@@ -111,10 +167,10 @@ public sealed class GoogleTeaserLinkWriterTests
     }
 
     [TestMethod]
-    public async Task AppendingToAWholeCellLinkedUrlIsRefused()
+    public async Task AppendingToAWholeCellWithForeignLinkTargetIsRefused()
     {
         FakeSheet sheet = Workbook();
-        sheet.SetCell(4, 4, "https://x.com/Owner_Handle/status/13", "https://x.com/Owner_Handle/status/13");
+        sheet.SetCell(4, 4, "https://x.com/Owner_Handle/status/13", "https://x.com/Other_Name/status/99");
         Assert.AreEqual("teaser-cell-linked", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
             Writer(sheet).AppendAsync("ep-c", NewLink, CancellationToken.None))).Code);
         Assert.AreEqual(0, sheet.Posts.Count);
@@ -242,6 +298,20 @@ public sealed class GoogleTeaserLinkWriterTests
         Assert.AreEqual("teaser-cell-linked", (await Assert.ThrowsExceptionAsync<GoogleCatalogueException>(() =>
             Writer(linked).AppendAsync("ep-c", NewLink, CancellationToken.None))).Code);
         Assert.AreEqual(0, formula.Posts.Count + linked.Posts.Count);
+    }
+
+    [TestMethod]
+    public async Task ExactValidUrlAutoHyperlinkCanBeExtendedButForeignLinksRemainProtected()
+    {
+        FakeSheet autoLinked = Workbook();
+        const string existing = "https://x.com/Owner_Handle/status/13";
+        autoLinked.SetCell(2, 4, existing, existing);
+
+        GoogleTeaserLinkResult result = await Writer(autoLinked).AppendAsync("ep-a", NewLink, CancellationToken.None);
+
+        Assert.AreEqual("appended", result.Status);
+        Assert.AreEqual(existing + ", " + NewLink, autoLinked.Cell(2, 4));
+        Assert.AreEqual(1, autoLinked.Posts.Count);
     }
 
     [TestMethod]

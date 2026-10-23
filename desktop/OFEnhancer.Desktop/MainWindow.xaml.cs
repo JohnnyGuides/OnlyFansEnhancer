@@ -24,6 +24,9 @@ public partial class MainWindow : Window, IDisposable
     private readonly BrowserUploadChannel uploads = new();
     private readonly DevelopmentFixtureSource developmentFixtures = new();
     private readonly UploadCatalogueController uploadCatalogue;
+    private readonly System.Threading.Timer catalogueSyncTimer;
+    private readonly CancellationTokenSource catalogueSyncLifetime = new();
+    private int catalogueSyncQueued;
     private readonly XObservationController xObservations;
     private readonly XTeaserController xTeasers;
     private readonly UploadThumbnailCatalogue uploadThumbnails;
@@ -75,7 +78,8 @@ public partial class MainWindow : Window, IDisposable
         );
         queuedRouter = router;
         uploadCatalogue = new UploadCatalogueController(catalogue, googleCatalogue.ReadSubredditPresets,
-            googleCatalogue.WriteBackUploadResult, googleCatalogue.RefreshCatalogueForMatching);
+            googleCatalogue.WriteBackUploadResult, googleCatalogue.RefreshCatalogueForMatching,
+            googleCatalogue.retryUploadWritebacks);
         XScanActivityBoard scanActivity = new();
         xObservations = new XObservationController(catalogue, scanActivity: scanActivity,
             startedUtc: System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime());
@@ -86,6 +90,12 @@ public partial class MainWindow : Window, IDisposable
                 return googleCatalogue.WriteBackTeaserLinks(now);
             }, scanActivity: scanActivity);
         xTeasers.Start();
+        catalogueSyncTimer=new System.Threading.Timer(_=>
+        {
+            if (exiting || disposed) return;
+            if(Interlocked.Exchange(ref catalogueSyncQueued,1)!=0) return;
+            _ = RunPeriodicCatalogueSyncAsync();
+        },null,TimeSpan.FromSeconds(20),TimeSpan.FromMinutes(1));
         uploadThumbnails = new UploadThumbnailCatalogue(catalogue);
         uploads.EventReceived += value => Dispatcher.BeginInvoke(() =>
         {
@@ -444,11 +454,30 @@ public partial class MainWindow : Window, IDisposable
         finally { System.Windows.Application.Current.Shutdown(); }
     }
 
+    private async Task RunPeriodicCatalogueSyncAsync()
+    {
+        try
+        {
+            if (exiting || disposed) return;
+            // Provider I/O stays beside the dispatcher so editor and file-chunk
+            // requests keep moving. Upload links retain their immediate/hourly path.
+            await googleCatalogue.WriteBackCreatorWorkflowsAsync(dispatcher, catalogueSyncLifetime.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (WebMessageDispatcherClosedException) { }
+        catch (ObjectDisposedException) { }
+        catch { }
+        finally { Interlocked.Exchange(ref catalogueSyncQueued, 0); }
+    }
+
     public void Dispose()
     {
         if (disposed)
             return;
         disposed = true;
+        try { catalogueSyncLifetime.Cancel(); } catch (ObjectDisposedException) { }
+        catalogueSyncTimer.Dispose();
         xTeasers.Dispose();
         uploads.Dispose();
         windowSource?.RemoveHook(HandleWindowMessage);

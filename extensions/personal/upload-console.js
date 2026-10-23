@@ -2430,14 +2430,14 @@
       }
     }
 
-    async function loadCatalogueSnapshot() {
+    async function loadCatalogueSnapshot(force = false) {
       const client = globalThis.CreatorCatalogueClient;
       if (!client?.getCatalogueSnapshot) {
         throw new Error(
           "Catalogue unavailable. Reload OFEnhancer and try again.",
         );
       }
-      if (!snapshotPromise) {
+      if (force || !snapshotPromise) {
         const pending = client.getCatalogueSnapshot();
         snapshotPromise = pending;
         // Share an in-flight read, but never reuse a completed catalogue for new matches.
@@ -3038,6 +3038,9 @@
                 publicationState: currentMatch.candidate.publicationState,
                 row: currentMatch.candidate.row,
                 id: currentMatch.candidate.id,
+                ...(currentMatch.candidate.destination
+                  ? { destination: currentMatch.candidate.destination }
+                  : {}),
                 releaseDate: currentMatch.candidate.releaseDate,
                 title: currentMatch.candidate.title,
                 description: currentMatch.candidate.description,
@@ -3620,6 +3623,74 @@
           remaining.textContent = `Review in your browser: ${state.manualFields.join(", ")}.`;
           card.append(remaining);
         }
+        if (
+          !state.postUrl &&
+          ["onlyfans", "fansly", "manyvids", "pornhub"].includes(platform) &&
+          (state.submitted ||
+            state.submitAttempted ||
+            /manual|unresolved/.test(state.status || ""))
+        ) {
+          const recovery = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = "Already posted? Add the link";
+          recovery.append(summary);
+          const form = document.createElement("form");
+          const label = document.createElement("label");
+          label.textContent = "Published post link";
+          const input = document.createElement("input");
+          input.type = "url";
+          input.required = true;
+          input.setAttribute(
+            "aria-label",
+            `${name.textContent} published post link`,
+          );
+          label.append(input);
+          const confirmed = document.createElement("label");
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.required = true;
+          confirmed.append(check, " I checked this post belongs to this video");
+          const save = document.createElement("button");
+          save.type = "submit";
+          save.textContent = "Save published link";
+          const error = document.createElement("p");
+          error.className = "error";
+          error.setAttribute("role", "status");
+          form.append(label, confirmed, save, error);
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (!activeSession || !check.checked || !form.reportValidity())
+              return;
+            save.disabled = true;
+            try {
+              const response = await sendMessage({
+                type: "RECONCILE_CREATOR_UPLOAD_RESULT",
+                sessionId: activeSession.id,
+                platform,
+                postUrl: input.value.trim(),
+                confirmSource: true,
+              });
+              const result =
+                response.results?.find(
+                  (target) => target.platform === platform,
+                ) || response.result;
+              if (!result || result.platform !== platform)
+                throw new Error(
+                  "The published link could not be recorded. Try again.",
+                );
+              setPlatformState(platform, {
+                ...result,
+                error: result.error || "",
+              });
+            } catch (problem) {
+              error.textContent = problem.message;
+            } finally {
+              save.disabled = false;
+            }
+          });
+          recovery.append(form);
+          card.append(recovery);
+        }
         const retryNeedsNew =
           platform === "pornhub" &&
           state.status === "failed" &&
@@ -3691,6 +3762,7 @@
           : "",
         sentKeys: [],
         urls: [],
+        attemptedKeys: [],
       };
     }
 
@@ -3718,6 +3790,7 @@
         waiting: "Waiting for platform links",
         uploading: "Uploading to JohnnyGuides",
         sent: "Uploaded to JohnnyGuides",
+        partial: "Uploaded · destinations pending",
         failed: "Failed",
       }[script.status];
       heading.append(name, badge);
@@ -3727,6 +3800,18 @@
         notice.textContent = script.notice;
         card.append(notice);
       }
+      const hasCatalogueDestination = Boolean(
+        activeSession?.catalogue?.destination?.workbookId,
+      );
+      const writebackState =
+        script.writebackState ||
+        (hasCatalogueDestination
+          ? script.sheetPending
+            ? "pending"
+            : "synced"
+          : script.urls.length || script.sentKeys.length
+            ? "not-associated"
+            : undefined);
       for (const url of script.urls) {
         const link = document.createElement("a");
         link.href = url;
@@ -3740,6 +3825,44 @@
         message.className = "error";
         message.textContent = script.error;
         card.append(message);
+      }
+      if (
+        writebackState === "not-associated" &&
+        script.status !== "uploading"
+      ) {
+        const link = document.createElement("button");
+        link.type = "button";
+        link.textContent = "Link to catalogue";
+        link.addEventListener("click", () => {
+          const association = get("#savedCatalogueAssociation");
+          association.hidden = false;
+          association.open = true;
+          association.scrollIntoView({ block: "nearest" });
+          get("#loadAssociationRows").focus();
+        });
+        card.append(link);
+      } else if (
+        writebackState === "pending" &&
+        script.status !== "uploading"
+      ) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.textContent = "Retry catalogue sync";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          try {
+            const response = await sendMessage({
+              type: "RETRY_CREATOR_SCRIPT_CATALOGUE",
+              sessionId: activeSession.id,
+            });
+            applyScriptState(response.scriptState);
+            renderPlatformStates();
+          } catch (error) {
+            script.error = error.message;
+            renderPlatformStates();
+          }
+        });
+        card.append(retry);
       }
       if (
         !script.blocked &&
@@ -3761,23 +3884,70 @@
     }
 
     // A script failure is reported on its own card; platform results stand.
-    async function sendScript() {
+    function applyScriptState(saved) {
+      const script = activeSession?.script;
+      if (!script || !saved) return;
+      script.sentKeys = [
+        ...new Set([...script.sentKeys, ...(saved.sentKeys || [])]),
+      ];
+      script.urls = [...new Set([...script.urls, ...(saved.urls || [])])];
+      script.sheetPending = saved.sheetPending === true;
+      const hasCatalogueDestination = Boolean(
+        activeSession?.catalogue?.destination?.workbookId,
+      );
+      script.writebackState =
+        saved.writebackState ||
+        (hasCatalogueDestination
+          ? script.sheetPending
+            ? "pending"
+            : "synced"
+          : script.urls.length || script.sentKeys.length
+            ? "not-associated"
+            : undefined);
+      script.error = saved.error || "";
+      script.status =
+        {
+          uploaded: "sent",
+          partial: "partial",
+          failed: "failed",
+          pending: "waiting",
+          selected: "waiting",
+        }[saved.status] || script.status;
+    }
+
+    function maybeSendScript() {
+      const script = activeSession?.script;
+      if (!script || script.blocked || script.status === "uploading") return;
+      const pending = globalThis.CreatorSyncScript.scriptDispatchReadiness(
+        scriptLinks(script),
+        script.sentKeys,
+      );
+      if (
+        pending.ready.some((link) => !script.attemptedKeys.includes(link.key))
+      )
+        void sendScript(true);
+    }
+
+    async function sendScript(automatic = false) {
       const session = activeSession;
       const script = session?.script;
       if (!script || script.blocked || script.status === "uploading") return;
+      const destinations = globalThis.CreatorSyncScript.scriptDispatchReadiness(
+        scriptLinks(script),
+        script.sentKeys,
+      ).ready.filter(
+        (link) => !automatic || !script.attemptedKeys.includes(link.key),
+      );
+      if (!destinations.length) return;
       script.attempted = true;
       script.status = "uploading";
       script.error = "";
       renderPlatformStates();
       try {
         // Keys already sent are never posted again.
+        script.attemptedKeys.push(...destinations.map((link) => link.key));
         const uploads = globalThis.CreatorSyncScript.scriptUploads(
-          scriptLinks(script).filter(
-            ({ platform, postUrl }) =>
-              !script.sentKeys.includes(
-                globalThis.CreatorSyncScript.scriptKey(platform, postUrl),
-              ),
-          ),
+          destinations,
           script.funscript,
           script.leadIns,
         );
@@ -3804,24 +3974,40 @@
         for (const result of response.scripts || []) {
           if (result.url) {
             if (!script.urls.includes(result.url)) script.urls.push(result.url);
-            // Reposting is idempotent; keep failed catalogue records retryable.
-            if (!result.sheetError) script.sentKeys.push(...result.keys);
+            // Keep provider-confirmed keys when only catalogue sync needs a retry.
+            script.sentKeys.push(...(result.keys || []));
           }
           if (result.error) failures.push(result.error);
           if (result.sheetError) notes.push(result.sheetError);
         }
+        applyScriptState(response.scriptState);
+        script.sheetPending = Boolean(
+          response.scriptState?.sheetPending || notes.length,
+        );
+        const remaining = globalThis.CreatorSyncScript.scriptDispatchReadiness(
+          script.targets.map((platform) => ({
+            platform,
+            postUrl: platformStates.get(platform)?.postUrl || "",
+          })),
+          script.sentKeys,
+        );
         script.status =
-          !failures.length &&
-          !notes.length &&
-          (response.scripts || []).length === uploads.length
-            ? "sent"
-            : "failed";
+          failures.length || (response.scripts || []).length !== uploads.length
+            ? script.urls.length
+              ? "partial"
+              : "failed"
+            : remaining.ready.length || remaining.pending.length
+              ? "partial"
+              : "sent";
         script.error = [...failures, ...notes].join(" ");
       } catch (error) {
         script.status = "failed";
         script.error = error.message;
       }
-      if (activeSession === session) renderPlatformStates();
+      if (activeSession === session) {
+        renderPlatformStates();
+        maybeSendScript();
+      }
     }
 
     function setPlatformState(platform, patch) {
@@ -3831,14 +4017,7 @@
       });
       renderPlatformStates();
       updateUploadAction();
-      const script = activeSession?.script;
-      if (
-        script?.status === "waiting" &&
-        !script.attempted &&
-        script.targets.length &&
-        script.targets.every((target) => platformStates.get(target)?.postUrl)
-      )
-        void sendScript();
+      maybeSendScript();
       if (patch.postUrl && activeSession?.catalogueDeferred)
         get("#savedCatalogueAssociation").hidden = false;
     }
@@ -4179,6 +4358,7 @@
         ),
         proof: { ...confirmed.proof },
         socialSessionId: confirmed.socialSessionId || "",
+        catalogue: confirmed.catalogue || null,
         port: null,
         channel: null,
         pendingFiles: new Map(),
@@ -4446,35 +4626,58 @@
             : "Checking the selected Work row…";
       let written;
       try {
+        const entryRequest = {
+          mode,
+          title: title.value.trim(),
+          description: description.value.trim(),
+          releaseDate: releaseDate.value,
+          category: uploadCategory.value,
+          seasonArc: uploadSeason.value,
+          ...(mode === "new"
+            ? {
+                fileName: (fullFile || pornhubFile)?.name,
+                fileSize: (fullFile || pornhubFile)?.size,
+                fileLastModified: (fullFile || pornhubFile)?.lastModified,
+              }
+            : {
+                id: candidate.id,
+                expectedTitle: baseline.title,
+                expectedDescription: baseline.description,
+                expectedCategory: baseline.sheetCategory,
+                expectedSeasonArc: baseline.sheetSeasonArc,
+                // An untouched field keeps the sheet value exactly.
+                ...(uploadCategory.value === baseline.category
+                  ? { category: baseline.sheetCategory }
+                  : {}),
+                ...(uploadSeason.value === baseline.seasonArc
+                  ? { seasonArc: baseline.sheetSeasonArc }
+                  : {}),
+              }),
+        };
+        if (mode === "new") {
+          const key = "creatorUploadCatalogueCreateOperationV1";
+          const stored = (await chrome.storage.local.get(key))[key];
+          if (stored) {
+            if (JSON.stringify(stored.payload) !== JSON.stringify(entryRequest))
+              throw new Error(
+                "A previous Work row creation is unresolved. Restore its original details or recover that row before creating another.",
+              );
+            entryRequest.operationId = stored.operationId;
+          } else {
+            const operationId = crypto.randomUUID().toLowerCase();
+            await chrome.storage.local.set({
+              [key]: {
+                operationId,
+                payload: { ...entryRequest },
+              },
+            });
+            entryRequest.operationId = operationId;
+          }
+        }
         written =
-          await globalThis.CreatorCatalogueClient.writeUploadCatalogueEntry({
-            mode,
-            title: title.value.trim(),
-            description: description.value.trim(),
-            releaseDate: releaseDate.value,
-            category: uploadCategory.value,
-            seasonArc: uploadSeason.value,
-            ...(mode === "new"
-              ? {
-                  fileName: (fullFile || pornhubFile)?.name,
-                  fileSize: (fullFile || pornhubFile)?.size,
-                  fileLastModified: (fullFile || pornhubFile)?.lastModified,
-                }
-              : {
-                  id: candidate.id,
-                  expectedTitle: baseline.title,
-                  expectedDescription: baseline.description,
-                  expectedCategory: baseline.sheetCategory,
-                  expectedSeasonArc: baseline.sheetSeasonArc,
-                  // An untouched field keeps the sheet value exactly.
-                  ...(uploadCategory.value === baseline.category
-                    ? { category: baseline.sheetCategory }
-                    : {}),
-                  ...(uploadSeason.value === baseline.seasonArc
-                    ? { seasonArc: baseline.sheetSeasonArc }
-                    : {}),
-                }),
-          });
+          await globalThis.CreatorCatalogueClient.writeUploadCatalogueEntry(
+            entryRequest,
+          );
       } catch (error) {
         if (error?.message !== "catalogue-entry-not-on-sheet") throw error;
         // The desktop already re-read the sheet and retried this ID once.
@@ -4496,13 +4699,17 @@
           { cause: error },
         );
       }
-      currentSnapshot = await loadCatalogueSnapshot();
+      currentSnapshot = await loadCatalogueSnapshot(true);
       const saved = currentSnapshot.rows.find(
         (row) => row.id === written.id && row.row === written.row,
       );
       if (!saved)
         throw new Error(
           "Work saved the row, but the local catalogue has not refreshed. Review Work before retrying Upload.",
+        );
+      if (mode === "new")
+        await chrome.storage.local.remove(
+          "creatorUploadCatalogueCreateOperationV1",
         );
       selectedCatalogueRow = saved.row;
       lastPrefilledCatalogueRow = saved.row;
@@ -4739,6 +4946,9 @@
                     id: currentMatch.candidate.id,
                     title: currentMatch.candidate.title,
                     fingerprint: currentMatch.candidate.fingerprint,
+                    ...(currentMatch.candidate.destination
+                      ? { destination: currentMatch.candidate.destination }
+                      : {}),
                   },
               evidence: socialEvidence(),
               authorizationAt: Date.now(),
@@ -4760,6 +4970,11 @@
           files: selectedFiles,
           openingFrameToken,
           socialSessionId: socialPlan?.id || "",
+          catalogue: uploadWithoutSheet
+            ? null
+            : currentMatch.candidate?.destination
+              ? { destination: currentMatch.candidate.destination }
+              : {},
           proof: {
             fullFilename: fullFile?.name || "",
             mediaFiles: additionalMedia.map((file, index) => ({
@@ -5342,6 +5557,7 @@
           },
         });
         activeSession.script = scriptRun(expected, [...targetNames]);
+        applyScriptState(resumable.scriptState);
         platformStates.clear();
         for (const target of resumable.platforms)
           platformStates.set(target.platform, target);
@@ -5351,13 +5567,7 @@
         get("#preparationControls").hidden = false;
         lockDraft(true);
         renderPlatformStates();
-        if (
-          activeSession.script &&
-          [...targetNames].every(
-            (target) => platformStates.get(target)?.postUrl,
-          )
-        )
-          void sendScript();
+        maybeSendScript();
         matchStatus.textContent =
           "Reconnected to the saved upload. Review the platform result before continuing.";
         uploadError.textContent = "";
@@ -6573,12 +6783,31 @@
       const button = get("#associateSavedResults");
       button.disabled = true;
       try {
-        if (selectedTargets().length)
-          await sendMessage({
+        let results = [];
+        if (selectedTargets().length || session.script?.urls?.length) {
+          const response = await sendMessage({
             type: "ASSOCIATE_CREATOR_UPLOAD_CATALOGUE",
             sessionId: session.id,
             catalogue: row,
           });
+          results = response.results || [];
+          const scriptResult = results.find(
+            (result) => result.platform === "script",
+          );
+          if (scriptResult) {
+            session.catalogue = {
+              ...row,
+              source: "desktop",
+              status: "matched",
+            };
+            if (session.script) {
+              session.script.writebackState =
+                scriptResult.writebackState ||
+                (scriptResult.sheetPending ? "pending" : "synced");
+              session.script.sheetPending = scriptResult.sheetPending === true;
+            }
+          }
+        }
         if (activeSession !== session) return;
         if (socialSessionId) {
           const response = await sendMessage({
@@ -6589,8 +6818,18 @@
           if (activeSession !== session) return;
           applySocialJob(response.socialDistribution?.jobs?.x);
         }
-        get("#savedAssociationStatus").textContent =
-          "Association saved. No uploads or publications were repeated.";
+        const stopped = results.filter((result) =>
+          ["stale", "conflict"].includes(result.status),
+        );
+        if (stopped.length)
+          throw new Error(
+            `Association needs review for ${stopped.map((result) => result.platform).join(", ")}. The published links are preserved.`,
+          );
+        get("#savedAssociationStatus").textContent = results.some(
+          (result) => result.googleError || result.status === "recorded-local",
+        )
+          ? "Associated locally. Google sync is pending."
+          : "Association saved. No uploads or publications were repeated.";
       } catch (error) {
         if (activeSession === session)
           get("#savedAssociationStatus").textContent = error.message;
@@ -6940,7 +7179,7 @@
       const revision = matchRevision;
       matchStatus.textContent = "Refreshing the catalogue snapshot…";
       try {
-        const fetched = await loadCatalogueSnapshot();
+        const fetched = await loadCatalogueSnapshot(true);
         if (runBusy || activeSession || revision !== matchRevision) return;
         currentSnapshot = fetched;
         renderPicker();

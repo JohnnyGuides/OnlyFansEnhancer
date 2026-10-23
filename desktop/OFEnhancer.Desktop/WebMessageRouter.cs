@@ -54,6 +54,10 @@ public sealed partial class WebMessageRouter(
                     saveBrowserPreference
                 ),
                 "getCatalogue" => WithCatalogue(requestId, request, GetCatalogue),
+                "getCreatorWorkflows" => WithCatalogue(requestId, request, GetCreatorWorkflows),
+                "associateCreatorWorkflow" or "getUploadWritebacks" or "getCreatorWorkflowWritebacks" or "rebaseUploadWriteback" => WithCatalogue(
+                    requestId, request, value => Success(value.RequestId,
+                        new UploadCatalogueController(catalogue!).Handle(value.Operation,value.Payload))),
                 "getUploadCatalogueSnapshot" => WithCatalogue(requestId, request, GetUploadCatalogueSnapshot),
                 "importCatalogueSnapshot" => WithCatalogue(requestId, request, ImportCatalogue),
                 "scanThumbnails" => WithCatalogue(requestId, request, ScanThumbnails),
@@ -107,6 +111,7 @@ public sealed partial class WebMessageRouter(
                     request,
                     () => googleCatalogue!.syncGoogleCatalogue()
                 ),
+                "retryUploadWritebacks" => WithGoogle(requestId,request,() => googleCatalogue!.retryUploadWritebacks()),
                 "disconnectGoogleCatalogue" => WithGoogle(
                     requestId,
                     request,
@@ -132,6 +137,14 @@ public sealed partial class WebMessageRouter(
             return Failure(requestId, exception.Code);
         }
         catch (CatalogueBindingException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
+        catch (CreatorWorkflowException exception)
+        {
+            return Failure(requestId, exception.Code);
+        }
+        catch (WorkbookProjectionException exception)
         {
             return Failure(requestId, exception.Code);
         }
@@ -248,6 +261,11 @@ public sealed partial class WebMessageRouter(
     {
         DeserializePayload<EmptyPayload>(request.Payload);
         return Success(request.RequestId, catalogue!.GetCatalogue());
+    }
+
+    private string GetCreatorWorkflows(WebRequest request)
+    {
+        return Success(request.RequestId,new UploadCatalogueController(catalogue!).Handle(request.Operation,request.Payload));
     }
 
     private string ImportCatalogue(WebRequest request)

@@ -175,6 +175,7 @@
     "workflows/c4s-upload.js": "extensions/personal/workflows/c4s-upload.js",
     "workflows/catalogue-client.js": "extensions/personal/workflows/catalogue-client.js",
     "workflows/catalogue-contract.js": "extensions/personal/workflows/catalogue-contract.js",
+    "workflows/catalogue-workflow.js": "extensions/personal/workflows/catalogue-workflow.js",
     "workflows/catalogue-proposal.js": "extensions/personal/workflows/catalogue-proposal.js",
     "workflows/common.js": "extensions/personal/workflows/common.js",
     "workflows/desktop-upload-runtime.js": "extensions/personal/workflows/desktop-upload-runtime.js",

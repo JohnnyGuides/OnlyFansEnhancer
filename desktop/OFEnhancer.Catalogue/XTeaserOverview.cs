@@ -6,7 +6,8 @@ namespace OFEnhancer.Catalogue;
 
 public sealed record XTeaserEpisode(string ItemId, string SourceKey, string Title, int UsedCount, int FailedCount,
     int ReadyClips, int PostedClips, int GoodClips, int FailedClips, string? Category = null, string? Series = null,
-    string? Episode = null, string? ThumbnailAssetId = null);
+    string? Episode = null, string? ThumbnailAssetId = null,
+    IReadOnlyList<XTeaserIncomingOwnerTeaser>? IncomingOwnerTeasers = null);
 
 public sealed record XTeaserMetrics(string ObservedUtc, double AgeHours, long? Views, long? Likes, long? Reposts,
     long? Replies, long? Bookmarks);
@@ -14,7 +15,11 @@ public sealed record XTeaserMetrics(string ObservedUtc, double AgeHours, long? V
 public sealed record XTeaserVerdict(string Verdict, double EngagementRate, double CohortMedian, int CohortSize,
     double SampleAgeHours, string DecidedUtc);
 
-public sealed record XTeaserFirstReply(string StatusId, string Link, string Kind, string RepliedUtc);
+public sealed record XTeaserFirstReply(string StatusId, string Link, string Kind, string RepliedUtc,
+    string? PromotedItemId = null, string? PromotedSourceKey = null, string? PromotedTitle = null);
+
+public sealed record XTeaserIncomingOwnerTeaser(string StatusId, string PostedUtc, string? SourceItemId,
+    string? SourceKey, string? SourceTitle, string ReplyStatusId, string ReplyLink, string ReplyLinkKind);
 
 // Medians of the other teasers' samples taken at an age comparable to this
 // post's latest sample; a null field had too few comparable values.
@@ -57,9 +62,33 @@ public sealed partial class CatalogueStore
         Query("SELECT status_id, verdict, engagement_rate, cohort_median, cohort_size, sample_age_hours, decided_utc FROM x_teaser_verdicts",
             reader => verdicts[reader.GetString(0)] = new(reader.GetString(1), reader.GetDouble(2), reader.GetDouble(3),
                 reader.GetInt32(4), reader.GetDouble(5), reader.GetString(6)));
+        Dictionary<(string Kind, string Id), List<CatalogueItemSummary>> byPaidPost = [];
+        IReadOnlyList<CatalogueItemSummary> catalogueItems = GetItems();
+        foreach (CatalogueItemSummary item in catalogueItems)
+        {
+            foreach ((string kind, string id) in ItemUrls(item, "onlyfans").Concat(ItemUrls(item, "fansly"))
+                .Select(PaidPostFromUrl).OfType<(string, string)>().Distinct())
+            {
+                if (!byPaidPost.TryGetValue((kind, id), out List<CatalogueItemSummary>? matches))
+                    byPaidPost[(kind, id)] = matches = [];
+                if (matches.All(match => match.ItemId != item.ItemId)) matches.Add(item);
+            }
+        }
         Dictionary<string, XTeaserFirstReply> replies = new(StringComparer.Ordinal);
         Query("SELECT status_id, reply_status_id, reply_link, link_kind, replied_utc FROM x_first_replies",
-            reader => replies[reader.GetString(0)] = new(reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+            reader =>
+            {
+                string link = reader.GetString(2);
+                string kind = reader.GetString(3);
+                CatalogueItemSummary? promoted = PaidPostFromUrl(link) is { } paid
+                    && paid.Kind == kind
+                    && byPaidPost.TryGetValue(paid, out List<CatalogueItemSummary>? matches)
+                    && matches.Count == 1
+                        ? matches[0]
+                        : null;
+                replies[reader.GetString(0)] = new(reader.GetString(1), link, kind, reader.GetString(4),
+                    promoted?.ItemId, promoted?.SourceKey, promoted?.Title);
+            });
         Dictionary<string, XTeaserMetrics> latest = new(StringComparer.Ordinal);
         Query("""
             SELECT s.status_id, s.observed_utc, s.age_hours, s.views, s.likes, s.reposts, s.replies, s.bookmarks
@@ -107,17 +136,24 @@ public sealed partial class CatalogueStore
 
         Dictionary<string, string> thumbnails = CatalogueMatcher.ReadPrimaryAssets(Connection);
         List<XTeaserEpisode> episodes = [];
-        foreach (CatalogueItemSummary item in GetItems())
+        Dictionary<string, CatalogueItemSummary> itemsById = catalogueItems.ToDictionary(item => item.ItemId, StringComparer.Ordinal);
+        foreach (CatalogueItemSummary item in catalogueItems)
         {
             string key = item.SourceKey.ToLowerInvariant();
             List<XTeaserPost> used = [.. posts.Where(post => post.ItemId == item.ItemId)];
             List<XTeaserClip> own = [.. clips.Where(clip => clip.EpisodeKey == key)];
             int failed = used.Count(post => post.Verdict?.Verdict == "failed");
             // Every active episode is listed so the dashboard shows uncovered ones too.
+            List<XTeaserIncomingOwnerTeaser> incoming = [.. posts.Take(MaxOverviewPosts)
+                .Where(post => post.FirstReply?.PromotedItemId == item.ItemId && post.ItemId != item.ItemId)
+                .Select(post => new XTeaserIncomingOwnerTeaser(post.StatusId, post.PostedUtc, post.ItemId,
+                    post.SourceKey, post.ItemId is not null && itemsById.TryGetValue(post.ItemId, out CatalogueItemSummary? source)
+                        ? source.Title : null, post.FirstReply!.StatusId, post.FirstReply.Link, post.FirstReply.Kind))];
             episodes.Add(new(item.ItemId, item.SourceKey, item.Title, used.Count - failed, failed,
                 own.Count(clip => clip.State == "ready"), own.Count(clip => clip.State == "posted"),
                 own.Count(clip => clip.State == "good"), own.Count(clip => clip.State == "failed"),
-                item.Category, item.Series, item.Episode, thumbnails.GetValueOrDefault(item.ItemId)));
+                item.Category, item.Series, item.Episode, thumbnails.GetValueOrDefault(item.ItemId),
+                incoming.Count > 0 ? incoming : null));
         }
 
         List<XTeaserMove> moves = [];

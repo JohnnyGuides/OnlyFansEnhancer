@@ -25,9 +25,9 @@ public sealed partial class CatalogueStore
         string? ConversationId, bool IsRetweet, bool HasVideo, IReadOnlyList<string> Urls);
 
     // Recomputes the derived X tables from the stored owner posts and the
-    // catalogue: first self-replies, then post-to-episode bindings. Sheet X
-    // links outrank first-reply paid links; owner bindings are never replaced;
-    // an ambiguous match binds nothing and is recorded as a conflict.
+    // catalogue: first self-replies, then source-to-episode bindings. Only an
+    // explicit owner mapping or a catalogue X link can identify the source;
+    // a paid link in a reply identifies a promotion destination separately.
     public XBindingResult RefreshXBindings(DateTimeOffset now)
     {
         string nowText = now.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
@@ -45,14 +45,10 @@ public sealed partial class CatalogueStore
                 ("$postId", reply.PostId), ("$utc", reply.Reply.PostedUtc.ToString("O", CultureInfo.InvariantCulture)));
 
         Dictionary<string, List<CatalogueItemSummary>> bySheetStatus = [];
-        Dictionary<(string Kind, string Id), List<CatalogueItemSummary>> byPaidPost = [];
         foreach (CatalogueItemSummary item in items)
         {
             foreach (string id in ItemUrls(item, "x").Select(XStatusIdFromUrl).OfType<string>().Distinct(StringComparer.Ordinal))
                 Add(bySheetStatus, id, item);
-            foreach ((string kind, string id) in ItemUrls(item, "onlyfans").Concat(ItemUrls(item, "fansly"))
-                .Select(PaidPostFromUrl).OfType<(string, string)>().Distinct())
-                Add(byPaidPost, (kind, id), item);
         }
 
         Dictionary<string, (string ItemId, string Evidence)> existing = [];
@@ -71,9 +67,6 @@ public sealed partial class CatalogueStore
             List<XBindingCandidate> candidates = [];
             if (bySheetStatus.TryGetValue(teaser.StatusId, out List<CatalogueItemSummary>? sheetItems))
                 candidates.AddRange(sheetItems.Select(item => new XBindingCandidate(item.ItemId, item.SourceKey, "sheet-link")));
-            if (replies.TryGetValue(teaser.StatusId, out var reply)
-                && byPaidPost.TryGetValue((reply.Kind, reply.PostId), out List<CatalogueItemSummary>? paidItems))
-                candidates.AddRange(paidItems.Select(item => new XBindingCandidate(item.ItemId, item.SourceKey, "reply-link")));
 
             bool owner = existing.TryGetValue(teaser.StatusId, out var current) && current.Evidence == "owner";
             XBindingCandidate? winner = null;

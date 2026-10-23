@@ -207,7 +207,7 @@ const chrome = {
         ok: true,
         requestId: request.requestId,
         status: {
-          productVersion: "0.20.129",
+          productVersion: "0.20.130",
           protocolVersion: 1,
           capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
         },
@@ -281,6 +281,16 @@ const chrome = {
                 newValue: structuredClone(value),
               },
             },
+            "local",
+          );
+        }
+      },
+      async remove(keys) {
+        for (const key of Array.isArray(keys) ? keys : [keys]) {
+          const oldValue = storage[key];
+          delete storage[key];
+          storageChangeListener?.(
+            { [key]: { oldValue, newValue: undefined } },
             "local",
           );
         }
@@ -587,7 +597,7 @@ function send(message, sender = extensionPageSender) {
   assert.ok(manifest.permissions.includes("offscreen"));
   const desktop = await send({ type: "GET_DESKTOP_STATUS" });
   assert.deepEqual(JSON.parse(JSON.stringify(desktop.desktopStatus)), {
-    productVersion: "0.20.129",
+    productVersion: "0.20.130",
     protocolVersion: 1,
     capabilities: ["desktop-shell", "local-file-attach", "native-bridge"],
   });
@@ -607,7 +617,7 @@ function send(message, sender = extensionPageSender) {
     type: "OFENHANCER_APP_REQUEST",
     operation: "getStatus",
   });
-  assert.equal(sharedAppStatus.result.productVersion, "0.20.129");
+  assert.equal(sharedAppStatus.result.productVersion, "0.20.130");
   const desktopAppRuntime = context.CreatorDesktopUploadRuntime.create({
     chrome,
     handleMessage: messageListener,
@@ -1273,9 +1283,36 @@ function send(message, sender = extensionPageSender) {
       return [{ frameId: 0, result: null }];
     if (
       name === "func" &&
-      details.func.toString().includes("CreatorFanslyComposers")
+      details.func.toString().includes("const deadline = Date.now() + 30000")
     )
-      return [{ result: true }];
+      return [
+        {
+          frameId: 0,
+          documentId: tabDocumentId(openTabs.get(details.target.tabId)),
+          result: true,
+        },
+      ];
+    if (
+      details.func
+        .toString()
+        .includes("const composer = globalThis.CreatorFanslyComposers")
+    ) {
+      return [
+        {
+          frameId: 0,
+          documentId: tabDocumentId(openTabs.get(details.target.tabId)),
+          result: {
+            url: openTabs.get(details.target.tabId).url,
+            owned: true,
+          },
+        },
+      ];
+    }
+    if (
+      details.world === "MAIN" &&
+      details.func.toString().includes("CreatorUploadResponseObserver?.arm")
+    )
+      return [{ frameId: 0, result: true }];
     uploadExecutions.push(name);
     if (name === "inspectCreatorPornhubUploader")
       return [
@@ -1320,6 +1357,25 @@ function send(message, sender = extensionPageSender) {
         ];
       }
       if (args.platform !== "manyvids") {
+        if (args.draft.publishMode === "autonomous") {
+          const commitCheckpoint = await new Promise((resolve) =>
+            messageListener(
+              {
+                type: "CHECKPOINT_CREATOR_UPLOAD_COMMIT",
+                sessionId: args.sessionId,
+                platform: args.platform,
+              },
+              {
+                tab: { id: openTabs.get(details.target.tabId).id },
+                frameId: 0,
+                documentId: tabDocumentId(openTabs.get(details.target.tabId)),
+                url: openTabs.get(details.target.tabId).url,
+              },
+              resolve,
+            ),
+          );
+          assert.equal(commitCheckpoint.ok, true, commitCheckpoint.error);
+        }
         return [{ frameId: 0, result: { status: "submitted" } }];
       }
       manyVidsStages.push(args.stage);
@@ -1378,6 +1434,26 @@ function send(message, sender = extensionPageSender) {
         );
         throw new Error("fixture response lost after durable checkpoint");
       }
+      // Mirror the page adapter's durable pre-Save checkpoint. Without this
+      // synthetic acknowledgement the background correctly refuses to treat
+      // an unjournaled link as a verified publication receipt.
+      const commitCheckpoint = await new Promise((resolve) =>
+        messageListener(
+          {
+            type: "CHECKPOINT_CREATOR_UPLOAD_COMMIT",
+            sessionId: args.sessionId,
+            platform: "manyvids",
+          },
+          {
+            tab: { id: tab.id },
+            frameId: 0,
+            documentId: tabDocumentId(tab),
+            url: tab.url,
+          },
+          resolve,
+        ),
+      );
+      assert.equal(commitCheckpoint.ok, true, commitCheckpoint.error);
       tab.url = "https://www.manyvids.com/upload-video";
       return [
         {
@@ -1421,6 +1497,7 @@ function send(message, sender = extensionPageSender) {
         if (first.find((result) => result.platform === "fansly")?.status !== "uploaded-no-sheet") throw new Error(JSON.stringify(first));
         const retry = await retryCreatorUploadPlatform(uploadOnlyRequest.sessionId, "fansly");
         const storedAfterSuccess = await CreatorUploadSessionStore.load(uploadOnlyRequest.sessionId);
+        const publicationJournalAfterSuccess = await CreatorUploadSessionStore.listPublication();
         const correctionRequest = {
           ...uploadOnlyRequest,
           draft: { ...uploadOnlyRequest.draft, title: "Independent correction fixture", fullFilename: "correction.mp4" },
@@ -1493,7 +1570,8 @@ function send(message, sender = extensionPageSender) {
           prepared,
           first,
           retry,
-          storedAfterSuccess,
+          storedAfterSuccess: storedAfterSuccess ?? null,
+          publicationJournalAfterSuccess,
           correctionFirst,
           correctionRetryError,
           uncertainResult,
@@ -1542,8 +1620,19 @@ function send(message, sender = extensionPageSender) {
     ]);
     assert.equal(directRun.retry[0].status, "uploaded-no-sheet");
     assert.equal(
-      directRun.storedAfterSuccess.platforms.manyvids.submitAttempted,
-      true,
+      directRun.storedAfterSuccess,
+      null,
+      "a fully receipted terminal session is retired",
+    );
+    assert.deepEqual(
+      directRun.publicationJournalAfterSuccess
+        .filter(
+          (receipt) =>
+            receipt.platform === "manyvids" && receipt.receiptVerified === true,
+        )
+        .map((receipt) => receipt.postUrl),
+      ["https://www.manyvids.com/Video/7783271"],
+      "verified publication history replaces the retired pending intent",
     );
     assert.equal(directRun.pornhubPrepared.platforms[0].status, "prepared");
     assert.equal(

@@ -12,7 +12,7 @@ public sealed partial class CatalogueStore
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT clip_id, rel_path, episode_key, state, size_bytes, mtime_utc, sha256
-            FROM x_local_clips WHERE missing = 0 AND state IN ('ready', 'failed')
+            FROM x_local_clips WHERE missing = 0 AND status_id IS NULL AND state IN ('ready', 'failed')
             ORDER BY CASE state WHEN 'ready' THEN 0 ELSE 1 END, clip_id DESC LIMIT 200
             """;
         using SqliteDataReader reader = command.ExecuteReader();
